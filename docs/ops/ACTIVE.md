@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-21**
+Last updated: **2026-09-22**
 
 ## Authoritative context
 
@@ -27,17 +27,25 @@ Last updated: **2026-09-21**
   checking all 30 automated scenarios; Android Full passes 5/5 and Demo
   compiles independently; and the real macOS app target passes 5/5. The
   private SDK itself passed Swift 27/27, Kotlin 28/28, 30/30 cross-platform
-  scenarios, and its 40-file repository guard before merge. The exact local
-  replacement also passes 196/196 release-control tests, the complete 310-test
-  Tools wall with one intentional skip, nine release checks, ten required
-  contexts, trusted self-check, calibration, terminology, provenance,
-  private-data, health-claims, strict localization, operations, shell,
-  Actionlint, and diff gates. Implementation commit `68a855cc` is local.
-  PR `#17` remote head remains `9ff11b63`; the evidence commit and one
-  consolidated push, exact-SHA hosted checks,
-  review-thread resolution, protected merge/main verification, and exact
-  cleanup remain. No supplier binary, firmware, real adapter, or flasher is
-  included.
+  scenarios, and its 40-file repository guard before merge. PR `#17` head
+  `abd54fbd` passed the complete Apple wall, Android build/unit wall, Android
+  Review Sample shell, server/package/policy/trust jobs, and the automated
+  no-finding review. Its release-control failure was only four shifted
+  `ACTIVE.md` line numbers with unchanged occurrence counts, category totals,
+  groups, and active allowlist. Its Android production shell started zero
+  tests because the bounded runner stopped on host memory pressure; the
+  retained status recorded `resource-memory` with no result evidence. The
+  local correction repins the reviewed terminology digest and makes both
+  managed-device workflows announce a retry only after the fail-closed
+  classifier approves it. The 17-case retry suite, Actionlint, ten-context
+  required-CI check, trusted self-check, and focused Apple/Android UI
+  confidence-state regressions pass locally. The final exact local tree passes
+  197/197 release-control tests and the complete 311-test Tools wall with one
+  intentional skip; all 83 operations records, terminology, workflow syntax,
+  diff hygiene, and private repository visibility also pass. One replacement
+  push, exact-SHA hosted checks, review-thread resolution, protected merge/main
+  verification, and exact cleanup remain. No supplier binary, firmware, real
+  adapter, or flasher is included.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,

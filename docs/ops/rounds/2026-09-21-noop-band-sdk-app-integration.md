@@ -131,6 +131,17 @@ Success means:
   deleting and asserting removal of its exact feedback record. This preserves
   production feedback restoration while preventing a retiring test worker
   from leaking nonterminal outbox state into later UI tests.
+- Reviewed the final hosted candidate rather than retrying failures blindly.
+  The complete Apple wall, Android build/unit wall, and Android Review Sample
+  shell passed. Release controls failed only because the final operations
+  record shifted four reviewed terminology line numbers without changing
+  counts, categories, groups, or the active allowlist. The Android production
+  shell started zero tests because the bounded runner stopped on host memory
+  pressure.
+- Preserved the managed-device classifier's fail-closed resource behavior and
+  moved both retry announcements behind an explicit `retry == true` condition.
+  A resource-pressure stop no longer presents source text that says a retry is
+  happening when the classifier correctly rejects it.
 
 ## Data, privacy, and medical truth
 
@@ -186,9 +197,11 @@ Success means:
 | Feedback cleanup instrumentation regression | Full instrumentation source compiled, then the five continuity cases followed by all eight AppShell cases passed 13/13 on `pixel2Api35` in 2m37s | WorkManager generations quiesce before the exact test record is removed, and both previously failing report sheets open in the same managed-device sequence | The complete hosted production-shell wall or physical Android behavior |
 | Apple app boundary | Xcode 27 focused macOS test passed 5/5 in the real app target, including WHOOP-default routing, source-scoped restore, explicit terminals, generation invalidation, and bounded failure categories | App-target compilation and shared Apple boundary behavior are green on the current host | iOS runtime, universal/macOS-15, BLE, background, or hardware behavior |
 | Bounded disk exception and cleanup | The final isolated Apple rerun used an 8 GiB runner floor after measuring 13 GiB free and a prior 3.2 GiB DerivedData footprint; it passed, then the exact DerivedData and generated `.swiftpm` directory were removed and the artifact verifier passed | The final Apple test could run without risking the concurrent UI cache, while round-owned disk use returned immediately | Future host capacity without the same preflight and cleanup |
-| Final repository policy wall | The exact release-control module wall passed 196/196; the complete Tools wall passed 310/310 with one intentional skip; 9 release checks, required-CI 10 contexts, trusted self-check, shell syntax and ShellCheck, Actionlint, calibration parity, terminology, distribution provenance, private-data and health-claims guards, strict Apple/Android localization, 83 operations records, and diff hygiene passed | The exact local candidate satisfies the repository-controlled release, trust, privacy, claims, localization, and operations contracts | Hosted exact-SHA enforcement or protected integration |
+| Final repository policy wall | The exact release-control module wall passed 197/197; the complete Tools wall passed 311/311 with one intentional skip; 9 release checks, required-CI 10 contexts, trusted self-check, shell syntax and ShellCheck, Actionlint, calibration parity, terminology, distribution provenance, private-data and health-claims guards, strict Apple/Android localization, 83 operations records, and diff hygiene passed | The exact local candidate satisfies the repository-controlled release, trust, privacy, claims, localization, and operations contracts | Hosted exact-SHA enforcement or protected integration |
 | Final terminology and claims gates | 17,869 classified occurrences across 1,588 groups with unchanged category totals and zero forbidden mappings; health-claims scanned 1,299 files; complete localization audit passed with zero translated-key gaps in the supported Apple catalogs | The reviewed terminology snapshot, health wording guard, and localization catalogs remain coherent | Physical accessibility, every pre-existing hardcoded-literal debt item, or medical accuracy |
 | Previous remote candidate | PR `#17` head `c16488d7` passed every applicable hosted app, policy, trust, package, server, and release context before review remediation | The pre-remediation integration graph was hosted-green | The unpushed remediation candidate; new exact-SHA checks remain required |
+| Final pre-repin hosted candidate | PR `#17` head `abd54fbd` passed macOS, iOS production shell, Apple required, Android build/unit, Android Review Sample, server/package/policy/trust jobs, and automated review. Release controls failed only on four shifted inventory line numbers. Android production shell stopped before tests with bounded `resource-memory` and no result files. | The final SDK source and app graph compile and pass every hosted wall that executed tests; the two red jobs are precisely classified and retained | A passing replacement exact-SHA Android production shell or release-control job |
+| Managed-device retry diagnostic correction | `test_android_managed_device_retry` passes 17/17, Actionlint passes, required-CI verifies all ten contexts, and trusted self-check passes | Resource-pressure stops remain fail-closed, while retry announcements occur only after classifier approval | Whether the next hosted runner has sufficient memory to execute the emulator wall |
 
 ## Physical device and deployment
 
@@ -214,11 +227,10 @@ Success means:
   `ce09fa67038865a35bc32698730953bd379d726f`; final SDK-export replacement
   `d8028186898b934f34ec50a98614f7e67d06d947`; final runtime-authority
   adoption `68a855cc191f3ab2f8a2aad04594441357603393`.
-- Branch and remote state: PR `#17` is open from the dedicated branch; the
-  remote head is `9ff11b63`. The `dab6072` artifact replacement, app-boundary
-  revision updates, and trust-root repin are committed locally at `68a855cc`;
-  this evidence update remains local. The exact replacement SHA remains
-  subject to all protected checks.
+- Branch and remote state: PR `#17` is open from the dedicated branch at remote
+  head `abd54fbd`. The terminology repin, retry-diagnostic workflow correction,
+  its regression test, and this evidence update remain local. The exact
+  replacement SHA remains subject to all protected checks.
 - Repository visibility verified: `Dhanunjay-Divi/Noop` and
   `Dhanunjay-Divi/NoopBandSDK` both report `PRIVATE` with default branch
   `main`.
@@ -236,14 +248,16 @@ Success means:
 ## Open risks and honest limitations
 
 - Focused Apple and Android app-target verification is green, including the
-  exact Android class ordering that previously leaked feedback state, but the
-  complete protected Apple/Android walls must rerun on the final exact SHA.
+  exact Android class ordering that previously leaked feedback state. The
+  previous exact head also passed every Apple job, Android build/unit, and
+  Android Review Sample; its zero-test production-shell memory stop must rerun
+  on the final exact SHA.
 - A source-only adapter seam cannot establish that a supplier band is
   compatible or flashable.
 
 ## Next round
 
-1. Commit this final evidence update and push both local commits once.
+1. Commit the final correction and push one replacement exact head.
 2. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching
    evidence.

@@ -36094,10 +36094,10 @@
       "category": "historical",
       "lineNumbers": [
         20,
-        79,
-        100,
-        244,
-        364
+        91,
+        112,
+        256,
+        376
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36421,7 +36421,7 @@
         29,
         50,
         117,
-        187
+        198
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",

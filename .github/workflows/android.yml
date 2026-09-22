@@ -181,6 +181,14 @@ jobs:
             --bounded-status-file app/build/noop-managed-device-status/production-shell-instrumentation.status \
             --expected-label production-shell-instrumentation \
             --github-output "$GITHUB_OUTPUT"
+
+      - name: Announce approved production-shell infrastructure retry
+        if: >-
+          ${{
+            steps.production_shell_first.outcome == 'failure' &&
+            steps.production_shell_retry.outputs.retry == 'true'
+          }}
+        run: |
           echo "::warning title=Managed-device infrastructure retry::Android production-shell infrastructure failed before tests started; resetting and retrying once."
 
       - name: Reset production-shell managed device before the approved retry
@@ -336,6 +344,14 @@ jobs:
             app/build/outputs/androidTest-results/managedDevice \
             --bounded-status-file app/build/noop-managed-device-status/review-sample-fresh-process.status \
             --github-output "$GITHUB_OUTPUT"
+
+      - name: Announce approved Review Sample infrastructure retry
+        if: >-
+          ${{
+            steps.review_sample_first.outcome == 'failure' &&
+            steps.review_sample_retry.outputs.retry == 'true'
+          }}
+        run: |
           echo "::warning title=Managed-device infrastructure retry::Android managed-device infrastructure failed before tests started; resetting and retrying once."
 
       - name: Reset managed device before the approved retry
