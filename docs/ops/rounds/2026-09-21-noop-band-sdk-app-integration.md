@@ -2,14 +2,12 @@
 
 ## Status
 
-- State: `ready for replacement push`
+- State: `ready for hosted resource-profile replacement push`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
-- End implementation commit:
-  `3a7ba9e56ade2d5f5d7561d877e19c6cde272c65`
-- Record commit or PR: PR `#17`; this follow-up records the final local
-  candidate, while protected exact-SHA evidence remains pending
+- End implementation commit: pending final hosted resource-profile correction
+- Record commit or PR: PR `#17`; exact-SHA replacement evidence remains pending
 
 ## Objective
 
@@ -157,6 +155,18 @@ Success means:
   moved both retry announcements behind an explicit `retry == true` condition.
   A resource-pressure stop no longer presents source text that says a retry is
   happening when the classifier correctly rejects it.
+- Verified exact head `fbbb3b50` across every other hosted context: Android
+  build/unit/lint, production shell, iOS, macOS, server, packages,
+  localization, policy, release, and trust checks passed. Review Sample alone
+  stopped twice under the bounded runner after emulator startup because the
+  hosted runner crossed the unchanged 10% free-memory floor. Both retained
+  artifacts contain a successful APK preparation, `resource-memory` status,
+  emulator setup evidence, and zero test-result records.
+- Reduced only the Review Sample managed-device Gradle envelope from a 2 GiB
+  heap with two workers to the 1.5 GiB, one-worker profile already proven by
+  the complete hosted production-shell job. The first run and approved retry
+  now share that bounded profile. Release-control tests reject any return to
+  the larger two-worker shape.
 
 ## Data, privacy, and medical truth
 
@@ -218,6 +228,8 @@ Success means:
 | Previous remote candidate | PR `#17` head `c16488d7` passed every applicable hosted app, policy, trust, package, server, and release context before review remediation | The pre-remediation integration graph was hosted-green | The unpushed remediation candidate; new exact-SHA checks remain required |
 | Final pre-repin hosted candidate | PR `#17` head `abd54fbd` passed macOS, iOS production shell, Apple required, Android build/unit, Android Review Sample, server/package/policy/trust jobs, and automated review. Release controls failed only on four shifted inventory line numbers. Android production shell stopped before tests with bounded `resource-memory` and no result files. | The final SDK source and app graph compile and pass every hosted wall that executed tests; the two red jobs are precisely classified and retained | A passing replacement exact-SHA Android production shell or release-control job |
 | Managed-device retry diagnostic correction | `test_android_managed_device_retry` passes 17/17, Actionlint passes, required-CI verifies all ten contexts, and trusted self-check passes | Resource-pressure stops remain fail-closed, while retry announcements occur only after classifier approval | Whether the next hosted runner has sufficient memory to execute the emulator wall |
+| Exact-head hosted resource classification | PR `#17` head `fbbb3b50` passed every hosted context except Review Sample. Run `35681052415` attempt 1 job `106598021250` and attempt 2 job `106602308597` each completed APK preparation, entered the emulator task, then stopped with bounded `resource-memory`; retained evidence has no test-result records. | The two failures are reproducible hosted-runner resource stops, not hidden assertions or product failures | A passing Review Sample execution on the replacement profile |
+| Review Sample resource-profile correction | Both Review Sample commands now use `-Xmx1536m` and `--max-workers=1`, matching the hosted-green production shell. Focused workflow/retry tests pass 66/66, Actionlint passes, and the complete bounded Tools wall passes 312/312 with one intentional skip. | Required workflow structure, fail-closed classification, memory envelope, and repository controls agree locally | Hosted exact-SHA execution of the corrected Review Sample job |
 
 ## Physical device and deployment
 
@@ -249,9 +261,10 @@ Success means:
   `3a7ba9e56ade2d5f5d7561d877e19c6cde272c65`. This record update is the
   remaining local evidence commit.
 - Branch and remote state: PR `#17` is open from the dedicated branch at remote
-  head `8a8960e5`, which passes every applicable hosted context. The current
-  replacement remains local. Its exact SHA remains subject to all protected
-  checks.
+  head `fbbb3b50`. Every hosted context except Review Sample is green; that job
+  stopped twice on bounded host memory without test results. The smaller
+  resource-profile correction remains local and requires a replacement push
+  plus all exact-SHA protected checks.
 - Repository visibility verified: `Dhanunjay-Divi/Noop` and
   `Dhanunjay-Divi/NoopBandSDK` both report `PRIVATE` with default branch
   `main`.
@@ -270,14 +283,16 @@ Success means:
 
 - Focused Apple and Android app-target verification is green, including an API
   35 regression that holds a canceled worker in `NonCancellable` cleanup and
-  proves teardown remains blocked until actual unwind. Every required hosted
-  context must rerun on the replacement exact SHA.
+  proves teardown remains blocked until actual unwind. The Review Sample
+  resource-profile replacement must pass every required hosted context on one
+  exact SHA.
 - A source-only adapter seam cannot establish that a supplier band is
   compatible or flashable.
 
 ## Next round
 
-1. Commit this record update and push the two local commits as one exact head.
+1. Commit the Review Sample resource profile, tests, and this evidence update,
+   then push one replacement exact head.
 2. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching
    evidence.

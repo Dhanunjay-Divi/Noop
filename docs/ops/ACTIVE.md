@@ -35,14 +35,18 @@ Last updated: **2026-09-22**
   passes 5/5; and the unsigned iOS simulator graph builds with its embedded
   Watch app and widget validated. The private SDK itself passed Swift 31/31,
   Kotlin 34/34, 33/33 cross-platform scenarios, and its 42-file repository
-  guard before PR `#7` merged normally. PR `#17` remote head `8a8960e5`
-  currently passes every hosted Apple, Android, server, package, policy,
-  localization, license, release-control, and trust context. The local
-  replacement repins the protected SDK export and closes the three remaining
-  review findings. The replacement implementation is committed locally at
-  `3a7ba9e5`; one consolidated push, exact-SHA hosted checks, thread
-  resolution, protected merge/main verification, and exact cleanup remain. No
-  supplier binary, firmware, real adapter, or flasher is included.
+  guard before PR `#7` merged normally. PR `#17` remote head `fbbb3b50`
+  passes every hosted Apple, Android build/unit/lint and production-shell,
+  server, package, policy, localization, license, release-control, and trust
+  context. Review Sample alone stopped twice after emulator startup on the
+  bounded 10% host-memory floor with successful APK preparation and no test
+  results. The local correction gives both Review Sample executions the
+  hosted-green production-shell envelope of a 1.5 GiB Gradle heap and one
+  worker; 66 focused workflow/retry tests, Actionlint, and the complete bounded
+  312-test Tools wall pass with one intentional skip. One replacement push,
+  exact-SHA hosted checks, thread resolution, protected merge/main
+  verification, and exact cleanup remain. No supplier binary, firmware, real
+  adapter, or flasher is included.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,
@@ -388,9 +392,9 @@ Resume from:
 
 ## Immediate next actions
 
-1. Complete the independent review and lightweight release-control wall.
-2. Commit and push one SDK-integration candidate, open a protected pull request,
-   and require all ten exact-SHA contexts.
+1. Commit and push the Review Sample resource-profile replacement to PR `#17`.
+2. Require all ten exact-SHA contexts and resolve only the three reviewed
+   threads covered by matching source and tests.
 3. Merge normally only after Apple and Android app compilers/tests are green,
    verify protected `main`, and remove exact round-owned outputs and logs.
 4. Execute the supplier adapter and flashing round only after the exact

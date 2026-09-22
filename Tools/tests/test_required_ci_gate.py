@@ -801,20 +801,18 @@ class RequiredCIGateTests(unittest.TestCase):
             "DEFAULT_MIN_FREE_MEMORY_PERCENT = 10.0",
             bounded_runner,
         )
-        self.assertEqual(
-            source.count(
-                '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"'
-            ),
-            2,
+        self.assertNotIn(
+            '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"',
+            source,
         )
         self.assertEqual(
             source.count(
                 '"-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8"'
             ),
-            2,
+            4,
         )
-        self.assertEqual(source.count("--max-workers=2"), 2)
-        self.assertEqual(source.count("--max-workers=1"), 2)
+        self.assertNotIn("--max-workers=2", source)
+        self.assertEqual(source.count("--max-workers=1"), 4)
         self.assertEqual(source.count("app/build/noop-managed-device-status/"), 22)
         self.assertEqual(source.count("--no-daemon"), 8)
         self.assertEqual(source.count("--no-configuration-cache"), 8)
@@ -876,29 +874,20 @@ class RequiredCIGateTests(unittest.TestCase):
                 "Prove Review Sample worker isolation" in step_name
                 or "Retry Review Sample isolation once" in step_name
             )
+            managed_device_test = production_shell_test or review_sample_test
             self.assertEqual(
                 block.count("--min-free-disk-gib 4"),
                 expected_disk_floor_count,
             )
             self.assertEqual(
                 block.count(
-                    '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"'
-                ),
-                1 if review_sample_test else 0,
-            )
-            self.assertEqual(
-                block.count(
                     '"-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8"'
                 ),
-                1 if production_shell_test else 0,
-            )
-            self.assertEqual(
-                block.count("--max-workers=2"),
-                1 if review_sample_test else 0,
+                1 if managed_device_test else 0,
             )
             self.assertEqual(
                 block.count("--max-workers=1"),
-                1 if production_shell_test else 0,
+                1 if managed_device_test else 0,
             )
             self.assertEqual(block.count("--max-log-mib 16"), 1)
             status_path = re.search(r"--status-file ([^ \\\\\n]+)", block)
