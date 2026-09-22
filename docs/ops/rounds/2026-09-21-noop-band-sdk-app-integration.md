@@ -2,12 +2,12 @@
 
 ## Status
 
-- State: `ready for hosted resource-profile replacement push`
+- State: `ready for final protected SDK repin push`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
-- End implementation commit: pending final hosted resource-profile correction
-- Record commit or PR: PR `#17`; exact-SHA replacement evidence remains pending
+- End implementation commit: pending final protected SDK repin commit
+- Record commit or PR: PR `#17`; final exact-SHA evidence remains pending
 
 ## Objective
 
@@ -70,11 +70,11 @@ Success means:
   - private SDK connection-lifecycle hardening merge on `main`
     `78c17cbd495353f33b5ef169bd1200ee9a0c35df`;
   - private SDK caller-ownership and security-terminal hardening merge on
-    `main` `44559aeb4b1b50af9e6ab8b8dc786f87821c72d9`;
+    `main` `277c628d5a1fd9e747871e777d908e41460802fa`;
   - ten-file export manifest with
     `supplierArtifactsIncluded: false`;
-  - standalone Swift 30-test, Kotlin 31-test, 33-scenario cross-platform
-    conformance, and 41-file repository-gate evidence;
+  - standalone Swift 32-test, Kotlin 35-test, 33-scenario cross-platform
+    conformance, and 43-file repository-gate evidence;
   - existing Apple and Android single-active-source coordinators.
 - Unknowns that must remain unknown until measured: exact supplier APIs and
   callbacks, protocol/device identity, disconnected flash depth and overwrite
@@ -85,9 +85,9 @@ Success means:
 ## Delivered
 
 - Re-exported the exact ten-file source artifact from private SDK `main`
-  revision `44559aeb4b1b50af9e6ab8b8dc786f87821c72d9` twice from a clean
+  revision `277c628d5a1fd9e747871e777d908e41460802fa` twice from a clean
   worktree. Both artifacts were byte-identical; the manifest SHA-256 is
-  `cd640939de9ac2509a570081b62ed361314a25b19922d65371dfbec7a4269a14`.
+  `eb8ef2cf5b819f937732c7415c3618a42c5024d4325746e1ac7ac5ed3fd0ac7c`.
   The verified artifact replaced `Vendor/NoopBandSDK` without supplier
   binaries or symlinks.
 - Preserved the original seven private-SDK review corrections and consumed the
@@ -104,7 +104,9 @@ Success means:
   diagnostics. The late protected remediation snapshots caller-owned Kotlin
   live/history collections once at the state-machine boundary and invalidates
   the authenticated session after an operation security failure on both
-  platforms.
+  platforms. The final protected correction makes `securityFailure` terminal
+  to that session object and requires a newly constructed session before scan
+  can restart.
 - Added a release-control verifier that pins the export manifest, source
   repository/revision, every exported file digest and size, the executable
   Swift package definition, and the package test wrapper. It rejects symlinks,
@@ -167,6 +169,20 @@ Success means:
   the complete hosted production-shell job. The first run and approved retry
   now share that bounded profile. Release-control tests reject any return to
   the larger two-worker shape.
+- Repinned the app to protected SDK PR `#8` merge `277c628d`. Two independent
+  clean exports were byte-identical with manifest SHA-256
+  `eb8ef2cf5b819f937732c7415c3618a42c5024d4325746e1ac7ac5ed3fd0ac7c`.
+  The artifact verifier and six adversarial tests pass, the vendored Swift
+  package passes 15/15, and Android Full integration, Demo compilation, and
+  Full instrumentation-source compilation pass.
+- The first complete Tools rerun correctly rejected SwiftPM's generated
+  `Vendor/NoopBandSDK/.build` symlink and the stale terminology snapshot.
+  Removing only that generated cache restored all six artifact tests. A
+  temporary terminology snapshot proved unchanged 17,869 occurrence and
+  category totals, 1,588 path/category groups, and zero forbidden mappings;
+  only six documentation line numbers changed. The reviewed snapshot and its
+  trusted digest were repinned, the focused trust matrix passes 72/72, and the
+  unchanged complete Tools wall passes 312/312 with one intentional skip.
 
 ## Data, privacy, and medical truth
 
@@ -211,8 +227,9 @@ Success means:
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | Starting app context snapshot | Clean dedicated branch at `9c514175`; concurrent UI work remains in its own worktree | Work is isolated from protected `main` and concurrent changes | Build correctness or hardware behavior |
-| Private SDK final remediation | PR `#7` merged normally at `44559ae`; Swift 31/31, Kotlin 34/34, 33 shared scenarios, and the 42-file repository gate passed | The neutral runtime snapshots caller-owned Kotlin collections and treats operation security failures as terminal before final app ingestion | Supplier API compatibility or physical behavior |
-| Independent clean exports | Two clean-worktree exports were byte-identical; manifest SHA-256 `cd640939de9ac2509a570081b62ed361314a25b19922d65371dfbec7a4269a14` | The vendored artifact is deterministic and traceable to `44559ae` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Private SDK final remediation | PR `#8` merged normally at `277c628d`; Swift 32/32, Kotlin 35/35, 33 shared scenarios, and the 43-file repository gate passed | Security failure is terminal to the issuing session object and recovery requires a replacement session | Supplier API compatibility or physical behavior |
+| Independent clean exports | Two clean-worktree exports were byte-identical; manifest SHA-256 `eb8ef2cf5b819f937732c7415c3618a42c5024d4325746e1ac7ac5ed3fd0ac7c` | The vendored artifact is deterministic and traceable to `277c628d` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Final protected SDK app repin | Exact artifact plus 6/6 verifier tests, vendored Swift 15/15, Android Full SDK integration, Demo compile, Full instrumentation-source compile, focused trust 72/72, and complete Tools 312/312 with one intentional skip | The final source-only SDK correction is consumed consistently and repository release controls remain intact | Supplier transport invocation or any physical-device behavior |
 | Artifact verifier plus unit tests | Exact ten-file export passed; 6/6 verifier tests passed, including rejection of a symlink artifact root; no supplier artifacts found | Source, manifest, package wrapper, exact layout, root/tree symlink policy, and no-binary policy are pinned | Physical compatibility |
 | Exact Swift package workflow order | The vendored package completed 15/15 tests and checked all 33 automated exported scenarios, then its generated `.build` cache was removed and the exact artifact verifier passed | SwiftPM agrees with the shared contract without leaving generated files inside the verified source tree | App lifecycle, BLE, background, or hardware behavior |
 | Android Full app boundary | `NoopBandSdkIntegrationTest` passed 5/5 under `testFullDebugUnitTest`, including all 33 automated shared scenarios | Full-variant app source, immutable capability authorization, connection/authentication generation fences, durable checkpoint restoration, explicit terminals, and bounded diagnostics compile and pass | Instrumentation, OEM background, BLE, or physical behavior |
@@ -263,8 +280,8 @@ Success means:
 - Branch and remote state: PR `#17` is open from the dedicated branch at remote
   head `fbbb3b50`. Every hosted context except Review Sample is green; that job
   stopped twice on bounded host memory without test results. The smaller
-  resource-profile correction remains local and requires a replacement push
-  plus all exact-SHA protected checks.
+  resource-profile correction and protected SDK repin remain local and require
+  one final push plus all exact-SHA protected checks.
 - Repository visibility verified: `Dhanunjay-Divi/Noop` and
   `Dhanunjay-Divi/NoopBandSDK` both report `PRIVATE` with default branch
   `main`.
@@ -291,8 +308,8 @@ Success means:
 
 ## Next round
 
-1. Commit the Review Sample resource profile, tests, and this evidence update,
-   then push one replacement exact head.
+1. Commit the protected SDK repin, trust snapshot, and this evidence update,
+   then push one final exact head.
 2. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching
    evidence.

@@ -1777,21 +1777,34 @@ object BandConformanceRunner {
             }
             events += "security_failure_stale_token_rejected"
         }
-        val restartGeneration = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate, restartGeneration)
-        session.completeConnectionForConformance(
+        try {
+            session.beginScan()
+            events += "security_failure_restart_incorrect"
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.INVALID_STATE) {
+                throw error
+            }
+            events += "security_failure_restart_rejected"
+        }
+        val replacement = BandSessionMachine(diagnostics)
+        val replacementGeneration = replacement.beginScan()
+        replacement.selectCandidate(
+            VirtualBandFixtures.candidate,
+            replacementGeneration,
+        )
+        replacement.completeConnectionForConformance(
             VirtualBandFixtures.identity,
-            restartGeneration,
+            replacementGeneration,
         )
-        session.acceptCapabilities(
+        replacement.acceptCapabilities(
             VirtualBandFixtures.capabilities,
-            restartGeneration,
+            replacementGeneration,
         )
-        events += "security_failure_recovered"
+        events += "replacement_session_ready"
         return result(
             "operation_terminal_paths",
             events,
-            session.snapshot(),
+            replacement.snapshot(),
         )
     }
 
@@ -1973,20 +1986,30 @@ object BandConformanceRunner {
             events += "security_state_incorrect"
         }
 
-        val recoveryGeneration = session.beginScan()
-        session.selectCandidate(
+        try {
+            session.beginScan()
+            events += "security_failure_restart_incorrect"
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.INVALID_STATE) {
+                throw error
+            }
+            events += "security_failure_restart_rejected"
+        }
+        val replacement = BandSessionMachine(diagnostics)
+        val replacementGeneration = replacement.beginScan()
+        replacement.selectCandidate(
             VirtualBandFixtures.candidate,
-            recoveryGeneration,
+            replacementGeneration,
         )
-        session.completeConnectionForConformance(
+        replacement.completeConnectionForConformance(
             VirtualBandFixtures.identity,
-            recoveryGeneration,
+            replacementGeneration,
         )
-        session.acceptCapabilities(
+        replacement.acceptCapabilities(
             VirtualBandFixtures.capabilities,
-            recoveryGeneration,
+            replacementGeneration,
         )
-        events += "connection_recovered"
+        events += "replacement_session_ready"
 
         val recorded = diagnostics.snapshot()
         if (
@@ -2016,7 +2039,7 @@ object BandConformanceRunner {
         return result(
             "connection_terminal_paths",
             events,
-            session.snapshot(),
+            replacement.snapshot(),
             failure = BandFailureCategory.SECURITY_FAILURE,
         )
     }

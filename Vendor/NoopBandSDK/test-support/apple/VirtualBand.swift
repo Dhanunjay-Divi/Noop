@@ -2023,24 +2023,31 @@ public enum BandConformanceRunner {
         } catch BandFailureCategory.staleCallback {
             events.append("security_failure_stale_token_rejected")
         }
-        let restartGeneration = try await session.beginScan()
-        try await session.selectCandidate(
+        do {
+            _ = try await session.beginScan()
+            events.append("security_failure_restart_incorrect")
+        } catch BandFailureCategory.invalidState {
+            events.append("security_failure_restart_rejected")
+        }
+        let replacement = BandSessionMachine(diagnostics: diagnostics)
+        let replacementGeneration = try await replacement.beginScan()
+        try await replacement.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: restartGeneration
+            callbackGeneration: replacementGeneration
         )
-        try await session.completeConnectionForConformance(
+        try await replacement.completeConnectionForConformance(
             VirtualBandFixtures.identity,
-            callbackGeneration: restartGeneration
+            callbackGeneration: replacementGeneration
         )
-        try await session.acceptCapabilities(
+        try await replacement.acceptCapabilities(
             VirtualBandFixtures.capabilities,
-            callbackGeneration: restartGeneration
+            callbackGeneration: replacementGeneration
         )
-        events.append("security_failure_recovered")
+        events.append("replacement_session_ready")
         return result(
             scenario: "operation_terminal_paths",
             events: events,
-            snapshot: await session.snapshot()
+            snapshot: await replacement.snapshot()
         )
     }
 
@@ -2237,20 +2244,27 @@ public enum BandConformanceRunner {
             events.append("security_state_incorrect")
         }
 
-        let recoveryGeneration = try await session.beginScan()
-        try await session.selectCandidate(
+        do {
+            _ = try await session.beginScan()
+            events.append("security_failure_restart_incorrect")
+        } catch BandFailureCategory.invalidState {
+            events.append("security_failure_restart_rejected")
+        }
+        let replacement = BandSessionMachine(diagnostics: diagnostics)
+        let replacementGeneration = try await replacement.beginScan()
+        try await replacement.selectCandidate(
             VirtualBandFixtures.candidate,
-            callbackGeneration: recoveryGeneration
+            callbackGeneration: replacementGeneration
         )
-        try await session.completeConnectionForConformance(
+        try await replacement.completeConnectionForConformance(
             VirtualBandFixtures.identity,
-            callbackGeneration: recoveryGeneration
+            callbackGeneration: replacementGeneration
         )
-        try await session.acceptCapabilities(
+        try await replacement.acceptCapabilities(
             VirtualBandFixtures.capabilities,
-            callbackGeneration: recoveryGeneration
+            callbackGeneration: replacementGeneration
         )
-        events.append("connection_recovered")
+        events.append("replacement_session_ready")
 
         let recorded = await diagnostics.snapshot()
         if recorded.contains(where: {
@@ -2273,7 +2287,7 @@ public enum BandConformanceRunner {
         return result(
             scenario: "connection_terminal_paths",
             events: events,
-            snapshot: await session.snapshot(),
+            snapshot: await replacement.snapshot(),
             failure: .securityFailure
         )
     }

@@ -457,7 +457,8 @@
           "reconnected",
           "security_failure_terminal",
           "security_failure_stale_token_rejected",
-          "security_failure_recovered"
+          "security_failure_restart_rejected",
+          "replacement_session_ready"
         ],
         "finalState": "ready",
         "acknowledgedCursor": null,
@@ -495,7 +496,8 @@
           "connection_cancelled",
           "authentication_rejected",
           "security_failure",
-          "connection_recovered",
+          "security_failure_restart_rejected",
+          "replacement_session_ready",
           "connection_diagnostics_bounded"
         ],
         "finalState": "ready",

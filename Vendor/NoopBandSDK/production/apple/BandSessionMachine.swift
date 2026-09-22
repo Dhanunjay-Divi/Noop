@@ -74,7 +74,6 @@ public actor BandSessionMachine {
         guard state == .idle
             || state == .recovering
             || state == .rejected
-            || state == .securityFailure
         else {
             throw BandFailureCategory.invalidState
         }

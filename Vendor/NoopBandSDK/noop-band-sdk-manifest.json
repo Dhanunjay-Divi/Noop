@@ -1,9 +1,9 @@
 {
   "files": [
     {
-      "bytes": 14922,
+      "bytes": 15020,
       "path": "contract/conformance/scenarios.json",
-      "sha256": "be76d40cb0d97191e9f0045de4c0291950f99f34a6aeca18c457febb96ccfbc6"
+      "sha256": "ab409218a3b1d5bde4fc38fc8eec59b22757523d361dad754089070b41f8ad95"
     },
     {
       "bytes": 1631,
@@ -11,9 +11,9 @@
       "sha256": "5a0cab8fa6d25485e4e46d59331bab4ae7551084b044c37961d2b65659470ba0"
     },
     {
-      "bytes": 52452,
+      "bytes": 52394,
       "path": "production/android/BandSessionMachine.kt",
-      "sha256": "1f87712b635f78eb7c00bb70e53b81874b8fec250150e4b239effd6ebd42a3a3"
+      "sha256": "afcd0ae7668dd317f67beda0d746c89bc9e597429415b5756b7570033d7e61de"
     },
     {
       "bytes": 2029,
@@ -31,9 +31,9 @@
       "sha256": "73d301ce544be6eb29ddd9e2dc51a7a861f7bbffed3bbfb42959b76a43c1a8e2"
     },
     {
-      "bytes": 48726,
+      "bytes": 48685,
       "path": "production/apple/BandSessionMachine.swift",
-      "sha256": "8645b83e5b89bfa4776702dfa3edfe847bf85c0e21a7f06263ac533e7c1d42de"
+      "sha256": "2612ef7604cef69ca1c57518f2bbb82a3737199e18322bb0d0ed5f3e65f460f9"
     },
     {
       "bytes": 18481,
@@ -41,18 +41,18 @@
       "sha256": "493ec1262b75a3115d828c9ea9be0e05e9d3218648ddd2e1cdb33621594a7226"
     },
     {
-      "bytes": 79472,
+      "bytes": 80349,
       "path": "test-support/android/VirtualBand.kt",
-      "sha256": "44ea5e39d0eef3133a9efade109533fd7b8e1adbb3a9632623adb2a18eaa2ffc"
+      "sha256": "72a4e996d39274d4be25a6e16ecc702830abe7fd0ba1d7bb5debddc1e172f6c6"
     },
     {
-      "bytes": 88125,
+      "bytes": 88833,
       "path": "test-support/apple/VirtualBand.swift",
-      "sha256": "8b75dc51e29151fcaa828630e535df043c1202bdf0dc01e6c1d6f1a577f3d947"
+      "sha256": "9fd4fb72e2881b633a97d99c0e605e09c80048b1ea23f3708036a184ff52994e"
     }
   ],
   "schemaVersion": 1,
   "sourceRepository": "Dhanunjay-Divi/NoopBandSDK",
-  "sourceRevision": "44559aeb4b1b50af9e6ab8b8dc786f87821c72d9",
+  "sourceRevision": "277c628d5a1fd9e747871e777d908e41460802fa",
   "supplierArtifactsIncluded": false
 }

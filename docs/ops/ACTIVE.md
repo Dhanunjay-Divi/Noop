@@ -13,9 +13,9 @@ Last updated: **2026-09-22**
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
 - Current state: the private binary-free SDK is merged on private `main` at
-  `44559aeb4b1b50af9e6ab8b8dc786f87821c72d9`, and two independent clean
+  `277c628d5a1fd9e747871e777d908e41460802fa`, and two independent clean
   exports from that exact revision were byte-identical with manifest SHA-256
-  `cd640939de9ac2509a570081b62ed361314a25b19922d65371dfbec7a4269a14`.
+  `eb8ef2cf5b819f937732c7415c3618a42c5024d4325746e1ac7ac5ed3fd0ac7c`.
   The exact ten-file artifact is integrated locally into Apple and Android
   behind a production-default-off source factory; WHOOP remains the default
   comparison transport. The final SDK additionally binds operation tokens and
@@ -33,17 +33,19 @@ Last updated: **2026-09-22**
   Android Demo compiles independently; the exact API 35
   continuity-plus-App-Shell sequence passes 14/14; the real macOS app target
   passes 5/5; and the unsigned iOS simulator graph builds with its embedded
-  Watch app and widget validated. The private SDK itself passed Swift 31/31,
-  Kotlin 34/34, 33/33 cross-platform scenarios, and its 42-file repository
-  guard before PR `#7` merged normally. PR `#17` remote head `fbbb3b50`
-  passes every hosted Apple, Android build/unit/lint and production-shell,
-  server, package, policy, localization, license, release-control, and trust
-  context. Review Sample alone stopped twice after emulator startup on the
-  bounded 10% host-memory floor with successful APK preparation and no test
-  results. The local correction gives both Review Sample executions the
-  hosted-green production-shell envelope of a 1.5 GiB Gradle heap and one
-  worker; 66 focused workflow/retry tests, Actionlint, and the complete bounded
-  312-test Tools wall pass with one intentional skip. One replacement push,
+  Watch app and widget validated. The private SDK itself passed Swift 32/32,
+  Kotlin 35/35, 33/33 cross-platform scenarios, and its 43-file repository
+  guard before PR `#8` merged normally. Two exports from protected SDK
+  `277c628d` are byte-identical. The repinned app artifact passes its exact
+  verifier and six adversarial tests, the vendored Swift package passes 15/15,
+  and Android Full integration, Demo compilation, and Full instrumentation
+  source compilation pass. The focused trust matrix passes 72/72 and the
+  complete Tools wall passes 312/312 with one intentional skip after reviewing
+  and repinning only six terminology line-number shifts; occurrence and
+  category totals remain unchanged with zero forbidden mappings. PR `#17`
+  remote head `7c79eaac` passed all 30 hosted
+  contexts, including Review Sample under the corrected 1.5 GiB one-worker
+  profile, before the late security-terminal review. One final app commit/push,
   exact-SHA hosted checks, thread resolution, protected merge/main
   verification, and exact cleanup remain. No supplier binary, firmware, real
   adapter, or flasher is included.

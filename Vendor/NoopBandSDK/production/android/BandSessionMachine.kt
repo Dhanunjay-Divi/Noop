@@ -69,8 +69,7 @@ class BandSessionMachine(
         if (
             state != BandSessionState.IDLE &&
             state != BandSessionState.RECOVERING &&
-            state != BandSessionState.REJECTED &&
-            state != BandSessionState.SECURITY_FAILURE
+            state != BandSessionState.REJECTED
         ) {
             fail(BandFailureCategory.INVALID_STATE)
         }
