@@ -2,13 +2,14 @@
 
 ## Status
 
-- State: `in progress`
+- State: `ready for replacement push`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - End implementation commit:
-  `68a855cc191f3ab2f8a2aad04594441357603393`
-- Record commit or PR: PR `#17`; final record and protected exact-SHA evidence pending
+  `ab6c5540dc5a55f9bec883b8fe47a3722d7bc280`
+- Record commit or PR: PR `#17`; this follow-up records the final local
+  candidate, while protected exact-SHA evidence remains pending
 
 ## Objective
 
@@ -233,11 +234,12 @@ Success means:
   `4fcc134240a542694c5acc51a4d1487b074064bd`; prior evidence update
   `ce09fa67038865a35bc32698730953bd379d726f`; final SDK-export replacement
   `d8028186898b934f34ec50a98614f7e67d06d947`; final runtime-authority
-  adoption `68a855cc191f3ab2f8a2aad04594441357603393`.
+  adoption `68a855cc191f3ab2f8a2aad04594441357603393`; final reviewed SDK repin
+  `ab6c5540dc5a55f9bec883b8fe47a3722d7bc280`.
 - Branch and remote state: PR `#17` is open from the dedicated branch at remote
-  head `abd54fbd`. The terminology repin, retry-diagnostic workflow correction,
-  its regression test, and this evidence update remain local. The exact
-  replacement SHA remains subject to all protected checks.
+  head `1c7bb44a`. Implementation candidate `ab6c5540` and this final record
+  update remain local. The replacement exact SHA remains subject to all
+  protected checks.
 - Repository visibility verified: `Dhanunjay-Divi/Noop` and
   `Dhanunjay-Divi/NoopBandSDK` both report `PRIVATE` with default branch
   `main`.
@@ -264,7 +266,7 @@ Success means:
 
 ## Next round
 
-1. Commit the final correction and push one replacement exact head.
+1. Push the two local commits together as one replacement exact head.
 2. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching
    evidence.
