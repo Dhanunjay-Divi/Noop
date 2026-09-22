@@ -6,7 +6,9 @@
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
-- End implementation commit: pending final release-control correction commit
+- End implementation commits:
+  `8fb07e3179ebb314b570da56784586552eb1e465` and
+  `4388058c09130d371c05d86a725c3bddb1354524`
 - Record commit or PR: PR `#17`; final exact-SHA evidence remains pending
 
 ## Objective
@@ -330,7 +332,10 @@ Success means:
   `ab6c5540dc5a55f9bec883b8fe47a3722d7bc280`; prior evidence head
   `8a8960e557d6e5dfa34e8352c56884e1a87d5a53`; final `44559ae` repin and
   worker-exit fence
-  `3a7ba9e56ade2d5f5d7561d877e19c6cde272c65`. This record update is the
+  `3a7ba9e56ade2d5f5d7561d877e19c6cde272c65`; protected SDK `bdeddf8`
+  repin and release-control update
+  `8fb07e3179ebb314b570da56784586552eb1e465`; Android boundary provenance
+  alignment `4388058c09130d371c05d86a725c3bddb1354524`. This record update is the
   remaining local evidence commit.
 - Branch and remote state: PR `#17` is open from the dedicated branch. Remote
   head `bdd8fe34` passed the Android wall and macOS build while its iOS

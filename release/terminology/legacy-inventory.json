@@ -36417,13 +36417,13 @@
     {
       "category": "historical",
       "lineNumbers": [
-        17,
-        28,
-        49,
-        139,
-        237,
-        286,
-        295
+        19,
+        30,
+        51,
+        141,
+        239,
+        288,
+        297
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
