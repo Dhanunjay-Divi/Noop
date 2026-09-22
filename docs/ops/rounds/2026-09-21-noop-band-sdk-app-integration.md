@@ -7,7 +7,7 @@
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - End implementation commit:
-  `ab6c5540dc5a55f9bec883b8fe47a3722d7bc280`
+  `3a7ba9e56ade2d5f5d7561d877e19c6cde272c65`
 - Record commit or PR: PR `#17`; this follow-up records the final local
   candidate, while protected exact-SHA evidence remains pending
 
@@ -244,8 +244,10 @@ Success means:
   `d8028186898b934f34ec50a98614f7e67d06d947`; final runtime-authority
   adoption `68a855cc191f3ab2f8a2aad04594441357603393`; prior reviewed SDK repin
   `ab6c5540dc5a55f9bec883b8fe47a3722d7bc280`; prior evidence head
-  `8a8960e557d6e5dfa34e8352c56884e1a87d5a53`. The `44559ae` repin,
-  worker-exit fence, and current evidence commit are pending.
+  `8a8960e557d6e5dfa34e8352c56884e1a87d5a53`; final `44559ae` repin and
+  worker-exit fence
+  `3a7ba9e56ade2d5f5d7561d877e19c6cde272c65`. This record update is the
+  remaining local evidence commit.
 - Branch and remote state: PR `#17` is open from the dedicated branch at remote
   head `8a8960e5`, which passes every applicable hosted context. The current
   replacement remains local. Its exact SHA remains subject to all protected
@@ -275,7 +277,7 @@ Success means:
 
 ## Next round
 
-1. Commit and push this replacement as one exact head.
+1. Commit this record update and push the two local commits as one exact head.
 2. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching
    evidence.

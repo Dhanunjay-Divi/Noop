@@ -39,9 +39,10 @@ Last updated: **2026-09-22**
   currently passes every hosted Apple, Android, server, package, policy,
   localization, license, release-control, and trust context. The local
   replacement repins the protected SDK export and closes the three remaining
-  review findings. One consolidated commit/push, exact-SHA hosted checks,
-  thread resolution, protected merge/main verification, and exact cleanup
-  remain. No supplier binary, firmware, real adapter, or flasher is included.
+  review findings. The replacement implementation is committed locally at
+  `3a7ba9e5`; one consolidated push, exact-SHA hosted checks, thread
+  resolution, protected merge/main verification, and exact cleanup remain. No
+  supplier binary, firmware, real adapter, or flasher is included.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,
