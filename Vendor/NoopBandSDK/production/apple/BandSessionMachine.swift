@@ -4,11 +4,13 @@ public actor BandSessionMachine {
     private struct PendingLive {
         let acceptance: LiveAcceptance
         let sampleIdentities: [BandSampleIdentity]
+        let expectedSampleCount: Int
     }
 
     private struct PendingHistory {
         let acceptance: HistoryAcceptance
         let sampleIdentities: [BandSampleIdentity]
+        let expectedSampleCount: Int
     }
 
     private let diagnostics: BandDiagnosticsRecorder
@@ -743,7 +745,8 @@ public actor BandSessionMachine {
         )
         pendingLive = PendingLive(
             acceptance: acceptance,
-            sampleIdentities: unique.map(\.identity)
+            sampleIdentities: unique.map(\.identity),
+            expectedSampleCount: unique.count
         )
         return acceptance
     }
@@ -776,7 +779,7 @@ public actor BandSessionMachine {
         }
         guard receipt.committed,
               receipt.committedSamples
-                >= pendingLive.acceptance.acceptedSamples.count
+                >= pendingLive.expectedSampleCount
         else {
             self.pendingLive = nil
             await diagnostics.record(
@@ -1032,15 +1035,19 @@ public actor BandSessionMachine {
         }
 
         var uniqueSet: Set<BandSampleIdentity> = []
-        var unique: [BandSampleIdentity] = []
+        var unique: [AcceptedHistorySample] = []
         var duplicateCount = 0
-        for sample in chunk.batches.flatMap(\.samples) {
-            if durableSampleIdentities.contains(sample.identity)
-                || !uniqueSet.insert(sample.identity).inserted
-            {
-                duplicateCount += 1
-            } else {
-                unique.append(sample.identity)
+        for batch in chunk.batches {
+            for sample in batch.samples {
+                if durableSampleIdentities.contains(sample.identity)
+                    || !uniqueSet.insert(sample.identity).inserted
+                {
+                    duplicateCount += 1
+                } else {
+                    unique.append(
+                        AcceptedHistorySample(batch: batch, sample: sample)
+                    )
+                }
             }
         }
         nextHistoryReceiptSequence &+= 1
@@ -1050,14 +1057,15 @@ public actor BandSessionMachine {
             nextCursor: chunk.nextCursor,
             complete: chunk.complete,
             overflowed: chunk.overflowed,
-            acceptedSamples: unique.count,
+            acceptedSamples: unique,
             duplicateSamples: duplicateCount,
             sessionNonce: sessionNonce,
             receiptSequence: nextHistoryReceiptSequence
         )
         pendingHistory = PendingHistory(
             acceptance: acceptance,
-            sampleIdentities: unique
+            sampleIdentities: unique.map(\.sample.identity),
+            expectedSampleCount: unique.count
         )
         await diagnostics.record(
             BandDiagnosticEvent(
@@ -1115,7 +1123,8 @@ public actor BandSessionMachine {
         }
         guard receipt.committed,
               receipt.historyStateCommitted,
-              receipt.committedSamples >= pendingHistory.acceptance.acceptedSamples
+              receipt.committedSamples
+                >= pendingHistory.expectedSampleCount
         else {
             self.pendingHistory = nil
             await diagnostics.record(

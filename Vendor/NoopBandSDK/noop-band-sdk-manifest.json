@@ -11,9 +11,9 @@
       "sha256": "5a0cab8fa6d25485e4e46d59331bab4ae7551084b044c37961d2b65659470ba0"
     },
     {
-      "bytes": 59218,
+      "bytes": 59750,
       "path": "production/android/BandSessionMachine.kt",
-      "sha256": "6fe477c111334d6f0b7e63b46b87c21ac149099706aaa44fa59c0a161f7cb8cd"
+      "sha256": "e6d62cf68e1dfa080cd5b0b7453be22682e1b5bdc73b8b1443d5274191ef2b55"
     },
     {
       "bytes": 2041,
@@ -21,9 +21,9 @@
       "sha256": "f1f47a3940df57988d3f66295e764d16f7082522a5da5d72500ae52d7b0227f8"
     },
     {
-      "bytes": 15188,
+      "bytes": 16675,
       "path": "production/android/Models.kt",
-      "sha256": "dabc2f3a907f99a6168d253d4e1d7346179cf2295a7f068168add0ef0916f56c"
+      "sha256": "0c449250194300cbb6b6a578d4fdf6e52a816a2d2970849466d4f32a37c38f01"
     },
     {
       "bytes": 2802,
@@ -31,28 +31,28 @@
       "sha256": "c8e0438f9348542e984fa41d0c8a40a73a70022a0ff49edf12f41e443ced3292"
     },
     {
-      "bytes": 54699,
+      "bytes": 55029,
       "path": "production/apple/BandSessionMachine.swift",
-      "sha256": "11649762014deaa9ba505631f4c4a88ca081cceacd2705495f3625087774f91d"
+      "sha256": "4ad77750a26d898a0967b9cf90da74f9e652d0712c4faf4440eb0eb1168cac5c"
     },
     {
-      "bytes": 18548,
+      "bytes": 19115,
       "path": "production/apple/NoopBandModels.swift",
-      "sha256": "e7c8d0a907a64b91c0114fcdd83f5bfa28af572f552a89bece8269f6dad2cff8"
+      "sha256": "b68c72cc82453d35ed02de9218ffd101a83f82453b0cead7fde2196ed9a0ea2a"
     },
     {
-      "bytes": 89535,
+      "bytes": 88127,
       "path": "test-support/android/VirtualBand.kt",
-      "sha256": "18b0933f45d07e335043487337b04a9be1b6b507320ea84bdd29ea5eb1ddf0c8"
+      "sha256": "371558ebc862aa0adc2807f8aaea52f80ab2c86a8078542e49aab4b229079003"
     },
     {
-      "bytes": 97923,
+      "bytes": 97028,
       "path": "test-support/apple/VirtualBand.swift",
-      "sha256": "24cf567f8dcb7c118e61117dc5f282fda6e0258502027bfa4400ceaf6bc2d8d9"
+      "sha256": "e4a816689070821a2f55cd0e8336e4304394861b0fc4f861213029c2adef5cf7"
     }
   ],
   "schemaVersion": 1,
   "sourceRepository": "Dhanunjay-Divi/NoopBandSDK",
-  "sourceRevision": "bdeddf876af4a83c1f9607ea3b6345b969152ab4",
+  "sourceRevision": "8fb464471fdd4ae09d5750feedcc25d50bdb1c20",
   "supplierArtifactsIncluded": false
 }

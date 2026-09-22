@@ -497,6 +497,22 @@ public struct LiveAcceptance: Equatable, Sendable {
     }
 }
 
+public struct AcceptedHistorySample: Equatable, Sendable {
+    public let sourceIdentity: String
+    public let lane: BandProvenanceLane
+    public let parserRevision: String
+    public let calibrationRevision: String
+    public let sample: BandSample
+
+    init(batch: BandSampleBatch, sample: BandSample) {
+        sourceIdentity = batch.sourceIdentity
+        lane = batch.lane
+        parserRevision = batch.parserRevision
+        calibrationRevision = batch.calibrationRevision
+        self.sample = sample
+    }
+}
+
 public struct DurableLiveReceipt: Equatable, Sendable {
     public let committedSamples: Int
     public let committed: Bool
@@ -523,7 +539,7 @@ public struct HistoryAcceptance: Equatable, Sendable {
     public let nextCursor: String?
     public let complete: Bool
     public let overflowed: Bool
-    public let acceptedSamples: Int
+    public let acceptedSamples: [AcceptedHistorySample]
     public let duplicateSamples: Int
     let sessionNonce: UUID
     let receiptSequence: UInt64
@@ -534,7 +550,7 @@ public struct HistoryAcceptance: Equatable, Sendable {
         nextCursor: String?,
         complete: Bool,
         overflowed: Bool,
-        acceptedSamples: Int,
+        acceptedSamples: [AcceptedHistorySample],
         duplicateSamples: Int,
         sessionNonce: UUID,
         receiptSequence: UInt64
@@ -544,7 +560,7 @@ public struct HistoryAcceptance: Equatable, Sendable {
         self.nextCursor = nextCursor
         self.complete = complete
         self.overflowed = overflowed
-        self.acceptedSamples = acceptedSamples
+        self.acceptedSamples = Array(acceptedSamples)
         self.duplicateSamples = duplicateSamples
         self.sessionNonce = sessionNonce
         self.receiptSequence = receiptSequence

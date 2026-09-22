@@ -13,11 +13,11 @@ Last updated: **2026-09-22**
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
 - Current state: the binary-free SDK is merged on protected `main` at
-  `bdeddf876af4a83c1f9607ea3b6345b969152ab4`, and two independent clean
+  `8fb464471fdd4ae09d5750feedcc25d50bdb1c20`, and two independent clean
   exports from that exact revision were byte-identical with manifest SHA-256
-  `31f4a8fef6ad500d445bf8804a22a57b61b6b0409fc589c39db5c472fece2553`
+  `abc87fb3a6bb91e013af7dc458a49710bfa9fb56cb8e19013b4ab7cb67571cf9`
   and whole-tree digest
-  `a98be76838877520ee8f5e9b5ef97b85ded592025129fa7c2df6525be51dd041`.
+  `cd371c1e2ff91a0981182208a7520fc11340e6ffcbaf3121359eb9961e92da4e`.
   The exact ten-file artifact is integrated locally into Apple and Android
   behind a production-default-off source factory; WHOOP remains the default
   comparison transport. The final SDK additionally binds operation tokens and
@@ -34,35 +34,45 @@ Last updated: **2026-09-22**
   protected closeout serializes live and history durability windows, adds
   generation-fenced capability cancel/fail terminals, prevents lifecycle
   transitions from discarding an unresolved durable receipt, and invalidates
-  authenticated state after an operation authentication failure. Current focused
-  evidence is green: the exact artifact and six adversarial verifier tests
+  authenticated state after an operation authentication failure. The final
+  protected correction also returns exact provenance-bearing accepted history
+  rows, exposes immutable Android acceptance collections, bounds restored
+  checkpoint traversal before iteration, and validates durable receipts against
+  independent staged counts. Current focused evidence is green: the exact
+  artifact and eight adversarial verifier tests
   pass; the vendored Swift package passes 15/15 while checking all 35 automated
   scenarios; Android Full integration passes 6/6; Android Demo and Full
   instrumentation sources compile independently; the API 35 WorkManager
   attempt-fence class passes 8/8; and the real macOS app target passes 6/6,
   including the four invalid-token combinations and default compatibility
   routing. The exact-current unsigned iOS simulator graph also builds
-  successfully with `NOOPWatch.app` and `NOOPWidgets.appex` embedded and
-  validated. The complete 312-test Tools wall passes with one intentional
-  skip. Its first post-repin run exposed one 50 ms spawn-deadline timing
+  successfully with no source warnings and with `NOOPWatch.app` and
+  `NOOPWidgets.appex` embedded and validated. The exact-current complete Tools
+  wall passes 317/317. An earlier post-repin run exposed one 50 ms spawn-deadline timing
   transient in the bounded runner's own test (`126` instead of the expected
   timeout `124`); the isolated case then passed once plus five repeats, no
   child process leaked, and the unchanged complete wall passed. The SDK itself
-  passed Swift 39/39, Kotlin 44/44 with `installDist`, 35/35 cross-platform
-  scenarios, and its 47-file repository guard before PR `#12` merged normally.
+  passed Swift 40/40, Kotlin 47/47 with `installDist`, 35/35 cross-platform
+  scenarios, and its 48-file repository guard before PR `#13` merged normally.
   PR `#17` remote head `fe800e8e` passed every Android, macOS, server, package,
   policy, localization, claims, license, operations, and trust job. Its iOS
   production shell executed 39 tests and failed only the app-report queue
   transition because the shorter queued page retained the long review page's
   scroll offset. The local correction resets the sheet to its top anchor on
   each phase transition; the exact previously failing case passes 1/1 in
-  16.098 seconds on a fresh iPhone 17e simulator. After reviewing and repinning
-  the generated terminology digest, 75 focused artifact, required-CI,
+  16.098 seconds on a fresh iPhone 17e simulator and 1/1 in 15.841 seconds
+  after the iOS 17 callback correction. After reviewing and repinning
+  the generated terminology digest, 77 focused artifact, required-CI,
   terminology, and trust tests pass; the trusted self-check verifies protected
   main, required-CI verifies all ten contexts, and the exact ten-file SDK
   artifact verifies with supplier payloads absent. The exact-current complete
-  Tools wall passes 315 tests with one intentional skip under the bounded
-  runner. The consolidated local candidate requires one replacement push,
+  Tools wall passes 317/317 under the bounded runner. Workflow entrypoints also
+  pass 9/9 release controls, calibration parity, health-claims, legal and
+  distribution provenance, private-data, shell, workflow, Python compilation,
+  operations, and diff gates. Supported translation catalogs have zero missing
+  keys; the reviewed 244 Android and 135 Apple hardcoded-literal baseline
+  remains explicit debt. The consolidated local candidate requires one
+  replacement push,
   exact-SHA hosted checks, reviewed-thread resolution, protected merge/main
   verification, and exact cleanup. Both
   repositories currently report `PUBLIC`; the D-056 private-SDK release target

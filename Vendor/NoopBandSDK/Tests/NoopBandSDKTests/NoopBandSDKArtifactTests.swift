@@ -112,13 +112,13 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             token: token,
             callbackGeneration: generation
         )
-        XCTAssertEqual(acceptance.acceptedSamples, 1)
+        XCTAssertEqual(acceptance.acceptedSamples.count, 1)
 
         try await session.acknowledgeHistory(
             receipt: DurableHistoryReceipt(
                 acceptance: acceptance,
                 historyStateCommitted: true,
-                committedSamples: acceptance.acceptedSamples,
+                committedSamples: acceptance.acceptedSamples.count,
                 committed: true
             ),
             token: token,

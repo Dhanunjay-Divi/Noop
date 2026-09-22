@@ -18,9 +18,11 @@ class VirtualBandStore {
     @Synchronized
     fun commit(
         acceptance: HistoryAcceptance,
-        samples: List<BandSample>,
     ): DurableHistoryReceipt {
-        val identities = samples.map(BandSample::identity).toSet()
+        val identities =
+            acceptance.acceptedSamples.map {
+                it.sample.identity
+            }.toSet()
         committed.addAll(identities)
         return DurableHistoryReceipt(
             acceptance = acceptance,
@@ -320,14 +322,9 @@ object BandConformanceRunner {
             token,
             generation,
         )
-        accepted += acceptance.acceptedSamples
+        accepted += acceptance.acceptedSamples.size
         events += "history_received"
-        val receipt = store.commit(
-            acceptance,
-            VirtualBandFixtures.historyChunk.batches.flatMap(
-                BandSampleBatch::samples,
-            ),
-        )
+        val receipt = store.commit(acceptance)
         events += "history_committed"
         session.acknowledgeHistory(receipt, token, generation)
         events += "history_acknowledged"
@@ -440,12 +437,7 @@ object BandConformanceRunner {
             secondToken,
             secondGeneration,
         )
-        val foreignHistoryReceipt = firstStore.commit(
-            firstHistory,
-            VirtualBandFixtures.historyChunk.batches.flatMap(
-                BandSampleBatch::samples,
-            ),
-        )
+        val foreignHistoryReceipt = firstStore.commit(firstHistory)
         try {
             second.acknowledgeHistory(
                 foreignHistoryReceipt,
@@ -462,12 +454,7 @@ object BandConformanceRunner {
             failure = error.category
             events += "foreign_operation_token_rejected"
         }
-        val ownHistoryReceipt = secondStore.commit(
-            secondHistory,
-            VirtualBandFixtures.historyChunk.batches.flatMap(
-                BandSampleBatch::samples,
-            ),
-        )
+        val ownHistoryReceipt = secondStore.commit(secondHistory)
         second.acknowledgeHistory(
             ownHistoryReceipt,
             secondToken,
@@ -482,7 +469,7 @@ object BandConformanceRunner {
             second.snapshot(),
             acceptedSamples =
                 secondLive.acceptedSamples.size +
-                    secondHistory.acceptedSamples,
+                    secondHistory.acceptedSamples.size,
             failure = failure,
         )
     }
@@ -612,12 +599,7 @@ object BandConformanceRunner {
             firstHistoryToken,
             generation,
         )
-        val firstHistoryReceipt = store.commit(
-            firstHistory,
-            VirtualBandFixtures.historyChunk.batches.flatMap(
-                BandSampleBatch::samples,
-            ),
-        )
+        val firstHistoryReceipt = store.commit(firstHistory)
         session.acknowledgeHistory(
             firstHistoryReceipt,
             firstHistoryToken,
@@ -671,10 +653,7 @@ object BandConformanceRunner {
             failure = error.category
             events += "stale_history_receipt_rejected"
         }
-        val secondHistoryReceipt = store.commit(
-            secondHistory,
-            secondHistoryChunk.batches.flatMap(BandSampleBatch::samples),
-        )
+        val secondHistoryReceipt = store.commit(secondHistory)
         session.acknowledgeHistory(
             secondHistoryReceipt,
             secondHistoryToken,
@@ -690,8 +669,8 @@ object BandConformanceRunner {
             acceptedSamples =
                 firstLive.acceptedSamples.size +
                     secondLive.acceptedSamples.size +
-                    firstHistory.acceptedSamples +
-                    secondHistory.acceptedSamples,
+                    firstHistory.acceptedSamples.size +
+                    secondHistory.acceptedSamples.size,
             failure = failure,
         )
     }
@@ -728,12 +707,7 @@ object BandConformanceRunner {
             token,
             generation,
         )
-        val receipt = store.commit(
-            retryAcceptance,
-            VirtualBandFixtures.historyChunk.batches.flatMap(
-                BandSampleBatch::samples,
-            ),
-        )
+        val receipt = store.commit(retryAcceptance)
         events += "history_committed"
         session.acknowledgeHistory(receipt, token, generation)
         events += "history_acknowledged"
@@ -742,7 +716,7 @@ object BandConformanceRunner {
             "history_requires_durable_receipt",
             events,
             session.snapshot(),
-            acceptedSamples = retryAcceptance.acceptedSamples,
+            acceptedSamples = retryAcceptance.acceptedSamples.size,
             failure = failure,
         )
     }
@@ -802,12 +776,7 @@ object BandConformanceRunner {
             firstToken,
             generation,
         )
-        val firstReceipt = store.commit(
-            firstAcceptance,
-            VirtualBandFixtures.historyChunk.batches.flatMap(
-                BandSampleBatch::samples,
-            ),
-        )
+        val firstReceipt = store.commit(firstAcceptance)
         session.acknowledgeHistory(firstReceipt, firstToken, generation)
         session.completeOperation(firstToken)
         events += "first_history_committed"
@@ -831,7 +800,7 @@ object BandConformanceRunner {
             "history_cursor_chain_rejected",
             events,
             session.snapshot(),
-            acceptedSamples = firstAcceptance.acceptedSamples,
+            acceptedSamples = firstAcceptance.acceptedSamples.size,
             failure = failure,
         )
     }
@@ -988,12 +957,7 @@ object BandConformanceRunner {
             resumedGeneration,
         )
         events += "history_resumed"
-        val receipt = store.commit(
-            acceptance,
-            VirtualBandFixtures.historyChunk.batches.flatMap(
-                BandSampleBatch::samples,
-            ),
-        )
+        val receipt = store.commit(acceptance)
         events += "history_committed"
         session.acknowledgeHistory(
             receipt,
@@ -1006,7 +970,7 @@ object BandConformanceRunner {
             "history_interrupted_resume",
             events,
             session.snapshot(),
-            acceptedSamples = acceptance.acceptedSamples,
+            acceptedSamples = acceptance.acceptedSamples.size,
             failure = failure,
         )
     }
@@ -1074,10 +1038,7 @@ object BandConformanceRunner {
             ),
         )
         val acceptance = session.stageHistoryChunk(chunk, token, generation)
-        val receipt = VirtualBandStore().commit(
-            acceptance,
-            chunk.batches.flatMap(BandSampleBatch::samples),
-        )
+        val receipt = VirtualBandStore().commit(acceptance)
         events += "history_committed"
         session.acknowledgeHistory(receipt, token, generation)
         events += "history_acknowledged"
@@ -1086,7 +1047,7 @@ object BandConformanceRunner {
             "history_checkpoint_restored",
             events,
             session.snapshot(),
-            acceptedSamples = acceptance.acceptedSamples,
+            acceptedSamples = acceptance.acceptedSamples.size,
         )
     }
 
@@ -1262,7 +1223,7 @@ object BandConformanceRunner {
                 DurableHistoryReceipt(
                     acceptance = firstAcceptance,
                     historyStateCommitted = false,
-                    committedSamples = firstAcceptance.acceptedSamples,
+                    committedSamples = firstAcceptance.acceptedSamples.size,
                     committed = true,
                 ),
                 token,
@@ -1273,10 +1234,7 @@ object BandConformanceRunner {
         }
         firstAcceptance =
             session.stageHistoryChunk(firstChunk, token, generation)
-        val firstReceipt = store.commit(
-            firstAcceptance,
-            firstChunk.batches.flatMap(BandSampleBatch::samples),
-        )
+        val firstReceipt = store.commit(firstAcceptance)
         session.acknowledgeHistory(firstReceipt, token, generation)
         events += "history_committed"
         try {
@@ -1316,10 +1274,7 @@ object BandConformanceRunner {
         val terminalAcceptance =
             session.stageHistoryChunk(terminalChunk, token, generation)
         events += "terminal_received"
-        val terminalReceipt = store.commit(
-            terminalAcceptance,
-            terminalChunk.batches.flatMap(BandSampleBatch::samples),
-        )
+        val terminalReceipt = store.commit(terminalAcceptance)
         session.acknowledgeHistory(terminalReceipt, token, generation)
         events += "terminal_committed"
         try {
@@ -1337,8 +1292,8 @@ object BandConformanceRunner {
             events,
             session.snapshot(),
             acceptedSamples =
-                firstAcceptance.acceptedSamples +
-                    terminalAcceptance.acceptedSamples,
+                firstAcceptance.acceptedSamples.size +
+                    terminalAcceptance.acceptedSamples.size,
             failure = failure,
         )
     }
@@ -1419,12 +1374,7 @@ object BandConformanceRunner {
             firstToken,
             generation,
         )
-        val firstReceipt = store.commit(
-            firstAcceptance,
-            VirtualBandFixtures.historyChunk.batches.flatMap(
-                BandSampleBatch::samples,
-            ),
-        )
+        val firstReceipt = store.commit(firstAcceptance)
         session.acknowledgeHistory(firstReceipt, firstToken, generation)
         session.completeOperation(firstToken)
         events += "first_history_completed"
@@ -1443,7 +1393,7 @@ object BandConformanceRunner {
             "history_operation_requires_own_receipt",
             events,
             session.snapshot(),
-            acceptedSamples = firstAcceptance.acceptedSamples,
+            acceptedSamples = firstAcceptance.acceptedSamples.size,
             failure = failure,
         )
     }
@@ -2126,7 +2076,7 @@ object BandConformanceRunner {
             DurableHistoryReceipt(
                 acceptance = acceptance,
                 historyStateCommitted = true,
-                committedSamples = acceptance.acceptedSamples,
+                committedSamples = acceptance.acceptedSamples.size,
                 committed = true,
             ),
             token,

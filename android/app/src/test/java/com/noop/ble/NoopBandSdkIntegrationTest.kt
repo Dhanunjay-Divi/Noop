@@ -33,7 +33,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "bdeddf876af4a83c1f9607ea3b6345b969152ab4",
+            "8fb464471fdd4ae09d5750feedcc25d50bdb1c20",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -253,7 +253,7 @@ class NoopBandSdkIntegrationTest {
         val receipt = DurableHistoryReceipt(
             acceptance = acceptance,
             historyStateCommitted = true,
-            committedSamples = acceptance.acceptedSamples,
+            committedSamples = acceptance.acceptedSamples.size,
             committed = true,
         )
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `final SDK repin locally verified; exact-SHA hosted verification pending`
+- State: `protected SDK PR 13 repin locally verified; exact-SHA hosted verification pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
@@ -237,6 +237,29 @@ Success means:
   15/15 across all 35 automated scenarios; Android Full integration passes
   6/6; Demo and Full instrumentation sources compile; and the real macOS app
   target passes 6/6 with WHOOP still the default transport.
+- Repinned the final candidate to protected SDK PR `#13`, merged normally at
+  `8fb464471fdd4ae09d5750feedcc25d50bdb1c20`. The protected SDK now returns
+  exact provenance-bearing accepted history rows, exposes immutable accepted
+  live/history collections on Android, bounds restored checkpoint traversal
+  before iteration, and validates live/history durable receipts against an
+  independent staged count. Swift passed 40/40, Kotlin passed 47/47 plus
+  distribution, shared conformance passed 35/35, and the 48-file repository
+  gate passed before merge.
+- Exported protected SDK `8fb4644` twice from independent clean worktrees. The
+  outputs were byte-identical with manifest SHA-256
+  `abc87fb3a6bb91e013af7dc458a49710bfa9fb56cb8e19013b4ab7cb67571cf9`
+  and source-tree digest
+  `cd371c1e2ff91a0981182208a7520fc11340e6ffcbaf3121359eb9961e92da4e`.
+  The app-owned Swift wrapper is separately pinned at
+  `e335df14a588ac080de13ab98a4fe77802eb4e9610e6f4d4bd554e8310fa5f28`.
+- Hardened the app artifact verifier so a symlink in any supplied artifact
+  path ancestor is rejected before resolution. All 8 adversarial verifier
+  tests pass, including symlinked `Vendor` and parent-directory cases.
+- Verified the final app repin: the vendored Swift package passes 15/15 across
+  all 35 shared scenarios; Android Full integration passes 6/6; Android Demo
+  and Full instrumentation sources compile; and the real macOS app target
+  passes 6/6. The unsigned iOS simulator graph builds with `NOOPWatch.app` and
+  `NOOPWidgets.appex` embedded.
 - Reviewed exact hosted PR `#17` head `fe800e8e` after its final Apple job
   completed. Every Android, macOS, server, package, policy, localization,
   claims, license, operations, and trust job passed. The iOS production shell
@@ -248,14 +271,25 @@ Success means:
   transition, and the UI test waits for the existing delivery identifier plus
   asynchronous dismissal. The exact previously failing test passes 1/1 on a
   fresh iPhone 17e simulator in 16.098 seconds.
+- Re-ran that exact UI journey after replacing the deprecated iOS 17
+  `onChange` callback shape. It passes 1/1 in 15.841 seconds, and a subsequent
+  complete unsigned iOS graph succeeds with no source warnings while retaining
+  the embedded Watch and widget products.
 - Reviewed and repinned the final generated terminology inventory after this
   evidence update. The semantic totals and categories remain unchanged with
   zero forbidden mappings. The focused artifact, required-CI, terminology, and
-  trusted-release suite passes 75/75; trusted self-verification and all ten
+  trusted-release suite passes 77/77; trusted self-verification and all ten
   required contexts pass, and the exact ten-file SDK artifact verifies at
-  protected revision `bdeddf8` with supplier payloads absent. The
-  exact-current complete Tools wall passes 315 tests with one intentional skip
-  under the bounded runner.
+  protected revision `8fb4644` with supplier payloads absent. The exact-current
+  complete Tools wall passes 317/317 under the bounded runner.
+- Re-ran the workflow entrypoints directly. Release controls pass 9/9;
+  calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16
+  guards; health-claims scans 1,299 files; legal inventory verifies 230 runtime
+  components and 3 container inputs; distribution provenance, private-data,
+  shell syntax/ShellCheck, workflow lint, Python compilation, operations
+  records, and diff hygiene pass. The full localization audit confirms no
+  translated-key gaps in supported catalogs while retaining the reviewed
+  baseline of 244 Android and 135 Apple hardcoded literals as explicit debt.
 
 ## Data, privacy, and medical truth
 
@@ -303,13 +337,13 @@ Success means:
 | Private SDK final remediation | PR `#8` merged normally at `277c628d`; Swift 32/32, Kotlin 35/35, 33 shared scenarios, and the 43-file repository gate passed | Security failure is terminal to the issuing session object and recovery requires a replacement session | Supplier API compatibility or physical behavior |
 | Independent clean exports | Two clean-worktree exports were byte-identical; manifest SHA-256 `eb8ef2cf5b819f937732c7415c3618a42c5024d4325746e1ac7ac5ed3fd0ac7c` | The vendored artifact is deterministic and traceable to `277c628d` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Protected SDK history observability | PR `#9` merged normally at `55fdd891`; Swift 33/33, Kotlin 36/36 plus distribution, 33 shared scenarios, and the 44-file repository gate passed | Invalid history tokens fail closed with bounded typed diagnostics on both SDK implementations | Supplier API compatibility or physical behavior |
-| Final independent clean exports | Two clean-worktree exports were byte-identical; manifest SHA-256 `31f4a8fef6ad500d445bf8804a22a57b61b6b0409fc589c39db5c472fece2553`, whole-tree digest `a98be76838877520ee8f5e9b5ef97b85ded592025129fa7c2df6525be51dd041` | The final vendored artifact is deterministic and traceable to protected SDK `bdeddf8` | Legal rights or supplier provenance beyond the absent-artifact declaration |
-| Final protected SDK app repin | Exact artifact plus 21 focused verifier/trust tests, vendored Swift 15/15, Android Full SDK integration 6/6, Demo compile, Full instrumentation-source compile, and macOS app boundary 6/6 | The final source-only SDK correction is consumed consistently on Apple and Android while WHOOP remains the default comparison transport | Supplier transport invocation or any physical-device behavior |
-| Artifact verifier plus unit tests | Exact ten-file export passed; 6/6 verifier tests passed, including rejection of a symlink artifact root; no supplier artifacts found | Source, manifest, package wrapper, exact layout, root/tree symlink policy, and no-binary policy are pinned | Physical compatibility |
+| Final independent clean exports | Two clean-worktree exports were byte-identical; manifest SHA-256 `abc87fb3a6bb91e013af7dc458a49710bfa9fb56cb8e19013b4ab7cb67571cf9`, source-tree digest `cd371c1e2ff91a0981182208a7520fc11340e6ffcbaf3121359eb9961e92da4e`, and app wrapper digest `e335df14a588ac080de13ab98a4fe77802eb4e9610e6f4d4bd554e8310fa5f28` | The final vendored artifact is deterministic and traceable to protected SDK `8fb4644` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Final protected SDK app repin | SDK Swift 40/40, Kotlin 47/47 plus distribution, shared conformance 35/35, and repository gate 48/48 passed before PR `#13` merged. App verifier 8/8, vendored Swift 15/15, Android Full integration 6/6, Demo compile, Full instrumentation-source compile, and macOS app boundary 6/6 pass. | Exact provenance-bearing history rows, immutable Android acceptances, pre-traversal checkpoint bounds, and independent staged receipt counts are consumed consistently on Apple and Android while WHOOP remains the default comparison transport | Supplier transport invocation or any physical-device behavior |
+| Artifact verifier plus unit tests | Exact ten-file export passed; 8/8 verifier tests passed, including rejection of a symlink artifact root and symlinked path ancestors; no supplier artifacts found | Source, manifest, package wrapper, exact layout, complete path/tree symlink policy, and no-binary policy are pinned | Physical compatibility |
 | Protected-base artifact authority | 70 focused release/trust tests pass; a copied artifact with a one-line source mutation is rejected by the protected verifier; non-owner `unittest` and standard-library shadow paths are rejected; the complete Tools wall passes 315 tests with one intentional skip | Future non-owner candidates cannot satisfy the SDK artifact gate by shadowing Python's test runner or by relying only on candidate-controlled tests | Owner authorization, hosted exact-SHA execution, supplier rights, or physical compatibility |
 | Exact Swift package workflow order | The vendored package completed 15/15 tests and checked all 35 automated exported scenarios; the exact artifact verifier then passed after generated package output was removed | SwiftPM agrees with the shared contract without leaving generated files inside the verified source tree | App lifecycle, BLE, background, or hardware behavior |
 | Android Full app boundary | `NoopBandSdkIntegrationTest` passed 6/6 under `testFullDebugUnitTest`, including all 35 automated shared scenarios and all four invalid-history-token combinations | Full-variant app source, immutable capability authorization, connection/authentication generation fences, durable checkpoint restoration, explicit terminals, and bounded diagnostics compile and pass | Instrumentation, OEM background, BLE, or physical behavior |
-| Android Demo compile | `compileDemoDebugKotlin` passed independently against the `bdeddf8` export | The Demo variant consumes the same final source successfully | Demo runtime rendering or device behavior |
+| Android Demo compile | `compileDemoDebugKotlin` passed independently against the `8fb4644` export | The Demo variant consumes the same final source successfully | Demo runtime rendering or device behavior |
 | Android memory classification | One combined Full+Demo invocation let the two Compose compilers overlap and exhausted a 3 GiB Kotlin heap; separate no-daemon, no-parallel, two-worker commands passed | The failure was an avoidable verification command shape, not a source failure; variant walls must stay sequential | Every future machine configuration |
 | Hosted production-shell diagnosis | PR `#17` run `35643099439` started 120 API 35 tests; 116 passed, two App Report cases timed out before their explanation sheets appeared, and the retained result protobuf contained real test cases | The red required context was a real cross-test state leak, not a zero-test infrastructure event or SDK behavior failure | The local correction until rerun on the protected exact SHA |
 | Feedback cleanup instrumentation regression | Full instrumentation source compiled, then six continuity cases followed by all eight AppShell cases passed 14/14 on `pixel2Api35` in 1m42s | Terminal WorkInfo alone cannot release teardown; actual worker/probe unwind and a stable no-new-generation snapshot are required before deleting the exact record, and the report sheets still open afterward | The complete hosted production-shell wall or physical Android behavior |
@@ -317,14 +351,14 @@ Success means:
 | Bounded disk exception and cleanup | The final Apple rerun reused its integration-only package cache with a 5.5 GiB hard floor after measuring 8.2 GiB free; the real app test passed 5/5, the exact DerivedData reached 2.8 GiB, and its removal restored free disk from 6.9 GiB to 9.3 GiB | The final Apple test ran under explicit memory/disk bounds without touching the concurrent UI worktree, while round-owned disk use returned immediately | Future host capacity without the same preflight and cleanup |
 | Final repository policy wall | The terminology inventory and protected digest were repinned after unchanged counts/categories and zero forbidden mappings were reviewed. The first post-repin complete Tools run then found one bounded-runner self-test timing transient: a 50 ms post-spawn deadline returned `126` instead of timeout `124`. The isolated case passed once plus five repeats with no leaked process, and the unchanged complete wall passed 312/312 with one intentional skip. Required-CI verifies 10 contexts, and trusted self-check, terminology, operations, artifact, bounded-runner, and diff gates pass. | The exact local candidate satisfies the repository-controlled release, trust, privacy, terminology, operations, artifact, and process-cleanup contracts | Hosted exact-SHA enforcement or protected integration |
 | Resource-floor correction | The first 312-test Tools wall had four bounded-runner failures because nested tests correctly enforced their 10 GiB default while the host had 9.3 GiB free. With no build processes active, deleting only generated Xcode precompiled-module and module caches restored 11 GiB; the unchanged wall then passed 312/312 with one skip | The failures were environmental and the runner remained fail-closed; generated cache cleanup restored the test precondition without source or test changes | Future host capacity without the same disk preflight |
-| Final terminology and claims gates | 17,869 classified occurrences across 1,588 groups with unchanged category totals and zero forbidden mappings; health-claims scanned 1,299 files; complete localization audit passed with zero translated-key gaps in the supported Apple catalogs | The reviewed terminology snapshot, health wording guard, and localization catalogs remain coherent | Physical accessibility, every pre-existing hardcoded-literal debt item, or medical accuracy |
+| Final terminology and claims gates | 17,871 classified occurrences across 1,588 groups with unchanged category totals and zero forbidden mappings; health-claims scanned 1,299 files; complete localization audit passed with zero translated-key gaps in supported catalogs and retained the reviewed 244 Android/135 Apple hardcoded-literal baseline | The reviewed terminology snapshot, health wording guard, and translation catalogs remain coherent without hiding the existing literal backlog | Physical accessibility, resolution of every pre-existing hardcoded literal, or medical accuracy |
 | Previous remote candidate | PR `#17` head `c16488d7` passed every applicable hosted app, policy, trust, package, server, and release context before review remediation | The pre-remediation integration graph was hosted-green | The unpushed remediation candidate; new exact-SHA checks remain required |
 | Final pre-repin hosted candidate | PR `#17` head `abd54fbd` passed macOS, iOS production shell, Apple required, Android build/unit, Android Review Sample, server/package/policy/trust jobs, and automated review. Release controls failed only on four shifted inventory line numbers. Android production shell stopped before tests with bounded `resource-memory` and no result files. | The final SDK source and app graph compile and pass every hosted wall that executed tests; the two red jobs are precisely classified and retained | A passing replacement exact-SHA Android production shell or release-control job |
 | Managed-device retry diagnostic correction | `test_android_managed_device_retry` passes 17/17, Actionlint passes, required-CI verifies all ten contexts, and trusted self-check passes | Resource-pressure stops remain fail-closed, while retry announcements occur only after classifier approval | Whether the next hosted runner has sufficient memory to execute the emulator wall |
 | Exact-head hosted resource classification | PR `#17` head `fbbb3b50` passed every hosted context except Review Sample. Run `35681052415` attempt 1 job `106598021250` and attempt 2 job `106602308597` each completed APK preparation, entered the emulator task, then stopped with bounded `resource-memory`; retained evidence has no test-result records. | The two failures are reproducible hosted-runner resource stops, not hidden assertions or product failures | A passing Review Sample execution on the replacement profile |
 | Review Sample resource-profile correction | Both Review Sample commands now use `-Xmx1536m` and `--max-workers=1`, matching the hosted-green production shell. Focused workflow/retry tests pass 66/66, Actionlint passes, and the complete bounded Tools wall passes 312/312 with one intentional skip. | Required workflow structure, fail-closed classification, memory envelope, and repository controls agree locally | Hosted exact-SHA execution of the corrected Review Sample job |
-| Hosted iOS app-report transition correction | Exact head `fe800e8e` passed every hosted context except the iOS production shell, whose only failing case retained the review page's scroll offset after entering the queued phase. The corrected exact case passes 1/1 in 16.098 seconds on a fresh iPhone 17e simulator. | The queued status, cancellation control, and sheet dismissal are visibly reachable after a long review-page scroll; the correction compiles in the real iOS UI-test graph | Replacement exact-SHA hosted execution, physical shake behavior, or production feedback delivery |
-| Final app-report trust wall | The reviewed terminology snapshot is repinned with unchanged semantic totals and zero forbidden mappings. Focused artifact, required-CI, terminology, and trust tests pass 75/75; the exact-current complete Tools wall passes 315 tests with one intentional skip; trusted self-check, ten required contexts, operations validation, diff hygiene, and exact SDK artifact verification pass. | The narrow UI correction and its evidence did not weaken the protected release or SDK artifact contracts | Hosted exact-SHA enforcement or protected integration |
+| Hosted iOS app-report transition correction | Exact head `fe800e8e` passed every hosted context except the iOS production shell, whose only failing case retained the review page's scroll offset after entering the queued phase. The corrected exact case passes 1/1 in 16.098 seconds on a fresh iPhone 17e simulator and 1/1 in 15.841 seconds after the iOS 17 callback correction. The complete unsigned iOS graph then builds with zero source warnings and embeds Watch/widgets. | The queued status, cancellation control, and sheet dismissal are visibly reachable after a long review-page scroll; the correction compiles in the real iOS UI-test graph without a deprecated source API | Replacement exact-SHA hosted execution, physical shake behavior, or production feedback delivery |
+| Final app-report trust wall | The reviewed terminology snapshot is repinned with unchanged semantic totals and zero forbidden mappings. Focused artifact, required-CI, terminology, and trust tests pass 77/77; the exact-current complete Tools wall passes 317/317; trusted self-check, ten required contexts, operations validation, diff hygiene, exact SDK artifact verification, 9/9 release controls, legal/distribution/private-data, calibration, health-claims, shell, and localization gates pass. | The SDK repin, verifier hardening, and narrow UI correction did not weaken protected release, privacy, claims, metric, localization, or artifact contracts | Hosted exact-SHA enforcement, physical accessibility, or protected integration |
 
 ## Physical device and deployment
 
@@ -356,15 +390,14 @@ Success means:
   `3a7ba9e56ade2d5f5d7561d877e19c6cde272c65`; protected SDK `bdeddf8`
   repin and release-control update
   `8fb07e3179ebb314b570da56784586552eb1e465`; Android boundary provenance
-  alignment `4388058c09130d371c05d86a725c3bddb1354524`. This record update is the
-  remaining local evidence commit.
+  alignment `4388058c09130d371c05d86a725c3bddb1354524`. The protected SDK PR `#13`
+  repin, verifier hardening, callback correction, and this evidence update are
+  the remaining local candidate.
 - Branch and remote state: PR `#17` is open from the dedicated branch. Remote
-  head `fe800e8e` passed every hosted context except the iOS production shell;
-  that job's sole failing test is corrected locally and passes on a fresh
-  simulator. The protected-base artifact verifier, Python runtime-shadow
-  defense, reviewed source digest, adversarial regressions, and targeted iOS
-  correction are locally green and require one replacement push plus all
-  exact-SHA protected checks.
+  head `4439603d` includes the queued-sheet correction but predates the
+  protected SDK PR `#13` repin. The new artifact, complete path-symlink
+  defense, app-boundary regressions, and iOS callback correction are locally
+  green and require one replacement push plus all exact-SHA protected checks.
 - Repository visibility verified on 2026-09-22:
   `Dhanunjay-Divi/Noop` and `Dhanunjay-Divi/NoopBandSDK` both report `PUBLIC`
   with default branch `main`. D-056 still requires the SDK repository to be
@@ -385,8 +418,8 @@ Success means:
 - Focused Apple and Android app-target verification is green, including an API
   35 regression that holds a canceled worker in `NonCancellable` cleanup and
   proves teardown remains blocked until actual unwind. The final
-  protected-base release-control correction passes 70 focused tests and the
-  complete 315-test Tools wall with one intentional skip. The consolidated
+  protected-base release-control correction passes 77 focused tests and the
+  complete 317-test Tools wall. The consolidated
   replacement candidate must still pass every required hosted context on one
   exact SHA.
 - A source-only adapter seam cannot establish that a supplier band is
@@ -395,7 +428,7 @@ Success means:
 ## Next round
 
 1. Refresh and review the terminology snapshot after this final evidence edit,
-   run the final repository gates, commit the final protected SDK repin and
+   run the final repository gates, commit the protected SDK PR `#13` repin and
    evidence update, then push one final exact head.
 2. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching

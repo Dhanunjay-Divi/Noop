@@ -6,7 +6,7 @@ import NoopBandSDK
 /// no NOOP-band factory until a separately reviewed supplier adapter exists.
 enum NoopBandSDKBoundary {
     static let pinnedSourceRevision =
-        "bdeddf876af4a83c1f9607ea3b6345b969152ab4"
+        "8fb464471fdd4ae09d5750feedcc25d50bdb1c20"
 
     static func makeSession(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),

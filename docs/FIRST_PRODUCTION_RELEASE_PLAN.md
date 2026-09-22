@@ -275,8 +275,11 @@ snapshots and terminal operation-security failures were merged through PR
 security-failure terminal and bounded invalid-history-token rejection evidence
 were merged through PRs `#8` and `#9`. Durable-receipt serialization,
 capability cancel/fail terminals, and operation-authentication invalidation
-were merged through PR `#12`, with current protected `main` at
-`bdeddf876af4a83c1f9607ea3b6345b969152ab4`. The app consumes the deterministic
+were merged through PR `#12`. Exact provenance-bearing accepted history rows,
+immutable Android acceptance collections, bounded restored-checkpoint
+traversal, and independent staged receipt counts were merged through PR `#13`,
+with current protected `main` at
+`8fb464471fdd4ae09d5750feedcc25d50bdb1c20`. The app consumes the deterministic
 export from that current protected revision through a digest-pinned,
 supplier-artifact-free boundary. The repository is temporarily public as of
 2026-09-22; D-056 still requires private visibility before release.

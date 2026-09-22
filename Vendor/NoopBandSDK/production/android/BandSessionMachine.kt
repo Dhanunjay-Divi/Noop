@@ -10,11 +10,13 @@ class BandSessionMachine(
     private data class PendingLive(
         val acceptance: LiveAcceptance,
         val sampleIdentities: List<BandSampleIdentity>,
+        val expectedSampleCount: Int,
     )
 
     private data class PendingHistory(
         val acceptance: HistoryAcceptance,
         val sampleIdentities: List<BandSampleIdentity>,
+        val expectedSampleCount: Int,
     )
 
     private val restoredHistoryCheckpoint =
@@ -702,6 +704,7 @@ class BandSessionMachine(
         pendingLive = PendingLive(
             acceptance = acceptance,
             sampleIdentities = unique.map(BandSample::identity),
+            expectedSampleCount = unique.size,
         )
         return acceptance
     }
@@ -736,7 +739,7 @@ class BandSessionMachine(
         }
         if (
             !receipt.committed ||
-            receipt.committedSamples < pending.acceptance.acceptedSamples.size
+            receipt.committedSamples < pending.expectedSampleCount
         ) {
             pendingLive = null
             diagnostics.record(
@@ -997,18 +1000,24 @@ class BandSessionMachine(
         }
 
         val uniqueSet = mutableSetOf<BandSampleIdentity>()
-        val unique = mutableListOf<BandSampleIdentity>()
+        val unique = mutableListOf<AcceptedHistorySample>()
         var duplicates = 0
-        immutableChunk.batches
-            .flatMap(BandSampleBatch::samples)
-            .forEach { sample ->
-            if (
-                sample.identity in durableSampleIdentities ||
-                !uniqueSet.add(sample.identity)
-            ) {
-                duplicates += 1
-            } else {
-                unique += sample.identity
+        immutableChunk.batches.forEach { batch ->
+            batch.samples.forEach { sample ->
+                if (
+                    sample.identity in durableSampleIdentities ||
+                    !uniqueSet.add(sample.identity)
+                ) {
+                    duplicates += 1
+                } else {
+                    unique += AcceptedHistorySample(
+                        sourceIdentity = batch.sourceIdentity,
+                        lane = batch.lane,
+                        parserRevision = batch.parserRevision,
+                        calibrationRevision = batch.calibrationRevision,
+                        sample = sample,
+                    )
+                }
             }
         }
         nextHistoryReceiptSequence += 1
@@ -1018,12 +1027,16 @@ class BandSessionMachine(
             nextCursor = immutableChunk.nextCursor,
             complete = immutableChunk.complete,
             overflowed = immutableChunk.overflowed,
-            acceptedSamples = unique.size,
+            acceptedSamples = unique,
             duplicateSamples = duplicates,
             sessionNonce = sessionNonce,
             receiptSequence = nextHistoryReceiptSequence,
         )
-        pendingHistory = PendingHistory(acceptance, unique)
+        pendingHistory = PendingHistory(
+            acceptance,
+            unique.map { it.sample.identity },
+            unique.size,
+        )
         diagnostics.record(
             BandDiagnosticEvent(
                 BandDiagnosticKind.HISTORY,
@@ -1082,7 +1095,7 @@ class BandSessionMachine(
         if (
             !receipt.committed ||
             !receipt.historyStateCommitted ||
-            receipt.committedSamples < pending.acceptance.acceptedSamples
+            receipt.committedSamples < pending.expectedSampleCount
         ) {
             pendingHistory = null
             diagnostics.record(

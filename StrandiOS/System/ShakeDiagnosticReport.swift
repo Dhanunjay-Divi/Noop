@@ -597,7 +597,7 @@ struct ShakeDiagnosticReportSheet: View {
                         .screenPadding()
                         .padding(.vertical, NoopMetrics.space5)
                     }
-                    .onChange(of: controller.phase) { _ in
+                    .onChange(of: controller.phase) { _, _ in
                         Task { @MainActor in
                             await Task.yield()
                             proxy.scrollTo(

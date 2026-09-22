@@ -6,20 +6,21 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import stat
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 
 EXPECTED_MANIFEST_SHA256 = (
-    "31f4a8fef6ad500d445bf8804a22a57b61b6b0409fc589c39db5c472fece2553"
+    "abc87fb3a6bb91e013af7dc458a49710bfa9fb56cb8e19013b4ab7cb67571cf9"
 )
 EXPECTED_SOURCE_REPOSITORY = "Dhanunjay-Divi/NoopBandSDK"
-EXPECTED_SOURCE_REVISION = "bdeddf876af4a83c1f9607ea3b6345b969152ab4"
+EXPECTED_SOURCE_REVISION = "8fb464471fdd4ae09d5750feedcc25d50bdb1c20"
 EXPORT_DIRECTORIES = ("contract", "production", "test-support")
 EXPECTED_INTEGRATION_FILES = {
     "Package.swift": "16fdef516135df5e4df8dd6c260e910e41ca3a6091e9151ba058e8ce2da95053",
     "Tests/NoopBandSDKTests/NoopBandSDKArtifactTests.swift": (
-        "82aa611de5ca6b310c05ababda11b91d6fc4342fc18cdd6c9f98733324d6aa8e"
+        "e335df14a588ac080de13ab98a4fe77802eb4e9610e6f4d4bd554e8310fa5f28"
     ),
 }
 EXPECTED_TOP_LEVEL_ENTRIES = {
@@ -80,9 +81,29 @@ def _load_unique_json(path: Path) -> dict[str, Any]:
     return loaded
 
 
+def _reject_symlinked_artifact_path(root: Path) -> None:
+    absolute_root = root if root.is_absolute() else Path.cwd() / root
+    current = Path(absolute_root.anchor)
+
+    for part in absolute_root.parts[1:]:
+        if part == "..":
+            current = current.parent
+            continue
+        current /= part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise VerificationError("artifact path ancestors are not inspectable") from error
+        if stat.S_ISLNK(mode):
+            if current == absolute_root:
+                raise VerificationError("artifact root must not be a symlink")
+            raise VerificationError("artifact path ancestor must not be a symlink")
+
+
 def verify_artifact(root: Path) -> dict[str, Any]:
-    if root.is_symlink():
-        raise VerificationError("artifact root must not be a symlink")
+    _reject_symlinked_artifact_path(root)
     root = root.resolve()
     manifest_path = root / "noop-band-sdk-manifest.json"
     if not manifest_path.is_file() or manifest_path.is_symlink():

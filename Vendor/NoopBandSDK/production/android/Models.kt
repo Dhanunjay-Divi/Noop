@@ -1,5 +1,6 @@
 package com.noop.bandsdk
 
+import java.util.Collections
 import java.util.UUID
 
 object BandContractLimits {
@@ -379,10 +380,39 @@ data class BandHistoryChunk(
 
 private fun <T> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
     val expectedSize = size
-    if (maximumSize < 0 || expectedSize > maximumSize) {
+    if (maximumSize < 0 || expectedSize < 0 || expectedSize > maximumSize) {
         fail(BandFailureCategory.INVALID_INPUT)
     }
     val snapshot = ArrayList<T>(expectedSize)
+    try {
+        val iterator = iterator()
+        while (iterator.hasNext()) {
+            if (snapshot.size == maximumSize) {
+                fail(BandFailureCategory.INVALID_INPUT)
+            }
+            snapshot += iterator.next()
+        }
+    } catch (error: BandException) {
+        throw error
+    } catch (_: RuntimeException) {
+        fail(BandFailureCategory.INVALID_INPUT)
+    }
+    if (snapshot.size != expectedSize) {
+        fail(BandFailureCategory.INVALID_INPUT)
+    }
+    return snapshot
+}
+
+private fun <T> Set<T>.boundedSnapshot(maximumSize: Int): Set<T> {
+    val expectedSize = try {
+        size
+    } catch (_: RuntimeException) {
+        fail(BandFailureCategory.INVALID_INPUT)
+    }
+    if (maximumSize < 0 || expectedSize < 0 || expectedSize > maximumSize) {
+        fail(BandFailureCategory.INVALID_INPUT)
+    }
+    val snapshot = LinkedHashSet<T>(expectedSize)
     try {
         val iterator = iterator()
         while (iterator.hasNext()) {
@@ -429,7 +459,9 @@ data class BandHistoryCheckpoint(
     }
 
     internal fun immutableSnapshot(): BandHistoryCheckpoint = copy(
-        durableSampleIdentities = durableSampleIdentities.toSet(),
+        durableSampleIdentities = durableSampleIdentities.boundedSnapshot(
+            BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES,
+        ),
     )
 }
 
@@ -449,9 +481,20 @@ class LiveAcceptance internal constructor(
     internal val generation: Long,
     internal val receiptSequence: Long,
 ) {
-    val acceptedSamples: List<BandSample> = acceptedSamples.toList()
+    val acceptedSamples: List<BandSample> =
+        Collections.unmodifiableList(ArrayList(acceptedSamples))
 
     override fun toString(): String = "LiveAcceptance"
+}
+
+class AcceptedHistorySample internal constructor(
+    val sourceIdentity: String,
+    val lane: BandProvenanceLane,
+    val parserRevision: String,
+    val calibrationRevision: String,
+    val sample: BandSample,
+) {
+    override fun toString(): String = "AcceptedHistorySample"
 }
 
 class DurableLiveReceipt(
@@ -472,11 +515,14 @@ class HistoryAcceptance internal constructor(
     val nextCursor: String?,
     val complete: Boolean,
     val overflowed: Boolean,
-    val acceptedSamples: Int,
+    acceptedSamples: List<AcceptedHistorySample>,
     val duplicateSamples: Int,
     internal val sessionNonce: UUID,
     internal val receiptSequence: Long,
 ) {
+    val acceptedSamples: List<AcceptedHistorySample> =
+        Collections.unmodifiableList(ArrayList(acceptedSamples))
+
     override fun toString(): String = "HistoryAcceptance"
 }
 

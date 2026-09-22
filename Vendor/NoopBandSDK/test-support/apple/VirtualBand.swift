@@ -18,10 +18,11 @@ public actor VirtualBandStore {
     }
 
     public func commit(
-        acceptance: HistoryAcceptance,
-        samples: [BandSample]
+        acceptance: HistoryAcceptance
     ) -> DurableHistoryReceipt {
-        let identities = Set(samples.map(\.identity))
+        let identities = Set(
+            acceptance.acceptedSamples.map(\.sample.identity)
+        )
         committed.formUnion(identities)
         return DurableHistoryReceipt(
             acceptance: acceptance,
@@ -403,12 +404,9 @@ public enum BandConformanceRunner {
             token: token,
             callbackGeneration: generation
         )
-        accepted += acceptance.acceptedSamples
+        accepted += acceptance.acceptedSamples.count
         events.append("history_received")
-        let receipt = await store.commit(
-            acceptance: acceptance,
-            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
-        )
+        let receipt = await store.commit(acceptance: acceptance)
         events.append("history_committed")
         try await session.acknowledgeHistory(
             receipt: receipt,
@@ -542,8 +540,7 @@ public enum BandConformanceRunner {
             callbackGeneration: secondGeneration
         )
         let foreignHistoryReceipt = await firstStore.commit(
-            acceptance: firstHistory,
-            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
+            acceptance: firstHistory
         )
         do {
             try await second.acknowledgeHistory(
@@ -562,8 +559,7 @@ public enum BandConformanceRunner {
             events.append("foreign_operation_token_rejected")
         }
         let ownHistoryReceipt = await secondStore.commit(
-            acceptance: secondHistory,
-            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
+            acceptance: secondHistory
         )
         try await second.acknowledgeHistory(
             receipt: ownHistoryReceipt,
@@ -579,7 +575,7 @@ public enum BandConformanceRunner {
             snapshot: await second.snapshot(),
             acceptedSamples:
                 secondLive.acceptedSamples.count
-                    + secondHistory.acceptedSamples,
+                    + secondHistory.acceptedSamples.count,
             failure: failure
         )
     }
@@ -730,8 +726,7 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         let firstHistoryReceipt = await store.commit(
-            acceptance: firstHistory,
-            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
+            acceptance: firstHistory
         )
         try await session.acknowledgeHistory(
             receipt: firstHistoryReceipt,
@@ -786,8 +781,7 @@ public enum BandConformanceRunner {
             events.append("stale_history_receipt_rejected")
         }
         let secondHistoryReceipt = await store.commit(
-            acceptance: secondHistory,
-            samples: secondHistoryChunk.batches.flatMap(\.samples)
+            acceptance: secondHistory
         )
         try await session.acknowledgeHistory(
             receipt: secondHistoryReceipt,
@@ -804,8 +798,8 @@ public enum BandConformanceRunner {
             acceptedSamples:
                 firstLive.acceptedSamples.count
                     + secondLive.acceptedSamples.count
-                    + firstHistory.acceptedSamples
-                    + secondHistory.acceptedSamples,
+                    + firstHistory.acceptedSamples.count
+                    + secondHistory.acceptedSamples.count,
             failure: failure
         )
     }
@@ -845,10 +839,7 @@ public enum BandConformanceRunner {
             token: token,
             callbackGeneration: generation
         )
-        let receipt = await store.commit(
-            acceptance: retryAcceptance,
-            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
-        )
+        let receipt = await store.commit(acceptance: retryAcceptance)
         events.append("history_committed")
         try await session.acknowledgeHistory(
             receipt: receipt,
@@ -861,7 +852,7 @@ public enum BandConformanceRunner {
             scenario: "history_requires_durable_receipt",
             events: events,
             snapshot: await session.snapshot(),
-            acceptedSamples: retryAcceptance.acceptedSamples,
+            acceptedSamples: retryAcceptance.acceptedSamples.count,
             failure: failure
         )
     }
@@ -923,10 +914,7 @@ public enum BandConformanceRunner {
             token: firstToken,
             callbackGeneration: generation
         )
-        let firstReceipt = await store.commit(
-            acceptance: firstAcceptance,
-            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
-        )
+        let firstReceipt = await store.commit(acceptance: firstAcceptance)
         try await session.acknowledgeHistory(
             receipt: firstReceipt,
             token: firstToken,
@@ -954,7 +942,7 @@ public enum BandConformanceRunner {
             scenario: "history_cursor_chain_rejected",
             events: events,
             snapshot: await session.snapshot(),
-            acceptedSamples: firstAcceptance.acceptedSamples,
+            acceptedSamples: firstAcceptance.acceptedSamples.count,
             failure: failure
         )
     }
@@ -1136,10 +1124,7 @@ public enum BandConformanceRunner {
             callbackGeneration: resumedGeneration
         )
         events.append("history_resumed")
-        let receipt = await store.commit(
-            acceptance: acceptance,
-            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
-        )
+        let receipt = await store.commit(acceptance: acceptance)
         events.append("history_committed")
         try await session.acknowledgeHistory(
             receipt: receipt,
@@ -1152,7 +1137,7 @@ public enum BandConformanceRunner {
             scenario: "history_interrupted_resume",
             events: events,
             snapshot: await session.snapshot(),
-            acceptedSamples: acceptance.acceptedSamples,
+            acceptedSamples: acceptance.acceptedSamples.count,
             failure: failure
         )
     }
@@ -1230,8 +1215,7 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         let receipt = await VirtualBandStore().commit(
-            acceptance: acceptance,
-            samples: chunk.batches.flatMap(\.samples)
+            acceptance: acceptance
         )
         events.append("history_committed")
         try await session.acknowledgeHistory(
@@ -1245,7 +1229,7 @@ public enum BandConformanceRunner {
             scenario: "history_checkpoint_restored",
             events: events,
             snapshot: await session.snapshot(),
-            acceptedSamples: acceptance.acceptedSamples
+            acceptedSamples: acceptance.acceptedSamples.count
         )
     }
 
@@ -1436,7 +1420,7 @@ public enum BandConformanceRunner {
                 receipt: DurableHistoryReceipt(
                     acceptance: firstAcceptance,
                     historyStateCommitted: false,
-                    committedSamples: firstAcceptance.acceptedSamples,
+                    committedSamples: firstAcceptance.acceptedSamples.count,
                     committed: true
                 ),
                 token: token,
@@ -1451,8 +1435,7 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         let firstReceipt = await store.commit(
-            acceptance: firstAcceptance,
-            samples: firstChunk.batches.flatMap(\.samples)
+            acceptance: firstAcceptance
         )
         try await session.acknowledgeHistory(
             receipt: firstReceipt,
@@ -1501,8 +1484,7 @@ public enum BandConformanceRunner {
         )
         events.append("terminal_received")
         let terminalReceipt = await store.commit(
-            acceptance: terminalAcceptance,
-            samples: terminalChunk.batches.flatMap(\.samples)
+            acceptance: terminalAcceptance
         )
         try await session.acknowledgeHistory(
             receipt: terminalReceipt,
@@ -1526,8 +1508,8 @@ public enum BandConformanceRunner {
             events: events,
             snapshot: await session.snapshot(),
             acceptedSamples:
-                firstAcceptance.acceptedSamples
-                    + terminalAcceptance.acceptedSamples,
+                firstAcceptance.acceptedSamples.count
+                    + terminalAcceptance.acceptedSamples.count,
             failure: failure
         )
     }
@@ -1621,8 +1603,7 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         let firstReceipt = await store.commit(
-            acceptance: firstAcceptance,
-            samples: VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
+            acceptance: firstAcceptance
         )
         try await session.acknowledgeHistory(
             receipt: firstReceipt,
@@ -1646,7 +1627,7 @@ public enum BandConformanceRunner {
             scenario: "history_operation_requires_own_receipt",
             events: events,
             snapshot: await session.snapshot(),
-            acceptedSamples: firstAcceptance.acceptedSamples,
+            acceptedSamples: firstAcceptance.acceptedSamples.count,
             failure: failure
         )
     }
@@ -2378,7 +2359,7 @@ public enum BandConformanceRunner {
             receipt: DurableHistoryReceipt(
                 acceptance: acceptance,
                 historyStateCommitted: true,
-                committedSamples: acceptance.acceptedSamples,
+                committedSamples: acceptance.acceptedSamples.count,
                 committed: true
             ),
             token: token,
