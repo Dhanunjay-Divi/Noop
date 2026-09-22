@@ -269,7 +269,9 @@ firmware invalidation, and stale terminal fencing were merged at
 authentication phases, generation-fenced connection completion, categorized
 connection/authentication terminals, and bounded pending-history busy
 diagnostics were merged through PR `#6` at
-`78c17cbd495353f33b5ef169bd1200ee9a0c35df`. The app consumes the
+`78c17cbd495353f33b5ef169bd1200ee9a0c35df`. Caller-owned Kotlin collection
+snapshots and terminal operation-security failures were merged through PR
+`#7` at `44559aeb4b1b50af9e6ab8b8dc786f87821c72d9`. The app consumes the
 deterministic export from that current private `main` revision through a
 digest-pinned, supplier-artifact-free boundary.
 

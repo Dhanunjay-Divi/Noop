@@ -1999,6 +1999,44 @@ public enum BandConformanceRunner {
             callbackGeneration: recovering.generation
         )
         events.append("reconnected")
+        let securityGeneration = await session.snapshot().generation
+        let securityFailed = try await session.beginOperation(.battery)
+        try await session.failOperation(
+            securityFailed,
+            category: .securityFailure
+        )
+        let securityTerminal = await session.snapshot()
+        if securityTerminal.state == .securityFailure,
+           securityTerminal.generation == securityGeneration + 1,
+           securityTerminal.activeOperation == nil,
+           !securityTerminal.liveActive
+        {
+            events.append("security_failure_terminal")
+        } else {
+            events.append("security_failure_not_terminal")
+        }
+        do {
+            try await session.failOperation(
+                securityFailed,
+                category: .timeout
+            )
+        } catch BandFailureCategory.staleCallback {
+            events.append("security_failure_stale_token_rejected")
+        }
+        let restartGeneration = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: restartGeneration
+        )
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: restartGeneration
+        )
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            callbackGeneration: restartGeneration
+        )
+        events.append("security_failure_recovered")
         return result(
             scenario: "operation_terminal_paths",
             events: events,

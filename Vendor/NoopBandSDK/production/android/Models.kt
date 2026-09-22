@@ -315,6 +315,10 @@ data class BandSampleBatch(
         }
         samples.forEach(BandSample::validate)
     }
+
+    internal fun immutableSnapshot(): BandSampleBatch = copy(
+        samples = samples.toList(),
+    )
 }
 
 data class BandHistoryChunk(
@@ -348,6 +352,10 @@ data class BandHistoryChunk(
         }
         batches.forEach { it.validate(BandProvenanceLane.HISTORY) }
     }
+
+    internal fun immutableSnapshot(): BandHistoryChunk = copy(
+        batches = batches.map(BandSampleBatch::immutableSnapshot),
+    )
 }
 
 data class BandHistoryCheckpoint(

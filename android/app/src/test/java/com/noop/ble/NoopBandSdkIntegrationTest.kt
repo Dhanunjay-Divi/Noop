@@ -24,7 +24,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "78c17cbd495353f33b5ef169bd1200ee9a0c35df",
+            "44559aeb4b1b50af9e6ab8b8dc786f87821c72d9",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -59,7 +59,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-78c17cb",
+            wrapperRevision = "artifact-44559ae",
         )
         completeConnection(session, identity, generation)
         session.acceptCapabilities(
@@ -117,7 +117,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-78c17cb",
+            wrapperRevision = "artifact-44559ae",
         )
         completeConnection(session, identity, generation)
         session.acceptCapabilities(
@@ -178,7 +178,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-78c17cb",
+            wrapperRevision = "artifact-44559ae",
         )
         completeConnection(session, identity, generation)
         val mutableCapabilities = mutableSetOf(BandCapability.HEART_RATE)

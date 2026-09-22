@@ -544,6 +544,7 @@ class BandSessionMachine(
             callbackGeneration,
             BandDiagnosticKind.LIVE,
         )
+        val immutableBatch = batch.immutableSnapshot()
         if (
             !liveActive ||
             (state != BandSessionState.LIVE_COLLECTING && activeOperation == null)
@@ -557,7 +558,7 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.INVALID_STATE)
         }
-        if (batch.sourceIdentity != identity?.sourceIdentity) {
+        if (immutableBatch.sourceIdentity != identity?.sourceIdentity) {
             diagnostics.record(
                 BandDiagnosticEvent(
                     BandDiagnosticKind.LIVE,
@@ -578,7 +579,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.BUSY)
         }
         try {
-            batch.validate(BandProvenanceLane.LIVE)
+            immutableBatch.validate(BandProvenanceLane.LIVE)
         } catch (error: BandException) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -590,19 +591,19 @@ class BandSessionMachine(
             throw error
         }
         validateNegotiatedStreams(
-            batch.samples,
+            immutableBatch.samples,
             BandDiagnosticKind.LIVE,
             liveStreams,
         )
         val acceptedIdentities = mutableSetOf<BandSampleIdentity>()
-        val unique = batch.samples.filter {
+        val unique = immutableBatch.samples.filter {
             it.identity !in durableSampleIdentities &&
                 acceptedIdentities.add(it.identity)
         }
         nextLiveReceiptSequence += 1
         val acceptance = LiveAcceptance(
             acceptedSamples = unique,
-            duplicateSamples = batch.samples.size - unique.size,
+            duplicateSamples = immutableBatch.samples.size - unique.size,
             sessionNonce = sessionNonce,
             generation = generation,
             receiptSequence = nextLiveReceiptSequence,
@@ -816,6 +817,7 @@ class BandSessionMachine(
             BandDiagnosticKind.HISTORY,
         )
         validateActiveToken(token, BandOperationClass.HISTORY)
+        val immutableChunk = chunk.immutableSnapshot()
         if (pendingHistory != null) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -837,7 +839,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_STATE)
         }
         try {
-            chunk.validate()
+            immutableChunk.validate()
         } catch (_: BandException) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -849,10 +851,10 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_INPUT)
         }
         validateNegotiatedStreams(
-            chunk.batches.flatMap(BandSampleBatch::samples),
+            immutableChunk.batches.flatMap(BandSampleBatch::samples),
             BandDiagnosticKind.HISTORY,
         )
-        if (chunk.previousCursor != acknowledgedHistoryCursor) {
+        if (immutableChunk.previousCursor != acknowledgedHistoryCursor) {
             diagnostics.record(
                 BandDiagnosticEvent(
                     BandDiagnosticKind.HISTORY,
@@ -863,8 +865,11 @@ class BandSessionMachine(
             fail(BandFailureCategory.HISTORY_STALLED)
         }
         if (
-            !chunk.complete &&
-            (chunk.nextCursor == null || chunk.nextCursor == chunk.previousCursor)
+            !immutableChunk.complete &&
+            (
+                immutableChunk.nextCursor == null ||
+                    immutableChunk.nextCursor == immutableChunk.previousCursor
+                )
         ) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -875,7 +880,11 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.HISTORY_STALLED)
         }
-        if (chunk.batches.any { it.sourceIdentity != identity?.sourceIdentity }) {
+        if (
+            immutableChunk.batches.any {
+                it.sourceIdentity != identity?.sourceIdentity
+            }
+        ) {
             diagnostics.record(
                 BandDiagnosticEvent(
                     BandDiagnosticKind.HISTORY,
@@ -889,7 +898,9 @@ class BandSessionMachine(
         val uniqueSet = mutableSetOf<BandSampleIdentity>()
         val unique = mutableListOf<BandSampleIdentity>()
         var duplicates = 0
-        chunk.batches.flatMap(BandSampleBatch::samples).forEach { sample ->
+        immutableChunk.batches
+            .flatMap(BandSampleBatch::samples)
+            .forEach { sample ->
             if (
                 sample.identity in durableSampleIdentities ||
                 !uniqueSet.add(sample.identity)
@@ -901,11 +912,11 @@ class BandSessionMachine(
         }
         nextHistoryReceiptSequence += 1
         val acceptance = HistoryAcceptance(
-            chunkIdentity = chunk.chunkIdentity,
-            acknowledgementToken = chunk.acknowledgementToken,
-            nextCursor = chunk.nextCursor,
-            complete = chunk.complete,
-            overflowed = chunk.overflowed,
+            chunkIdentity = immutableChunk.chunkIdentity,
+            acknowledgementToken = immutableChunk.acknowledgementToken,
+            nextCursor = immutableChunk.nextCursor,
+            complete = immutableChunk.complete,
+            overflowed = immutableChunk.overflowed,
             acceptedSamples = unique.size,
             duplicateSamples = duplicates,
             sessionNonce = sessionNonce,
@@ -1088,7 +1099,9 @@ class BandSessionMachine(
             )
             throw error
         }
-        if (token.operationClass == BandOperationClass.FIRMWARE) {
+        if (category == BandFailureCategory.SECURITY_FAILURE) {
+            invalidateAuthenticatedSession(BandSessionState.SECURITY_FAILURE)
+        } else if (token.operationClass == BandOperationClass.FIRMWARE) {
             invalidateNegotiationAfterFirmware()
         } else if (category == BandFailureCategory.DISCONNECTED) {
             clearOperationTracking()
@@ -1339,12 +1352,7 @@ class BandSessionMachine(
     }
 
     private fun invalidateNegotiationAfterFirmware() {
-        clearOperationTracking()
-        clearLiveTracking()
-        identity = null
-        capabilityReport = null
-        generation += 1
-        state = BandSessionState.RECOVERING
+        invalidateAuthenticatedSession(BandSessionState.RECOVERING)
     }
 
     private fun clearLiveTracking() {
@@ -1361,6 +1369,10 @@ class BandSessionMachine(
     }
 
     private fun clearConnectionAttempt(nextState: BandSessionState) {
+        invalidateAuthenticatedSession(nextState)
+    }
+
+    private fun invalidateAuthenticatedSession(nextState: BandSessionState) {
         clearOperationTracking()
         clearLiveTracking()
         identity = null

@@ -26,7 +26,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         hardwareRevision: "synthetic-hw-1",
         firmwareVersion: "synthetic-fw-1",
         protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-        wrapperRevision: "artifact-78c17cb"
+        wrapperRevision: "artifact-44559ae"
     )
 
     private var capabilities: BandCapabilityReport {

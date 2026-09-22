@@ -454,7 +454,10 @@
           "operation_failed",
           "disconnect_recovery",
           "stale_callback_rejected",
-          "reconnected"
+          "reconnected",
+          "security_failure_terminal",
+          "security_failure_stale_token_rejected",
+          "security_failure_recovered"
         ],
         "finalState": "ready",
         "acknowledgedCursor": null,

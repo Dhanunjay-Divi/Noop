@@ -11,12 +11,15 @@ import androidx.work.await
 import androidx.work.workDataOf
 import java.io.File
 import java.time.Instant
+import java.util.Collections
 import java.util.UUID
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -29,6 +32,7 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
     private lateinit var localId: String
     private lateinit var uniqueWorkName: String
     private lateinit var probeSession: FeedbackContinuityProbe.Session
+    private lateinit var workerExecutionProbe: FeedbackWorkerExecutionProbe
     private lateinit var outbox: FeedbackOutbox
     private lateinit var staged: FeedbackRecord
 
@@ -47,33 +51,72 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
             uniqueWorkName = FeedbackScheduler.workName(localId)
             workManager.cancelUniqueWork(uniqueWorkName).await()
             probeSession = FeedbackContinuityProbe.reset()
+            workerExecutionProbe = FeedbackWorkerExecutionProbe()
+            FeedbackWorkerExecutionObserver.install(workerExecutionProbe)
         }
     }
 
     @After
     fun removeUniqueWork() {
-        runBlocking {
-            workManager.cancelUniqueWork(uniqueWorkName).await()
-            withTimeout(15_000L) {
-                while (
-                    FeedbackContinuityWorkInspector.snapshots(
-                        workManager,
-                        uniqueWorkName,
-                    ).any { !it.state.isFinished }
-                ) {
-                    delay(50L)
-                }
+        try {
+            runBlocking {
+                workManager.cancelUniqueWork(uniqueWorkName).await()
+                probeSession.release.complete(Unit)
+                probeSession.unwindRelease.complete(Unit)
+                awaitUniqueWorkQuiescence()
             }
+            val recordDirectory = File(context.filesDir, "feedback/outbox/$localId")
+            assertTrue(
+                "Feedback continuity test record must be removed after workers quiesce",
+                recordDirectory.deleteRecursively(),
+            )
+            assertTrue(
+                "Feedback continuity test record must not leak into later test classes",
+                !recordDirectory.exists(),
+            )
+        } finally {
+            FeedbackWorkerExecutionObserver.clear(workerExecutionProbe)
         }
-        val recordDirectory = File(context.filesDir, "feedback/outbox/$localId")
-        assertTrue(
-            "Feedback continuity test record must be removed after workers quiesce",
-            recordDirectory.deleteRecursively(),
-        )
-        assertTrue(
-            "Feedback continuity test record must not leak into later test classes",
-            !recordDirectory.exists(),
-        )
+    }
+
+    @Test
+    fun canceledWorkInfoDoesNotProveCoroutineHasUnwound() = runBlocking {
+        probeSession = FeedbackContinuityProbe.reset(holdUnwind = true)
+        val predecessor =
+            OneTimeWorkRequestBuilder<BlockingFeedbackContinuityProbeWorker>().build()
+        workManager.enqueueUniqueWork(
+            uniqueWorkName,
+            ExistingWorkPolicy.REPLACE,
+            predecessor,
+        ).await()
+        withTimeout(15_000L) {
+            probeSession.started.await()
+        }
+
+        workManager.cancelUniqueWork(uniqueWorkName).await()
+        val terminalState = withTimeout(15_000L) {
+            while (true) {
+                val state = FeedbackContinuityWorkInspector.snapshots(
+                    workManager,
+                    uniqueWorkName,
+                ).firstOrNull { it.id == predecessor.id }?.state
+                if (state?.isFinished == true) return@withTimeout state
+                delay(50L)
+            }
+            error("unreachable")
+        }
+        assertEquals(WorkInfo.State.CANCELLED, terminalState)
+        assertFalse(probeSession.unwound.isCompleted)
+
+        val quiescence = async {
+            awaitUniqueWorkQuiescence()
+        }
+        delay(200L)
+        assertFalse(quiescence.isCompleted)
+
+        probeSession.unwindRelease.complete(Unit)
+        quiescence.await()
+        assertTrue(probeSession.unwound.isCompleted)
     }
 
     @Test
@@ -367,4 +410,82 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
         "report.txt" to "NOOP instrumentation report\n".toByteArray(),
         "meta.json" to """{"schema":1,"app_version":"9.2.1"}""".toByteArray(),
     )
+
+    private suspend fun awaitUniqueWorkQuiescence() {
+        withTimeout(15_000L) {
+            while (true) {
+                val beforeWork = FeedbackContinuityWorkInspector.snapshots(
+                    workManager,
+                    uniqueWorkName,
+                )
+                val beforeExecution = workerExecutionProbe.snapshot()
+                val probeUnwound =
+                    !probeSession.started.isCompleted || probeSession.unwound.isCompleted
+                if (
+                    beforeWork.all { it.state.isFinished } &&
+                    beforeExecution.allStartedExited &&
+                    probeUnwound
+                ) {
+                    delay(100L)
+                    val afterWork = FeedbackContinuityWorkInspector.snapshots(
+                        workManager,
+                        uniqueWorkName,
+                    )
+                    val afterExecution = workerExecutionProbe.snapshot()
+                    val noNewWork =
+                        afterWork.mapTo(mutableSetOf()) { it.id } -
+                            beforeWork.mapTo(mutableSetOf()) { it.id }
+                    val noNewExecutions =
+                        afterExecution.started - beforeExecution.started
+                    if (
+                        afterWork.all { it.state.isFinished } &&
+                        afterExecution.allStartedExited &&
+                        noNewWork.isEmpty() &&
+                        noNewExecutions.isEmpty() &&
+                        (
+                            !probeSession.started.isCompleted ||
+                                probeSession.unwound.isCompleted
+                            )
+                    ) {
+                        return@withTimeout
+                    }
+                }
+                delay(50L)
+            }
+        }
+    }
+
+    private class FeedbackWorkerExecutionProbe : FeedbackWorkerExecutionListener {
+        private val started =
+            Collections.synchronizedSet(mutableSetOf<UUID>())
+        private val exited =
+            Collections.synchronizedSet(mutableSetOf<UUID>())
+
+        override fun onExecution(
+            workId: UUID,
+            phase: FeedbackWorkerExecutionPhase,
+        ) {
+            when (phase) {
+                FeedbackWorkerExecutionPhase.STARTED -> started += workId
+                FeedbackWorkerExecutionPhase.EXITED -> exited += workId
+            }
+        }
+
+        fun snapshot(): FeedbackWorkerExecutionSnapshot = synchronized(started) {
+            synchronized(exited) {
+                FeedbackWorkerExecutionSnapshot(
+                    started = started.toSet(),
+                    exited = exited.toSet(),
+                )
+            }
+        }
+    }
+
+    private data class FeedbackWorkerExecutionSnapshot(
+        val started: Set<UUID>,
+        val exited: Set<UUID>,
+    ) {
+        val allStartedExited: Boolean
+            get() = exited.containsAll(started)
+    }
 }

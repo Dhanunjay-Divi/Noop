@@ -1752,6 +1752,42 @@ object BandConformanceRunner {
         }
         session.resumeAfterReconnect(recovering.generation)
         events += "reconnected"
+        val securityGeneration = session.snapshot().generation
+        val securityFailed = session.beginOperation(BandOperationClass.BATTERY)
+        session.failOperation(
+            securityFailed,
+            BandFailureCategory.SECURITY_FAILURE,
+        )
+        val securityTerminal = session.snapshot()
+        if (
+            securityTerminal.state == BandSessionState.SECURITY_FAILURE &&
+            securityTerminal.generation == securityGeneration + 1 &&
+            securityTerminal.activeOperation == null &&
+            !securityTerminal.liveActive
+        ) {
+            events += "security_failure_terminal"
+        } else {
+            events += "security_failure_not_terminal"
+        }
+        try {
+            session.failOperation(securityFailed, BandFailureCategory.TIMEOUT)
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                throw error
+            }
+            events += "security_failure_stale_token_rejected"
+        }
+        val restartGeneration = session.beginScan()
+        session.selectCandidate(VirtualBandFixtures.candidate, restartGeneration)
+        session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            restartGeneration,
+        )
+        session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            restartGeneration,
+        )
+        events += "security_failure_recovered"
         return result(
             "operation_terminal_paths",
             events,

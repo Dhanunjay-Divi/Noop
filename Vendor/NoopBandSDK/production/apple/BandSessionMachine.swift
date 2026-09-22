@@ -1115,7 +1115,9 @@ public actor BandSessionMachine {
             )
             throw failure
         }
-        if token.operationClass == .firmware {
+        if category == .securityFailure {
+            invalidateAuthenticatedSession(nextState: .securityFailure)
+        } else if token.operationClass == .firmware {
             invalidateNegotiationAfterFirmware()
         } else if category == .disconnected {
             clearOperationTracking()
@@ -1311,12 +1313,7 @@ public actor BandSessionMachine {
     }
 
     private func invalidateNegotiationAfterFirmware() {
-        clearOperationTracking()
-        clearLiveTracking()
-        identity = nil
-        capabilityReport = nil
-        generation &+= 1
-        state = .recovering
+        invalidateAuthenticatedSession(nextState: .recovering)
     }
 
     private func clearLiveTracking() {
@@ -1333,6 +1330,12 @@ public actor BandSessionMachine {
     }
 
     private func clearConnectionAttempt(nextState: BandSessionState) {
+        invalidateAuthenticatedSession(nextState: nextState)
+    }
+
+    private func invalidateAuthenticatedSession(
+        nextState: BandSessionState
+    ) {
         clearOperationTracking()
         clearLiveTracking()
         identity = nil
