@@ -665,10 +665,10 @@
     {
       "category": "historical",
       "lineNumbers": [
-        771,
-        773,
-        792,
-        793
+        779,
+        781,
+        800,
+        801
       ],
       "occurrenceCount": 4,
       "path": "NOOPiOSUITests/NOOPiOSUITests.swift",
@@ -36094,10 +36094,10 @@
       "category": "historical",
       "lineNumbers": [
         22,
-        108,
-        129,
-        273,
-        393
+        113,
+        134,
+        278,
+        398
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36422,8 +36422,8 @@
         51,
         141,
         239,
-        288,
-        297
+        307,
+        316
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
@@ -36463,7 +36463,7 @@
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "1a0840ebe22c6f24fa4344ab08e391bd695e97cb3c5ecbf2724d2673b131c3c6",
+      "sha256": "4f27d9b4d3eb00f547d9e58032f1541db0d2f057aa15e241635f9fdcfbb0581e",
       "tokenCounts": {
         "whoop": 4,
         "whoopstore": 3

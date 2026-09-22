@@ -249,6 +249,10 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "app-report-review")
 
         app.buttons["Send feedback"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["noop.app-report.delivery"]
+                .waitForExistence(timeout: 20)
+        )
         XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Cancel feedback"].exists)
         XCTAssertTrue(
@@ -261,7 +265,11 @@ final class NOOPiOSUITests: XCTestCase {
         )
         XCTAssertTrue(app.buttons["Close app report"].isEnabled)
         app.buttons["Close app report"].tap()
-        XCTAssertFalse(app.navigationBars["App report"].exists)
+        XCTAssertTrue(
+            waitUntil(timeout: 5) {
+                !app.navigationBars["App report"].exists
+            }
+        )
     }
 
     func testAppReportScreenSnapshotIsReviewableAndRemovable() {

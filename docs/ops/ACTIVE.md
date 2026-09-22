@@ -50,16 +50,21 @@ Last updated: **2026-09-22**
   child process leaked, and the unchanged complete wall passed. The SDK itself
   passed Swift 39/39, Kotlin 44/44 with `installDist`, 35/35 cross-platform
   scenarios, and its 47-file repository guard before PR `#12` merged normally.
-  PR `#17` remote head `bdd8fe34` passed the complete Android wall and macOS
-  build before a final P1 review identified candidate-controlled Python module
-  shadowing. The local correction makes the protected-base workflow verify the
-  isolated candidate SDK artifact directly and rejects non-owner standard
-  library/startup-module shadows at every repository Python execution root.
-  Seventy focused release/trust tests and the complete 315-test Tools wall pass
-  with one intentional skip. The consolidated local candidate is ready for one
-  final inventory refresh, commit/push, exact-SHA hosted checks,
-  reviewed-thread resolution, protected merge/main verification, and exact
-  cleanup. Both
+  PR `#17` remote head `fe800e8e` passed every Android, macOS, server, package,
+  policy, localization, claims, license, operations, and trust job. Its iOS
+  production shell executed 39 tests and failed only the app-report queue
+  transition because the shorter queued page retained the long review page's
+  scroll offset. The local correction resets the sheet to its top anchor on
+  each phase transition; the exact previously failing case passes 1/1 in
+  16.098 seconds on a fresh iPhone 17e simulator. After reviewing and repinning
+  the generated terminology digest, 75 focused artifact, required-CI,
+  terminology, and trust tests pass; the trusted self-check verifies protected
+  main, required-CI verifies all ten contexts, and the exact ten-file SDK
+  artifact verifies with supplier payloads absent. The exact-current complete
+  Tools wall passes 315 tests with one intentional skip under the bounded
+  runner. The consolidated local candidate requires one replacement push,
+  exact-SHA hosted checks, reviewed-thread resolution, protected merge/main
+  verification, and exact cleanup. Both
   repositories currently report `PUBLIC`; the D-056 private-SDK release target
   must be restored before release. No supplier binary, firmware, real adapter,
   or flasher is included.

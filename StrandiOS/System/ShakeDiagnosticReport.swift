@@ -576,24 +576,36 @@ struct ShakeDiagnosticReportSheet: View {
         NavigationStack {
             ZStack {
                 StrandPalette.surfaceBase.ignoresSafeArea()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
-                        switch controller.phase {
-                        case .explanation:
-                            explanation
-                        case .building:
-                            building
-                        case .review:
-                            review
-                        case .queued, .uploading, .retryScheduled, .sent,
-                                .cancelling, .cancelled:
-                            delivery
-                        case .failed:
-                            failure
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
+                            switch controller.phase {
+                            case .explanation:
+                                explanation
+                            case .building:
+                                building
+                            case .review:
+                                review
+                            case .queued, .uploading, .retryScheduled, .sent,
+                                    .cancelling, .cancelled:
+                                delivery
+                            case .failed:
+                                failure
+                            }
+                        }
+                        .id("noop.app-report.content")
+                        .screenPadding()
+                        .padding(.vertical, NoopMetrics.space5)
+                    }
+                    .onChange(of: controller.phase) { _ in
+                        Task { @MainActor in
+                            await Task.yield()
+                            proxy.scrollTo(
+                                "noop.app-report.content",
+                                anchor: .top
+                            )
                         }
                     }
-                    .screenPadding()
-                    .padding(.vertical, NoopMetrics.space5)
                 }
             }
             .navigationTitle(appReportText("app_report_title"))

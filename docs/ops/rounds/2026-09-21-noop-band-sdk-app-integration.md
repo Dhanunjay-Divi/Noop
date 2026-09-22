@@ -237,6 +237,25 @@ Success means:
   15/15 across all 35 automated scenarios; Android Full integration passes
   6/6; Demo and Full instrumentation sources compile; and the real macOS app
   target passes 6/6 with WHOOP still the default transport.
+- Reviewed exact hosted PR `#17` head `fe800e8e` after its final Apple job
+  completed. Every Android, macOS, server, package, policy, localization,
+  claims, license, operations, and trust job passed. The iOS production shell
+  executed 39 tests and failed only
+  `testAppReportRequiresConsentAndBuildsPrivateAttachmentReview`: after the
+  long review page scrolled to its send button, the shorter queued page kept
+  that stale scroll offset, leaving its queued title and cancel control
+  off-screen. The sheet now scrolls to a stable top anchor on every phase
+  transition, and the UI test waits for the existing delivery identifier plus
+  asynchronous dismissal. The exact previously failing test passes 1/1 on a
+  fresh iPhone 17e simulator in 16.098 seconds.
+- Reviewed and repinned the final generated terminology inventory after this
+  evidence update. The semantic totals and categories remain unchanged with
+  zero forbidden mappings. The focused artifact, required-CI, terminology, and
+  trusted-release suite passes 75/75; trusted self-verification and all ten
+  required contexts pass, and the exact ten-file SDK artifact verifies at
+  protected revision `bdeddf8` with supplier payloads absent. The
+  exact-current complete Tools wall passes 315 tests with one intentional skip
+  under the bounded runner.
 
 ## Data, privacy, and medical truth
 
@@ -304,6 +323,8 @@ Success means:
 | Managed-device retry diagnostic correction | `test_android_managed_device_retry` passes 17/17, Actionlint passes, required-CI verifies all ten contexts, and trusted self-check passes | Resource-pressure stops remain fail-closed, while retry announcements occur only after classifier approval | Whether the next hosted runner has sufficient memory to execute the emulator wall |
 | Exact-head hosted resource classification | PR `#17` head `fbbb3b50` passed every hosted context except Review Sample. Run `35681052415` attempt 1 job `106598021250` and attempt 2 job `106602308597` each completed APK preparation, entered the emulator task, then stopped with bounded `resource-memory`; retained evidence has no test-result records. | The two failures are reproducible hosted-runner resource stops, not hidden assertions or product failures | A passing Review Sample execution on the replacement profile |
 | Review Sample resource-profile correction | Both Review Sample commands now use `-Xmx1536m` and `--max-workers=1`, matching the hosted-green production shell. Focused workflow/retry tests pass 66/66, Actionlint passes, and the complete bounded Tools wall passes 312/312 with one intentional skip. | Required workflow structure, fail-closed classification, memory envelope, and repository controls agree locally | Hosted exact-SHA execution of the corrected Review Sample job |
+| Hosted iOS app-report transition correction | Exact head `fe800e8e` passed every hosted context except the iOS production shell, whose only failing case retained the review page's scroll offset after entering the queued phase. The corrected exact case passes 1/1 in 16.098 seconds on a fresh iPhone 17e simulator. | The queued status, cancellation control, and sheet dismissal are visibly reachable after a long review-page scroll; the correction compiles in the real iOS UI-test graph | Replacement exact-SHA hosted execution, physical shake behavior, or production feedback delivery |
+| Final app-report trust wall | The reviewed terminology snapshot is repinned with unchanged semantic totals and zero forbidden mappings. Focused artifact, required-CI, terminology, and trust tests pass 75/75; the exact-current complete Tools wall passes 315 tests with one intentional skip; trusted self-check, ten required contexts, operations validation, diff hygiene, and exact SDK artifact verification pass. | The narrow UI correction and its evidence did not weaken the protected release or SDK artifact contracts | Hosted exact-SHA enforcement or protected integration |
 
 ## Physical device and deployment
 
@@ -338,11 +359,12 @@ Success means:
   alignment `4388058c09130d371c05d86a725c3bddb1354524`. This record update is the
   remaining local evidence commit.
 - Branch and remote state: PR `#17` is open from the dedicated branch. Remote
-  head `bdd8fe34` passed the Android wall and macOS build while its iOS
-  production-shell job was still running when the final P1 review arrived.
-  The protected-base artifact verifier, Python runtime-shadow defense, reviewed
-  source digest, and adversarial regressions are locally green and require one
-  consolidated replacement push plus all exact-SHA protected checks.
+  head `fe800e8e` passed every hosted context except the iOS production shell;
+  that job's sole failing test is corrected locally and passes on a fresh
+  simulator. The protected-base artifact verifier, Python runtime-shadow
+  defense, reviewed source digest, adversarial regressions, and targeted iOS
+  correction are locally green and require one replacement push plus all
+  exact-SHA protected checks.
 - Repository visibility verified on 2026-09-22:
   `Dhanunjay-Divi/Noop` and `Dhanunjay-Divi/NoopBandSDK` both report `PUBLIC`
   with default branch `main`. D-056 still requires the SDK repository to be
