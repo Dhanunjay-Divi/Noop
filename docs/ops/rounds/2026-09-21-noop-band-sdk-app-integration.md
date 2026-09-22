@@ -6,10 +6,10 @@
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
-- End implementation commits:
-  `8fb07e3179ebb314b570da56784586552eb1e465` and
-  `4388058c09130d371c05d86a725c3bddb1354524`
-- Record commit or PR: PR `#17`; final exact-SHA evidence remains pending
+- Final SDK PR `#16` repin implementation commit:
+  `e6a932f5accd8c2fc01b1778b52c3d7c0d1b932f`
+- Record commit or PR: PR `#17`; final evidence commit and exact-SHA hosted
+  verification remain pending
 
 ## Objective
 
@@ -429,9 +429,9 @@ Success means:
   `3a7ba9e56ade2d5f5d7561d877e19c6cde272c65`; protected SDK `bdeddf8`
   repin and release-control update
   `8fb07e3179ebb314b570da56784586552eb1e465`; Android boundary provenance
-  alignment `4388058c09130d371c05d86a725c3bddb1354524`. The protected SDK PR `#16`
-  repin, verifier hardening, callback correction, and this evidence update are
-  the remaining local candidate.
+  alignment `4388058c09130d371c05d86a725c3bddb1354524`; final protected SDK PR `#16`
+  repin, verifier hardening, callback correction, and reviewed evidence
+  `e6a932f5accd8c2fc01b1778b52c3d7c0d1b932f`.
 - Branch and remote state: PR `#17` is open from the dedicated branch. Remote
   head `44e48a7d377918ff93772983ded53bd252120016` predates SDK PR `#16`.
   Its superseded Apple workflow was deliberately canceled after the new SDK
@@ -469,8 +469,8 @@ Success means:
 ## Next round
 
 1. Regenerate and review the terminology snapshot after this final evidence
-   edit, rerun its focused trust gates, commit the protected SDK PR `#16` repin
-   and evidence update, then push one final exact head.
+   edit, rerun its focused trust gates, commit the final evidence update, then
+   push one final exact head.
 2. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching
    evidence.
