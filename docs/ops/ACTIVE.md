@@ -13,11 +13,11 @@ Last updated: **2026-09-22**
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
 - Current state: the binary-free SDK is merged on protected `main` at
-  `c254cb329963eb262d18c43ae6b25a8340fe77f6`, and two independent clean
+  `bdeddf876af4a83c1f9607ea3b6345b969152ab4`, and two independent clean
   exports from that exact revision were byte-identical with manifest SHA-256
-  `2224b7543e0d74acd39214c8b84fd490e95917e95f564d96e9e621b7c9e422d0`
+  `31f4a8fef6ad500d445bf8804a22a57b61b6b0409fc589c39db5c472fece2553`
   and whole-tree digest
-  `f57d62bf1313810382ec9b7ca8589765bea2244177b7f855f57f502a1fa7864a`.
+  `a98be76838877520ee8f5e9b5ef97b85ded592025129fa7c2df6525be51dd041`.
   The exact ten-file artifact is integrated locally into Apple and Android
   behind a production-default-off source factory; WHOOP remains the default
   comparison transport. The final SDK additionally binds operation tokens and
@@ -30,9 +30,13 @@ Last updated: **2026-09-22**
   caller-owned Kotlin live/history collections, and terminal authenticated
   session invalidation after operation security failures. Invalid history
   operation tokens now also emit one fixed typed rejection event on both
-  platforms without changing the active history operation. Current focused
+  platforms without changing the active history operation. The final
+  protected closeout serializes live and history durability windows, adds
+  generation-fenced capability cancel/fail terminals, prevents lifecycle
+  transitions from discarding an unresolved durable receipt, and invalidates
+  authenticated state after an operation authentication failure. Current focused
   evidence is green: the exact artifact and six adversarial verifier tests
-  pass; the vendored Swift package passes 15/15 while checking all 34 automated
+  pass; the vendored Swift package passes 15/15 while checking all 35 automated
   scenarios; Android Full integration passes 6/6; Android Demo and Full
   instrumentation sources compile independently; the API 35 WorkManager
   attempt-fence class passes 8/8; and the real macOS app target passes 6/6,
@@ -44,8 +48,8 @@ Last updated: **2026-09-22**
   transient in the bounded runner's own test (`126` instead of the expected
   timeout `124`); the isolated case then passed once plus five repeats, no
   child process leaked, and the unchanged complete wall passed. The SDK itself
-  passed Swift 33/33, Kotlin 36/36 with `installDist`, 33/33 cross-platform
-  scenarios, and its 44-file repository guard before PR `#9` merged normally.
+  passed Swift 39/39, Kotlin 44/44 with `installDist`, 35/35 cross-platform
+  scenarios, and its 47-file repository guard before PR `#12` merged normally.
   PR `#17` remote head `bdd8fe34` passed the complete Android wall and macOS
   build before a final P1 review identified candidate-controlled Python module
   shadowing. The local correction makes the protected-base workflow verify the

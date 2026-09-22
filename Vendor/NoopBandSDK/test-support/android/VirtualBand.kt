@@ -219,6 +219,7 @@ object BandConformanceRunner {
         "operation_terminal_paths",
         "connection_callbacks_generation_fenced",
         "connection_terminal_paths",
+        "capability_terminal_paths",
         "history_pending_busy_diagnostics",
         "diagnostics_bounded",
         "fractional_steps_rejected",
@@ -265,6 +266,7 @@ object BandConformanceRunner {
         "connection_callbacks_generation_fenced" ->
             connectionCallbacksGenerationFenced()
         "connection_terminal_paths" -> connectionTerminalPaths()
+        "capability_terminal_paths" -> capabilityTerminalPaths()
         "history_pending_busy_diagnostics" ->
             historyPendingBusyDiagnostics()
         "fractional_steps_rejected" -> fractionalStepsRejected()
@@ -721,8 +723,13 @@ object BandConformanceRunner {
             failure = error.category
             events += "ack_rejected"
         }
+        val retryAcceptance = session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token,
+            generation,
+        )
         val receipt = store.commit(
-            acceptance,
+            retryAcceptance,
             VirtualBandFixtures.historyChunk.batches.flatMap(
                 BandSampleBatch::samples,
             ),
@@ -735,7 +742,7 @@ object BandConformanceRunner {
             "history_requires_durable_receipt",
             events,
             session.snapshot(),
-            acceptedSamples = acceptance.acceptedSamples,
+            acceptedSamples = retryAcceptance.acceptedSamples,
             failure = failure,
         )
     }
@@ -937,12 +944,37 @@ object BandConformanceRunner {
         val store = VirtualBandStore()
         val events = mutableListOf("ready")
         val firstToken = session.beginOperation(BandOperationClass.HISTORY)
-        session.stageHistoryChunk(
+        val firstAcceptance = session.stageHistoryChunk(
             VirtualBandFixtures.historyChunk,
             firstToken,
             generation,
         )
         events += "history_received"
+        try {
+            session.interruptForReconnect(generation)
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.BUSY) {
+                throw error
+            }
+            events += "persistence_drain_required"
+        }
+        try {
+            session.acknowledgeHistory(
+                DurableHistoryReceipt(
+                    acceptance = firstAcceptance,
+                    historyStateCommitted = false,
+                    committedSamples = 0,
+                    committed = false,
+                ),
+                firstToken,
+                generation,
+            )
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STORAGE) {
+                throw error
+            }
+            events += "persistence_failed"
+        }
         val resumedGeneration =
             session.interruptForReconnect(generation)
         val failure = BandFailureCategory.DISCONNECTED
@@ -1222,7 +1254,7 @@ object BandConformanceRunner {
             ),
         )
         val token = session.beginOperation(BandOperationClass.HISTORY)
-        val firstAcceptance =
+        var firstAcceptance =
             session.stageHistoryChunk(firstChunk, token, generation)
         events += "history_received"
         try {
@@ -1239,6 +1271,8 @@ object BandConformanceRunner {
         } catch (_: BandException) {
             events += "receipt_rejected"
         }
+        firstAcceptance =
+            session.stageHistoryChunk(firstChunk, token, generation)
         val firstReceipt = store.commit(
             firstAcceptance,
             firstChunk.batches.flatMap(BandSampleBatch::samples),
@@ -2060,7 +2094,7 @@ object BandConformanceRunner {
             generation,
         )
         val token = session.beginOperation(BandOperationClass.HISTORY)
-        session.stageHistoryChunk(
+        val acceptance = session.stageHistoryChunk(
             VirtualBandFixtures.historyChunk,
             token,
             generation,
@@ -2088,6 +2122,16 @@ object BandConformanceRunner {
         } else {
             events += "history_busy_missing"
         }
+        session.acknowledgeHistory(
+            DurableHistoryReceipt(
+                acceptance = acceptance,
+                historyStateCommitted = true,
+                committedSamples = acceptance.acceptedSamples,
+                committed = true,
+            ),
+            token,
+            generation,
+        )
         session.cancelOperation(token)
         events += "operation_cancelled"
         return result(
@@ -2095,6 +2139,167 @@ object BandConformanceRunner {
             events,
             session.snapshot(),
             failure = failure,
+        )
+    }
+
+    private fun capabilityTerminalPaths(): BandConformanceResult {
+        val diagnostics = BandDiagnosticsRecorder()
+        val session = BandSessionMachine(diagnostics)
+        val events = mutableListOf<String>()
+
+        val cancellationGeneration = session.beginScan()
+        session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            cancellationGeneration,
+        )
+        session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            cancellationGeneration,
+        )
+        session.cancelCapabilities(cancellationGeneration)
+        events += "capability_cancelled"
+        try {
+            session.cancelCapabilities(cancellationGeneration)
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                throw error
+            }
+            events += "stale_cancel_rejected"
+        }
+
+        val timeoutGeneration = session.beginScan()
+        session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            timeoutGeneration,
+        )
+        session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            timeoutGeneration,
+        )
+        session.failCapabilities(
+            BandFailureCategory.TIMEOUT,
+            timeoutGeneration,
+        )
+        events += "capability_timed_out"
+        try {
+            session.failCapabilities(
+                BandFailureCategory.INTERNAL_FAILURE,
+                timeoutGeneration,
+            )
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                throw error
+            }
+            events += "stale_failure_rejected"
+        }
+
+        val authenticationGeneration = session.beginScan()
+        session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            authenticationGeneration,
+        )
+        session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            authenticationGeneration,
+        )
+        session.failCapabilities(
+            BandFailureCategory.AUTHENTICATION,
+            authenticationGeneration,
+        )
+        events += "capability_authentication_rejected"
+
+        val disconnectedGeneration = session.beginScan()
+        session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            disconnectedGeneration,
+        )
+        session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            disconnectedGeneration,
+        )
+        session.failCapabilities(
+            BandFailureCategory.DISCONNECTED,
+            disconnectedGeneration,
+        )
+        events += "capability_disconnected"
+
+        val securitySession = BandSessionMachine(diagnostics)
+        val securityGeneration = securitySession.beginScan()
+        securitySession.selectCandidate(
+            VirtualBandFixtures.candidate,
+            securityGeneration,
+        )
+        securitySession.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            securityGeneration,
+        )
+        securitySession.failCapabilities(
+            BandFailureCategory.SECURITY_FAILURE,
+            securityGeneration,
+        )
+        events += "capability_security_failure"
+        try {
+            securitySession.beginScan()
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.INVALID_STATE) {
+                throw error
+            }
+            events += "security_failure_restart_rejected"
+        }
+
+        val replacement = BandSessionMachine(diagnostics)
+        val replacementGeneration = replacement.beginScan()
+        replacement.selectCandidate(
+            VirtualBandFixtures.candidate,
+            replacementGeneration,
+        )
+        replacement.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            replacementGeneration,
+        )
+        replacement.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            replacementGeneration,
+        )
+        events += "replacement_session_ready"
+
+        val recorded = diagnostics.snapshot()
+        if (
+            recorded.any {
+                it.kind == BandDiagnosticKind.CAPABILITY &&
+                    it.outcome == BandDiagnosticOutcome.CANCELLED
+            } &&
+            recorded.any {
+                it.kind == BandDiagnosticKind.CAPABILITY &&
+                    it.outcome == BandDiagnosticOutcome.TIMED_OUT &&
+                    it.failureCategory == BandFailureCategory.TIMEOUT
+            } &&
+            recorded.any {
+                it.kind == BandDiagnosticKind.CAPABILITY &&
+                    it.outcome == BandDiagnosticOutcome.REJECTED &&
+                    it.failureCategory == BandFailureCategory.AUTHENTICATION
+            } &&
+            recorded.any {
+                it.kind == BandDiagnosticKind.CAPABILITY &&
+                    it.outcome == BandDiagnosticOutcome.FAILED &&
+                    it.failureCategory == BandFailureCategory.DISCONNECTED
+            } &&
+            recorded.count {
+                it.kind == BandDiagnosticKind.CAPABILITY &&
+                    it.outcome == BandDiagnosticOutcome.STALE &&
+                    it.failureCategory == BandFailureCategory.STALE_CALLBACK
+            } == 2
+        ) {
+            events += "capability_diagnostics_bounded"
+        } else {
+            events += "capability_diagnostics_incorrect"
+        }
+
+        return result(
+            "capability_terminal_paths",
+            events,
+            replacement.snapshot(),
+            failure = BandFailureCategory.SECURITY_FAILURE,
         )
     }
 

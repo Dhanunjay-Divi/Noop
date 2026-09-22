@@ -228,6 +228,8 @@
         "events": [
           "ready",
           "history_received",
+          "persistence_drain_required",
+          "persistence_failed",
           "history_interrupted",
           "reconnected",
           "history_resumed",
@@ -507,6 +509,28 @@
       }
     },
     {
+      "id": "capability_terminal_paths",
+      "automated": true,
+      "expected": {
+        "events": [
+          "capability_cancelled",
+          "stale_cancel_rejected",
+          "capability_timed_out",
+          "stale_failure_rejected",
+          "capability_authentication_rejected",
+          "capability_disconnected",
+          "capability_security_failure",
+          "security_failure_restart_rejected",
+          "replacement_session_ready",
+          "capability_diagnostics_bounded"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "securityFailure"
+      }
+    },
+    {
       "id": "history_pending_busy_diagnostics",
       "automated": true,
       "expected": {
@@ -517,7 +541,7 @@
           "operation_cancelled"
         ],
         "finalState": "ready",
-        "acknowledgedCursor": null,
+        "acknowledgedCursor": "cursor-2",
         "acceptedSamples": 0,
         "failure": "busy"
       }

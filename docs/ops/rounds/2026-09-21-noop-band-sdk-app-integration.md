@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `ready for replacement exact-candidate verification`
+- State: `final SDK repin locally verified; exact-SHA hosted verification pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
@@ -71,12 +71,12 @@ Success means:
     `78c17cbd495353f33b5ef169bd1200ee9a0c35df`;
   - private SDK caller-ownership and security-terminal hardening merge on
     `main` `277c628d5a1fd9e747871e777d908e41460802fa`;
-  - protected SDK history-token observability merge through PR `#9` on `main`
-    `c254cb329963eb262d18c43ae6b25a8340fe77f6`;
+  - protected SDK durability and terminal closeout through PR `#12` on `main`
+    `bdeddf876af4a83c1f9607ea3b6345b969152ab4`;
   - ten-file export manifest with
     `supplierArtifactsIncluded: false`;
-  - standalone Swift 32-test, Kotlin 35-test, 33-scenario cross-platform
-    conformance, and 43-file repository-gate evidence;
+  - standalone Swift 39-test, Kotlin 44-test, 35-scenario cross-platform
+    conformance, and 47-file repository-gate evidence;
   - existing Apple and Android single-active-source coordinators.
 - Unknowns that must remain unknown until measured: exact supplier APIs and
   callbacks, protocol/device identity, disconnected flash depth and overwrite
@@ -221,6 +221,20 @@ Success means:
   all 34 automated scenarios, Android Full integration passes 6/6 with Demo
   and instrumentation sources compiled, and the final API 35 feedback class
   passes 8/8.
+- Repinned the closeout candidate to protected SDK PR `#12`, merged at
+  `bdeddf876af4a83c1f9607ea3b6345b969152ab4`. Two independent clean exports
+  were byte-identical with manifest SHA-256
+  `31f4a8fef6ad500d445bf8804a22a57b61b6b0409fc589c39db5c472fece2553`
+  and whole-tree digest
+  `a98be76838877520ee8f5e9b5ef97b85ded592025129fa7c2df6525be51dd041`.
+  The closeout serializes live/history durable receipts, adds
+  generation-fenced capability cancellation and failure, blocks destructive
+  lifecycle transitions while persistence is unresolved, and invalidates
+  authenticated state after operation authentication failure. The exact
+  artifact verifier passes 21 focused tests; the vendored Swift package passes
+  15/15 across all 35 automated scenarios; Android Full integration passes
+  6/6; Demo and Full instrumentation sources compile; and the real macOS app
+  target passes 6/6 with WHOOP still the default transport.
 
 ## Data, privacy, and medical truth
 
@@ -268,13 +282,13 @@ Success means:
 | Private SDK final remediation | PR `#8` merged normally at `277c628d`; Swift 32/32, Kotlin 35/35, 33 shared scenarios, and the 43-file repository gate passed | Security failure is terminal to the issuing session object and recovery requires a replacement session | Supplier API compatibility or physical behavior |
 | Independent clean exports | Two clean-worktree exports were byte-identical; manifest SHA-256 `eb8ef2cf5b819f937732c7415c3618a42c5024d4325746e1ac7ac5ed3fd0ac7c` | The vendored artifact is deterministic and traceable to `277c628d` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Protected SDK history observability | PR `#9` merged normally at `55fdd891`; Swift 33/33, Kotlin 36/36 plus distribution, 33 shared scenarios, and the 44-file repository gate passed | Invalid history tokens fail closed with bounded typed diagnostics on both SDK implementations | Supplier API compatibility or physical behavior |
-| Final independent clean exports | Two clean-worktree exports were byte-identical; manifest SHA-256 `2224b7543e0d74acd39214c8b84fd490e95917e95f564d96e9e621b7c9e422d0`, whole-tree digest `f57d62bf1313810382ec9b7ca8589765bea2244177b7f855f57f502a1fa7864a` | The final vendored artifact is deterministic and traceable to protected SDK `c254cb3` | Legal rights or supplier provenance beyond the absent-artifact declaration |
-| Final protected SDK app repin | Exact artifact plus 6/6 verifier tests, vendored Swift 15/15, Android Full SDK integration, Demo compile, Full instrumentation-source compile, focused trust 72/72, and complete Tools 312/312 with one intentional skip | The final source-only SDK correction is consumed consistently and repository release controls remain intact | Supplier transport invocation or any physical-device behavior |
+| Final independent clean exports | Two clean-worktree exports were byte-identical; manifest SHA-256 `31f4a8fef6ad500d445bf8804a22a57b61b6b0409fc589c39db5c472fece2553`, whole-tree digest `a98be76838877520ee8f5e9b5ef97b85ded592025129fa7c2df6525be51dd041` | The final vendored artifact is deterministic and traceable to protected SDK `bdeddf8` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Final protected SDK app repin | Exact artifact plus 21 focused verifier/trust tests, vendored Swift 15/15, Android Full SDK integration 6/6, Demo compile, Full instrumentation-source compile, and macOS app boundary 6/6 | The final source-only SDK correction is consumed consistently on Apple and Android while WHOOP remains the default comparison transport | Supplier transport invocation or any physical-device behavior |
 | Artifact verifier plus unit tests | Exact ten-file export passed; 6/6 verifier tests passed, including rejection of a symlink artifact root; no supplier artifacts found | Source, manifest, package wrapper, exact layout, root/tree symlink policy, and no-binary policy are pinned | Physical compatibility |
 | Protected-base artifact authority | 70 focused release/trust tests pass; a copied artifact with a one-line source mutation is rejected by the protected verifier; non-owner `unittest` and standard-library shadow paths are rejected; the complete Tools wall passes 315 tests with one intentional skip | Future non-owner candidates cannot satisfy the SDK artifact gate by shadowing Python's test runner or by relying only on candidate-controlled tests | Owner authorization, hosted exact-SHA execution, supplier rights, or physical compatibility |
-| Exact Swift package workflow order | The vendored package completed 15/15 tests and checked all 34 automated exported scenarios using an external scratch path; the exact artifact verifier then passed | SwiftPM agrees with the shared contract without leaving generated files inside the verified source tree | App lifecycle, BLE, background, or hardware behavior |
-| Android Full app boundary | `NoopBandSdkIntegrationTest` passed 6/6 under `testFullDebugUnitTest`, including all 34 automated shared scenarios and all four invalid-history-token combinations | Full-variant app source, immutable capability authorization, connection/authentication generation fences, durable checkpoint restoration, explicit terminals, and bounded diagnostics compile and pass | Instrumentation, OEM background, BLE, or physical behavior |
-| Android Demo compile | `compileDemoDebugKotlin` passed independently against the `c254cb3` export | The Demo variant consumes the same final source successfully | Demo runtime rendering or device behavior |
+| Exact Swift package workflow order | The vendored package completed 15/15 tests and checked all 35 automated exported scenarios; the exact artifact verifier then passed after generated package output was removed | SwiftPM agrees with the shared contract without leaving generated files inside the verified source tree | App lifecycle, BLE, background, or hardware behavior |
+| Android Full app boundary | `NoopBandSdkIntegrationTest` passed 6/6 under `testFullDebugUnitTest`, including all 35 automated shared scenarios and all four invalid-history-token combinations | Full-variant app source, immutable capability authorization, connection/authentication generation fences, durable checkpoint restoration, explicit terminals, and bounded diagnostics compile and pass | Instrumentation, OEM background, BLE, or physical behavior |
+| Android Demo compile | `compileDemoDebugKotlin` passed independently against the `bdeddf8` export | The Demo variant consumes the same final source successfully | Demo runtime rendering or device behavior |
 | Android memory classification | One combined Full+Demo invocation let the two Compose compilers overlap and exhausted a 3 GiB Kotlin heap; separate no-daemon, no-parallel, two-worker commands passed | The failure was an avoidable verification command shape, not a source failure; variant walls must stay sequential | Every future machine configuration |
 | Hosted production-shell diagnosis | PR `#17` run `35643099439` started 120 API 35 tests; 116 passed, two App Report cases timed out before their explanation sheets appeared, and the retained result protobuf contained real test cases | The red required context was a real cross-test state leak, not a zero-test infrastructure event or SDK behavior failure | The local correction until rerun on the protected exact SHA |
 | Feedback cleanup instrumentation regression | Full instrumentation source compiled, then six continuity cases followed by all eight AppShell cases passed 14/14 on `pixel2Api35` in 1m42s | Terminal WorkInfo alone cannot release teardown; actual worker/probe unwind and a stable no-new-generation snapshot are required before deleting the exact record, and the report sheets still open afterward | The complete hosted production-shell wall or physical Android behavior |
@@ -354,8 +368,8 @@ Success means:
 ## Next round
 
 1. Refresh and review the terminology snapshot after this final evidence edit,
-   run the final repository gates, commit the protected-base artifact authority
-   correction and evidence update, then push one final exact head.
+   run the final repository gates, commit the final protected SDK repin and
+   evidence update, then push one final exact head.
 2. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching
    evidence.

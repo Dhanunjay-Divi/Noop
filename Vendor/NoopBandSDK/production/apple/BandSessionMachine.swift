@@ -71,6 +71,16 @@ public actor BandSessionMachine {
     @discardableResult
     public func beginScan() async throws -> UInt64 {
         try ensureNotClosed()
+        guard !hasPendingPersistence else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .discovery,
+                    outcome: .rejected,
+                    failureCategory: .busy
+                )
+            )
+            throw BandFailureCategory.busy
+        }
         guard state == .idle
             || state == .recovering
             || state == .rejected
@@ -478,6 +488,97 @@ public actor BandSessionMachine {
         )
     }
 
+    public func cancelCapabilities(
+        callbackGeneration: UInt64
+    ) async throws {
+        try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .capability
+        )
+        guard state == .negotiatingCapabilities else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .capability,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        invalidateAuthenticatedSession(nextState: .idle)
+        await diagnostics.record(
+            BandDiagnosticEvent(kind: .capability, outcome: .cancelled)
+        )
+    }
+
+    public func failCapabilities(
+        _ category: BandFailureCategory,
+        callbackGeneration: UInt64
+    ) async throws {
+        try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .capability
+        )
+        guard state == .negotiatingCapabilities else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .capability,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        let allowed: Set<BandFailureCategory> = [
+            .unavailable,
+            .timeout,
+            .authentication,
+            .securityFailure,
+            .disconnected,
+            .internalFailure,
+        ]
+        guard allowed.contains(category) else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .capability,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
+
+        let terminalState: BandSessionState
+        switch category {
+        case .authentication:
+            terminalState = .rejected
+        case .securityFailure:
+            terminalState = .securityFailure
+        default:
+            terminalState = .recovering
+        }
+        invalidateAuthenticatedSession(nextState: terminalState)
+
+        let outcome: BandDiagnosticOutcome
+        switch category {
+        case .timeout:
+            outcome = .timedOut
+        case .authentication, .securityFailure:
+            outcome = .rejected
+        default:
+            outcome = .failed
+        }
+        await diagnostics.record(
+            BandDiagnosticEvent(
+                kind: .capability,
+                outcome: outcome,
+                failureCategory: category
+            )
+        )
+    }
+
     public func beginLive(
         streams requestedStreams: Set<BandStreamKind>? = nil
     ) async throws {
@@ -600,7 +701,7 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.invalidInput
         }
-        guard pendingLive == nil else {
+        guard pendingLive == nil, pendingHistory == nil else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .live,
@@ -858,7 +959,7 @@ public actor BandSessionMachine {
             )
             throw failure
         }
-        guard pendingHistory == nil else {
+        guard pendingHistory == nil, pendingLive == nil else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .history,
@@ -996,16 +1097,27 @@ public actor BandSessionMachine {
         guard let pendingHistory,
               receipt.receiptSequence
                 == pendingHistory.acceptance.receiptSequence,
-              receipt.committed,
               receipt.chunkIdentity == pendingHistory.acceptance.chunkIdentity,
               receipt.acknowledgementToken
                 == pendingHistory.acceptance.acknowledgementToken,
               receipt.nextCursor == pendingHistory.acceptance.nextCursor,
               receipt.complete == pendingHistory.acceptance.complete,
-              receipt.overflowed == pendingHistory.acceptance.overflowed,
+              receipt.overflowed == pendingHistory.acceptance.overflowed
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .failed,
+                    failureCategory: .storage
+                )
+            )
+            throw BandFailureCategory.storage
+        }
+        guard receipt.committed,
               receipt.historyStateCommitted,
               receipt.committedSamples >= pendingHistory.acceptance.acceptedSamples
         else {
+            self.pendingHistory = nil
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .history,
@@ -1106,6 +1218,16 @@ public actor BandSessionMachine {
             )
             throw failure
         }
+        if token.operationClass == .history, pendingHistory != nil {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: operationDiagnosticKind,
+                    outcome: .rejected,
+                    failureCategory: .busy
+                )
+            )
+            throw BandFailureCategory.busy
+        }
         if token.operationClass == .firmware {
             invalidateNegotiationAfterFirmware()
         } else {
@@ -1136,8 +1258,26 @@ public actor BandSessionMachine {
             )
             throw failure
         }
+        let invalidatesSession =
+            category == .securityFailure
+            || category == .authentication
+            || category == .disconnected
+        if (token.operationClass == .history && pendingHistory != nil)
+            || (invalidatesSession && hasPendingPersistence)
+        {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: operationDiagnosticKind,
+                    outcome: .rejected,
+                    failureCategory: .busy
+                )
+            )
+            throw BandFailureCategory.busy
+        }
         if category == .securityFailure {
             invalidateAuthenticatedSession(nextState: .securityFailure)
+        } else if category == .authentication {
+            invalidateAuthenticatedSession(nextState: .rejected)
         } else if token.operationClass == .firmware {
             invalidateNegotiationAfterFirmware()
         } else if category == .disconnected {
@@ -1181,6 +1321,16 @@ public actor BandSessionMachine {
               state != .securityFailure
         else {
             throw BandFailureCategory.invalidState
+        }
+        guard !hasPendingPersistence else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .rejected,
+                    failureCategory: .busy
+                )
+            )
+            throw BandFailureCategory.busy
         }
         let interruptedOperationKind = activeOperation.map {
             diagnosticKind(for: $0.operationClass)
@@ -1230,7 +1380,17 @@ public actor BandSessionMachine {
         )
     }
 
-    public func close() async {
+    public func close() async throws {
+        guard !hasPendingPersistence else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .connection,
+                    outcome: .rejected,
+                    failureCategory: .busy
+                )
+            )
+            throw BandFailureCategory.busy
+        }
         generation &+= 1
         clearOperationTracking()
         clearLiveTracking()
@@ -1352,6 +1512,10 @@ public actor BandSessionMachine {
 
     private func clearConnectionAttempt(nextState: BandSessionState) {
         invalidateAuthenticatedSession(nextState: nextState)
+    }
+
+    private var hasPendingPersistence: Bool {
+        pendingLive != nil || pendingHistory != nil
     }
 
     private func invalidateAuthenticatedSession(
