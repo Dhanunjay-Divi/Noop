@@ -288,11 +288,16 @@ revalidation after diagnostics suspension.
 PR `#16` validates retained sample bounds and circular-loss chronology,
 rejects history streams with zero retained history, and distinguishes
 recoverable from terminal firmware failure.
+PR `#19` publishes each platform's ordered conformance list and fails closed on
+contract-order drift. PR `#20` preserves an already ready Kotlin session when a
+malformed delayed capability callback is rejected, while the same malformed
+input still fails capability negotiation when negotiation is active.
 Current protected `main` is
-`a486768efb873b57515926740d3efa19787de612`. The app consumes the deterministic
-export from that current protected revision through a digest-pinned,
-supplier-artifact-free boundary. The repository is temporarily public as of
-2026-09-22; D-056 still requires private visibility before release.
+`9bc2eedce34c61d49f68001a973fbbda793d04ed`. The app integration candidate
+consumes the deterministic export from that protected revision through a
+digest-pinned, supplier-artifact-free boundary. The repository is temporarily
+public as of 2026-09-22; D-056 still requires private visibility before
+release.
 
 ```text
 NoopBandSDK/

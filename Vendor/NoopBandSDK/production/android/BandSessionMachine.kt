@@ -453,8 +453,10 @@ class BandSessionMachine(
         val immutableReport = try {
             report.immutableSnapshot()
         } catch (_: BandException) {
-            state = BandSessionState.INCOMPATIBLE
-            capabilityReport = null
+            if (state == BandSessionState.NEGOTIATING_CAPABILITIES) {
+                state = BandSessionState.INCOMPATIBLE
+                capabilityReport = null
+            }
             diagnostics.record(
                 BandDiagnosticEvent(
                     BandDiagnosticKind.CAPABILITY,

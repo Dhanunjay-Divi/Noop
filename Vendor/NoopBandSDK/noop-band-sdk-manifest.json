@@ -11,9 +11,9 @@
       "sha256": "75037796d86c34880a428a00ce525ec623c13c18013c6bd529b1aa2f6ee00420"
     },
     {
-      "bytes": 67851,
+      "bytes": 67943,
       "path": "production/android/BandSessionMachine.kt",
-      "sha256": "b19c24b58bd1c5223368dbb85d1079c812017b2cf5c888b81b1396a964a920bb"
+      "sha256": "8520ed6f06181115690c2d808dbb6c4cc9e8c87eb321f8407be90e409f3c3a50"
     },
     {
       "bytes": 2688,
@@ -53,6 +53,6 @@
   ],
   "schemaVersion": 1,
   "sourceRepository": "Dhanunjay-Divi/NoopBandSDK",
-  "sourceRevision": "823930fa16d30ea7849a557823215c913a36fb8b",
+  "sourceRevision": "9bc2eedce34c61d49f68001a973fbbda793d04ed",
   "supplierArtifactsIncluded": false
 }

@@ -28,15 +28,37 @@ import com.noop.bandsdk.BandUnit
 import com.noop.bandsdk.DurableHistoryReceipt
 import com.noop.bandsdk.DurableLiveReceipt
 import java.io.File
+import java.util.ConcurrentModificationException
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class NoopBandSdkIntegrationTest {
+    private class TraversalFailureSet<T>(
+        private val value: T,
+    ) : AbstractSet<T>() {
+        override val size: Int = 1
+
+        override fun iterator(): Iterator<T> = object : Iterator<T> {
+            override fun hasNext(): Boolean = true
+            override fun next(): T = throw ConcurrentModificationException()
+        }
+    }
+
+    private class MutationDuringTraversalSet<T>(
+        private val initialValue: T,
+        private val addedValue: T,
+    ) : AbstractSet<T>() {
+        override val size: Int = 1
+
+        override fun iterator(): Iterator<T> =
+            listOf(initialValue, addedValue).iterator()
+    }
+
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "823930fa16d30ea7849a557823215c913a36fb8b",
+            "9bc2eedce34c61d49f68001a973fbbda793d04ed",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -655,6 +677,79 @@ class NoopBandSdkIntegrationTest {
         }
         assertEquals(BandFailureCategory.UPDATE_NOT_ELIGIBLE, failure)
         assertEquals(BandSessionState.READY, session.snapshot().state)
+    }
+
+    @Test
+    fun malformedLateCapabilityCallbackPreservesReadySession() {
+        val malformedCapabilities = listOf(
+            TraversalFailureSet(BandCapability.BATTERY),
+            MutationDuringTraversalSet(
+                BandCapability.BATTERY,
+                BandCapability.HAPTICS,
+            ),
+        )
+
+        malformedCapabilities.forEach { capabilities ->
+            val diagnostics = BandDiagnosticsRecorder()
+            val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
+            val generation = session.beginScan()
+            val connectionToken = session.selectCandidate(
+                BandPairingCandidate(
+                    handle = "synthetic-candidate",
+                    compatible = true,
+                    identifyEligible = true,
+                ),
+                generation,
+            )
+            val identity = BandIdentity(
+                sourceIdentity = "synthetic-source",
+                hardwareRevision = "synthetic-hw-1",
+                firmwareVersion = "synthetic-fw-1",
+                protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
+                wrapperRevision = "artifact-9bc2eed",
+            )
+            completeConnection(session, identity, connectionToken, generation)
+            val report = BandCapabilityReport(
+                schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
+                protocolVersion = identity.protocolVersion,
+                hardwareRevision = identity.hardwareRevision,
+                firmwareVersion = identity.firmwareVersion,
+                historyDays = 7,
+                capabilities = setOf(BandCapability.HEART_RATE),
+                liveStreams = setOf(BandStreamKind.HEART_RATE),
+                historyStreams = setOf(BandStreamKind.HEART_RATE),
+            )
+            session.acceptCapabilities(report, connectionToken, generation)
+            val before = session.snapshot()
+
+            val failure = try {
+                session.acceptCapabilities(
+                    report.copy(capabilities = capabilities),
+                    connectionToken,
+                    generation,
+                )
+                null
+            } catch (error: BandException) {
+                error.category
+            }
+
+            assertEquals(BandFailureCategory.INVALID_INPUT, failure)
+            assertEquals(before, session.snapshot())
+            assertEquals(
+                BandDiagnosticEvent(
+                    kind = BandDiagnosticKind.CAPABILITY,
+                    outcome = BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                ),
+                diagnostics.snapshot().last(),
+            )
+
+            session.beginLive()
+            assertEquals(
+                BandSessionState.LIVE_COLLECTING,
+                session.snapshot().state,
+            )
+        }
     }
 
     @Test

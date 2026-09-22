@@ -35281,10 +35281,10 @@
         181,
         181,
         181,
-        606,
-        613,
-        613,
-        614
+        611,
+        618,
+        618,
+        619
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -35467,8 +35467,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        247,
-        248
+        249,
+        250
       ],
       "occurrenceCount": 2,
       "path": "docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md",
@@ -36422,12 +36422,12 @@
         54,
         144,
         242,
-        419,
-        430
+        469,
+        480
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
-      "sha256": "044675187c13f9cec2c6a433339f60f71f596a1094689ccc72f37838f7bca347",
+      "sha256": "74c777cab6e95d0001b14f6fbaf1610afa84d7d3f0f7e907733a02ec3885482f",
       "tokenCounts": {
         "whoop": 6,
         "whoop-default": 1
