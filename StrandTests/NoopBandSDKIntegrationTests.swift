@@ -46,7 +46,8 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     }
 
     private func readyHistorySession(
-        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
+        report: BandCapabilityReport? = nil
     ) async throws -> (BandSessionMachine, UInt64) {
         let session = NoopBandSDKBoundary.makeSession(diagnostics: diagnostics)
         let generation = try await session.beginScan()
@@ -63,7 +64,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-55fdd89"
+            wrapperRevision: "artifact-a8f94b5"
         )
         try await completeConnection(
             session,
@@ -72,13 +73,15 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             callbackGeneration: generation
         )
         try await session.acceptCapabilities(
-            BandCapabilityReport(
+            report ?? BandCapabilityReport(
                 schemaVersion: BandCapabilityReport.supportedSchemaVersion,
                 protocolVersion: identity.protocolVersion,
                 hardwareRevision: identity.hardwareRevision,
                 firmwareVersion: identity.firmwareVersion,
                 historyDays: 7,
-                capabilities: [.heartRate]
+                capabilities: [.heartRate],
+                liveStreams: [.heartRate],
+                historyStreams: [.heartRate]
             ),
             token: connectionToken,
             callbackGeneration: generation
@@ -89,7 +92,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "7794bae631c1704e18ae5c341fbc32e89c9dc647"
+            "a8f94b5cbda329eaf7793c5a2cece94fb568acc0"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let generation = try await session.beginScan()
@@ -124,7 +127,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-55fdd89"
+            wrapperRevision: "artifact-a8f94b5"
         )
         try await completeConnection(
             session,
@@ -139,7 +142,9 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 hardwareRevision: identity.hardwareRevision,
                 firmwareVersion: identity.firmwareVersion,
                 historyDays: 7,
-                capabilities: [.heartRate]
+                capabilities: [.heartRate],
+                liveStreams: [.heartRate],
+                historyStreams: [.heartRate]
             ),
             token: connectionToken,
             callbackGeneration: generation
@@ -188,7 +193,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-55fdd89"
+            wrapperRevision: "artifact-a8f94b5"
         )
         try await completeConnection(
             session,
@@ -203,7 +208,9 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 hardwareRevision: identity.hardwareRevision,
                 firmwareVersion: identity.firmwareVersion,
                 historyDays: 7,
-                capabilities: [.battery]
+                capabilities: [.battery],
+                liveStreams: [],
+                historyStreams: []
             ),
             token: connectionToken,
             callbackGeneration: generation
@@ -252,6 +259,8 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             nextCursor: "cursor-1",
             complete: true,
             overflowed: false,
+            retainedRange: nil,
+            firstLostRange: nil,
             acknowledgementToken: "ack-1",
             batches: [
                 BandSampleBatch(
@@ -394,6 +403,177 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         try await session.completeOperation(activeToken)
     }
 
+    func testPendingLiveReceiptDefersEstablishedAuthenticationFailure()
+        async throws
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let (session, generation) = try await readyHistorySession(
+            diagnostics: diagnostics
+        )
+        try await session.beginLive()
+        let acceptance = try await session.stageLiveBatch(
+            liveBatch(sequence: 30),
+            callbackGeneration: generation
+        )
+
+        do {
+            try await session.failEstablishedSession(
+                .authentication,
+                callbackGeneration: generation
+            )
+            XCTFail("Pending persistence must defer session invalidation")
+        } catch let failure as BandFailureCategory {
+            XCTAssertEqual(failure, .busy)
+        }
+        let pending = await session.snapshot()
+        XCTAssertEqual(pending.state, .liveCollecting)
+        XCTAssertEqual(pending.generation, generation)
+        XCTAssertTrue(pending.liveActive)
+        let pendingEvents = await diagnostics.snapshot()
+        XCTAssertEqual(
+            pendingEvents.last,
+            BandDiagnosticEvent(
+                kind: .authentication,
+                outcome: .rejected,
+                failureCategory: .busy
+            )
+        )
+
+        try await session.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: acceptance,
+                committedSamples: acceptance.acceptedSamples.count,
+                committed: true
+            ),
+            callbackGeneration: generation
+        )
+        try await session.failEstablishedSession(
+            .authentication,
+            callbackGeneration: generation
+        )
+        let rejected = await session.snapshot()
+        XCTAssertEqual(rejected.state, .rejected)
+    }
+
+    func testLiveAndHistoryStreamsAreAuthorizedIndependently() async throws {
+        let historyOnly = BandCapabilityReport(
+            schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            hardwareRevision: "synthetic-hw-1",
+            firmwareVersion: "synthetic-fw-1",
+            historyDays: 7,
+            capabilities: [.heartRate],
+            liveStreams: [],
+            historyStreams: [.heartRate]
+        )
+        let (historySession, historyGeneration) =
+            try await readyHistorySession(report: historyOnly)
+        do {
+            try await historySession.beginLive()
+            XCTFail("A history-only stream must not authorize live delivery")
+        } catch let failure as BandFailureCategory {
+            XCTAssertEqual(failure, .unsupported)
+        }
+        let historyToken = try await historySession.beginOperation(.history)
+        let historyAcceptance = try await historySession.stageHistoryChunk(
+            historyChunk(),
+            token: historyToken,
+            callbackGeneration: historyGeneration
+        )
+        try await historySession.acknowledgeHistory(
+            receipt: DurableHistoryReceipt(
+                acceptance: historyAcceptance,
+                historyStateCommitted: true,
+                committedSamples: historyAcceptance.acceptedSamples.count,
+                committed: true
+            ),
+            token: historyToken,
+            callbackGeneration: historyGeneration
+        )
+        try await historySession.completeOperation(historyToken)
+
+        let liveOnly = BandCapabilityReport(
+            schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            hardwareRevision: "synthetic-hw-1",
+            firmwareVersion: "synthetic-fw-1",
+            historyDays: 7,
+            capabilities: [.heartRate],
+            liveStreams: [.heartRate],
+            historyStreams: []
+        )
+        let (liveSession, liveGeneration) =
+            try await readyHistorySession(report: liveOnly)
+        try await liveSession.beginLive()
+        let liveAcceptance = try await liveSession.stageLiveBatch(
+            liveBatch(sequence: 31),
+            callbackGeneration: liveGeneration
+        )
+        try await liveSession.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: liveAcceptance,
+                committedSamples: liveAcceptance.acceptedSamples.count,
+                committed: true
+            ),
+            callbackGeneration: liveGeneration
+        )
+        try await liveSession.stopLive()
+        let unsupportedHistory =
+            try await liveSession.beginOperation(.history)
+        do {
+            _ = try await liveSession.stageHistoryChunk(
+                historyChunk(),
+                token: unsupportedHistory,
+                callbackGeneration: liveGeneration
+            )
+            XCTFail("A live-only stream must not authorize history delivery")
+        } catch let failure as BandFailureCategory {
+            XCTAssertEqual(failure, .unsupported)
+        }
+        try await liveSession.cancelOperation(unsupportedHistory)
+    }
+
+    func testOverflowRangesSurviveThePublicDurableReceiptBoundary()
+        async throws
+    {
+        let retained = BandHistoryRange(
+            startDeviceTimeMilliseconds: 2_000,
+            endDeviceTimeMilliseconds: 3_000
+        )
+        let firstLost = BandHistoryRange(
+            startDeviceTimeMilliseconds: 1_000,
+            endDeviceTimeMilliseconds: 1_999
+        )
+        let (session, generation) = try await readyHistorySession()
+        let token = try await session.beginOperation(.history)
+        let acceptance = try await session.stageHistoryChunk(
+            historyChunk(
+                overflowed: true,
+                retainedRange: retained,
+                firstLostRange: firstLost
+            ),
+            token: token,
+            callbackGeneration: generation
+        )
+        XCTAssertEqual(acceptance.retainedRange, retained)
+        XCTAssertEqual(acceptance.firstLostRange, firstLost)
+
+        let receipt = DurableHistoryReceipt(
+            acceptance: acceptance,
+            historyStateCommitted: true,
+            committedSamples: acceptance.acceptedSamples.count,
+            committed: true
+        )
+        XCTAssertEqual(receipt.retainedRange, retained)
+        XCTAssertEqual(receipt.firstLostRange, firstLost)
+        try await session.acknowledgeHistory(
+            receipt: receipt,
+            token: token,
+            callbackGeneration: generation
+        )
+        try await session.completeOperation(token)
+    }
+
     @MainActor
     func testExplicitFactoryCanOwnNonWhoopLifecycle() async throws {
         let store = try await WhoopStore.inMemory()
@@ -475,5 +655,65 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         XCTAssertEqual(factoryCalls, 0)
         XCTAssertEqual(starts, 0)
         XCTAssertEqual(stops, 0)
+    }
+
+    private func liveBatch(sequence: UInt64) -> BandSampleBatch {
+        BandSampleBatch(
+            sourceIdentity: "synthetic-source",
+            lane: .live,
+            parserRevision: "parser-1",
+            calibrationRevision: "calibration-1",
+            samples: [
+                BandSample(
+                    identity: BandSampleIdentity(
+                        stream: .heartRate,
+                        sequence: sequence,
+                        deviceTimeMilliseconds: Int64(sequence) * 1_000
+                    ),
+                    value: 72,
+                    unit: .beatsPerMinute,
+                    quality: .accepted
+                ),
+            ]
+        )
+    }
+
+    private func historyChunk(
+        overflowed: Bool = false,
+        retainedRange: BandHistoryRange? = nil,
+        firstLostRange: BandHistoryRange? = nil
+    ) -> BandHistoryChunk {
+        BandHistoryChunk(
+            chunkIdentity: "synthetic-chunk-\(overflowed)",
+            previousCursor: nil,
+            nextCursor: "cursor-\(overflowed)",
+            complete: true,
+            overflowed: overflowed,
+            retainedRange: retainedRange,
+            firstLostRange: firstLostRange,
+            acknowledgementToken: "ack-\(overflowed)",
+            batches: [
+                BandSampleBatch(
+                    sourceIdentity: "synthetic-source",
+                    lane: .history,
+                    parserRevision: "parser-1",
+                    calibrationRevision: "calibration-1",
+                    samples: [
+                        BandSample(
+                            identity: BandSampleIdentity(
+                                stream: .heartRate,
+                                sequence: overflowed ? 41 : 40,
+                                deviceTimeMilliseconds: overflowed
+                                    ? 41_000
+                                    : 40_000
+                            ),
+                            value: 70,
+                            unit: .beatsPerMinute,
+                            quality: .accepted
+                        ),
+                    ]
+                ),
+            ]
+        )
     }
 }

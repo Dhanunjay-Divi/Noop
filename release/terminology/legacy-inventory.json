@@ -15751,8 +15751,8 @@
       "category": "historical",
       "lineNumbers": [
         4,
-        399,
-        450
+        579,
+        630
       ],
       "occurrenceCount": 3,
       "path": "StrandTests/NoopBandSDKIntegrationTests.swift",
@@ -15764,8 +15764,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        443,
-        474
+        623,
+        654
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/NoopBandSDKIntegrationTests.swift",
@@ -35256,11 +35256,11 @@
       "category": "historical",
       "lineNumbers": [
         282,
-        571,
-        571,
-        572,
         573,
-        578
+        573,
+        574,
+        575,
+        580
       ],
       "occurrenceCount": 6,
       "path": "docs/FIRST_PRODUCTION_RELEASE_CHECKLIST.md",
@@ -35281,10 +35281,10 @@
         181,
         181,
         181,
-        599,
-        606,
-        606,
-        607
+        603,
+        610,
+        610,
+        611
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -35467,8 +35467,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        244,
-        245
+        247,
+        248
       ],
       "occurrenceCount": 2,
       "path": "docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md",
@@ -35696,8 +35696,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        311,
-        314
+        312,
+        315
       ],
       "occurrenceCount": 2,
       "path": "docs/RELEASE_CONTROLS.md",
@@ -35922,14 +35922,14 @@
         565,
         594,
         596,
-        1043,
-        1043,
-        1109,
-        1130,
-        1165,
-        1226,
-        1226,
-        1262
+        1056,
+        1056,
+        1122,
+        1143,
+        1178,
+        1239,
+        1239,
+        1275
       ],
       "occurrenceCount": 33,
       "path": "docs/handoff/NOOP-SDK-WRAPPER-INTEGRATION.md",
@@ -36093,15 +36093,15 @@
     {
       "category": "historical",
       "lineNumbers": [
-        22,
-        126,
-        147,
-        291,
-        411
+        41,
+        89,
+        110,
+        254,
+        374
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "eab214d7ec4b7cc376e39d3312c45e67ba4a15de18de54995651fdbe06a5f7a4",
+      "sha256": "e7c9c52106d6c40907d1f650db0aff5b9dff30e47524b160e2823e92dde9edd1",
       "tokenCounts": {
         "whoop": 2,
         "whoopstore": 3
@@ -36422,12 +36422,12 @@
         51,
         141,
         239,
-        352,
-        361
+        367,
+        377
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
-      "sha256": "816df068c9e18127fb08e755163156959e2aa7ebfaf3f2e227bf0a2185572eb0",
+      "sha256": "6eb4b53c5dda88aa7d943ffdccfd2ad98c38befb114be9b6187073cb4dbf80f0",
       "tokenCounts": {
         "whoop": 6,
         "whoop-default": 1
@@ -36463,7 +36463,7 @@
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "3253adf14fa36ec8467225b86eabb77bbfa16bfad84d532f13f8c6040b268daa",
+      "sha256": "8ab15ec50b54a7f8cd696b9ff8bab69437bb8c6874da23c0ca7636e79739b760",
       "tokenCounts": {
         "whoop": 4,
         "whoopstore": 3

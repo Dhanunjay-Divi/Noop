@@ -109,11 +109,12 @@ supplier and physical-device evidence, legal/certification approvals, store
 records, production operations, and final go/no-go approval remain separate
 open gates.
 
-For the active September 17 branch, record these only after they exist:
+For the active SDK app-integration branch, record these only after they exist:
 
 - candidate commit: `<pending exact 40-character SHA>`
-- pull request: `#16` currently points to superseded head `9d859d9a` and is
-  blocked; it is not evidence for the dirty replacement candidate
+- pull request: `#17`; prior head
+  `4185216a6390e05e67d465dd16ddaee08439cdf1` passed all ten required contexts
+  but is superseded by the unpushed SDK PR `#15` repin
 - required contexts: `<pending 10/10 on the candidate SHA>`
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`

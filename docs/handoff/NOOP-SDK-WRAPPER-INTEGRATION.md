@@ -770,10 +770,23 @@ The first accepted session for each hardware/firmware pair persists:
 - model and hardware revision;
 - firmware and protocol revision;
 - capability report revision;
-- supported stream and command set;
-- history categories and limits;
+- capability schema version;
+- supported live stream set;
+- supported history stream set and limits;
 - timestamp, quality, and calibration semantics; and
 - incompatibility or degradation state.
+
+Capability schema v2 treats live and stored-history support as independent.
+A stream advertised only in `historyStreams` does not authorize live delivery,
+and a stream advertised only in `liveStreams` does not authorize history
+offload. Schema v1 reports fail closed at this boundary; they are not silently
+expanded into both lanes.
+
+When circular history has overwritten data, an overflow chunk carries both the
+retained device-time range and the first lost device-time range. Those ranges
+must survive the accepted chunk and match the exact durable receipt before the
+cursor advances. They are storage/provenance metadata and never enter
+diagnostics.
 
 The app compares every later report with the accepted report:
 

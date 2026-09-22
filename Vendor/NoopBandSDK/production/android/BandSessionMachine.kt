@@ -584,6 +584,16 @@ class BandSessionMachine(
             callbackGeneration,
             BandDiagnosticKind.AUTHENTICATION,
         )
+        if (hasPendingPersistence) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.AUTHENTICATION,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.BUSY,
+                ),
+            )
+            fail(BandFailureCategory.BUSY)
+        }
         if (
             state != BandSessionState.READY &&
             state != BandSessionState.LIVE_COLLECTING
@@ -651,9 +661,7 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.BUSY)
         }
-        val negotiatedStreams = BandStreamKind.entries.filterTo(mutableSetOf()) {
-            requiredCapability(it) in capabilityReport?.capabilities.orEmpty()
-        }
+        val negotiatedStreams = capabilityReport?.liveStreams.orEmpty()
         val selectedStreams = requestedStreams?.toSet() ?: negotiatedStreams
         if (
             selectedStreams.isEmpty() ||
@@ -1052,6 +1060,7 @@ class BandSessionMachine(
         validateNegotiatedStreams(
             immutableChunk.batches.flatMap(BandSampleBatch::samples),
             BandDiagnosticKind.HISTORY,
+            capabilityReport?.historyStreams.orEmpty(),
         )
         if (immutableChunk.previousCursor != acknowledgedHistoryCursor) {
             diagnostics.record(
@@ -1128,6 +1137,8 @@ class BandSessionMachine(
             nextCursor = effectiveNextCursor,
             complete = immutableChunk.complete,
             overflowed = immutableChunk.overflowed,
+            retainedRange = immutableChunk.retainedRange,
+            firstLostRange = immutableChunk.firstLostRange,
             acceptedSamples = unique,
             duplicateSamples = duplicates,
             sessionNonce = sessionNonce,
@@ -1182,7 +1193,9 @@ class BandSessionMachine(
             receipt.acknowledgementToken != pending.acceptance.acknowledgementToken ||
             receipt.nextCursor != pending.acceptance.nextCursor ||
             receipt.complete != pending.acceptance.complete ||
-            receipt.overflowed != pending.acceptance.overflowed
+            receipt.overflowed != pending.acceptance.overflowed ||
+            receipt.retainedRange != pending.acceptance.retainedRange ||
+            receipt.firstLostRange != pending.acceptance.firstLostRange
         ) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -1831,18 +1844,6 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.UNSUPPORTED)
         }
-    }
-
-    private fun requiredCapability(
-        stream: BandStreamKind,
-    ): BandCapability = when (stream) {
-        BandStreamKind.HEART_RATE -> BandCapability.HEART_RATE
-        BandStreamKind.RR_INTERVAL -> BandCapability.RR_INTERVALS
-        BandStreamKind.STEPS -> BandCapability.STEPS
-        BandStreamKind.SPO2 -> BandCapability.SPO2
-        BandStreamKind.RESPIRATION -> BandCapability.RESPIRATION
-        BandStreamKind.TEMPERATURE -> BandCapability.TEMPERATURE
-        BandStreamKind.ACCELERATION -> BandCapability.ACCELEROMETER
     }
 
     private fun impliedCapability(

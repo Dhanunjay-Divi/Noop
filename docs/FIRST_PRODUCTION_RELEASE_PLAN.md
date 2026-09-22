@@ -281,8 +281,12 @@ traversal, and independent staged receipt counts were merged through PR `#13`,
 and candidate-bound callbacks, bounded successful-live diagnostics,
 established authentication/security terminals, Swift actor-operation
 revalidation, and terminal-cursor retention were merged through PR `#14`.
+PR `#15` adds capability schema v2 with separate live/history streams,
+retained and first-lost overflow ranges bound to durable receipts, pending
+persistence protection for established failures, and scan-authority
+revalidation after diagnostics suspension.
 Current protected `main` is
-`7794bae631c1704e18ae5c341fbc32e89c9dc647`. The app consumes the deterministic
+`a8f94b5cbda329eaf7793c5a2cece94fb568acc0`. The app consumes the deterministic
 export from that current protected revision through a digest-pinned,
 supplier-artifact-free boundary. The repository is temporarily public as of
 2026-09-22; D-056 still requires private visibility before release.
@@ -696,7 +700,7 @@ with traceable calibration and identity.
 
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
-| S3.1 | OPEN | Check in the versioned canonical protocol and capability schema after dossier approval. | Reviewed spec with change policy |
+| S3.1 | PARTIAL | Maintain the supplier-neutral versioned capability schema; bind supplier-approved protocol details only after dossier approval. | Schema v2 and change policy are reviewed; supplier protocol truth remains gated |
 | S3.2 | OPEN | Build pure Swift and Kotlin models, framing, parser, clock, history, command, and update state machines. | Shared golden and negative corpus green |
 | S3.3 | OPEN | Build CoreBluetooth and Android BLE transports around one serialized session state machine. | Lifecycle tests and platform builds |
 | S3.4 | OPEN | Build deterministic virtual band, fault injection, CLI, and packet/manifest inspector. | CI scenarios for every state and failure |

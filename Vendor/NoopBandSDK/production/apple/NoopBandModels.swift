@@ -122,6 +122,27 @@ public enum BandStreamKind: String, Codable, CaseIterable, Sendable {
     case acceleration
 }
 
+func requiredCapability(
+    for stream: BandStreamKind
+) -> BandCapability {
+    switch stream {
+    case .heartRate:
+        return .heartRate
+    case .rrInterval:
+        return .rrIntervals
+    case .steps:
+        return .steps
+    case .spo2:
+        return .spo2
+    case .respiration:
+        return .respiration
+    case .temperature:
+        return .temperature
+    case .acceleration:
+        return .accelerometer
+    }
+}
+
 public enum BandUnit: String, Codable, Sendable {
     case beatsPerMinute
     case milliseconds
@@ -218,7 +239,7 @@ public struct BandIdentity: Equatable, Sendable {
 }
 
 public struct BandCapabilityReport: Equatable, Codable, Sendable {
-    public static let supportedSchemaVersion = 1
+    public static let supportedSchemaVersion = 2
     public static let supportedProtocolVersion = "noop-band-v1"
 
     public let schemaVersion: Int
@@ -227,6 +248,8 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
     public let firmwareVersion: String
     public let historyDays: Int
     public let capabilities: Set<BandCapability>
+    public let liveStreams: Set<BandStreamKind>
+    public let historyStreams: Set<BandStreamKind>
 
     public init(
         schemaVersion: Int,
@@ -234,7 +257,9 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
         hardwareRevision: String,
         firmwareVersion: String,
         historyDays: Int,
-        capabilities: Set<BandCapability>
+        capabilities: Set<BandCapability>,
+        liveStreams: Set<BandStreamKind>,
+        historyStreams: Set<BandStreamKind>
     ) {
         self.schemaVersion = schemaVersion
         self.protocolVersion = protocolVersion
@@ -242,6 +267,8 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
         self.firmwareVersion = firmwareVersion
         self.historyDays = historyDays
         self.capabilities = capabilities
+        self.liveStreams = liveStreams
+        self.historyStreams = historyStreams
     }
 
     public func validate() throws {
@@ -252,7 +279,10 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
                   maximum: BandContractLimits.revisionLength
               ),
               (0 ... 255).contains(historyDays),
-              !capabilities.isEmpty
+              !capabilities.isEmpty,
+              liveStreams.union(historyStreams).allSatisfy({
+                  capabilities.contains(requiredCapability(for: $0))
+              })
         else {
             throw BandFailureCategory.incompatible
         }
@@ -381,12 +411,36 @@ public struct BandSampleBatch: Equatable, Codable, Sendable {
     }
 }
 
+public struct BandHistoryRange: Equatable, Codable, Sendable {
+    public let startDeviceTimeMilliseconds: Int64
+    public let endDeviceTimeMilliseconds: Int64
+
+    public init(
+        startDeviceTimeMilliseconds: Int64,
+        endDeviceTimeMilliseconds: Int64
+    ) {
+        self.startDeviceTimeMilliseconds = startDeviceTimeMilliseconds
+        self.endDeviceTimeMilliseconds = endDeviceTimeMilliseconds
+    }
+
+    public func validate() throws {
+        guard startDeviceTimeMilliseconds
+                >= BandContractLimits.minimumDeviceTimeMilliseconds,
+              endDeviceTimeMilliseconds >= startDeviceTimeMilliseconds
+        else {
+            throw BandFailureCategory.invalidInput
+        }
+    }
+}
+
 public struct BandHistoryChunk: Equatable, Codable, Sendable {
     public let chunkIdentity: String
     public let previousCursor: String?
     public let nextCursor: String?
     public let complete: Bool
     public let overflowed: Bool
+    public let retainedRange: BandHistoryRange?
+    public let firstLostRange: BandHistoryRange?
     public let acknowledgementToken: String
     public let batches: [BandSampleBatch]
 
@@ -396,6 +450,8 @@ public struct BandHistoryChunk: Equatable, Codable, Sendable {
         nextCursor: String?,
         complete: Bool,
         overflowed: Bool,
+        retainedRange: BandHistoryRange?,
+        firstLostRange: BandHistoryRange?,
         acknowledgementToken: String,
         batches: [BandSampleBatch]
     ) {
@@ -404,6 +460,8 @@ public struct BandHistoryChunk: Equatable, Codable, Sendable {
         self.nextCursor = nextCursor
         self.complete = complete
         self.overflowed = overflowed
+        self.retainedRange = retainedRange
+        self.firstLostRange = firstLostRange
         self.acknowledgementToken = acknowledgementToken
         self.batches = batches
     }
@@ -425,12 +483,19 @@ public struct BandHistoryChunk: Equatable, Codable, Sendable {
               acknowledgementToken.hasValidUTF8Length(
                   maximum: BandContractLimits.acknowledgementTokenLength
               ),
+              !overflowed || (
+                  retainedRange != nil
+                    && firstLostRange != nil
+              ),
+              overflowed || firstLostRange == nil,
               batches.count <= BandContractLimits.batchesPerHistoryChunk,
               batches.reduce(0, { $0 + $1.samples.count })
                 <= BandContractLimits.samplesPerHistoryChunk
         else {
             throw BandFailureCategory.invalidInput
         }
+        try retainedRange?.validate()
+        try firstLostRange?.validate()
         try batches.forEach { try $0.validate(expectedLane: .history) }
     }
 }
@@ -558,6 +623,8 @@ public struct HistoryAcceptance: Equatable, Sendable {
     public let nextCursor: String?
     public let complete: Bool
     public let overflowed: Bool
+    public let retainedRange: BandHistoryRange?
+    public let firstLostRange: BandHistoryRange?
     public let acceptedSamples: [AcceptedHistorySample]
     public let duplicateSamples: Int
     let sessionNonce: UUID
@@ -569,6 +636,8 @@ public struct HistoryAcceptance: Equatable, Sendable {
         nextCursor: String?,
         complete: Bool,
         overflowed: Bool,
+        retainedRange: BandHistoryRange?,
+        firstLostRange: BandHistoryRange?,
         acceptedSamples: [AcceptedHistorySample],
         duplicateSamples: Int,
         sessionNonce: UUID,
@@ -579,6 +648,8 @@ public struct HistoryAcceptance: Equatable, Sendable {
         self.nextCursor = nextCursor
         self.complete = complete
         self.overflowed = overflowed
+        self.retainedRange = retainedRange
+        self.firstLostRange = firstLostRange
         self.acceptedSamples = Array(acceptedSamples)
         self.duplicateSamples = duplicateSamples
         self.sessionNonce = sessionNonce
@@ -592,6 +663,8 @@ public struct DurableHistoryReceipt: Equatable, Sendable {
     public let nextCursor: String?
     public let complete: Bool
     public let overflowed: Bool
+    public let retainedRange: BandHistoryRange?
+    public let firstLostRange: BandHistoryRange?
     public let historyStateCommitted: Bool
     public let committedSamples: Int
     public let committed: Bool
@@ -609,6 +682,8 @@ public struct DurableHistoryReceipt: Equatable, Sendable {
         nextCursor = acceptance.nextCursor
         complete = acceptance.complete
         overflowed = acceptance.overflowed
+        retainedRange = acceptance.retainedRange
+        firstLostRange = acceptance.firstLostRange
         self.historyStateCommitted = historyStateCommitted
         self.committedSamples = committedSamples
         self.committed = committed

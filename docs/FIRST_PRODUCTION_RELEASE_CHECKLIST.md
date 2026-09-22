@@ -280,8 +280,8 @@ position without changing its ID. This inbox intentionally starts empty.
   bounded diagnostics, deterministic virtual conformance, and one
   digest-pinned source-only app boundary. Keep every production NOOP-band
   factory disabled and retain WHOOP as the comparison transport until the
-  supplier and physical gates pass. (Evidence: private SDK merge
-  `7794bae631c1704e18ae5c341fbc32e89c9dc647`,
+  supplier and physical gates pass. (Evidence: protected SDK merge
+  `a8f94b5cbda329eaf7793c5a2cece94fb568acc0`,
   `ops/rounds/2026-09-21-noop-band-sdk-app-integration.md`)
 - [ ] SDK-007 [ENG] Build quarantined Apple and Android supplier adapters behind
   neutral NOOP session/sample types; keep vendor callbacks, persistence, and
@@ -292,8 +292,10 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] SDK-009 [ENG] Enforce one active phone collector and one serialized
   per-band operation queue; implement an explicit durable collector-handoff
   protocol before allowing another supported phone to collect.
-- [ ] SDK-010 [ENG] Create the canonical versioned protocol and capability
-  schema.
+- [ ] SDK-010 [ENG] Complete the canonical versioned protocol and capability
+  schema. Supplier-neutral capability schema v2 is implemented; exact
+  supplier-approved protocol, firmware, command, and calibration truth remains
+  gated on the dossier and physical acceptance.
 - [ ] SDK-020 [ENG] Create synthetic golden, malformed, replay, duplicate, and
   out-of-order protocol fixtures.
 - [ ] SDK-030 [ENG] Implement device-neutral measured sample types with units,

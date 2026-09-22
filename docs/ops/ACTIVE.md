@@ -12,75 +12,38 @@ Last updated: **2026-09-22**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: the binary-free SDK is merged on protected `main` at
-  `7794bae631c1704e18ae5c341fbc32e89c9dc647`, and two independent clean
-  exports from that exact revision were byte-identical with manifest SHA-256
-  `57be20aafa317e2d846521ab54c91bd109fadd27911336b503a44bfad6e15eb0`;
-  the app-owned Swift wrapper is independently pinned at
-  `571637a0f0458155aae1166b875ae42f30c2bc3a63bc3cc95e2180b5cb24a365`.
-  The exact ten-file artifact is integrated locally into Apple and Android
-  behind a production-default-off source factory; WHOOP remains the default
-  comparison transport. The final SDK additionally binds operation tokens and
-  durable receipts to their issuing session, fences stale scan/reconnect
-  terminals, snapshots capability inputs, supports negotiated non-HR live
-  streams, enforces history availability, and invalidates negotiation after
-  firmware terminals. It now also exposes explicit connection and
-  authentication phases, generation-fenced completion and categorized
-  terminals, bounded pending-history busy diagnostics, immutable snapshots of
-  caller-owned Kotlin live/history collections, and terminal authenticated
-  session invalidation after operation security failures. Invalid history
-  operation tokens now also emit one fixed typed rejection event on both
-  platforms without changing the active history operation. The final
-  protected closeout serializes live and history durability windows, adds
-  generation-fenced capability cancel/fail terminals, prevents lifecycle
-  transitions from discarding an unresolved durable receipt, and invalidates
-  authenticated state after an operation authentication failure. The final
-  protected correction also returns exact provenance-bearing accepted history
-  rows, exposes immutable Android acceptance collections, bounds restored
-  checkpoint traversal before iteration, and validates durable receipts against
-  independent staged counts. Current focused evidence is green: the exact
-  artifact and eight adversarial verifier tests
-  pass; the vendored Swift package passes 15/15 while checking all 35 automated
-  scenarios; Android Full integration passes 6/6; Android Demo and Full
-  instrumentation sources compile independently; the API 35 WorkManager
-  attempt-fence class passes 8/8; and the real macOS app target passes 6/6,
-  including the four invalid-token combinations and default compatibility
-  routing. The exact-current unsigned iOS simulator graph also builds
-  successfully with no source warnings and with `NOOPWatch.app` and
-  `NOOPWidgets.appex` embedded and validated. The exact-current complete Tools
-  wall passes 317/317. An earlier post-repin run exposed one 50 ms spawn-deadline timing
-  transient in the bounded runner's own test (`126` instead of the expected
-  timeout `124`); the isolated case then passed once plus five repeats, no
-  child process leaked, and the unchanged complete wall passed. The SDK itself
-  passed Swift 47/47, Kotlin 52/52 with `installDist`, 35/35 cross-platform
-  scenarios, and its 50-file repository guard before PR `#14` merged normally.
-  PR `#17` remote head `54d0ee9c` passed all non-platform gates and Review
-  Sample; its Apple and Android build walls were intentionally cancelled after
-  the newer protected SDK review findings made that candidate obsolete. An
-  earlier exact head passed every Android, macOS, server, package,
-  policy, localization, claims, license, operations, and trust job. Its iOS
-  production shell executed 39 tests and failed only the app-report queue
-  transition because the shorter queued page retained the long review page's
-  scroll offset. The local correction resets the sheet to its top anchor on
-  each phase transition; the exact previously failing case passes 1/1 in
-  16.098 seconds on a fresh iPhone 17e simulator and 1/1 in 15.841 seconds
-  after the iOS 17 callback correction. After reviewing and repinning
-  the generated terminology digest, 77 focused artifact, required-CI,
-  terminology, and trust tests pass; the trusted self-check verifies protected
-  main, required-CI verifies all ten contexts, and the exact ten-file SDK
-  artifact verifies with supplier payloads absent. The exact-current complete
-  Tools wall passes 317/317 under the bounded runner. Workflow entrypoints also
-  pass 9/9 release controls, calibration parity, health-claims, legal and
-  distribution provenance, private-data, shell, workflow, Python compilation,
-  operations, and diff gates. Supported translation catalogs have zero missing
-  keys; the reviewed 230 Android and 133 Apple hardcoded-literal baseline
-  remains explicit debt. The consolidated local candidate requires one
-  replacement push,
-  exact-SHA hosted checks, reviewed-thread resolution, protected merge/main
-  verification, and exact cleanup. Both
-  repositories currently report `PUBLIC`; the D-056 private-SDK release target
-  must be restored before release. No supplier binary, firmware, real adapter,
-  or flasher is included.
+- Current state: protected `NoopBandSDK` PR `#15` is merged at
+  `a8f94b5cbda329eaf7793c5a2cece94fb568acc0`. Two independent clean exports
+  were byte-identical; the ten-file export manifest SHA-256 is
+  `670919a8009d41bd1ee9e8ddd141eb918c09dff8cd7a9d225f3202f3d6076e2e`
+  and the app-owned Swift wrapper SHA-256 is
+  `b0a315f1c62107ed8c079ee6dcd3c6ab6efa549300642b18caf2840913a8425c`.
+  Export-manifest schema `1` remains unchanged; the negotiated capability
+  contract is schema `2`. It separates `liveStreams` from `historyStreams`,
+  binds retained and first-lost overflow ranges through acceptance and durable
+  receipt, blocks established authentication/security invalidation while
+  persistence is unresolved, and revalidates Apple scan authority after the
+  diagnostics actor suspension. The SDK passed Swift 51/51, Kotlin 55/55 plus
+  `installDist`, shared conformance 35/35, and the 51-file repository gate.
+  The app artifact verifier and all 8 adversarial tests pass; the vendored
+  Swift package passes 15/15; the real macOS app boundary passes 9/9; Android
+  Full integration passes 10/10; and Android Demo plus Full instrumentation
+  sources compile. The current unsigned iOS simulator graph builds and embeds
+  validated Watch, Watch complication, and widget products. The complete
+  317-test Tools wall, exact 203-test release-workflow matrix, 9/9 release
+  controls, required-CI, trusted-main, calibration, terminology, claims,
+  legal/distribution, private-data, shell, localization, operations, and diff
+  gates pass locally. Supported translation catalogs have zero missing keys;
+  the current 244 Android and 135 Apple hardcoded-literal inventory remains
+  explicit debt. One consolidated push, replacement exact-SHA hosted checks,
+  four review-thread resolutions, protected merge/main verification, and exact
+  cleanup remain.
+  WHOOP remains the default independent test transport and the first-party
+  source factory remains disabled. No supplier binary, firmware, real adapter,
+  flasher, physical BLE evidence, background evidence, battery evidence,
+  haptic evidence, or physiological-accuracy evidence is included. Both
+  repositories currently report `PUBLIC`; D-056 requires the SDK repository
+  to be restored to `PRIVATE` before release.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,

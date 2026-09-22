@@ -105,8 +105,18 @@ object VirtualBandFixtures {
             BandCapability.WEAR_STATE,
             BandCapability.HEART_RATE,
             BandCapability.RR_INTERVALS,
+            BandCapability.ACCELEROMETER,
             BandCapability.HAPTICS,
             BandCapability.ALARMS,
+        ),
+        liveStreams = setOf(
+            BandStreamKind.HEART_RATE,
+            BandStreamKind.RR_INTERVAL,
+            BandStreamKind.ACCELERATION,
+        ),
+        historyStreams = setOf(
+            BandStreamKind.HEART_RATE,
+            BandStreamKind.RR_INTERVAL,
         ),
     )
 
@@ -135,6 +145,11 @@ object VirtualBandFixtures {
         nextCursor = "cursor-2",
         complete = true,
         overflowed = false,
+        retainedRange = BandHistoryRange(
+            startDeviceTimeMilliseconds = 2_000,
+            endDeviceTimeMilliseconds = 3_000,
+        ),
+        firstLostRange = null,
         acknowledgementToken = "ack-1",
         batches = listOf(
             BandSampleBatch(
@@ -185,6 +200,8 @@ object VirtualBandFixtures {
         nextCursor = "cursor-3",
         complete = true,
         overflowed = false,
+        retainedRange = historyChunk.retainedRange,
+        firstLostRange = null,
         acknowledgementToken = "ack-2",
         batches = historyChunk.batches,
     )
@@ -630,6 +647,11 @@ object BandConformanceRunner {
             nextCursor = "cursor-3",
             complete = true,
             overflowed = false,
+            retainedRange = BandHistoryRange(
+                startDeviceTimeMilliseconds = 101_000,
+                endDeviceTimeMilliseconds = 101_000,
+            ),
+            firstLostRange = null,
             acknowledgementToken = "ack-replay-2",
             batches = listOf(
                 BandSampleBatch(
@@ -842,6 +864,8 @@ object BandConformanceRunner {
                     BandCapability.BATTERY,
                     BandCapability.HEART_RATE,
                 ),
+                liveStreams = setOf(BandStreamKind.HEART_RATE),
+                historyStreams = setOf(BandStreamKind.HEART_RATE),
             ),
             connectionToken,
             generation,
@@ -916,6 +940,8 @@ object BandConformanceRunner {
             firmwareVersion = identity.firmwareVersion,
             historyDays = 7,
             capabilities = setOf(BandCapability.HEART_RATE),
+            liveStreams = setOf(BandStreamKind.HEART_RATE),
+            historyStreams = setOf(BandStreamKind.HEART_RATE),
         )
         var failure: BandFailureCategory? = null
         try {
@@ -1056,6 +1082,11 @@ object BandConformanceRunner {
             nextCursor = "cursor-3",
             complete = true,
             overflowed = false,
+            retainedRange = BandHistoryRange(
+                startDeviceTimeMilliseconds = 2_000,
+                endDeviceTimeMilliseconds = 4_000,
+            ),
+            firstLostRange = null,
             acknowledgementToken = "ack-2",
             batches = listOf(
                 BandSampleBatch(
@@ -1089,6 +1120,8 @@ object BandConformanceRunner {
             firmwareVersion = VirtualBandFixtures.identity.firmwareVersion,
             historyDays = 7,
             capabilities = setOf(BandCapability.HEART_RATE),
+            liveStreams = setOf(BandStreamKind.HEART_RATE),
+            historyStreams = setOf(BandStreamKind.HEART_RATE),
         )
         val (session, _) = readySession(report)
         val events = mutableListOf("ready")
@@ -1115,6 +1148,8 @@ object BandConformanceRunner {
             firmwareVersion = VirtualBandFixtures.identity.firmwareVersion,
             historyDays = 7,
             capabilities = setOf(BandCapability.HEART_RATE),
+            liveStreams = setOf(BandStreamKind.HEART_RATE),
+            historyStreams = setOf(BandStreamKind.HEART_RATE),
         )
         val (session, generation) = readySession(report)
         val events = mutableListOf("ready")
@@ -1152,6 +1187,11 @@ object BandConformanceRunner {
             nextCursor = "cursor-unnegotiated",
             complete = true,
             overflowed = false,
+            retainedRange = BandHistoryRange(
+                startDeviceTimeMilliseconds = 4_000,
+                endDeviceTimeMilliseconds = 4_000,
+            ),
+            firstLostRange = null,
             acknowledgementToken = "ack-unnegotiated",
             batches = listOf(
                 BandSampleBatch(
@@ -1190,6 +1230,8 @@ object BandConformanceRunner {
                 BandCapability.HEART_RATE,
                 BandCapability.FIRMWARE_UPDATE,
             ),
+            liveStreams = setOf(BandStreamKind.HEART_RATE),
+            historyStreams = setOf(BandStreamKind.HEART_RATE),
         )
         val (session, _) = readySession(report)
         val events = mutableListOf("ready")
@@ -1233,6 +1275,14 @@ object BandConformanceRunner {
             nextCursor = "cursor-2",
             complete = false,
             overflowed = true,
+            retainedRange = BandHistoryRange(
+                startDeviceTimeMilliseconds = 4_000,
+                endDeviceTimeMilliseconds = 4_000,
+            ),
+            firstLostRange = BandHistoryRange(
+                startDeviceTimeMilliseconds = 1_000,
+                endDeviceTimeMilliseconds = 3_999,
+            ),
             acknowledgementToken = "ack-incomplete",
             batches = listOf(
                 BandSampleBatch(
@@ -1290,6 +1340,11 @@ object BandConformanceRunner {
             nextCursor = "cursor-3",
             complete = true,
             overflowed = false,
+            retainedRange = BandHistoryRange(
+                startDeviceTimeMilliseconds = 5_000,
+                endDeviceTimeMilliseconds = 5_000,
+            ),
+            firstLostRange = null,
             acknowledgementToken = "ack-terminal",
             batches = listOf(
                 BandSampleBatch(
@@ -1458,6 +1513,8 @@ object BandConformanceRunner {
                 BandCapability.HEART_RATE,
                 BandCapability.FIRMWARE_UPDATE,
             ),
+            liveStreams = setOf(BandStreamKind.HEART_RATE),
+            historyStreams = setOf(BandStreamKind.HEART_RATE),
         )
         session.acceptCapabilities(
             report,
@@ -1557,6 +1614,8 @@ object BandConformanceRunner {
             nextCursor = null,
             complete = false,
             overflowed = false,
+            retainedRange = null,
+            firstLostRange = null,
             acknowledgementToken = "ack-stalled",
             batches = emptyList(),
         )
@@ -1613,6 +1672,8 @@ object BandConformanceRunner {
             firmwareVersion = VirtualBandFixtures.identity.firmwareVersion,
             historyDays = 7,
             capabilities = setOf(BandCapability.BATTERY),
+            liveStreams = emptySet(),
+            historyStreams = emptySet(),
         )
         val (session, _) = readySession(report)
         val events = mutableListOf("ready")

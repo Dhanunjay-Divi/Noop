@@ -50,12 +50,15 @@ The executable signed-device and hardware matrix is
 
 ## Repository boundary
 
-The NOOP-owned SDK contract now lives in the separate private
+The NOOP-owned SDK contract targets the separate private
 `Dhanunjay-Divi/NoopBandSDK` repository. Its initial `main` commit is
-`ee82cc0`. The repository contains only English NOOP-owned architecture,
-capability schema, conformance scenarios, supplier-intake records, platform
-adapter requirements, and local validation. It contains no vendor binary and
-no hosted GitHub Actions workflow.
+`ee82cc0`, and protected contract remediation is merged through
+`a8f94b5cbda329eaf7793c5a2cece94fb568acc0`. The repository contains only
+English NOOP-owned architecture, capability schema, conformance scenarios,
+supplier-intake records, platform adapter requirements, and local validation.
+It contains no vendor binary and no hosted GitHub Actions workflow. The
+repository was temporarily observed as public on 2026-09-22; D-056 requires
+private visibility before release.
 
 The original supplier package is not rewritten to remove Chinese comments or
 documentation. It remains immutable and outside Git so its provenance and

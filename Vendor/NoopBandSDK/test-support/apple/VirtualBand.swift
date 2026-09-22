@@ -152,8 +152,18 @@ public enum VirtualBandFixtures {
             .wearState,
             .heartRate,
             .rrIntervals,
+            .accelerometer,
             .haptics,
             .alarms,
+        ],
+        liveStreams: [
+            .heartRate,
+            .rrInterval,
+            .acceleration,
+        ],
+        historyStreams: [
+            .heartRate,
+            .rrInterval,
         ]
     )
 
@@ -182,6 +192,11 @@ public enum VirtualBandFixtures {
         nextCursor: "cursor-2",
         complete: true,
         overflowed: false,
+        retainedRange: BandHistoryRange(
+            startDeviceTimeMilliseconds: 2_000,
+            endDeviceTimeMilliseconds: 3_000
+        ),
+        firstLostRange: nil,
         acknowledgementToken: "ack-1",
         batches: [
             BandSampleBatch(
@@ -232,6 +247,8 @@ public enum VirtualBandFixtures {
         nextCursor: "cursor-3",
         complete: true,
         overflowed: false,
+        retainedRange: historyChunk.retainedRange,
+        firstLostRange: nil,
         acknowledgementToken: "ack-2",
         batches: historyChunk.batches
     )
@@ -766,6 +783,11 @@ public enum BandConformanceRunner {
             nextCursor: "cursor-3",
             complete: true,
             overflowed: false,
+            retainedRange: BandHistoryRange(
+                startDeviceTimeMilliseconds: 101_000,
+                endDeviceTimeMilliseconds: 101_000
+            ),
+            firstLostRange: nil,
             acknowledgementToken: "ack-replay-2",
             batches: [
                 BandSampleBatch(
@@ -991,7 +1013,9 @@ public enum BandConformanceRunner {
             hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
             firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.battery, .heartRate]
+            capabilities: [.battery, .heartRate],
+            liveStreams: [.heartRate],
+            historyStreams: [.heartRate]
         )
         try await session.acceptCapabilities(
             report,
@@ -1081,7 +1105,9 @@ public enum BandConformanceRunner {
             hardwareRevision: identity.hardwareRevision,
             firmwareVersion: identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.heartRate]
+            capabilities: [.heartRate],
+            liveStreams: [.heartRate],
+            historyStreams: [.heartRate]
         )
         var failure: BandFailureCategory?
         do {
@@ -1228,6 +1254,11 @@ public enum BandConformanceRunner {
             nextCursor: "cursor-3",
             complete: true,
             overflowed: false,
+            retainedRange: BandHistoryRange(
+                startDeviceTimeMilliseconds: 2_000,
+                endDeviceTimeMilliseconds: 4_000
+            ),
+            firstLostRange: nil,
             acknowledgementToken: "ack-2",
             batches: [
                 BandSampleBatch(
@@ -1272,7 +1303,9 @@ public enum BandConformanceRunner {
             hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
             firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.heartRate]
+            capabilities: [.heartRate],
+            liveStreams: [.heartRate],
+            historyStreams: [.heartRate]
         )
         let (session, _) = try await readySession(capabilities: report)
         var events = ["ready"]
@@ -1300,7 +1333,9 @@ public enum BandConformanceRunner {
             hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
             firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.heartRate]
+            capabilities: [.heartRate],
+            liveStreams: [.heartRate],
+            historyStreams: [.heartRate]
         )
         let (session, generation) = try await readySession(capabilities: report)
         var events = ["ready"]
@@ -1341,6 +1376,11 @@ public enum BandConformanceRunner {
             nextCursor: "cursor-unnegotiated",
             complete: true,
             overflowed: false,
+            retainedRange: BandHistoryRange(
+                startDeviceTimeMilliseconds: 4_000,
+                endDeviceTimeMilliseconds: 4_000
+            ),
+            firstLostRange: nil,
             acknowledgementToken: "ack-unnegotiated",
             batches: [
                 BandSampleBatch(
@@ -1381,7 +1421,9 @@ public enum BandConformanceRunner {
             hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
             firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.heartRate, .firmwareUpdate]
+            capabilities: [.heartRate, .firmwareUpdate],
+            liveStreams: [.heartRate],
+            historyStreams: [.heartRate]
         )
         let (session, _) = try await readySession(capabilities: report)
         var events = ["ready"]
@@ -1427,6 +1469,14 @@ public enum BandConformanceRunner {
             nextCursor: "cursor-2",
             complete: false,
             overflowed: true,
+            retainedRange: BandHistoryRange(
+                startDeviceTimeMilliseconds: 4_000,
+                endDeviceTimeMilliseconds: 4_000
+            ),
+            firstLostRange: BandHistoryRange(
+                startDeviceTimeMilliseconds: 1_000,
+                endDeviceTimeMilliseconds: 3_999
+            ),
             acknowledgementToken: "ack-incomplete",
             batches: [
                 BandSampleBatch(
@@ -1496,6 +1546,11 @@ public enum BandConformanceRunner {
             nextCursor: "cursor-3",
             complete: true,
             overflowed: false,
+            retainedRange: BandHistoryRange(
+                startDeviceTimeMilliseconds: 5_000,
+                endDeviceTimeMilliseconds: 5_000
+            ),
+            firstLostRange: nil,
             acknowledgementToken: "ack-terminal",
             batches: [
                 BandSampleBatch(
@@ -1690,7 +1745,9 @@ public enum BandConformanceRunner {
             hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
             firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.heartRate, .firmwareUpdate]
+            capabilities: [.heartRate, .firmwareUpdate],
+            liveStreams: [.heartRate],
+            historyStreams: [.heartRate]
         )
         try await session.acceptCapabilities(
             report,
@@ -1786,6 +1843,8 @@ public enum BandConformanceRunner {
             nextCursor: nil,
             complete: false,
             overflowed: false,
+            retainedRange: nil,
+            firstLostRange: nil,
             acknowledgementToken: "ack-stalled",
             batches: []
         )
@@ -1852,7 +1911,9 @@ public enum BandConformanceRunner {
             hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
             firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.battery]
+            capabilities: [.battery],
+            liveStreams: [],
+            historyStreams: []
         )
         let (session, _) = try await readySession(capabilities: report)
         var events = ["ready"]
@@ -1929,7 +1990,12 @@ public enum BandConformanceRunner {
             historyDays: 7,
             capabilities:
                 VirtualBandFixtures.capabilities.capabilities
-                    .union([.accelerometer])
+                    .union([.accelerometer]),
+            liveStreams:
+                VirtualBandFixtures.capabilities.liveStreams
+                    .union([.acceleration]),
+            historyStreams:
+                VirtualBandFixtures.capabilities.historyStreams
         )
         try await session.acceptCapabilities(
             capabilities,

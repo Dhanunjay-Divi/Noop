@@ -226,6 +226,8 @@ data class BandCapabilityReport(
     val firmwareVersion: String,
     val historyDays: Int,
     val capabilities: Set<BandCapability>,
+    val liveStreams: Set<BandStreamKind>,
+    val historyStreams: Set<BandStreamKind>,
 ) {
     fun validate() {
         if (
@@ -236,18 +238,29 @@ data class BandCapabilityReport(
                 BandContractLimits.REVISION_LENGTH,
             ) ||
             historyDays !in 0..255 ||
-            capabilities.isEmpty()
+            capabilities.isEmpty() ||
+            (liveStreams + historyStreams).any {
+                requiredCapability(it) !in capabilities
+            }
         ) {
             fail(BandFailureCategory.INCOMPATIBLE)
         }
     }
 
     internal fun immutableSnapshot(): BandCapabilityReport = copy(
-        capabilities = capabilities.toSet(),
+        capabilities = capabilities.boundedSnapshot(
+            BandCapability.entries.size,
+        ),
+        liveStreams = liveStreams.boundedSnapshot(
+            BandStreamKind.entries.size,
+        ),
+        historyStreams = historyStreams.boundedSnapshot(
+            BandStreamKind.entries.size,
+        ),
     )
 
     companion object {
-        const val SUPPORTED_SCHEMA_VERSION = 1
+        const val SUPPORTED_SCHEMA_VERSION = 2
         const val SUPPORTED_PROTOCOL_VERSION = "noop-band-v1"
     }
 }
@@ -338,12 +351,29 @@ data class BandSampleBatch(
     )
 }
 
+data class BandHistoryRange(
+    val startDeviceTimeMilliseconds: Long,
+    val endDeviceTimeMilliseconds: Long,
+) {
+    fun validate() {
+        if (
+            startDeviceTimeMilliseconds <
+            BandContractLimits.MINIMUM_DEVICE_TIME_MILLISECONDS ||
+            endDeviceTimeMilliseconds < startDeviceTimeMilliseconds
+        ) {
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
+    }
+}
+
 data class BandHistoryChunk(
     val chunkIdentity: String,
     val previousCursor: String?,
     val nextCursor: String?,
     val complete: Boolean,
     val overflowed: Boolean,
+    val retainedRange: BandHistoryRange?,
+    val firstLostRange: BandHistoryRange?,
     val acknowledgementToken: String,
     val batches: List<BandSampleBatch>,
 ) {
@@ -361,12 +391,19 @@ data class BandHistoryChunk(
             !acknowledgementToken.hasValidUtf8Length(
                 BandContractLimits.ACKNOWLEDGEMENT_TOKEN_LENGTH,
             ) ||
+            (overflowed && (
+                retainedRange == null ||
+                    firstLostRange == null
+                )) ||
+            (!overflowed && firstLostRange != null) ||
             batches.size > BandContractLimits.BATCHES_PER_HISTORY_CHUNK ||
             batches.sumOf { it.samples.size } >
             BandContractLimits.SAMPLES_PER_HISTORY_CHUNK
         ) {
             fail(BandFailureCategory.INVALID_INPUT)
         }
+        retainedRange?.validate()
+        firstLostRange?.validate()
         batches.forEach { it.validate(BandProvenanceLane.HISTORY) }
     }
 
@@ -522,6 +559,8 @@ class HistoryAcceptance internal constructor(
     val nextCursor: String?,
     val complete: Boolean,
     val overflowed: Boolean,
+    val retainedRange: BandHistoryRange?,
+    val firstLostRange: BandHistoryRange?,
     acceptedSamples: List<AcceptedHistorySample>,
     val duplicateSamples: Int,
     internal val sessionNonce: UUID,
@@ -544,6 +583,8 @@ class DurableHistoryReceipt(
     val nextCursor: String? = acceptance.nextCursor
     val complete: Boolean = acceptance.complete
     val overflowed: Boolean = acceptance.overflowed
+    val retainedRange: BandHistoryRange? = acceptance.retainedRange
+    val firstLostRange: BandHistoryRange? = acceptance.firstLostRange
     internal val sessionNonce: UUID = acceptance.sessionNonce
     internal val receiptSequence: Long = acceptance.receiptSequence
 
@@ -561,4 +602,16 @@ data class BandSessionSnapshot(
 
 internal fun fail(category: BandFailureCategory): Nothing {
     throw BandException(category)
+}
+
+internal fun requiredCapability(
+    stream: BandStreamKind,
+): BandCapability = when (stream) {
+    BandStreamKind.HEART_RATE -> BandCapability.HEART_RATE
+    BandStreamKind.RR_INTERVAL -> BandCapability.RR_INTERVALS
+    BandStreamKind.STEPS -> BandCapability.STEPS
+    BandStreamKind.SPO2 -> BandCapability.SPO2
+    BandStreamKind.RESPIRATION -> BandCapability.RESPIRATION
+    BandStreamKind.TEMPERATURE -> BandCapability.TEMPERATURE
+    BandStreamKind.ACCELERATION -> BandCapability.ACCELEROMETER
 }

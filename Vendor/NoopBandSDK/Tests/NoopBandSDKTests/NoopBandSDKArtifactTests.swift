@@ -26,7 +26,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         hardwareRevision: "synthetic-hw-1",
         firmwareVersion: "synthetic-fw-1",
         protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-        wrapperRevision: "artifact-55fdd89"
+        wrapperRevision: "artifact-a8f94b5"
     )
 
     private var capabilities: BandCapabilityReport {
@@ -36,7 +36,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             hardwareRevision: identity.hardwareRevision,
             firmwareVersion: identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.heartRate, .rrIntervals, .battery]
+            capabilities: [.heartRate, .rrIntervals, .battery],
+            liveStreams: [.heartRate, .rrInterval],
+            historyStreams: [.heartRate, .rrInterval]
         )
     }
 
@@ -112,6 +114,8 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                 nextCursor: "cursor-1",
                 complete: true,
                 overflowed: false,
+                retainedRange: nil,
+                firstLostRange: nil,
                 acknowledgementToken: "ack-1",
                 batches: [batch(lane: .history, samples: [historySample])]
             ),
@@ -148,6 +152,8 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                 nextCursor: "cursor-1",
                 complete: true,
                 overflowed: false,
+                retainedRange: nil,
+                firstLostRange: nil,
                 acknowledgementToken: "ack-1",
                 batches: [batch(
                     lane: .history,
@@ -290,7 +296,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             hardwareRevision: identity.hardwareRevision,
             firmwareVersion: identity.firmwareVersion,
             historyDays: capabilities.historyDays,
-            capabilities: capabilities.capabilities.union([.steps])
+            capabilities: capabilities.capabilities.union([.steps]),
+            liveStreams: capabilities.liveStreams.union([.steps]),
+            historyStreams: capabilities.historyStreams
         )
         do {
             try await session.acceptCapabilities(
@@ -324,7 +332,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             hardwareRevision: identity.hardwareRevision,
             firmwareVersion: identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.spo2]
+            capabilities: [.spo2],
+            liveStreams: [.spo2],
+            historyStreams: []
         )
         let (session, generation, _) = try await readySession(report: report)
         let spo2 = BandSample(
@@ -440,7 +450,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             hardwareRevision: identity.hardwareRevision,
             firmwareVersion: identity.firmwareVersion,
             historyDays: 0,
-            capabilities: [.heartRate]
+            capabilities: [.heartRate],
+            liveStreams: [.heartRate],
+            historyStreams: []
         )
         let (session, _, _) = try await readySession(
             report: report,
@@ -472,7 +484,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             hardwareRevision: identity.hardwareRevision,
             firmwareVersion: identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.heartRate, .firmwareUpdate]
+            capabilities: [.heartRate, .firmwareUpdate],
+            liveStreams: [.heartRate],
+            historyStreams: [.heartRate]
         )
         let (session, generation, _) = try await readySession(
             report: firmwareCapabilities
@@ -534,7 +548,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                 hardwareRevision: updatedIdentity.hardwareRevision,
                 firmwareVersion: updatedIdentity.firmwareVersion,
                 historyDays: 7,
-                capabilities: [.heartRate, .firmwareUpdate]
+                capabilities: [.heartRate, .firmwareUpdate],
+                liveStreams: [.heartRate],
+                historyStreams: [.heartRate]
             ),
             token: postFirmwareConnectionToken,
             callbackGeneration: postFirmwareGeneration
@@ -551,7 +567,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             hardwareRevision: identity.hardwareRevision,
             firmwareVersion: identity.firmwareVersion,
             historyDays: 7,
-            capabilities: [.heartRate, .firmwareUpdate]
+            capabilities: [.heartRate, .firmwareUpdate],
+            liveStreams: [.heartRate],
+            historyStreams: [.heartRate]
         )
 
         let (cancelledSession, _, _) = try await readySession(report: report)
@@ -638,6 +656,8 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                     nextCursor: "cursor-invalid",
                     complete: true,
                     overflowed: false,
+                    retainedRange: nil,
+                    firstLostRange: nil,
                     acknowledgementToken: "ack-invalid",
                     batches: [batch(lane: .history, samples: [invalid])]
                 ),

@@ -12,6 +12,7 @@ import com.noop.bandsdk.BandException
 import com.noop.bandsdk.BandFailureCategory
 import com.noop.bandsdk.BandHistoryCheckpoint
 import com.noop.bandsdk.BandHistoryChunk
+import com.noop.bandsdk.BandHistoryRange
 import com.noop.bandsdk.BandIdentity
 import com.noop.bandsdk.BandOperationClass
 import com.noop.bandsdk.BandPairingCandidate
@@ -25,6 +26,7 @@ import com.noop.bandsdk.BandSessionState
 import com.noop.bandsdk.BandStreamKind
 import com.noop.bandsdk.BandUnit
 import com.noop.bandsdk.DurableHistoryReceipt
+import com.noop.bandsdk.DurableLiveReceipt
 import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -34,7 +36,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "7794bae631c1704e18ae5c341fbc32e89c9dc647",
+            "a8f94b5cbda329eaf7793c5a2cece94fb568acc0",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -69,7 +71,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-55fdd89",
+            wrapperRevision = "artifact-a8f94b5",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
@@ -80,6 +82,8 @@ class NoopBandSdkIntegrationTest {
                 firmwareVersion = identity.firmwareVersion,
                 historyDays = 7,
                 capabilities = setOf(BandCapability.HEART_RATE),
+                liveStreams = setOf(BandStreamKind.HEART_RATE),
+                historyStreams = setOf(BandStreamKind.HEART_RATE),
             ),
             connectionToken,
             generation,
@@ -128,7 +132,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-55fdd89",
+            wrapperRevision = "artifact-a8f94b5",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
@@ -139,6 +143,8 @@ class NoopBandSdkIntegrationTest {
                 firmwareVersion = identity.firmwareVersion,
                 historyDays = 7,
                 capabilities = setOf(BandCapability.BATTERY),
+                liveStreams = emptySet(),
+                historyStreams = emptySet(),
             ),
             connectionToken,
             generation,
@@ -174,6 +180,240 @@ class NoopBandSdkIntegrationTest {
     }
 
     @Test
+    fun pendingLiveReceiptMakesEstablishedAuthenticationFailureBusyUntilAcknowledged() {
+        val diagnostics = BandDiagnosticsRecorder()
+        val (session, generation) = readySessionWithStreams(
+            diagnostics = diagnostics,
+        )
+        session.beginLive()
+        val acceptance = session.stageLiveBatch(
+            heartRateBatch(
+                lane = BandProvenanceLane.LIVE,
+                sequence = 10,
+                deviceTimeMilliseconds = 10_000,
+            ),
+            generation,
+        )
+
+        val failure = try {
+            session.failEstablishedSession(
+                BandFailureCategory.AUTHENTICATION,
+                generation,
+            )
+            null
+        } catch (error: BandException) {
+            error.category
+        }
+        assertEquals(BandFailureCategory.BUSY, failure)
+        val pending = session.snapshot()
+        assertEquals(generation, pending.generation)
+        assertEquals(BandSessionState.LIVE_COLLECTING, pending.state)
+        assertEquals(true, pending.liveActive)
+        assertEquals(
+            BandDiagnosticEvent(
+                kind = BandDiagnosticKind.AUTHENTICATION,
+                outcome = BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.BUSY,
+            ),
+            diagnostics.snapshot().last(),
+        )
+
+        session.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = acceptance,
+                committedSamples = acceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            generation,
+        )
+        session.failEstablishedSession(
+            BandFailureCategory.AUTHENTICATION,
+            generation,
+        )
+        assertEquals(BandSessionState.REJECTED, session.snapshot().state)
+    }
+
+    @Test
+    fun liveAndHistoryStreamSetsAuthorizeLanesIndependently() {
+        val (historySession, historyGeneration) = readySessionWithStreams(
+            liveStreams = emptySet(),
+            historyStreams = setOf(BandStreamKind.HEART_RATE),
+        )
+        val liveFailure = try {
+            historySession.beginLive()
+            null
+        } catch (error: BandException) {
+            error.category
+        }
+        assertEquals(BandFailureCategory.UNSUPPORTED, liveFailure)
+
+        val historyToken =
+            historySession.beginOperation(BandOperationClass.HISTORY)
+        val historyAcceptance = historySession.stageHistoryChunk(
+            heartRateHistoryChunk(
+                chunkIdentity = "history-only-chunk",
+                nextCursor = "history-only-cursor",
+                acknowledgementToken = "history-only-ack",
+                sequence = 20,
+                deviceTimeMilliseconds = 20_000,
+            ),
+            historyToken,
+            historyGeneration,
+        )
+        historySession.acknowledgeHistory(
+            DurableHistoryReceipt(
+                acceptance = historyAcceptance,
+                historyStateCommitted = true,
+                committedSamples = historyAcceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            historyToken,
+            historyGeneration,
+        )
+        historySession.completeOperation(historyToken)
+
+        val (liveSession, liveGeneration) = readySessionWithStreams(
+            liveStreams = setOf(BandStreamKind.HEART_RATE),
+            historyStreams = emptySet(),
+        )
+        liveSession.beginLive()
+        val liveAcceptance = liveSession.stageLiveBatch(
+            heartRateBatch(
+                lane = BandProvenanceLane.LIVE,
+                sequence = 30,
+                deviceTimeMilliseconds = 30_000,
+            ),
+            liveGeneration,
+        )
+        liveSession.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = liveAcceptance,
+                committedSamples = liveAcceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            liveGeneration,
+        )
+        liveSession.stopLive()
+
+        val unsupportedHistoryToken =
+            liveSession.beginOperation(BandOperationClass.HISTORY)
+        val historyFailure = try {
+            liveSession.stageHistoryChunk(
+                heartRateHistoryChunk(
+                    chunkIdentity = "live-only-chunk",
+                    nextCursor = "live-only-cursor",
+                    acknowledgementToken = "live-only-ack",
+                    sequence = 31,
+                    deviceTimeMilliseconds = 31_000,
+                ),
+                unsupportedHistoryToken,
+                liveGeneration,
+            )
+            null
+        } catch (error: BandException) {
+            error.category
+        }
+        assertEquals(BandFailureCategory.UNSUPPORTED, historyFailure)
+        liveSession.cancelOperation(unsupportedHistoryToken)
+    }
+
+    @Test
+    fun overflowRangesSurviveAcceptanceAndDurableReceipt() {
+        val (session, generation) = readySessionWithStreams()
+        val token = session.beginOperation(BandOperationClass.HISTORY)
+        val retainedRange = BandHistoryRange(
+            startDeviceTimeMilliseconds = 40_000,
+            endDeviceTimeMilliseconds = 49_999,
+        )
+        val firstLostRange = BandHistoryRange(
+            startDeviceTimeMilliseconds = 30_000,
+            endDeviceTimeMilliseconds = 39_999,
+        )
+        val acceptance = session.stageHistoryChunk(
+            heartRateHistoryChunk(
+                chunkIdentity = "overflow-chunk",
+                nextCursor = "overflow-cursor",
+                acknowledgementToken = "overflow-ack",
+                sequence = 40,
+                deviceTimeMilliseconds = 40_000,
+                overflowed = true,
+                retainedRange = retainedRange,
+                firstLostRange = firstLostRange,
+            ),
+            token,
+            generation,
+        )
+        assertEquals(retainedRange, acceptance.retainedRange)
+        assertEquals(firstLostRange, acceptance.firstLostRange)
+
+        val receipt = DurableHistoryReceipt(
+            acceptance = acceptance,
+            historyStateCommitted = true,
+            committedSamples = acceptance.acceptedSamples.size,
+            committed = true,
+        )
+        assertEquals(retainedRange, receipt.retainedRange)
+        assertEquals(firstLostRange, receipt.firstLostRange)
+        session.acknowledgeHistory(receipt, token, generation)
+        session.completeOperation(token)
+    }
+
+    @Test
+    fun callerMutableStreamSetsAreSnapshotted() {
+        val liveStreams = mutableSetOf(BandStreamKind.HEART_RATE)
+        val historyStreams = mutableSetOf(BandStreamKind.HEART_RATE)
+        val (session, generation) = readySessionWithStreams(
+            liveStreams = liveStreams,
+            historyStreams = historyStreams,
+        )
+        liveStreams.clear()
+        historyStreams.clear()
+
+        session.beginLive(setOf(BandStreamKind.HEART_RATE))
+        val liveAcceptance = session.stageLiveBatch(
+            heartRateBatch(
+                lane = BandProvenanceLane.LIVE,
+                sequence = 50,
+                deviceTimeMilliseconds = 50_000,
+            ),
+            generation,
+        )
+        session.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = liveAcceptance,
+                committedSamples = liveAcceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            generation,
+        )
+        session.stopLive()
+
+        val historyToken = session.beginOperation(BandOperationClass.HISTORY)
+        val historyAcceptance = session.stageHistoryChunk(
+            heartRateHistoryChunk(
+                chunkIdentity = "snapshot-chunk",
+                nextCursor = "snapshot-cursor",
+                acknowledgementToken = "snapshot-ack",
+                sequence = 51,
+                deviceTimeMilliseconds = 51_000,
+            ),
+            historyToken,
+            generation,
+        )
+        session.acknowledgeHistory(
+            DurableHistoryReceipt(
+                acceptance = historyAcceptance,
+                historyStateCommitted = true,
+                committedSamples = historyAcceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            historyToken,
+            generation,
+        )
+        session.completeOperation(historyToken)
+    }
+
+    @Test
     fun invalidHistoryTokensRecordBoundedRejections() {
         val diagnostics = BandDiagnosticsRecorder()
         val (session, generation) = readyHistorySession(diagnostics)
@@ -190,6 +430,8 @@ class NoopBandSdkIntegrationTest {
             nextCursor = "cursor-1",
             complete = true,
             overflowed = false,
+            retainedRange = null,
+            firstLostRange = null,
             acknowledgementToken = "ack-1",
             batches = listOf(
                 BandSampleBatch(
@@ -329,7 +571,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-55fdd89",
+            wrapperRevision = "artifact-a8f94b5",
         )
         completeConnection(session, identity, connectionToken, generation)
         val mutableCapabilities = mutableSetOf(BandCapability.HEART_RATE)
@@ -340,6 +582,8 @@ class NoopBandSdkIntegrationTest {
             firmwareVersion = identity.firmwareVersion,
             historyDays = 7,
             capabilities = mutableCapabilities,
+            liveStreams = mutableSetOf(BandStreamKind.HEART_RATE),
+            historyStreams = mutableSetOf(BandStreamKind.HEART_RATE),
         )
         session.acceptCapabilities(report, connectionToken, generation)
         session.acceptCapabilities(report, connectionToken, generation)
@@ -412,6 +656,98 @@ class NoopBandSdkIntegrationTest {
         )
     }
 
+    private fun readySessionWithStreams(
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
+        liveStreams: Set<BandStreamKind> =
+            setOf(BandStreamKind.HEART_RATE),
+        historyStreams: Set<BandStreamKind> =
+            setOf(BandStreamKind.HEART_RATE),
+    ): Pair<BandSessionMachine, Long> {
+        val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
+        val generation = session.beginScan()
+        val connectionToken = session.selectCandidate(
+            BandPairingCandidate(
+                handle = "synthetic-candidate",
+                compatible = true,
+                identifyEligible = true,
+            ),
+            generation,
+        )
+        val identity = BandIdentity(
+            sourceIdentity = "synthetic-source",
+            hardwareRevision = "synthetic-hw-1",
+            firmwareVersion = "synthetic-fw-1",
+            protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
+            wrapperRevision = "artifact-a8f94b5",
+        )
+        completeConnection(session, identity, connectionToken, generation)
+        session.acceptCapabilities(
+            BandCapabilityReport(
+                schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
+                protocolVersion = identity.protocolVersion,
+                hardwareRevision = identity.hardwareRevision,
+                firmwareVersion = identity.firmwareVersion,
+                historyDays = 7,
+                capabilities = setOf(BandCapability.HEART_RATE),
+                liveStreams = liveStreams,
+                historyStreams = historyStreams,
+            ),
+            connectionToken,
+            generation,
+        )
+        return session to generation
+    }
+
+    private fun heartRateBatch(
+        lane: BandProvenanceLane,
+        sequence: Long,
+        deviceTimeMilliseconds: Long,
+    ): BandSampleBatch = BandSampleBatch(
+        sourceIdentity = "synthetic-source",
+        lane = lane,
+        parserRevision = "parser-1",
+        calibrationRevision = "calibration-1",
+        samples = listOf(
+            BandSample(
+                identity = BandSampleIdentity(
+                    stream = BandStreamKind.HEART_RATE,
+                    sequence = sequence,
+                    deviceTimeMilliseconds = deviceTimeMilliseconds,
+                ),
+                value = 72.0,
+                unit = BandUnit.BEATS_PER_MINUTE,
+                quality = BandSampleQuality.ACCEPTED,
+            ),
+        ),
+    )
+
+    private fun heartRateHistoryChunk(
+        chunkIdentity: String,
+        nextCursor: String,
+        acknowledgementToken: String,
+        sequence: Long,
+        deviceTimeMilliseconds: Long,
+        overflowed: Boolean = false,
+        retainedRange: BandHistoryRange? = null,
+        firstLostRange: BandHistoryRange? = null,
+    ): BandHistoryChunk = BandHistoryChunk(
+        chunkIdentity = chunkIdentity,
+        previousCursor = null,
+        nextCursor = nextCursor,
+        complete = true,
+        overflowed = overflowed,
+        retainedRange = retainedRange,
+        firstLostRange = firstLostRange,
+        acknowledgementToken = acknowledgementToken,
+        batches = listOf(
+            heartRateBatch(
+                lane = BandProvenanceLane.HISTORY,
+                sequence = sequence,
+                deviceTimeMilliseconds = deviceTimeMilliseconds,
+            ),
+        ),
+    )
+
     private fun readyHistorySession(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
     ): Pair<BandSessionMachine, Long> {
@@ -430,7 +766,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-55fdd89",
+            wrapperRevision = "artifact-a8f94b5",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
@@ -441,6 +777,8 @@ class NoopBandSdkIntegrationTest {
                 firmwareVersion = identity.firmwareVersion,
                 historyDays = 7,
                 capabilities = setOf(BandCapability.HEART_RATE),
+                liveStreams = setOf(BandStreamKind.HEART_RATE),
+                historyStreams = setOf(BandStreamKind.HEART_RATE),
             ),
             connectionToken,
             generation,
