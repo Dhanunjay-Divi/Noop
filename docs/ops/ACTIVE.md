@@ -12,35 +12,42 @@ Last updated: **2026-09-22**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: `NoopBandSDK` PR `#16` is merged normally at
-  `a486768efb873b57515926740d3efa19787de612`. Two independent clean exports
+- Current state: `NoopBandSDK` PR `#19` is merged normally at
+  `823930fa16d30ea7849a557823215c913a36fb8b`. Two independent exact-merge exports
   were byte-identical; the ten-file export manifest SHA-256 is
-  `703f7eff73298acbf4098b31a9e1a7b50b9a8579515cfd596476f00cace6755f`
+  `ed338ff50e026ce2f9326ef6b1aa854766c33f7f886177da21c776f6196719fc`
   and their aggregate eleven-file export-tree SHA-256 is
-  `fb1ec8080b2ddce6ceb1e2e56f8d855afbdbef80ca24de5172b5e3c5af306662`.
+  `ed08f2caf393649d9af106e8c8dd4878aab544e3e166231806da91634b0082fa`.
   The app-owned Swift wrapper SHA-256 is
-  `2704fd896899bfca64de46ea8b10ef64a7ca7dff6ea6ebe6f30196ac8733d8c7`.
+  `6fbf791315521028e9cafd2407f21bfe559912631ef5c716f77dbf35b3f92ce3`.
   Export-manifest schema `1` remains unchanged; the negotiated capability
   contract is schema `2`. It separates `liveStreams` from `historyStreams`,
   binds retained and first-lost overflow ranges through acceptance and durable
   receipt, blocks established authentication/security invalidation while
   persistence is unresolved, validates retained sample bounds and loss-range
   chronology, rejects advertised history with zero retention, and exposes a
-  distinct terminal firmware-failure state. The SDK passed Swift 52/52,
-  Kotlin 56/56 plus `installDist`, shared conformance 36/36, and the 52-file
-  repository gate. Independent final review found no P0-P2 issue.
-  The app artifact verifier and all 8 adversarial tests pass; the vendored
-  Swift package passes 15/15; the real macOS app boundary passes 9/9; Android
-  Full integration passes 10/10; and Android Demo plus Full instrumentation
-  sources compile. The current unsigned iOS simulator graph builds and embeds
-  validated Watch, Watch complication, and widget products. The complete
-  317-test Tools wall, exact 203-test release-workflow matrix, 9/9 release
-  controls, required-CI, trusted-main, calibration, terminology, claims,
-  legal/distribution, private-data, shell, localization, operations, and diff
-  gates pass locally. Supported translation catalogs have zero missing keys;
-  the current 244 Android and 135 Apple hardcoded-literal inventory remains
-  explicit debt. One consolidated push, replacement exact-SHA hosted checks,
-  four review-thread resolutions, protected merge/main verification, and exact
+  distinct terminal firmware-failure state. The SDK additionally publishes
+  each platform's ordered conformance list and fails closed on contract-order
+  drift. It passed Swift 55/55, Kotlin 62/62 plus `installDist`, shared
+  conformance 38/38, and the clean 55-file repository gate.
+  The app artifact verifier passes with a 9-test suite containing one positive
+  and eight adversarial cases; the vendored Swift package passes 15/15; the
+  real macOS app boundary passes 10/10; Android Full integration passes 11/11;
+  and Android Demo plus Full instrumentation
+  and Demo instrumentation sources compile. The current unsigned iOS
+  simulator graph builds and embeds
+  validated Watch, Watch complication, and widget products. The focused
+  artifact/required-CI/terminology/trust matrix passes 78/78, the complete
+  Tools wall passes 318/318 with one intentional skip, and the exact
+  release-workflow matrix passes 204/204. Release controls pass 9/9; all ten
+  required contexts, trusted-main, calibration, terminology, claims,
+  legal/distribution, private-data, shell, workflow lint, Python compilation,
+  localization, operations, and diff gates pass locally. Supported translation
+  catalogs have zero missing keys; the current 244 Android and 135 Apple
+  hardcoded-literal inventory remains explicit debt. One consolidated push,
+  replacement exact-SHA hosted checks,
+  resolution of the 11 currently open review threads (one outdated and ten
+  attached to current lines), protected merge/main verification, and exact
   cleanup remain.
   WHOOP remains the default independent test transport and the first-party
   source factory remains disabled. No supplier binary, firmware, real adapter,
@@ -393,10 +400,10 @@ Resume from:
 
 ## Immediate next actions
 
-1. Commit the protected-base artifact-authority correction and push one exact
-   replacement candidate to PR `#17`.
-2. Require all ten exact-SHA contexts and resolve only reviewed threads covered
-   by matching protected SDK, app source, and tests.
+1. Push one exact replacement candidate to PR `#17`.
+2. Require all ten exact-SHA
+   contexts, and resolve only reviewed threads covered by matching protected
+   SDK, app source, and tests.
 3. Merge normally only after Apple and Android app compilers/tests are green,
    verify protected `main`, and remove exact round-owned outputs and logs.
 4. Restore the SDK repository's D-056 private visibility before release.
