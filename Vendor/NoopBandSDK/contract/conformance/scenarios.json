@@ -463,6 +463,61 @@
       }
     },
     {
+      "id": "connection_callbacks_generation_fenced",
+      "automated": true,
+      "expected": {
+        "events": [
+          "connection_started",
+          "connection_failed",
+          "stale_cancel_rejected",
+          "stale_failure_rejected",
+          "stale_terminals_preserved_state",
+          "stale_connection_rejected",
+          "connected",
+          "capabilities_accepted",
+          "stale_phases_preserved",
+          "connection_diagnostics_bounded"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "connection_terminal_paths",
+      "automated": true,
+      "expected": {
+        "events": [
+          "connection_cancelled",
+          "authentication_rejected",
+          "security_failure",
+          "connection_recovered",
+          "connection_diagnostics_bounded"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "securityFailure"
+      }
+    },
+    {
+      "id": "history_pending_busy_diagnostics",
+      "automated": true,
+      "expected": {
+        "events": [
+          "history_pending",
+          "second_chunk_rejected",
+          "history_busy_recorded",
+          "operation_cancelled"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "busy"
+      }
+    },
+    {
       "id": "diagnostics_bounded",
       "automated": true,
       "expected": {

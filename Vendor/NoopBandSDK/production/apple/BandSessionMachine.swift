@@ -71,7 +71,11 @@ public actor BandSessionMachine {
     @discardableResult
     public func beginScan() async throws -> UInt64 {
         try ensureNotClosed()
-        guard state == .idle || state == .recovering else {
+        guard state == .idle
+            || state == .recovering
+            || state == .rejected
+            || state == .securityFailure
+        else {
             throw BandFailureCategory.invalidState
         }
         generation &+= 1
@@ -194,9 +198,71 @@ public actor BandSessionMachine {
         )
     }
 
-    public func connect(_ newIdentity: BandIdentity) async throws {
+    public func beginConnection(
+        callbackGeneration: UInt64
+    ) async throws {
         try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .connection
+        )
         guard state == .candidateSelected else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .connection,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        state = .connecting
+        await diagnostics.record(
+            BandDiagnosticEvent(kind: .connection, outcome: .began)
+        )
+    }
+
+    public func beginAuthentication(
+        callbackGeneration: UInt64
+    ) async throws {
+        try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .authentication
+        )
+        guard state == .connecting else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .authentication,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        state = .authenticating
+        await diagnostics.record(
+            BandDiagnosticEvent(kind: .authentication, outcome: .began)
+        )
+    }
+
+    public func completeConnection(
+        _ newIdentity: BandIdentity,
+        callbackGeneration: UInt64
+    ) async throws {
+        try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .authentication
+        )
+        guard state == .authenticating else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .authentication,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
             throw BandFailureCategory.invalidState
         }
         do {
@@ -204,7 +270,7 @@ public actor BandSessionMachine {
         } catch {
             await diagnostics.record(
                 BandDiagnosticEvent(
-                    kind: .connection,
+                    kind: .authentication,
                     outcome: .rejected,
                     failureCategory: .invalidInput
                 )
@@ -242,12 +308,106 @@ public actor BandSessionMachine {
             durableSourceIdentity = newIdentity.sourceIdentity
         }
         capabilityReport = nil
-        state = .connecting
         identity = newIdentity
-        state = .authenticating
         state = .negotiatingCapabilities
         await diagnostics.record(
-            BandDiagnosticEvent(kind: .connection, outcome: .completed)
+            BandDiagnosticEvent(kind: .authentication, outcome: .completed)
+        )
+    }
+
+    public func cancelConnection(
+        phase: BandConnectionPhase,
+        callbackGeneration: UInt64
+    ) async throws {
+        try ensureNotClosed()
+        let diagnosticKind = diagnosticKind(for: phase)
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: diagnosticKind
+        )
+        guard state == sessionState(for: phase) else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: diagnosticKind,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        clearConnectionAttempt(nextState: .idle)
+        await diagnostics.record(
+            BandDiagnosticEvent(kind: diagnosticKind, outcome: .cancelled)
+        )
+    }
+
+    public func failConnection(
+        _ category: BandFailureCategory,
+        phase: BandConnectionPhase,
+        callbackGeneration: UInt64
+    ) async throws {
+        try ensureNotClosed()
+        let diagnosticKind = diagnosticKind(for: phase)
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: diagnosticKind
+        )
+        guard state == sessionState(for: phase) else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: diagnosticKind,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        let allowed: Set<BandFailureCategory> = [
+            .unavailable,
+            .permission,
+            .timeout,
+            .rejected,
+            .authentication,
+            .securityFailure,
+            .disconnected,
+            .internalFailure,
+        ]
+        guard allowed.contains(category) else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: diagnosticKind,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
+
+        let terminalState: BandSessionState
+        switch category {
+        case .rejected, .authentication:
+            terminalState = .rejected
+        case .securityFailure:
+            terminalState = .securityFailure
+        default:
+            terminalState = .recovering
+        }
+        clearConnectionAttempt(nextState: terminalState)
+        let outcome: BandDiagnosticOutcome
+        switch category {
+        case .timeout:
+            outcome = .timedOut
+        case .rejected, .authentication, .securityFailure:
+            outcome = .rejected
+        default:
+            outcome = .failed
+        }
+        await diagnostics.record(
+            BandDiagnosticEvent(
+                kind: diagnosticKind,
+                outcome: outcome,
+                failureCategory: category
+            )
         )
     }
 
@@ -689,6 +849,13 @@ public actor BandSessionMachine {
         )
         try validateActiveToken(token, expected: .history)
         guard pendingHistory == nil else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .rejected,
+                    failureCategory: .busy
+                )
+            )
             throw BandFailureCategory.busy
         }
         guard historyOperationLastReceiptComplete != true else {
@@ -1163,6 +1330,37 @@ public actor BandSessionMachine {
         pendingHistory = nil
         historyOperationReceivedDurableReceipt = false
         historyOperationLastReceiptComplete = nil
+    }
+
+    private func clearConnectionAttempt(nextState: BandSessionState) {
+        clearOperationTracking()
+        clearLiveTracking()
+        identity = nil
+        capabilityReport = nil
+        generation &+= 1
+        state = nextState
+    }
+
+    private func diagnosticKind(
+        for phase: BandConnectionPhase
+    ) -> BandDiagnosticKind {
+        switch phase {
+        case .connection:
+            return .connection
+        case .authentication:
+            return .authentication
+        }
+    }
+
+    private func sessionState(
+        for phase: BandConnectionPhase
+    ) -> BandSessionState {
+        switch phase {
+        case .connection:
+            return .connecting
+        case .authentication:
+            return .authenticating
+        }
     }
 
     private func clearDurableSampleIdentities() {

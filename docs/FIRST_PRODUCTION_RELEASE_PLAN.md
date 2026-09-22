@@ -265,7 +265,11 @@ operation-terminal remediation was merged at
 `34028a2ab56feb90ae774b0ee0055529ce175723`. Session-bound operation
 authority, immutable capability inputs, non-HR live streams, history gates,
 firmware invalidation, and stale terminal fencing were merged at
-`dab6072eb2b69b07ee34221dbb649a0119547246`. The app consumes the
+`dab6072eb2b69b07ee34221dbb649a0119547246`. Explicit connection and
+authentication phases, generation-fenced connection completion, categorized
+connection/authentication terminals, and bounded pending-history busy
+diagnostics were merged through PR `#6` at
+`78c17cbd495353f33b5ef169bd1200ee9a0c35df`. The app consumes the
 deterministic export from that current private `main` revision through a
 digest-pinned, supplier-artifact-free boundary.
 

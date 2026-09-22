@@ -5,6 +5,7 @@ import java.util.ArrayDeque
 enum class BandDiagnosticKind {
     DISCOVERY,
     CONNECTION,
+    AUTHENTICATION,
     CAPABILITY,
     COMMAND,
     LIVE,

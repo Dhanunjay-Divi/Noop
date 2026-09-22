@@ -67,6 +67,11 @@ public enum BandSessionState: String, Codable, Sendable {
     case securityFailure
 }
 
+public enum BandConnectionPhase: String, Codable, Sendable {
+    case connection
+    case authentication
+}
+
 public enum BandFailureCategory: String, Codable, Error, Sendable {
     case unavailable
     case permission
@@ -75,6 +80,7 @@ public enum BandFailureCategory: String, Codable, Error, Sendable {
     case rejected
     case incompatible
     case authentication
+    case securityFailure
     case staleCallback
     case disconnected
     case storage

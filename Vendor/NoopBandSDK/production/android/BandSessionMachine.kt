@@ -66,7 +66,12 @@ class BandSessionMachine(
     @Synchronized
     fun beginScan(): Long {
         ensureNotClosed()
-        if (state != BandSessionState.IDLE && state != BandSessionState.RECOVERING) {
+        if (
+            state != BandSessionState.IDLE &&
+            state != BandSessionState.RECOVERING &&
+            state != BandSessionState.REJECTED &&
+            state != BandSessionState.SECURITY_FAILURE
+        ) {
             fail(BandFailureCategory.INVALID_STATE)
         }
         generation += 1
@@ -203,9 +208,75 @@ class BandSessionMachine(
     }
 
     @Synchronized
-    fun connect(newIdentity: BandIdentity) {
+    fun beginConnection(callbackGeneration: Long) {
         ensureNotClosed()
+        validateCallbackGeneration(
+            callbackGeneration,
+            BandDiagnosticKind.CONNECTION,
+        )
         if (state != BandSessionState.CANDIDATE_SELECTED) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.CONNECTION,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_STATE,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_STATE)
+        }
+        state = BandSessionState.CONNECTING
+        diagnostics.record(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.CONNECTION,
+                BandDiagnosticOutcome.BEGAN,
+            ),
+        )
+    }
+
+    @Synchronized
+    fun beginAuthentication(callbackGeneration: Long) {
+        ensureNotClosed()
+        validateCallbackGeneration(
+            callbackGeneration,
+            BandDiagnosticKind.AUTHENTICATION,
+        )
+        if (state != BandSessionState.CONNECTING) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.AUTHENTICATION,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_STATE,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_STATE)
+        }
+        state = BandSessionState.AUTHENTICATING
+        diagnostics.record(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.AUTHENTICATION,
+                BandDiagnosticOutcome.BEGAN,
+            ),
+        )
+    }
+
+    @Synchronized
+    fun completeConnection(
+        newIdentity: BandIdentity,
+        callbackGeneration: Long,
+    ) {
+        ensureNotClosed()
+        validateCallbackGeneration(
+            callbackGeneration,
+            BandDiagnosticKind.AUTHENTICATION,
+        )
+        if (state != BandSessionState.AUTHENTICATING) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.AUTHENTICATION,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_STATE,
+                ),
+            )
             fail(BandFailureCategory.INVALID_STATE)
         }
         try {
@@ -213,7 +284,7 @@ class BandSessionMachine(
         } catch (_: BandException) {
             diagnostics.record(
                 BandDiagnosticEvent(
-                    BandDiagnosticKind.CONNECTION,
+                    BandDiagnosticKind.AUTHENTICATION,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.INVALID_INPUT,
                 ),
@@ -222,14 +293,100 @@ class BandSessionMachine(
         }
         prepareDurableState(newIdentity.sourceIdentity)
         capabilityReport = null
-        state = BandSessionState.CONNECTING
         identity = newIdentity
-        state = BandSessionState.AUTHENTICATING
         state = BandSessionState.NEGOTIATING_CAPABILITIES
         diagnostics.record(
             BandDiagnosticEvent(
-                BandDiagnosticKind.CONNECTION,
+                BandDiagnosticKind.AUTHENTICATION,
                 BandDiagnosticOutcome.COMPLETED,
+            ),
+        )
+    }
+
+    @Synchronized
+    fun cancelConnection(
+        phase: BandConnectionPhase,
+        callbackGeneration: Long,
+    ) {
+        ensureNotClosed()
+        val diagnosticKind = diagnosticKind(phase)
+        validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind,
+        )
+        if (state != sessionState(phase)) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    diagnosticKind,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_STATE,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_STATE)
+        }
+        clearConnectionAttempt(BandSessionState.IDLE)
+        diagnostics.record(
+            BandDiagnosticEvent(
+                diagnosticKind,
+                BandDiagnosticOutcome.CANCELLED,
+            ),
+        )
+    }
+
+    @Synchronized
+    fun failConnection(
+        category: BandFailureCategory,
+        phase: BandConnectionPhase,
+        callbackGeneration: Long,
+    ) {
+        ensureNotClosed()
+        val diagnosticKind = diagnosticKind(phase)
+        validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind,
+        )
+        if (state != sessionState(phase)) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    diagnosticKind,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_STATE,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_STATE)
+        }
+        if (category !in connectionFailureCategories) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    diagnosticKind,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
+        val terminalState = when (category) {
+            BandFailureCategory.REJECTED,
+            BandFailureCategory.AUTHENTICATION,
+            -> BandSessionState.REJECTED
+            BandFailureCategory.SECURITY_FAILURE ->
+                BandSessionState.SECURITY_FAILURE
+            else -> BandSessionState.RECOVERING
+        }
+        clearConnectionAttempt(terminalState)
+        val outcome = when (category) {
+            BandFailureCategory.TIMEOUT -> BandDiagnosticOutcome.TIMED_OUT
+            BandFailureCategory.REJECTED,
+            BandFailureCategory.AUTHENTICATION,
+            BandFailureCategory.SECURITY_FAILURE,
+            -> BandDiagnosticOutcome.REJECTED
+            else -> BandDiagnosticOutcome.FAILED
+        }
+        diagnostics.record(
+            BandDiagnosticEvent(
+                diagnosticKind,
+                outcome,
+                failureCategory = category,
             ),
         )
     }
@@ -1152,6 +1309,18 @@ class BandSessionMachine(
             BandFailureCategory.INTERNAL_FAILURE,
         )
 
+    private val connectionFailureCategories: Set<BandFailureCategory>
+        get() = setOf(
+            BandFailureCategory.UNAVAILABLE,
+            BandFailureCategory.PERMISSION,
+            BandFailureCategory.TIMEOUT,
+            BandFailureCategory.REJECTED,
+            BandFailureCategory.AUTHENTICATION,
+            BandFailureCategory.SECURITY_FAILURE,
+            BandFailureCategory.DISCONNECTED,
+            BandFailureCategory.INTERNAL_FAILURE,
+        )
+
     private fun diagnosticKind(
         operationClass: BandOperationClass,
     ): BandDiagnosticKind = when (operationClass) {
@@ -1190,6 +1359,31 @@ class BandSessionMachine(
         historyOperationReceivedDurableReceipt = false
         historyOperationLastReceiptComplete = null
     }
+
+    private fun clearConnectionAttempt(nextState: BandSessionState) {
+        clearOperationTracking()
+        clearLiveTracking()
+        identity = null
+        capabilityReport = null
+        generation += 1
+        state = nextState
+    }
+
+    private fun diagnosticKind(
+        phase: BandConnectionPhase,
+    ): BandDiagnosticKind = when (phase) {
+        BandConnectionPhase.CONNECTION -> BandDiagnosticKind.CONNECTION
+        BandConnectionPhase.AUTHENTICATION ->
+            BandDiagnosticKind.AUTHENTICATION
+    }
+
+    private fun sessionState(
+        phase: BandConnectionPhase,
+    ): BandSessionState = when (phase) {
+        BandConnectionPhase.CONNECTION -> BandSessionState.CONNECTING
+        BandConnectionPhase.AUTHENTICATION ->
+            BandSessionState.AUTHENTICATING
+        }
 
     private fun clearDurableSampleIdentities() {
         durableSampleIdentities.clear()

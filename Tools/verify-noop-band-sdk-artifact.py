@@ -11,15 +11,15 @@ from typing import Any
 
 
 EXPECTED_MANIFEST_SHA256 = (
-    "35c03822b8993799a75fdcacc12867d124e1e94701364e7c9eb3f8f51e33c7a2"
+    "fdff42f9f0544e82325f62289121073001e953bb9630959bd7eeac2938e67b21"
 )
 EXPECTED_SOURCE_REPOSITORY = "Dhanunjay-Divi/NoopBandSDK"
-EXPECTED_SOURCE_REVISION = "dab6072eb2b69b07ee34221dbb649a0119547246"
+EXPECTED_SOURCE_REVISION = "78c17cbd495353f33b5ef169bd1200ee9a0c35df"
 EXPORT_DIRECTORIES = ("contract", "production", "test-support")
 EXPECTED_INTEGRATION_FILES = {
     "Package.swift": "16fdef516135df5e4df8dd6c260e910e41ca3a6091e9151ba058e8ce2da95053",
     "Tests/NoopBandSDKTests/NoopBandSDKArtifactTests.swift": (
-        "28bb5036f2b6ef94f8a52b35aff3478c57c192f7636e715e31f0487cac887ec7"
+        "4e4b2f999b89ee2bd7e9c2e6e76a1aa637a47cc17e556da043215eba985bc188"
     ),
 }
 EXPECTED_TOP_LEVEL_ENTRIES = {
@@ -81,6 +81,8 @@ def _load_unique_json(path: Path) -> dict[str, Any]:
 
 
 def verify_artifact(root: Path) -> dict[str, Any]:
+    if root.is_symlink():
+        raise VerificationError("artifact root must not be a symlink")
     root = root.resolve()
     manifest_path = root / "noop-band-sdk-manifest.json"
     if not manifest_path.is_file() or manifest_path.is_symlink():

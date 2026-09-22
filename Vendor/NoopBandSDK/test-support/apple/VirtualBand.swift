@@ -33,6 +33,18 @@ public actor VirtualBandStore {
 }
 
 private extension BandSessionMachine {
+    func completeConnectionForConformance(
+        _ identity: BandIdentity,
+        callbackGeneration: UInt64
+    ) async throws {
+        try await beginConnection(callbackGeneration: callbackGeneration)
+        try await beginAuthentication(callbackGeneration: callbackGeneration)
+        try await completeConnection(
+            identity,
+            callbackGeneration: callbackGeneration
+        )
+    }
+
     func durablyCommitLiveBatch(
         _ batch: BandSampleBatch,
         callbackGeneration: UInt64
@@ -246,6 +258,9 @@ public enum BandConformanceRunner {
         "sampling_requires_sensor_capability",
         "durable_identity_cache_bounded",
         "operation_terminal_paths",
+        "connection_callbacks_generation_fenced",
+        "connection_terminal_paths",
+        "history_pending_busy_diagnostics",
         "diagnostics_bounded",
         "closed_session_terminal",
     ]
@@ -308,6 +323,12 @@ public enum BandConformanceRunner {
             return try await durableIdentityCacheBounded()
         case "operation_terminal_paths":
             return try await operationTerminalPaths()
+        case "connection_callbacks_generation_fenced":
+            return try await connectionCallbacksGenerationFenced()
+        case "connection_terminal_paths":
+            return try await connectionTerminalPaths()
+        case "history_pending_busy_diagnostics":
+            return try await historyPendingBusyDiagnostics()
         case "diagnostics_bounded":
             return await diagnosticsBounded()
         case "closed_session_terminal":
@@ -328,7 +349,10 @@ public enum BandConformanceRunner {
             VirtualBandFixtures.candidate,
             callbackGeneration: generation
         )
-        try await session.connect(VirtualBandFixtures.identity)
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: generation
+        )
         try await session.acceptCapabilities(
             capabilities,
             callbackGeneration: generation
@@ -349,7 +373,10 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         events.append("candidate_selected")
-        try await session.connect(VirtualBandFixtures.identity)
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: generation
+        )
         events.append("connected")
         try await session.acceptCapabilities(
             VirtualBandFixtures.capabilities,
@@ -930,7 +957,10 @@ public enum BandConformanceRunner {
             VirtualBandFixtures.candidate,
             callbackGeneration: generation
         )
-        try await session.connect(VirtualBandFixtures.identity)
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: generation
+        )
         let report = BandCapabilityReport(
             schemaVersion: BandCapabilityReport.supportedSchemaVersion,
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
@@ -1014,7 +1044,10 @@ public enum BandConformanceRunner {
             protocolVersion: "noop-band-v2",
             wrapperRevision: VirtualBandFixtures.identity.wrapperRevision
         )
-        try await session.connect(identity)
+        try await session.completeConnectionForConformance(
+            identity,
+            callbackGeneration: generation
+        )
         events.append("connected")
         let report = BandCapabilityReport(
             schemaVersion: 2,
@@ -1111,7 +1144,10 @@ public enum BandConformanceRunner {
             VirtualBandFixtures.candidate,
             callbackGeneration: generation
         )
-        try await session.connect(VirtualBandFixtures.identity)
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: generation
+        )
         try await session.acceptCapabilities(
             VirtualBandFixtures.capabilities,
             callbackGeneration: generation
@@ -1593,7 +1629,10 @@ public enum BandConformanceRunner {
             VirtualBandFixtures.candidate,
             callbackGeneration: generation
         )
-        try await session.connect(VirtualBandFixtures.identity)
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: generation
+        )
         let report = BandCapabilityReport(
             schemaVersion: BandCapabilityReport.supportedSchemaVersion,
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
@@ -1614,7 +1653,10 @@ public enum BandConformanceRunner {
             VirtualBandFixtures.candidate,
             callbackGeneration: postFirmwareGeneration
         )
-        try await session.connect(VirtualBandFixtures.identity)
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: postFirmwareGeneration
+        )
         try await session.acceptCapabilities(
             report,
             callbackGeneration: postFirmwareGeneration
@@ -1635,7 +1677,10 @@ public enum BandConformanceRunner {
             VirtualBandFixtures.candidate,
             callbackGeneration: recoveryGeneration
         )
-        try await session.connect(VirtualBandFixtures.identity)
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: recoveryGeneration
+        )
         try await session.acceptCapabilities(
             report,
             callbackGeneration: recoveryGeneration
@@ -1815,7 +1860,10 @@ public enum BandConformanceRunner {
             VirtualBandFixtures.candidate,
             callbackGeneration: generation
         )
-        try await session.connect(VirtualBandFixtures.identity)
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: generation
+        )
         let capabilities = BandCapabilityReport(
             schemaVersion: BandCapabilityReport.supportedSchemaVersion,
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
@@ -1904,7 +1952,10 @@ public enum BandConformanceRunner {
             VirtualBandFixtures.candidate,
             callbackGeneration: generation
         )
-        try await session.connect(VirtualBandFixtures.identity)
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: generation
+        )
         try await session.acceptCapabilities(
             VirtualBandFixtures.capabilities,
             callbackGeneration: generation
@@ -1952,6 +2003,295 @@ public enum BandConformanceRunner {
             scenario: "operation_terminal_paths",
             events: events,
             snapshot: await session.snapshot()
+        )
+    }
+
+    private static func connectionCallbacksGenerationFenced()
+        async throws -> BandConformanceResult
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let session = BandSessionMachine(diagnostics: diagnostics)
+        var events: [String] = []
+        var failure: BandFailureCategory?
+
+        let oldGeneration = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: oldGeneration
+        )
+        try await session.beginConnection(
+            callbackGeneration: oldGeneration
+        )
+        events.append("connection_started")
+        try await session.failConnection(
+            .timeout,
+            phase: .connection,
+            callbackGeneration: oldGeneration
+        )
+        if await session.snapshot().state == .recovering {
+            events.append("connection_failed")
+        } else {
+            events.append("connection_failure_incorrect")
+        }
+
+        let currentGeneration = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: currentGeneration
+        )
+        try await session.beginConnection(
+            callbackGeneration: currentGeneration
+        )
+        try await session.beginAuthentication(
+            callbackGeneration: currentGeneration
+        )
+        do {
+            try await session.cancelConnection(
+                phase: .connection,
+                callbackGeneration: oldGeneration
+            )
+        } catch BandFailureCategory.staleCallback {
+            events.append("stale_cancel_rejected")
+        }
+        do {
+            try await session.failConnection(
+                .timeout,
+                phase: .connection,
+                callbackGeneration: oldGeneration
+            )
+        } catch BandFailureCategory.staleCallback {
+            events.append("stale_failure_rejected")
+        }
+        let beforeCompletion = await session.snapshot()
+        if beforeCompletion.state == .authenticating,
+           beforeCompletion.generation == currentGeneration
+        {
+            events.append("stale_terminals_preserved_state")
+        } else {
+            events.append("stale_terminals_mutated_state")
+        }
+        do {
+            try await session.completeConnection(
+                VirtualBandFixtures.identity,
+                callbackGeneration: oldGeneration
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("stale_connection_rejected")
+        }
+        try await session.completeConnection(
+            VirtualBandFixtures.identity,
+            callbackGeneration: currentGeneration
+        )
+        events.append("connected")
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            callbackGeneration: currentGeneration
+        )
+        events.append("capabilities_accepted")
+
+        let recorded = await diagnostics.snapshot()
+        let connectionStaleCount = recorded.filter {
+            $0.kind == .connection
+                && $0.outcome == .stale
+                && $0.failureCategory == .staleCallback
+        }.count
+        let authenticationStaleCount = recorded.filter {
+            $0.kind == .authentication
+                && $0.outcome == .stale
+                && $0.failureCategory == .staleCallback
+        }.count
+        if connectionStaleCount == 2, authenticationStaleCount == 1 {
+            events.append("stale_phases_preserved")
+        } else {
+            events.append("stale_phases_incorrect")
+        }
+        if recorded.contains(where: {
+            $0.kind == .connection
+                && $0.outcome == .timedOut
+                && $0.failureCategory == .timeout
+        }), recorded.contains(where: {
+            $0.kind == .authentication
+                && $0.outcome == .stale
+                && $0.failureCategory == .staleCallback
+        }), recorded.contains(where: {
+            $0.kind == .authentication
+                && $0.outcome == .began
+        }) {
+            events.append("connection_diagnostics_bounded")
+        } else {
+            events.append("connection_diagnostics_incorrect")
+        }
+        return result(
+            scenario: "connection_callbacks_generation_fenced",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func connectionTerminalPaths()
+        async throws -> BandConformanceResult
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let session = BandSessionMachine(diagnostics: diagnostics)
+        var events: [String] = []
+
+        let cancellationGeneration = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: cancellationGeneration
+        )
+        try await session.beginConnection(
+            callbackGeneration: cancellationGeneration
+        )
+        try await session.cancelConnection(
+            phase: .connection,
+            callbackGeneration: cancellationGeneration
+        )
+        if await session.snapshot().state == .idle {
+            events.append("connection_cancelled")
+        } else {
+            events.append("connection_cancellation_incorrect")
+        }
+
+        let authenticationGeneration = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: authenticationGeneration
+        )
+        try await session.beginConnection(
+            callbackGeneration: authenticationGeneration
+        )
+        try await session.beginAuthentication(
+            callbackGeneration: authenticationGeneration
+        )
+        try await session.failConnection(
+            .authentication,
+            phase: .authentication,
+            callbackGeneration: authenticationGeneration
+        )
+        if await session.snapshot().state == .rejected {
+            events.append("authentication_rejected")
+        } else {
+            events.append("authentication_state_incorrect")
+        }
+
+        let securityGeneration = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: securityGeneration
+        )
+        try await session.beginConnection(
+            callbackGeneration: securityGeneration
+        )
+        try await session.beginAuthentication(
+            callbackGeneration: securityGeneration
+        )
+        try await session.failConnection(
+            .securityFailure,
+            phase: .authentication,
+            callbackGeneration: securityGeneration
+        )
+        if await session.snapshot().state == .securityFailure {
+            events.append("security_failure")
+        } else {
+            events.append("security_state_incorrect")
+        }
+
+        let recoveryGeneration = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: recoveryGeneration
+        )
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: recoveryGeneration
+        )
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            callbackGeneration: recoveryGeneration
+        )
+        events.append("connection_recovered")
+
+        let recorded = await diagnostics.snapshot()
+        if recorded.contains(where: {
+            $0.kind == .connection && $0.outcome == .cancelled
+        }), recorded.contains(where: {
+            $0.kind == .authentication
+                && $0.outcome == .rejected
+                && $0.failureCategory == .authentication
+        }), recorded.contains(where: {
+            $0.kind == .authentication
+                && $0.outcome == .rejected
+                && $0.failureCategory == .securityFailure
+        }), recorded.contains(where: {
+            $0.kind == .authentication && $0.outcome == .began
+        }) {
+            events.append("connection_diagnostics_bounded")
+        } else {
+            events.append("connection_diagnostics_incorrect")
+        }
+        return result(
+            scenario: "connection_terminal_paths",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: .securityFailure
+        )
+    }
+
+    private static func historyPendingBusyDiagnostics()
+        async throws -> BandConformanceResult
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let session = BandSessionMachine(diagnostics: diagnostics)
+        let generation = try await session.beginScan()
+        try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            callbackGeneration: generation
+        )
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            callbackGeneration: generation
+        )
+        let token = try await session.beginOperation(.history)
+        _ = try await session.stageHistoryChunk(
+            VirtualBandFixtures.historyChunk,
+            token: token,
+            callbackGeneration: generation
+        )
+        var events = ["history_pending"]
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.stageHistoryChunk(
+                VirtualBandFixtures.historyChunk,
+                token: token,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("second_chunk_rejected")
+        }
+        if (await diagnostics.snapshot()).last == BandDiagnosticEvent(
+            kind: .history,
+            outcome: .rejected,
+            failureCategory: .busy
+        ) {
+            events.append("history_busy_recorded")
+        } else {
+            events.append("history_busy_missing")
+        }
+        try await session.cancelOperation(token)
+        events.append("operation_cancelled")
+        return result(
+            scenario: "history_pending_busy_diagnostics",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
         )
     }
 

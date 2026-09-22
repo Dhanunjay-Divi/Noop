@@ -96,6 +96,11 @@ enum class BandSessionState(val wireValue: String) {
     SECURITY_FAILURE("securityFailure"),
 }
 
+enum class BandConnectionPhase(val wireValue: String) {
+    CONNECTION("connection"),
+    AUTHENTICATION("authentication"),
+}
+
 enum class BandFailureCategory(val wireValue: String) {
     UNAVAILABLE("unavailable"),
     PERMISSION("permission"),
@@ -104,6 +109,7 @@ enum class BandFailureCategory(val wireValue: String) {
     REJECTED("rejected"),
     INCOMPATIBLE("incompatible"),
     AUTHENTICATION("authentication"),
+    SECURITY_FAILURE("securityFailure"),
     STALE_CALLBACK("staleCallback"),
     DISCONNECTED("disconnected"),
     STORAGE("storage"),

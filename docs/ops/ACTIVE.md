@@ -13,21 +13,24 @@ Last updated: **2026-09-22**
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
 - Current state: the private binary-free SDK is merged on private `main` at
-  `dab6072eb2b69b07ee34221dbb649a0119547246`, and two independent clean
+  `78c17cbd495353f33b5ef169bd1200ee9a0c35df`, and two independent clean
   exports from that exact revision were byte-identical with manifest SHA-256
-  `35c03822b8993799a75fdcacc12867d124e1e94701364e7c9eb3f8f51e33c7a2`.
+  `fdff42f9f0544e82325f62289121073001e953bb9630959bd7eeac2938e67b21`.
   The exact ten-file artifact is integrated locally into Apple and Android
   behind a production-default-off source factory; WHOOP remains the default
   comparison transport. The final SDK additionally binds operation tokens and
   durable receipts to their issuing session, fences stale scan/reconnect
   terminals, snapshots capability inputs, supports negotiated non-HR live
   streams, enforces history availability, and invalidates negotiation after
-  firmware terminals. Current focused evidence is green: the exact artifact
-  and five verifier tests pass; the vendored Swift package passes 15/15 while
-  checking all 30 automated scenarios; Android Full passes 5/5 and Demo
-  compiles independently; and the real macOS app target passes 5/5. The
-  private SDK itself passed Swift 27/27, Kotlin 28/28, 30/30 cross-platform
-  scenarios, and its 40-file repository guard before merge. PR `#17` head
+  firmware terminals. It now also exposes explicit connection and
+  authentication phases, generation-fenced completion and categorized
+  terminals, and bounded pending-history busy diagnostics. Current focused
+  evidence is green: the exact artifact and six verifier tests pass; the
+  vendored Swift package passes 15/15 while checking all 33 automated
+  scenarios; Android Full passes 5/5 and Demo compiles independently; and the
+  real macOS app target passes 5/5. The private SDK itself passed Swift 30/30,
+  Kotlin 31/31, 33/33 cross-platform scenarios, and its 41-file repository
+  guard before PR `#6` merged. PR `#17` head
   `abd54fbd` passed the complete Apple wall, Android build/unit wall, Android
   Review Sample shell, server/package/policy/trust jobs, and the automated
   no-finding review. Its release-control failure was only four shifted
@@ -40,7 +43,7 @@ Last updated: **2026-09-22**
   classifier approves it. The 17-case retry suite, Actionlint, ten-context
   required-CI check, trusted self-check, and focused Apple/Android UI
   confidence-state regressions pass locally. The final exact local tree passes
-  197/197 release-control tests and the complete 311-test Tools wall with one
+  197/197 release-control tests and the complete 312-test Tools wall with one
   intentional skip; all 83 operations records, terminology, workflow syntax,
   diff hygiene, and private repository visibility also pass. One replacement
   push, exact-SHA hosted checks, review-thread resolution, protected merge/main

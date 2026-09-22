@@ -70,6 +70,19 @@ class NoopBandSDKArtifactTest(unittest.TestCase):
             ):
                 VERIFIER.verify_artifact(copied)
 
+    def test_artifact_root_symlink_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            linked = Path(temporary) / "artifact"
+            linked.symlink_to(
+                ROOT / "Vendor" / "NoopBandSDK",
+                target_is_directory=True,
+            )
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationError,
+                "artifact root must not be a symlink",
+            ):
+                VERIFIER.verify_artifact(linked)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15751,8 +15751,8 @@
       "category": "historical",
       "lineNumbers": [
         4,
-        167,
-        218
+        192,
+        243
       ],
       "occurrenceCount": 3,
       "path": "StrandTests/NoopBandSDKIntegrationTests.swift",
@@ -15764,8 +15764,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        211,
-        242
+        236,
+        267
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/NoopBandSDKIntegrationTests.swift",
@@ -35281,10 +35281,10 @@
         181,
         181,
         181,
-        581,
-        588,
-        588,
-        589
+        585,
+        592,
+        592,
+        593
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -36094,10 +36094,10 @@
       "category": "historical",
       "lineNumbers": [
         20,
-        91,
-        112,
-        256,
-        376
+        94,
+        115,
+        259,
+        379
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36420,8 +36420,8 @@
         18,
         29,
         50,
-        117,
-        198
+        123,
+        204
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",

@@ -26,7 +26,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         hardwareRevision: "synthetic-hw-1",
         firmwareVersion: "synthetic-fw-1",
         protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-        wrapperRevision: "artifact-dab6072"
+        wrapperRevision: "artifact-78c17cb"
     )
 
     private var capabilities: BandCapabilityReport {
@@ -37,6 +37,23 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             firmwareVersion: identity.firmwareVersion,
             historyDays: 7,
             capabilities: [.heartRate, .rrIntervals, .battery]
+        )
+    }
+
+    private func completeConnection(
+        _ session: BandSessionMachine,
+        identity: BandIdentity,
+        callbackGeneration: UInt64
+    ) async throws {
+        try await session.beginConnection(
+            callbackGeneration: callbackGeneration
+        )
+        try await session.beginAuthentication(
+            callbackGeneration: callbackGeneration
+        )
+        try await session.completeConnection(
+            identity,
+            callbackGeneration: callbackGeneration
         )
     }
 
@@ -54,7 +71,11 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             ),
             callbackGeneration: generation
         )
-        try await session.connect(identity)
+        try await completeConnection(
+            session,
+            identity: identity,
+            callbackGeneration: generation
+        )
         try await session.acceptCapabilities(
             report ?? capabilities,
             callbackGeneration: generation
@@ -492,7 +513,11 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             protocolVersion: identity.protocolVersion,
             wrapperRevision: identity.wrapperRevision
         )
-        try await session.connect(updatedIdentity)
+        try await completeConnection(
+            session,
+            identity: updatedIdentity,
+            callbackGeneration: postFirmwareGeneration
+        )
         try await session.acceptCapabilities(
             BandCapabilityReport(
                 schemaVersion: BandCapabilityReport.supportedSchemaVersion,
@@ -669,7 +694,11 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             ),
             callbackGeneration: scanGeneration
         )
-        try await session.connect(identity)
+        try await completeConnection(
+            session,
+            identity: identity,
+            callbackGeneration: scanGeneration
+        )
         try await session.acceptCapabilities(
             capabilities,
             callbackGeneration: scanGeneration

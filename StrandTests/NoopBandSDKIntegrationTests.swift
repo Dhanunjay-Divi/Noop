@@ -24,10 +24,27 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         }
     }
 
+    private func completeConnection(
+        _ session: BandSessionMachine,
+        identity: BandIdentity,
+        callbackGeneration: UInt64
+    ) async throws {
+        try await session.beginConnection(
+            callbackGeneration: callbackGeneration
+        )
+        try await session.beginAuthentication(
+            callbackGeneration: callbackGeneration
+        )
+        try await session.completeConnection(
+            identity,
+            callbackGeneration: callbackGeneration
+        )
+    }
+
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "dab6072eb2b69b07ee34221dbb649a0119547246"
+            "78c17cbd495353f33b5ef169bd1200ee9a0c35df"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let generation = try await session.beginScan()
@@ -62,9 +79,13 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-dab6072"
+            wrapperRevision: "artifact-78c17cb"
         )
-        try await session.connect(identity)
+        try await completeConnection(
+            session,
+            identity: identity,
+            callbackGeneration: generation
+        )
         try await session.acceptCapabilities(
             BandCapabilityReport(
                 schemaVersion: BandCapabilityReport.supportedSchemaVersion,
@@ -120,9 +141,13 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-dab6072"
+            wrapperRevision: "artifact-78c17cb"
         )
-        try await session.connect(identity)
+        try await completeConnection(
+            session,
+            identity: identity,
+            callbackGeneration: generation
+        )
         try await session.acceptCapabilities(
             BandCapabilityReport(
                 schemaVersion: BandCapabilityReport.supportedSchemaVersion,

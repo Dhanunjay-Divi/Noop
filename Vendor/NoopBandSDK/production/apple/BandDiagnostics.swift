@@ -3,6 +3,7 @@ import Foundation
 public enum BandDiagnosticKind: String, Codable, Sendable {
     case discovery
     case connection
+    case authentication
     case capability
     case command
     case live
