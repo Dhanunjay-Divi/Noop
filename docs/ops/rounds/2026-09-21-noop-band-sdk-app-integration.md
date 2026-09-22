@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `ready for final exact-candidate verification`
+- State: `ready for replacement exact-candidate verification`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
-- End implementation commit: pending final protected SDK repin commit
+- End implementation commit: pending final release-control correction commit
 - Record commit or PR: PR `#17`; final exact-SHA evidence remains pending
 
 ## Objective
@@ -114,6 +114,14 @@ Success means:
   Swift package definition, and the package test wrapper. It rejects symlinks,
   including a symlink supplied as the artifact root, unexpected top-level
   files, tree drift, and supplier binary/archive payloads.
+- Closed the final P1 release-control bypass found on exact head `bdd8fe34`.
+  Protected-base pull-request validation now executes the protected SDK
+  artifact verifier against the isolated candidate checkout, independently of
+  candidate-controlled test discovery. It also classifies Python standard
+  library and startup-module shadows at the repository, `Tools`, and
+  `Tools/tests` execution roots as protected trust paths, so a non-owner
+  candidate cannot replace `unittest`, `json`, `pathlib`, `sitecustomize`, or
+  an equivalent runtime module to suppress release tests.
 - Added the local Swift package to the macOS, iOS, and macOS test graphs. Its
   test target compiles the exported Apple virtual band and compares all 33
   automated results with the exported JSON contract.
@@ -263,6 +271,7 @@ Success means:
 | Final independent clean exports | Two clean-worktree exports were byte-identical; manifest SHA-256 `2224b7543e0d74acd39214c8b84fd490e95917e95f564d96e9e621b7c9e422d0`, whole-tree digest `f57d62bf1313810382ec9b7ca8589765bea2244177b7f855f57f502a1fa7864a` | The final vendored artifact is deterministic and traceable to protected SDK `c254cb3` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Final protected SDK app repin | Exact artifact plus 6/6 verifier tests, vendored Swift 15/15, Android Full SDK integration, Demo compile, Full instrumentation-source compile, focused trust 72/72, and complete Tools 312/312 with one intentional skip | The final source-only SDK correction is consumed consistently and repository release controls remain intact | Supplier transport invocation or any physical-device behavior |
 | Artifact verifier plus unit tests | Exact ten-file export passed; 6/6 verifier tests passed, including rejection of a symlink artifact root; no supplier artifacts found | Source, manifest, package wrapper, exact layout, root/tree symlink policy, and no-binary policy are pinned | Physical compatibility |
+| Protected-base artifact authority | 70 focused release/trust tests pass; a copied artifact with a one-line source mutation is rejected by the protected verifier; non-owner `unittest` and standard-library shadow paths are rejected; the complete Tools wall passes 315 tests with one intentional skip | Future non-owner candidates cannot satisfy the SDK artifact gate by shadowing Python's test runner or by relying only on candidate-controlled tests | Owner authorization, hosted exact-SHA execution, supplier rights, or physical compatibility |
 | Exact Swift package workflow order | The vendored package completed 15/15 tests and checked all 34 automated exported scenarios using an external scratch path; the exact artifact verifier then passed | SwiftPM agrees with the shared contract without leaving generated files inside the verified source tree | App lifecycle, BLE, background, or hardware behavior |
 | Android Full app boundary | `NoopBandSdkIntegrationTest` passed 6/6 under `testFullDebugUnitTest`, including all 34 automated shared scenarios and all four invalid-history-token combinations | Full-variant app source, immutable capability authorization, connection/authentication generation fences, durable checkpoint restoration, explicit terminals, and bounded diagnostics compile and pass | Instrumentation, OEM background, BLE, or physical behavior |
 | Android Demo compile | `compileDemoDebugKotlin` passed independently against the `c254cb3` export | The Demo variant consumes the same final source successfully | Demo runtime rendering or device behavior |
@@ -309,10 +318,12 @@ Success means:
   worker-exit fence
   `3a7ba9e56ade2d5f5d7561d877e19c6cde272c65`. This record update is the
   remaining local evidence commit.
-- Branch and remote state: PR `#17` is open from the dedicated branch. The
-  protected SDK `c254cb3` repin, final WorkManager attempt/ownership fence,
-  reviewed terminology snapshot, and operations update are locally green and
-  require one consolidated push plus all exact-SHA protected checks.
+- Branch and remote state: PR `#17` is open from the dedicated branch. Remote
+  head `bdd8fe34` passed the Android wall and macOS build while its iOS
+  production-shell job was still running when the final P1 review arrived.
+  The protected-base artifact verifier, Python runtime-shadow defense, reviewed
+  source digest, and adversarial regressions are locally green and require one
+  consolidated replacement push plus all exact-SHA protected checks.
 - Repository visibility verified on 2026-09-22:
   `Dhanunjay-Divi/Noop` and `Dhanunjay-Divi/NoopBandSDK` both report `PUBLIC`
   with default branch `main`. D-056 still requires the SDK repository to be
@@ -332,17 +343,19 @@ Success means:
 
 - Focused Apple and Android app-target verification is green, including an API
   35 regression that holds a canceled worker in `NonCancellable` cleanup and
-  proves teardown remains blocked until actual unwind. The consolidated local
-  candidate must pass every required hosted context on one exact SHA.
+  proves teardown remains blocked until actual unwind. The final
+  protected-base release-control correction passes 70 focused tests and the
+  complete 315-test Tools wall with one intentional skip. The consolidated
+  replacement candidate must still pass every required hosted context on one
+  exact SHA.
 - A source-only adapter seam cannot establish that a supplier band is
   compatible or flashable.
 
 ## Next round
 
 1. Refresh and review the terminology snapshot after this final evidence edit,
-   run the final repository gates, commit the protected SDK repin, app
-   regressions, WorkManager attempt fence, trust snapshot, and evidence update,
-   then push one final exact head.
+   run the final repository gates, commit the protected-base artifact authority
+   correction and evidence update, then push one final exact head.
 2. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve remaining review threads from matching
    evidence.

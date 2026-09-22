@@ -46,10 +46,16 @@ Last updated: **2026-09-22**
   child process leaked, and the unchanged complete wall passed. The SDK itself
   passed Swift 33/33, Kotlin 36/36 with `installDist`, 33/33 cross-platform
   scenarios, and its 44-file repository guard before PR `#9` merged normally.
-  PR `#17` remote head `cdecd2ef` passed every hosted context before this final
-  protected-SDK repin. The consolidated local candidate is ready for one final
-  inventory refresh, commit/push, exact-SHA hosted checks, reviewed-thread
-  resolution, protected merge/main verification, and exact cleanup. Both
+  PR `#17` remote head `bdd8fe34` passed the complete Android wall and macOS
+  build before a final P1 review identified candidate-controlled Python module
+  shadowing. The local correction makes the protected-base workflow verify the
+  isolated candidate SDK artifact directly and rejects non-owner standard
+  library/startup-module shadows at every repository Python execution root.
+  Seventy focused release/trust tests and the complete 315-test Tools wall pass
+  with one intentional skip. The consolidated local candidate is ready for one
+  final inventory refresh, commit/push, exact-SHA hosted checks,
+  reviewed-thread resolution, protected merge/main verification, and exact
+  cleanup. Both
   repositories currently report `PUBLIC`; the D-056 private-SDK release target
   must be restored before release. No supplier binary, firmware, real adapter,
   or flasher is included.
@@ -398,8 +404,8 @@ Resume from:
 
 ## Immediate next actions
 
-1. Finish the final protected-SDK repin evidence and push one exact candidate
-   to PR `#17`.
+1. Commit the protected-base artifact-authority correction and push one exact
+   replacement candidate to PR `#17`.
 2. Require all ten exact-SHA contexts and resolve only reviewed threads covered
    by matching protected SDK, app source, and tests.
 3. Merge normally only after Apple and Android app compilers/tests are green,

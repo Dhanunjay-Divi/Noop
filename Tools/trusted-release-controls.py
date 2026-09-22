@@ -25,6 +25,11 @@ CHECK_SCOPES = {"protected-main", "pull-request"}
 GITHUB_ACTIONS_APP_ID = 15368
 MAX_RESPONSE_BYTES = 1024 * 1024
 PROTECTED_PREFIXES = (".github/workflows/",)
+PYTHON_EXECUTION_ROOTS = ((), ("Tools",), ("Tools", "tests"))
+PYTHON_RUNTIME_MODULES = frozenset(sys.stdlib_module_names) | {
+    "sitecustomize",
+    "usercustomize",
+}
 PROTECTED_PATHS = {
     "release/required-ci.json",
     "release/evidence/manifest.schema.json",
@@ -56,6 +61,7 @@ PROTECTED_PATHS = {
     "Tools/run-bounded-command.py",
     "Tools/terminology-audit.py",
     "Tools/tests/test_noop_band_sdk_artifact.py",
+    "Tools/tests/test_trusted_release_controls.py",
     "Tools/trusted-release-controls.py",
     "Tools/update-homebrew-cask.sh",
     "Tools/verify-noop-band-sdk-artifact.py",
@@ -157,7 +163,27 @@ def _safe_path(value: str) -> str:
 
 def is_protected_path(value: str) -> bool:
     path = _safe_path(value)
-    return path in PROTECTED_PATHS or path.startswith(PROTECTED_PREFIXES)
+    return (
+        path in PROTECTED_PATHS
+        or path.startswith(PROTECTED_PREFIXES)
+        or _python_runtime_shadow_module(path) is not None
+    )
+
+
+def _python_runtime_shadow_module(value: str) -> str | None:
+    """Return the stdlib/startup module shadowed from a Python execution root."""
+    parts = PurePosixPath(value).parts
+    for root in PYTHON_EXECUTION_ROOTS:
+        if parts[: len(root)] != root:
+            continue
+        relative = parts[len(root) :]
+        if not relative:
+            continue
+        entry = relative[0]
+        module = entry[:-3] if entry.endswith(".py") else entry
+        if module in PYTHON_RUNTIME_MODULES:
+            return module
+    return None
 
 
 def authorize_changed_paths(
@@ -254,6 +280,25 @@ def _load_required_gate(base_root: Path) -> Any:
     return module
 
 
+def _load_noop_band_sdk_verifier(base_root: Path) -> Any:
+    path = base_root / "Tools" / "verify-noop-band-sdk-artifact.py"
+    spec = importlib.util.spec_from_file_location(
+        "trusted_base_noop_band_sdk_verifier", path
+    )
+    if spec is None or spec.loader is None:
+        raise TrustedControlError(
+            "trusted NOOP Band SDK verifier cannot be loaded"
+        )
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except (OSError, RuntimeError, SyntaxError) as error:
+        raise TrustedControlError(
+            "trusted NOOP Band SDK verifier cannot be loaded"
+        ) from error
+    return module
+
+
 def _check_candidate_with_base_gate(base_root: Path, candidate_root: Path) -> None:
     gate = _load_required_gate(base_root)
     try:
@@ -264,6 +309,19 @@ def _check_candidate_with_base_gate(base_root: Path, candidate_root: Path) -> No
     except gate.GateError as error:
         raise TrustedControlError(
             "candidate fails the protected base release-control contract"
+        ) from error
+
+
+def _check_candidate_band_sdk_with_base_verifier(
+    base_root: Path,
+    candidate_root: Path,
+) -> None:
+    verifier = _load_noop_band_sdk_verifier(base_root)
+    try:
+        verifier.verify_artifact(candidate_root / "Vendor" / "NoopBandSDK")
+    except (OSError, verifier.VerificationError) as error:
+        raise TrustedControlError(
+            "candidate fails the protected NOOP Band SDK artifact contract"
         ) from error
 
 
@@ -302,6 +360,7 @@ def verify_pull_request(
             )
     else:
         _check_candidate_with_base_gate(trusted_base, candidate)
+        _check_candidate_band_sdk_with_base_verifier(trusted_base, candidate)
     return len(paths), len(protected)
 
 
@@ -317,6 +376,7 @@ def verify_self(root: Path) -> None:
         raise TrustedControlError(
             "protected main fails its release-control contract"
         ) from error
+    _check_candidate_band_sdk_with_base_verifier(repository, repository)
 
 
 def report_exact_check(

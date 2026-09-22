@@ -36094,10 +36094,10 @@
       "category": "historical",
       "lineNumbers": [
         22,
-        98,
-        119,
-        263,
-        383
+        104,
+        125,
+        269,
+        389
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36420,8 +36420,8 @@
         17,
         28,
         49,
-        131,
-        272
+        139,
+        281
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
@@ -36461,7 +36461,7 @@
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "6763e7059d292034d95a1495e6cda1dffc5786d2cb6109646183367dffad9e8b",
+      "sha256": "6bba41f2c0086327f7306859e3168ca541d9cb9dec6d1b8bd805415cba51c70e",
       "tokenCounts": {
         "whoop": 4,
         "whoopstore": 3

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -51,6 +53,7 @@ class TrustedReleaseControlTests(unittest.TestCase):
             "Tools/github-release-tag-gate.py",
             "Tools/homebrew-version-gate.py",
             "Tools/tests/test_noop_band_sdk_artifact.py",
+            "Tools/tests/test_trusted_release_controls.py",
             "Tools/release.sh",
             "Tools/required-ci-gate.py",
             "Tools/run-bounded-command.py",
@@ -60,6 +63,57 @@ class TrustedReleaseControlTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertTrue(TRUSTED.is_protected_path(path))
+
+    def test_python_runtime_shadow_paths_are_protected(self) -> None:
+        for path in (
+            "unittest.py",
+            "unittest/__init__.py",
+            "unittest/__main__.py",
+            "sitecustomize.py",
+            "Tools/json.py",
+            "Tools/pathlib/__init__.py",
+            "Tools/tests/re.py",
+            "Tools/tests/usercustomize.py",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(TRUSTED.is_protected_path(path))
+        for path in (
+            "Tools/tests/test_unittest.py",
+            "server/app/unittest.py",
+            "Strand/App/AppModel.swift",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(TRUSTED.is_protected_path(path))
+
+    def test_non_owner_cannot_shadow_unittest_runner(self) -> None:
+        with self.assertRaisesRegex(
+            TRUSTED.TrustedControlError, "require the repository owner"
+        ):
+            TRUSTED.authorize_changed_paths(
+                ["unittest/__init__.py", "unittest/__main__.py"],
+                repository_owner="Dhanunjay-Divi",
+                actor="another-builder",
+            )
+
+    def test_protected_base_verifier_rejects_tampered_band_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = Path(temporary)
+            artifact = candidate / "Vendor" / "NoopBandSDK"
+            artifact.parent.mkdir(parents=True)
+            shutil.copytree(ROOT / "Vendor" / "NoopBandSDK", artifact)
+            model = artifact / "production" / "android" / "Models.kt"
+            model.write_text(
+                model.read_text(encoding="utf-8") + "\n// tampered\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                TRUSTED.TrustedControlError,
+                "protected NOOP Band SDK artifact contract",
+            ):
+                TRUSTED._check_candidate_band_sdk_with_base_verifier(
+                    ROOT,
+                    candidate,
+                )
 
     def test_non_owner_cannot_change_a_trust_root(self) -> None:
         with self.assertRaisesRegex(
