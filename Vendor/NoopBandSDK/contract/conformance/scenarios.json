@@ -537,6 +537,20 @@
       }
     },
     {
+      "id": "fractional_steps_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "integer_steps_accepted",
+          "fractional_steps_rejected"
+        ],
+        "finalState": "idle",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "invalidInput"
+      }
+    },
+    {
       "id": "closed_session_terminal",
       "automated": true,
       "expected": {

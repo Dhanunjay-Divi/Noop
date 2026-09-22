@@ -13,11 +13,11 @@ Last updated: **2026-09-22**
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
 - Current state: the binary-free SDK is merged on protected `main` at
-  `55fdd891fb3e9c4adf610e2b38a21b0adc3fa237`, and two independent clean
+  `c254cb329963eb262d18c43ae6b25a8340fe77f6`, and two independent clean
   exports from that exact revision were byte-identical with manifest SHA-256
-  `15fc3a647a1a2ab74145458d2dd11333d4009db78a3b20a5d586c87f3395403a`
+  `2224b7543e0d74acd39214c8b84fd490e95917e95f564d96e9e621b7c9e422d0`
   and whole-tree digest
-  `88e372d88b990af2a97d86a7b5db218ce20694c515468d4156efd167ce1f84ef`.
+  `f57d62bf1313810382ec9b7ca8589765bea2244177b7f855f57f502a1fa7864a`.
   The exact ten-file artifact is integrated locally into Apple and Android
   behind a production-default-off source factory; WHOOP remains the default
   comparison transport. The final SDK additionally binds operation tokens and
@@ -32,10 +32,10 @@ Last updated: **2026-09-22**
   operation tokens now also emit one fixed typed rejection event on both
   platforms without changing the active history operation. Current focused
   evidence is green: the exact artifact and six adversarial verifier tests
-  pass; the vendored Swift package passes 15/15 while checking all 33 automated
+  pass; the vendored Swift package passes 15/15 while checking all 34 automated
   scenarios; Android Full integration passes 6/6; Android Demo and Full
   instrumentation sources compile independently; the API 35 WorkManager
-  attempt-fence class passes 7/7; and the real macOS app target passes 6/6,
+  attempt-fence class passes 8/8; and the real macOS app target passes 6/6,
   including the four invalid-token combinations and default compatibility
   routing. The exact-current unsigned iOS simulator graph also builds
   successfully with `NOOPWatch.app` and `NOOPWidgets.appex` embedded and

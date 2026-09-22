@@ -409,27 +409,55 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
     fun executionProbeDistinguishesRetryAttemptsWithSameWorkId() {
         val probe = FeedbackWorkerExecutionProbe()
         val workId = UUID.randomUUID()
+        val relevantWorkIds = setOf(workId)
 
         probe.onExecution(workId, FeedbackWorkerExecutionPhase.STARTED)
         probe.onExecution(workId, FeedbackWorkerExecutionPhase.EXITED)
-        val firstAttempt = probe.snapshot()
+        val firstAttempt = probe.snapshot(relevantWorkIds)
         assertTrue(firstAttempt.allStartedExited)
         assertEquals(1L, firstAttempt.startedAttempts[workId])
         assertEquals(1L, firstAttempt.exitedAttempts[workId])
 
         probe.onExecution(workId, FeedbackWorkerExecutionPhase.STARTED)
-        val retryAttempt = probe.snapshot()
+        val retryAttempt = probe.snapshot(relevantWorkIds)
         assertFalse(retryAttempt.allStartedExited)
         assertEquals(2L, retryAttempt.startedAttempts[workId])
         assertEquals(1L, retryAttempt.exitedAttempts[workId])
         assertFalse(retryAttempt.startedAttempts == firstAttempt.startedAttempts)
 
         probe.onExecution(workId, FeedbackWorkerExecutionPhase.EXITED)
-        val retryExited = probe.snapshot()
+        val retryExited = probe.snapshot(relevantWorkIds)
         assertTrue(retryExited.allStartedExited)
         assertEquals(2L, retryExited.startedAttempts[workId])
         assertEquals(2L, retryExited.exitedAttempts[workId])
         assertFalse(retryExited.startedAttempts == firstAttempt.startedAttempts)
+    }
+
+    @Test
+    fun executionProbeIgnoresUnobservedExitsAndUnrelatedWork() {
+        val probe = FeedbackWorkerExecutionProbe()
+        val relevantWorkId = UUID.randomUUID()
+        val unrelatedWorkId = UUID.randomUUID()
+        val relevantWorkIds = setOf(relevantWorkId)
+
+        probe.onExecution(relevantWorkId, FeedbackWorkerExecutionPhase.EXITED)
+        probe.onExecution(unrelatedWorkId, FeedbackWorkerExecutionPhase.STARTED)
+        val beforeRelevantStart = probe.snapshot(relevantWorkIds)
+        assertTrue(beforeRelevantStart.allStartedExited)
+        assertTrue(beforeRelevantStart.startedAttempts.isEmpty())
+        assertTrue(beforeRelevantStart.exitedAttempts.isEmpty())
+
+        probe.onExecution(relevantWorkId, FeedbackWorkerExecutionPhase.STARTED)
+        val relevantRunning = probe.snapshot(relevantWorkIds)
+        assertFalse(relevantRunning.allStartedExited)
+        assertEquals(1L, relevantRunning.startedAttempts[relevantWorkId])
+        assertEquals(null, relevantRunning.exitedAttempts[relevantWorkId])
+
+        probe.onExecution(relevantWorkId, FeedbackWorkerExecutionPhase.EXITED)
+        val relevantExited = probe.snapshot(relevantWorkIds)
+        assertTrue(relevantExited.allStartedExited)
+        assertEquals(1L, relevantExited.startedAttempts[relevantWorkId])
+        assertEquals(1L, relevantExited.exitedAttempts[relevantWorkId])
     }
 
     private fun feedbackEntries(): List<Pair<String, ByteArray>> = listOf(
@@ -439,12 +467,14 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
 
     private suspend fun awaitUniqueWorkQuiescence() {
         withTimeout(15_000L) {
+            val relevantWorkIds = mutableSetOf<UUID>()
             while (true) {
                 val beforeWork = FeedbackContinuityWorkInspector.snapshots(
                     workManager,
                     uniqueWorkName,
                 )
-                val beforeExecution = workerExecutionProbe.snapshot()
+                relevantWorkIds += beforeWork.map { it.id }
+                val beforeExecution = workerExecutionProbe.snapshot(relevantWorkIds)
                 val probeUnwound =
                     !probeSession.started.isCompleted || probeSession.unwound.isCompleted
                 if (
@@ -457,7 +487,8 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
                         workManager,
                         uniqueWorkName,
                     )
-                    val afterExecution = workerExecutionProbe.snapshot()
+                    relevantWorkIds += afterWork.map { it.id }
+                    val afterExecution = workerExecutionProbe.snapshot(relevantWorkIds)
                     val noNewWork =
                         afterWork.mapTo(mutableSetOf()) { it.id } -
                             beforeWork.mapTo(mutableSetOf()) { it.id }
@@ -492,18 +523,31 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
             phase: FeedbackWorkerExecutionPhase,
         ) {
             synchronized(lock) {
-                val attempts = when (phase) {
-                    FeedbackWorkerExecutionPhase.STARTED -> startedAttempts
-                    FeedbackWorkerExecutionPhase.EXITED -> exitedAttempts
+                when (phase) {
+                    FeedbackWorkerExecutionPhase.STARTED -> {
+                        startedAttempts[workId] =
+                            startedAttempts.getOrDefault(workId, 0L) + 1L
+                    }
+                    FeedbackWorkerExecutionPhase.EXITED -> {
+                        val started = startedAttempts[workId] ?: return@synchronized
+                        val exited = exitedAttempts.getOrDefault(workId, 0L)
+                        if (exited < started) {
+                            exitedAttempts[workId] = exited + 1L
+                        }
+                    }
                 }
-                attempts[workId] = attempts.getOrDefault(workId, 0L) + 1L
             }
         }
 
-        fun snapshot(): FeedbackWorkerExecutionSnapshot = synchronized(lock) {
+        fun snapshot(
+            relevantWorkIds: Set<UUID>,
+        ): FeedbackWorkerExecutionSnapshot = synchronized(lock) {
+            val relevantStartedAttempts =
+                startedAttempts.filterKeys { it in relevantWorkIds }
             FeedbackWorkerExecutionSnapshot(
-                startedAttempts = startedAttempts.toMap(),
-                exitedAttempts = exitedAttempts.toMap(),
+                startedAttempts = relevantStartedAttempts,
+                exitedAttempts =
+                    exitedAttempts.filterKeys { it in relevantStartedAttempts },
             )
         }
     }

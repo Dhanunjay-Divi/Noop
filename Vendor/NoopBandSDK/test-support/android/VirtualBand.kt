@@ -221,6 +221,7 @@ object BandConformanceRunner {
         "connection_terminal_paths",
         "history_pending_busy_diagnostics",
         "diagnostics_bounded",
+        "fractional_steps_rejected",
         "closed_session_terminal",
     )
 
@@ -266,6 +267,7 @@ object BandConformanceRunner {
         "connection_terminal_paths" -> connectionTerminalPaths()
         "history_pending_busy_diagnostics" ->
             historyPendingBusyDiagnostics()
+        "fractional_steps_rejected" -> fractionalStepsRejected()
         "diagnostics_bounded" -> diagnosticsBounded()
         "closed_session_terminal" -> closedSessionTerminal()
         else -> fail(BandFailureCategory.INVALID_INPUT)
@@ -2126,6 +2128,59 @@ object BandConformanceRunner {
             acknowledgedCursor = null,
             acceptedSamples = 0,
             failure = null,
+        )
+    }
+
+    private fun fractionalStepsRejected(): BandConformanceResult {
+        val identity = BandSampleIdentity(
+            stream = BandStreamKind.STEPS,
+            sequence = 1,
+            deviceTimeMilliseconds = 1,
+        )
+        listOf(0.0, 1.0, 1_000_000.0).forEach { value ->
+            BandSample(
+                identity = identity,
+                value = value,
+                unit = BandUnit.COUNT,
+                quality = BandSampleQuality.ACCEPTED,
+            ).validate()
+        }
+
+        var rejected = 0
+        listOf(0.5, 1.5, 999_999.5).forEach { value ->
+            try {
+                BandSample(
+                    identity = identity,
+                    value = value,
+                    unit = BandUnit.COUNT,
+                    quality = BandSampleQuality.ACCEPTED,
+                ).validate()
+            } catch (error: BandException) {
+                if (error.category == BandFailureCategory.INVALID_INPUT) {
+                    rejected += 1
+                } else {
+                    throw error
+                }
+            }
+        }
+        return BandConformanceResult(
+            scenario = "fractional_steps_rejected",
+            events = listOf(
+                "integer_steps_accepted",
+                if (rejected == 3) {
+                    "fractional_steps_rejected"
+                } else {
+                    "fractional_steps_accepted"
+                },
+            ),
+            finalState = BandSessionState.IDLE.wireValue,
+            acknowledgedCursor = null,
+            acceptedSamples = 0,
+            failure = if (rejected == 3) {
+                BandFailureCategory.INVALID_INPUT.wireValue
+            } else {
+                BandFailureCategory.INTERNAL_FAILURE.wireValue
+            },
         )
     }
 

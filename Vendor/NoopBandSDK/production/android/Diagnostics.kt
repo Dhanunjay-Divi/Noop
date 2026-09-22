@@ -17,6 +17,7 @@ enum class BandDiagnosticKind {
 
 enum class BandDiagnosticOutcome {
     BEGAN,
+    STAGED,
     COMPLETED,
     CANCELLED,
     REJECTED,

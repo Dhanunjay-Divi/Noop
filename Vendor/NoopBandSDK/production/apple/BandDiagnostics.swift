@@ -15,6 +15,7 @@ public enum BandDiagnosticKind: String, Codable, Sendable {
 
 public enum BandDiagnosticOutcome: String, Codable, Sendable {
     case began
+    case staged
     case completed
     case cancelled
     case rejected

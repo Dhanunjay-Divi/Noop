@@ -274,7 +274,7 @@ snapshots and terminal operation-security failures were merged through PR
 `#8` at `277c628d5a1fd9e747871e777d908e41460802fa`. The same-session
 security-failure terminal and bounded invalid-history-token rejection evidence
 were merged through PRs `#8` and `#9`, with current protected `main` at
-`55fdd891fb3e9c4adf610e2b38a21b0adc3fa237`. The app consumes the deterministic
+`c254cb329963eb262d18c43ae6b25a8340fe77f6`. The app consumes the deterministic
 export from that current protected revision through a digest-pinned,
 supplier-artifact-free boundary. The repository is temporarily public as of
 2026-09-22; D-056 still requires private visibility before release.

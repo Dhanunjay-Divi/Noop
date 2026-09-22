@@ -262,6 +262,7 @@ public enum BandConformanceRunner {
         "connection_terminal_paths",
         "history_pending_busy_diagnostics",
         "diagnostics_bounded",
+        "fractional_steps_rejected",
         "closed_session_terminal",
     ]
 
@@ -329,6 +330,8 @@ public enum BandConformanceRunner {
             return try await connectionTerminalPaths()
         case "history_pending_busy_diagnostics":
             return try await historyPendingBusyDiagnostics()
+        case "fractional_steps_rejected":
+            return try fractionalStepsRejected()
         case "diagnostics_bounded":
             return await diagnosticsBounded()
         case "closed_session_terminal":
@@ -2370,6 +2373,55 @@ public enum BandConformanceRunner {
             acknowledgedCursor: nil,
             acceptedSamples: 0,
             failure: nil
+        )
+    }
+
+    private static func fractionalStepsRejected() throws
+        -> BandConformanceResult
+    {
+        let identity = BandSampleIdentity(
+            stream: .steps,
+            sequence: 1,
+            deviceTimeMilliseconds: 1
+        )
+        for value in [0.0, 1.0, 1_000_000.0] {
+            try BandSample(
+                identity: identity,
+                value: value,
+                unit: .count,
+                quality: .accepted
+            ).validate()
+        }
+
+        var rejected = 0
+        for value in [0.5, 1.5, 999_999.5] {
+            do {
+                try BandSample(
+                    identity: identity,
+                    value: value,
+                    unit: .count,
+                    quality: .accepted
+                ).validate()
+            } catch BandFailureCategory.invalidInput {
+                rejected += 1
+            }
+        }
+        return BandConformanceResult(
+            scenario: "fractional_steps_rejected",
+            events: [
+                "integer_steps_accepted",
+                rejected == 3
+                    ? "fractional_steps_rejected"
+                    : "fractional_steps_accepted",
+            ],
+            finalState: BandSessionState.idle.rawValue,
+            acknowledgedCursor: nil,
+            acceptedSamples: 0,
+            failure: (
+                rejected == 3
+                    ? BandFailureCategory.invalidInput
+                    : BandFailureCategory.internalFailure
+            ).rawValue
         )
     }
 

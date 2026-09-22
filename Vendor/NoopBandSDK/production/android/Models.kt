@@ -273,7 +273,9 @@ data class BandSample(
             BandStreamKind.RR_INTERVAL ->
                 unit == BandUnit.MILLISECONDS && value in 200.0..3_000.0
             BandStreamKind.STEPS ->
-                unit == BandUnit.COUNT && value in 0.0..1_000_000.0
+                unit == BandUnit.COUNT &&
+                    value in 0.0..1_000_000.0 &&
+                    value % 1.0 == 0.0
             BandStreamKind.SPO2 ->
                 unit == BandUnit.PERCENT && value in 50.0..100.0
             BandStreamKind.RESPIRATION ->
@@ -316,8 +318,15 @@ data class BandSampleBatch(
         samples.forEach(BandSample::validate)
     }
 
-    internal fun immutableSnapshot(): BandSampleBatch = copy(
-        samples = samples.toList(),
+    internal fun immutableSnapshot(
+        maximumSamples: Int = BandContractLimits.SAMPLES_PER_BATCH,
+    ): BandSampleBatch = copy(
+        samples = samples.boundedSnapshot(
+            minOf(
+                BandContractLimits.SAMPLES_PER_BATCH,
+                maximumSamples,
+            ),
+        ),
     )
 }
 
@@ -353,9 +362,44 @@ data class BandHistoryChunk(
         batches.forEach { it.validate(BandProvenanceLane.HISTORY) }
     }
 
-    internal fun immutableSnapshot(): BandHistoryChunk = copy(
-        batches = batches.map(BandSampleBatch::immutableSnapshot),
-    )
+    internal fun immutableSnapshot(): BandHistoryChunk {
+        val immutableBatches = batches.boundedSnapshot(
+            BandContractLimits.BATCHES_PER_HISTORY_CHUNK,
+        )
+        var remainingSamples = BandContractLimits.SAMPLES_PER_HISTORY_CHUNK
+        return copy(
+            batches = immutableBatches.map { batch ->
+                batch.immutableSnapshot(remainingSamples).also {
+                    remainingSamples -= it.samples.size
+                }
+            },
+        )
+    }
+}
+
+private fun <T> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
+    val expectedSize = size
+    if (maximumSize < 0 || expectedSize > maximumSize) {
+        fail(BandFailureCategory.INVALID_INPUT)
+    }
+    val snapshot = ArrayList<T>(expectedSize)
+    try {
+        val iterator = iterator()
+        while (iterator.hasNext()) {
+            if (snapshot.size == maximumSize) {
+                fail(BandFailureCategory.INVALID_INPUT)
+            }
+            snapshot += iterator.next()
+        }
+    } catch (error: BandException) {
+        throw error
+    } catch (_: RuntimeException) {
+        fail(BandFailureCategory.INVALID_INPUT)
+    }
+    if (snapshot.size != expectedSize) {
+        fail(BandFailureCategory.INVALID_INPUT)
+    }
+    return snapshot
 }
 
 data class BandHistoryCheckpoint(

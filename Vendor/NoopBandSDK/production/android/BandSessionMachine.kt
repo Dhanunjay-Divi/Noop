@@ -543,7 +543,6 @@ class BandSessionMachine(
             callbackGeneration,
             BandDiagnosticKind.LIVE,
         )
-        val immutableBatch = batch.immutableSnapshot()
         if (
             !liveActive ||
             (state != BandSessionState.LIVE_COLLECTING && activeOperation == null)
@@ -557,7 +556,7 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.INVALID_STATE)
         }
-        if (immutableBatch.sourceIdentity != identity?.sourceIdentity) {
+        if (batch.sourceIdentity != identity?.sourceIdentity) {
             diagnostics.record(
                 BandDiagnosticEvent(
                     BandDiagnosticKind.LIVE,
@@ -577,8 +576,10 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.BUSY)
         }
-        try {
-            immutableBatch.validate(BandProvenanceLane.LIVE)
+        val immutableBatch = try {
+            batch.immutableSnapshot().also {
+                it.validate(BandProvenanceLane.LIVE)
+            }
         } catch (error: BandException) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -827,7 +828,6 @@ class BandSessionMachine(
             )
             throw error
         }
-        val immutableChunk = chunk.immutableSnapshot()
         if (pendingHistory != null) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -848,17 +848,17 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.INVALID_STATE)
         }
-        try {
-            immutableChunk.validate()
-        } catch (_: BandException) {
+        val immutableChunk = try {
+            chunk.immutableSnapshot().also(BandHistoryChunk::validate)
+        } catch (error: BandException) {
             diagnostics.record(
                 BandDiagnosticEvent(
                     BandDiagnosticKind.HISTORY,
                     BandDiagnosticOutcome.REJECTED,
-                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                    failureCategory = error.category,
                 ),
             )
-            fail(BandFailureCategory.INVALID_INPUT)
+            throw error
         }
         validateNegotiatedStreams(
             immutableChunk.batches.flatMap(BandSampleBatch::samples),
@@ -936,7 +936,7 @@ class BandSessionMachine(
         diagnostics.record(
             BandDiagnosticEvent(
                 BandDiagnosticKind.HISTORY,
-                BandDiagnosticOutcome.COMPLETED,
+                BandDiagnosticOutcome.STAGED,
                 BandCountBucket.from(unique.size),
             ),
         )

@@ -1,9 +1,9 @@
 {
   "files": [
     {
-      "bytes": 15020,
+      "bytes": 15362,
       "path": "contract/conformance/scenarios.json",
-      "sha256": "ab409218a3b1d5bde4fc38fc8eec59b22757523d361dad754089070b41f8ad95"
+      "sha256": "0d02b50eb7937727dacf196cb3da11e3921f1361e6fba668a4601e6e05803db4"
     },
     {
       "bytes": 1631,
@@ -11,48 +11,48 @@
       "sha256": "5a0cab8fa6d25485e4e46d59331bab4ae7551084b044c37961d2b65659470ba0"
     },
     {
-      "bytes": 53092,
+      "bytes": 53053,
       "path": "production/android/BandSessionMachine.kt",
-      "sha256": "5b720a20d074894a817da9021b533d0db3422bc6d1fbae8f0384eeb3ce1b4180"
+      "sha256": "bcd13f2aa49f04efbb98b99e7e9737582a450d8ed81e29b37198785e58ef0e26"
     },
     {
-      "bytes": 2029,
+      "bytes": 2041,
       "path": "production/android/Diagnostics.kt",
-      "sha256": "3a1e27ec4b809fcc3ca3a92afed578ff03b75f4319ce50d4b0ebef42d51cbbe9"
+      "sha256": "f1f47a3940df57988d3f66295e764d16f7082522a5da5d72500ae52d7b0227f8"
     },
     {
-      "bytes": 13781,
+      "bytes": 15188,
       "path": "production/android/Models.kt",
-      "sha256": "f471e677bcc3a1a177e67b43e1a9a0daf320314b68b23cf658f62587c5d88012"
+      "sha256": "dabc2f3a907f99a6168d253d4e1d7346179cf2295a7f068168add0ef0916f56c"
     },
     {
-      "bytes": 2786,
+      "bytes": 2802,
       "path": "production/apple/BandDiagnostics.swift",
-      "sha256": "73d301ce544be6eb29ddd9e2dc51a7a861f7bbffed3bbfb42959b76a43c1a8e2"
+      "sha256": "c8e0438f9348542e984fa41d0c8a40a73a70022a0ff49edf12f41e443ced3292"
     },
     {
-      "bytes": 49353,
+      "bytes": 49350,
       "path": "production/apple/BandSessionMachine.swift",
-      "sha256": "9505041d0ca0a39c23ad393eba9c471f405acaa4c2c89237941ec1d45b5aaa1c"
+      "sha256": "bb8f1a7d836582f34b095a566dbb9fee6153fbe4ab3506c1cb7fa456e246dd86"
     },
     {
-      "bytes": 18481,
+      "bytes": 18548,
       "path": "production/apple/NoopBandModels.swift",
-      "sha256": "493ec1262b75a3115d828c9ea9be0e05e9d3218648ddd2e1cdb33621594a7226"
+      "sha256": "e7c8d0a907a64b91c0114fcdd83f5bfa28af572f552a89bece8269f6dad2cff8"
     },
     {
-      "bytes": 80349,
+      "bytes": 82245,
       "path": "test-support/android/VirtualBand.kt",
-      "sha256": "72a4e996d39274d4be25a6e16ecc702830abe7fd0ba1d7bb5debddc1e172f6c6"
+      "sha256": "3bb3ef3bf98542c3f0402222fe0142bc175ae569f7040f078bb1e2c1fc7eba55"
     },
     {
-      "bytes": 88833,
+      "bytes": 90477,
       "path": "test-support/apple/VirtualBand.swift",
-      "sha256": "9fd4fb72e2881b633a97d99c0e605e09c80048b1ea23f3708036a184ff52994e"
+      "sha256": "af005d5ce3fafb66a522fdd459fa95d4d6d382464423e7cdd83cad73fd4d4d07"
     }
   ],
   "schemaVersion": 1,
   "sourceRepository": "Dhanunjay-Divi/NoopBandSDK",
-  "sourceRevision": "55fdd891fb3e9c4adf610e2b38a21b0adc3fa237",
+  "sourceRevision": "c254cb329963eb262d18c43ae6b25a8340fe77f6",
   "supplierArtifactsIncluded": false
 }

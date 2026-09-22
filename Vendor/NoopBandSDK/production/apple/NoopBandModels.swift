@@ -294,7 +294,9 @@ public struct BandSample: Equatable, Codable, Sendable {
                 throw BandFailureCategory.invalidInput
             }
         case (.steps, .count):
-            guard (0 ... 1_000_000).contains(value) else {
+            guard (0 ... 1_000_000).contains(value),
+                  value.rounded(.towardZero) == value
+            else {
                 throw BandFailureCategory.invalidInput
             }
         case (.spo2, .percent):

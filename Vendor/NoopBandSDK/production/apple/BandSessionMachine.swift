@@ -961,7 +961,7 @@ public actor BandSessionMachine {
         await diagnostics.record(
             BandDiagnosticEvent(
                 kind: .history,
-                outcome: .completed,
+                outcome: .staged,
                 countBucket: BandCountBucket(count: unique.count)
             )
         )
