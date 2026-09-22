@@ -95,6 +95,7 @@ enum class BandSessionState(val wireValue: String) {
     INCOMPATIBLE("incompatible"),
     REJECTED("rejected"),
     SECURITY_FAILURE("securityFailure"),
+    FIRMWARE_FAILURE("firmwareFailure"),
 }
 
 enum class BandConnectionPhase(val wireValue: String) {
@@ -139,6 +140,11 @@ enum class BandOperationClass {
     ALARM,
     SAMPLING,
     FIRMWARE,
+}
+
+enum class BandFirmwareFailureDisposition {
+    RECOVERABLE,
+    TERMINAL,
 }
 
 enum class BandProvenanceLane {
@@ -239,6 +245,7 @@ data class BandCapabilityReport(
             ) ||
             historyDays !in 0..255 ||
             capabilities.isEmpty() ||
+            (historyStreams.isNotEmpty() && historyDays == 0) ||
             (liveStreams + historyStreams).any {
                 requiredCapability(it) !in capabilities
             }
@@ -405,6 +412,25 @@ data class BandHistoryChunk(
         retainedRange?.validate()
         firstLostRange?.validate()
         batches.forEach { it.validate(BandProvenanceLane.HISTORY) }
+        if (overflowed) {
+            val retained = retainedRange
+                ?: fail(BandFailureCategory.INVALID_INPUT)
+            val lost = firstLostRange
+                ?: fail(BandFailureCategory.INVALID_INPUT)
+            if (
+                lost.endDeviceTimeMilliseconds >=
+                retained.startDeviceTimeMilliseconds ||
+                batches.any { batch ->
+                    batch.samples.any { sample ->
+                        sample.identity.deviceTimeMilliseconds !in
+                            retained.startDeviceTimeMilliseconds..
+                            retained.endDeviceTimeMilliseconds
+                    }
+                }
+            ) {
+                fail(BandFailureCategory.INVALID_INPUT)
+            }
+        }
     }
 
     internal fun immutableSnapshot(): BandHistoryChunk {

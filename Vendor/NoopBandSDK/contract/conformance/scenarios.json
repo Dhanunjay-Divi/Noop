@@ -388,6 +388,25 @@
       }
     },
     {
+      "id": "firmware_terminal_failure",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "firmware_started",
+          "firmware_terminal",
+          "reconnect_rejected",
+          "terminal_diagnostic_recorded",
+          "same_session_restart_rejected",
+          "replacement_scan_started"
+        ],
+        "finalState": "firmwareFailure",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "invalidState"
+      }
+    },
+    {
       "id": "history_nonadvancing_cursor_rejected",
       "automated": true,
       "expected": {

@@ -23,6 +23,7 @@ public enum BandDiagnosticOutcome: String, Codable, Sendable {
     case stale
     case interrupted
     case failed
+    case terminal
 }
 
 public enum BandCountBucket: String, Codable, Sendable {

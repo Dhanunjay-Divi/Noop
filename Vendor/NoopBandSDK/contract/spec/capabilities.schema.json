@@ -5,6 +5,27 @@
   "$comment": "x-noop-maxUtf8Bytes is the normative cross-platform string bound; maxLength remains a generic-validator upper bound.",
   "type": "object",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "historyStreams": {
+            "minItems": 1
+          }
+        },
+        "required": [
+          "historyStreams"
+        ]
+      },
+      "then": {
+        "properties": {
+          "historyDays": {
+            "minimum": 1
+          }
+        }
+      }
+    }
+  ],
   "required": [
     "schemaVersion",
     "protocolVersion",

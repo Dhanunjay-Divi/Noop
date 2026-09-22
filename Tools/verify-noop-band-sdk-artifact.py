@@ -12,15 +12,15 @@ from typing import Any
 
 
 EXPECTED_MANIFEST_SHA256 = (
-    "670919a8009d41bd1ee9e8ddd141eb918c09dff8cd7a9d225f3202f3d6076e2e"
+    "703f7eff73298acbf4098b31a9e1a7b50b9a8579515cfd596476f00cace6755f"
 )
 EXPECTED_SOURCE_REPOSITORY = "Dhanunjay-Divi/NoopBandSDK"
-EXPECTED_SOURCE_REVISION = "a8f94b5cbda329eaf7793c5a2cece94fb568acc0"
+EXPECTED_SOURCE_REVISION = "a486768efb873b57515926740d3efa19787de612"
 EXPORT_DIRECTORIES = ("contract", "production", "test-support")
 EXPECTED_INTEGRATION_FILES = {
     "Package.swift": "16fdef516135df5e4df8dd6c260e910e41ca3a6091e9151ba058e8ce2da95053",
     "Tests/NoopBandSDKTests/NoopBandSDKArtifactTests.swift": (
-        "b0a315f1c62107ed8c079ee6dcd3c6ab6efa549300642b18caf2840913a8425c"
+        "2704fd896899bfca64de46ea8b10ef64a7ca7dff6ea6ebe6f30196ac8733d8c7"
     ),
 }
 EXPECTED_TOP_LEVEL_ENTRIES = {

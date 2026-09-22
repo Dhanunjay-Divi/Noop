@@ -64,7 +64,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-a8f94b5"
+            wrapperRevision: "artifact-a486768"
         )
         try await completeConnection(
             session,
@@ -92,7 +92,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "a8f94b5cbda329eaf7793c5a2cece94fb568acc0"
+            "a486768efb873b57515926740d3efa19787de612"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let generation = try await session.beginScan()
@@ -127,7 +127,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-a8f94b5"
+            wrapperRevision: "artifact-a486768"
         )
         try await completeConnection(
             session,
@@ -193,7 +193,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-a8f94b5"
+            wrapperRevision: "artifact-a486768"
         )
         try await completeConnection(
             session,
@@ -537,12 +537,12 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         async throws
     {
         let retained = BandHistoryRange(
-            startDeviceTimeMilliseconds: 2_000,
-            endDeviceTimeMilliseconds: 3_000
+            startDeviceTimeMilliseconds: 40_000,
+            endDeviceTimeMilliseconds: 49_999
         )
         let firstLost = BandHistoryRange(
-            startDeviceTimeMilliseconds: 1_000,
-            endDeviceTimeMilliseconds: 1_999
+            startDeviceTimeMilliseconds: 30_000,
+            endDeviceTimeMilliseconds: 39_999
         )
         let (session, generation) = try await readyHistorySession()
         let token = try await session.beginOperation(.history)

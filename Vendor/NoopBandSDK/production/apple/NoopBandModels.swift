@@ -65,6 +65,7 @@ public enum BandSessionState: String, Codable, Sendable {
     case incompatible
     case rejected
     case securityFailure
+    case firmwareFailure
 }
 
 public enum BandConnectionPhase: String, Codable, Sendable {
@@ -105,6 +106,11 @@ public enum BandOperationClass: String, Codable, Sendable {
     case alarm
     case sampling
     case firmware
+}
+
+public enum BandFirmwareFailureDisposition: String, Codable, Sendable {
+    case recoverable
+    case terminal
 }
 
 public enum BandProvenanceLane: String, Codable, Sendable {
@@ -280,6 +286,7 @@ public struct BandCapabilityReport: Equatable, Codable, Sendable {
               ),
               (0 ... 255).contains(historyDays),
               !capabilities.isEmpty,
+              historyStreams.isEmpty || historyDays > 0,
               liveStreams.union(historyStreams).allSatisfy({
                   capabilities.contains(requiredCapability(for: $0))
               })
@@ -497,6 +504,22 @@ public struct BandHistoryChunk: Equatable, Codable, Sendable {
         try retainedRange?.validate()
         try firstLostRange?.validate()
         try batches.forEach { try $0.validate(expectedLane: .history) }
+        if overflowed {
+            guard let retainedRange,
+                  let firstLostRange,
+                  firstLostRange.endDeviceTimeMilliseconds
+                    < retainedRange.startDeviceTimeMilliseconds,
+                  batches.allSatisfy({ batch in
+                      batch.samples.allSatisfy { sample in
+                          retainedRange.startDeviceTimeMilliseconds
+                            ... retainedRange.endDeviceTimeMilliseconds
+                            ~= sample.identity.deviceTimeMilliseconds
+                      }
+                  })
+            else {
+                throw BandFailureCategory.invalidInput
+            }
+        }
     }
 }
 

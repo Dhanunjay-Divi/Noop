@@ -12,19 +12,23 @@ Last updated: **2026-09-22**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: protected `NoopBandSDK` PR `#15` is merged at
-  `a8f94b5cbda329eaf7793c5a2cece94fb568acc0`. Two independent clean exports
+- Current state: `NoopBandSDK` PR `#16` is merged normally at
+  `a486768efb873b57515926740d3efa19787de612`. Two independent clean exports
   were byte-identical; the ten-file export manifest SHA-256 is
-  `670919a8009d41bd1ee9e8ddd141eb918c09dff8cd7a9d225f3202f3d6076e2e`
-  and the app-owned Swift wrapper SHA-256 is
-  `b0a315f1c62107ed8c079ee6dcd3c6ab6efa549300642b18caf2840913a8425c`.
+  `703f7eff73298acbf4098b31a9e1a7b50b9a8579515cfd596476f00cace6755f`
+  and their aggregate eleven-file export-tree SHA-256 is
+  `fb1ec8080b2ddce6ceb1e2e56f8d855afbdbef80ca24de5172b5e3c5af306662`.
+  The app-owned Swift wrapper SHA-256 is
+  `2704fd896899bfca64de46ea8b10ef64a7ca7dff6ea6ebe6f30196ac8733d8c7`.
   Export-manifest schema `1` remains unchanged; the negotiated capability
   contract is schema `2`. It separates `liveStreams` from `historyStreams`,
   binds retained and first-lost overflow ranges through acceptance and durable
   receipt, blocks established authentication/security invalidation while
-  persistence is unresolved, and revalidates Apple scan authority after the
-  diagnostics actor suspension. The SDK passed Swift 51/51, Kotlin 55/55 plus
-  `installDist`, shared conformance 35/35, and the 51-file repository gate.
+  persistence is unresolved, validates retained sample bounds and loss-range
+  chronology, rejects advertised history with zero retention, and exposes a
+  distinct terminal firmware-failure state. The SDK passed Swift 52/52,
+  Kotlin 56/56 plus `installDist`, shared conformance 36/36, and the 52-file
+  repository gate. Independent final review found no P0-P2 issue.
   The app artifact verifier and all 8 adversarial tests pass; the vendored
   Swift package passes 15/15; the real macOS app boundary passes 9/9; Android
   Full integration passes 10/10; and Android Demo plus Full instrumentation

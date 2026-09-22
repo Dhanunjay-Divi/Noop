@@ -1422,7 +1422,8 @@ public actor BandSessionMachine {
 
     public func failOperation(
         _ token: BandOperationToken,
-        category: BandFailureCategory
+        category: BandFailureCategory,
+        firmwareDisposition: BandFirmwareFailureDisposition = .recoverable
     ) async throws {
         let operationDiagnosticKind = diagnosticKind(for: token.operationClass)
         do {
@@ -1437,10 +1438,26 @@ public actor BandSessionMachine {
             )
             throw failure
         }
+        guard token.operationClass == .firmware
+                || firmwareDisposition == .recoverable
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: operationDiagnosticKind,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
+        let terminalFirmwareFailure =
+            token.operationClass == .firmware
+            && firmwareDisposition == .terminal
         let invalidatesSession =
             category == .securityFailure
             || category == .authentication
             || category == .disconnected
+            || terminalFirmwareFailure
         if (token.operationClass == .history && pendingHistory != nil)
             || (invalidatesSession && hasPendingPersistence)
         {
@@ -1455,6 +1472,8 @@ public actor BandSessionMachine {
         }
         if category == .securityFailure {
             invalidateAuthenticatedSession(nextState: .securityFailure)
+        } else if terminalFirmwareFailure {
+            invalidateAuthenticatedSession(nextState: .firmwareFailure)
         } else if category == .authentication {
             invalidateAuthenticatedSession(nextState: .rejected)
         } else if token.operationClass == .firmware {
@@ -1471,11 +1490,11 @@ public actor BandSessionMachine {
         await diagnostics.record(
             BandDiagnosticEvent(
                 kind: operationDiagnosticKind,
-                outcome: .failed,
+                outcome: terminalFirmwareFailure ? .terminal : .failed,
                 failureCategory: category
             )
         )
-        if category == .disconnected {
+        if category == .disconnected && !terminalFirmwareFailure {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .reconnect,
@@ -1498,7 +1517,8 @@ public actor BandSessionMachine {
         guard state != .idle,
               state != .incompatible,
               state != .rejected,
-              state != .securityFailure
+              state != .securityFailure,
+              state != .firmwareFailure
         else {
             throw BandFailureCategory.invalidState
         }

@@ -279,6 +279,7 @@ public enum BandConformanceRunner {
         "invalid_device_time_rejected",
         "history_operation_requires_own_receipt",
         "firmware_diagnostics_specific",
+        "firmware_terminal_failure",
         "history_nonadvancing_cursor_rejected",
         "utf8_length_cross_platform",
         "sampling_requires_sensor_capability",
@@ -341,6 +342,8 @@ public enum BandConformanceRunner {
             return try await historyOperationRequiresOwnReceipt()
         case "firmware_diagnostics_specific":
             return try await firmwareDiagnosticsSpecific()
+        case "firmware_terminal_failure":
+            return try await firmwareTerminalFailure()
         case "history_nonadvancing_cursor_rejected":
             return try await historyNonadvancingCursorRejected()
         case "utf8_length_cross_platform":
@@ -371,22 +374,25 @@ public enum BandConformanceRunner {
     }
 
     private static func readySession(
-        capabilities: BandCapabilityReport = VirtualBandFixtures.capabilities
+        capabilities: BandCapabilityReport = VirtualBandFixtures.capabilities,
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
     )
         async throws -> (BandSessionMachine, UInt64)
     {
         let (session, generation, _) = try await readySessionWithToken(
-            capabilities: capabilities
+            capabilities: capabilities,
+            diagnostics: diagnostics
         )
         return (session, generation)
     }
 
     private static func readySessionWithToken(
-        capabilities: BandCapabilityReport = VirtualBandFixtures.capabilities
+        capabilities: BandCapabilityReport = VirtualBandFixtures.capabilities,
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
     )
         async throws -> (BandSessionMachine, UInt64, BandConnectionToken)
     {
-        let session = BandSessionMachine()
+        let session = BandSessionMachine(diagnostics: diagnostics)
         let generation = try await session.beginScan()
         let connectionToken = try await session.selectCandidate(
             VirtualBandFixtures.candidate,
@@ -1828,6 +1834,70 @@ public enum BandConformanceRunner {
             scenario: "firmware_diagnostics_specific",
             events: events,
             snapshot: await session.snapshot()
+        )
+    }
+
+    private static func firmwareTerminalFailure()
+        async throws -> BandConformanceResult
+    {
+        let report = BandCapabilityReport(
+            schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            hardwareRevision: VirtualBandFixtures.identity.hardwareRevision,
+            firmwareVersion: VirtualBandFixtures.identity.firmwareVersion,
+            historyDays: 0,
+            capabilities: [.heartRate, .firmwareUpdate],
+            liveStreams: [.heartRate],
+            historyStreams: []
+        )
+        let diagnostics = BandDiagnosticsRecorder()
+        let (session, _) = try await readySession(
+            capabilities: report,
+            diagnostics: diagnostics
+        )
+        var events = ["ready"]
+        let token = try await session.beginOperation(.firmware)
+        events.append("firmware_started")
+        try await session.failOperation(
+            token,
+            category: .updateVerification,
+            firmwareDisposition: .terminal
+        )
+        events.append("firmware_terminal")
+        let terminalGeneration = await session.snapshot().generation
+
+        do {
+            _ = try await session.interruptForReconnect(
+                callbackGeneration: terminalGeneration
+            )
+        } catch BandFailureCategory.invalidState {
+            events.append("reconnect_rejected")
+        }
+
+        if await diagnostics.snapshot().last == BandDiagnosticEvent(
+            kind: .firmware,
+            outcome: .terminal,
+            failureCategory: .updateVerification
+        ) {
+            events.append("terminal_diagnostic_recorded")
+        }
+
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.beginScan()
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("same_session_restart_rejected")
+        }
+
+        let replacement = BandSessionMachine()
+        _ = try await replacement.beginScan()
+        events.append("replacement_scan_started")
+        return result(
+            scenario: "firmware_terminal_failure",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
         )
     }
 

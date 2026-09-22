@@ -232,6 +232,7 @@ object BandConformanceRunner {
         "invalid_device_time_rejected",
         "history_operation_requires_own_receipt",
         "firmware_diagnostics_specific",
+        "firmware_terminal_failure",
         "history_nonadvancing_cursor_rejected",
         "utf8_length_cross_platform",
         "sampling_requires_sensor_capability",
@@ -276,6 +277,7 @@ object BandConformanceRunner {
         "history_operation_requires_own_receipt" ->
             historyOperationRequiresOwnReceipt()
         "firmware_diagnostics_specific" -> firmwareDiagnosticsSpecific()
+        "firmware_terminal_failure" -> firmwareTerminalFailure()
         "history_nonadvancing_cursor_rejected" ->
             historyNonadvancingCursorRejected()
         "utf8_length_cross_platform" -> utf8LengthCrossPlatform()
@@ -297,15 +299,20 @@ object BandConformanceRunner {
 
     private fun readySession(
         capabilities: BandCapabilityReport = VirtualBandFixtures.capabilities,
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
     ): Pair<BandSessionMachine, Long> {
-        val (session, generation) = readySessionWithToken(capabilities)
+        val (session, generation) = readySessionWithToken(
+            capabilities,
+            diagnostics,
+        )
         return session to generation
     }
 
     private fun readySessionWithToken(
         capabilities: BandCapabilityReport = VirtualBandFixtures.capabilities,
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
     ): Triple<BandSessionMachine, Long, BandConnectionToken> {
-        val session = BandSessionMachine()
+        val session = BandSessionMachine(diagnostics)
         val generation = session.beginScan()
         val connectionToken =
             session.selectCandidate(VirtualBandFixtures.candidate, generation)
@@ -1601,6 +1608,70 @@ object BandConformanceRunner {
             "firmware_diagnostics_specific",
             events,
             session.snapshot(),
+        )
+    }
+
+    private fun firmwareTerminalFailure(): BandConformanceResult {
+        val report = BandCapabilityReport(
+            schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
+            protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
+            hardwareRevision = VirtualBandFixtures.identity.hardwareRevision,
+            firmwareVersion = VirtualBandFixtures.identity.firmwareVersion,
+            historyDays = 0,
+            capabilities = setOf(
+                BandCapability.HEART_RATE,
+                BandCapability.FIRMWARE_UPDATE,
+            ),
+            liveStreams = setOf(BandStreamKind.HEART_RATE),
+            historyStreams = emptySet(),
+        )
+        val diagnostics = BandDiagnosticsRecorder()
+        val (session, _) = readySession(report, diagnostics)
+        val events = mutableListOf("ready")
+        val token = session.beginOperation(BandOperationClass.FIRMWARE)
+        events += "firmware_started"
+        session.failOperation(
+            token,
+            BandFailureCategory.UPDATE_VERIFICATION,
+            BandFirmwareFailureDisposition.TERMINAL,
+        )
+        events += "firmware_terminal"
+        val terminalGeneration = session.snapshot().generation
+
+        try {
+            session.interruptForReconnect(terminalGeneration)
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.INVALID_STATE) {
+                throw error
+            }
+            events += "reconnect_rejected"
+        }
+
+        if (
+            diagnostics.snapshot().last() == BandDiagnosticEvent(
+                BandDiagnosticKind.FIRMWARE,
+                BandDiagnosticOutcome.TERMINAL,
+                failureCategory = BandFailureCategory.UPDATE_VERIFICATION,
+            )
+        ) {
+            events += "terminal_diagnostic_recorded"
+        }
+
+        var failure: BandFailureCategory? = null
+        try {
+            session.beginScan()
+        } catch (error: BandException) {
+            failure = error.category
+            events += "same_session_restart_rejected"
+        }
+
+        BandSessionMachine().beginScan()
+        events += "replacement_scan_started"
+        return result(
+            "firmware_terminal_failure",
+            events,
+            session.snapshot(),
+            failure = failure,
         )
     }
 

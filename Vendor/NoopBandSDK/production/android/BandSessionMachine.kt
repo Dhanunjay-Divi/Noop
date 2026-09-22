@@ -1349,6 +1349,8 @@ class BandSessionMachine(
     fun failOperation(
         token: BandOperationToken,
         category: BandFailureCategory,
+        firmwareDisposition: BandFirmwareFailureDisposition =
+            BandFirmwareFailureDisposition.RECOVERABLE,
     ) {
         val operationDiagnosticKind = diagnosticKind(token.operationClass)
         try {
@@ -1363,10 +1365,27 @@ class BandSessionMachine(
             )
             throw error
         }
+        if (
+            token.operationClass != BandOperationClass.FIRMWARE &&
+            firmwareDisposition != BandFirmwareFailureDisposition.RECOVERABLE
+        ) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    operationDiagnosticKind,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
+        val terminalFirmwareFailure =
+            token.operationClass == BandOperationClass.FIRMWARE &&
+                firmwareDisposition == BandFirmwareFailureDisposition.TERMINAL
         val invalidatesSession =
             category == BandFailureCategory.SECURITY_FAILURE ||
                 category == BandFailureCategory.AUTHENTICATION ||
-                category == BandFailureCategory.DISCONNECTED
+                category == BandFailureCategory.DISCONNECTED ||
+                terminalFirmwareFailure
         if (
             (
                 token.operationClass == BandOperationClass.HISTORY &&
@@ -1385,6 +1404,8 @@ class BandSessionMachine(
         }
         if (category == BandFailureCategory.SECURITY_FAILURE) {
             invalidateAuthenticatedSession(BandSessionState.SECURITY_FAILURE)
+        } else if (terminalFirmwareFailure) {
+            invalidateAuthenticatedSession(BandSessionState.FIRMWARE_FAILURE)
         } else if (category == BandFailureCategory.AUTHENTICATION) {
             invalidateAuthenticatedSession(BandSessionState.REJECTED)
         } else if (token.operationClass == BandOperationClass.FIRMWARE) {
@@ -1401,11 +1422,18 @@ class BandSessionMachine(
         diagnostics.record(
             BandDiagnosticEvent(
                 operationDiagnosticKind,
-                BandDiagnosticOutcome.FAILED,
+                if (terminalFirmwareFailure) {
+                    BandDiagnosticOutcome.TERMINAL
+                } else {
+                    BandDiagnosticOutcome.FAILED
+                },
                 failureCategory = category,
             ),
         )
-        if (category == BandFailureCategory.DISCONNECTED) {
+        if (
+            category == BandFailureCategory.DISCONNECTED &&
+            !terminalFirmwareFailure
+        ) {
             diagnostics.record(
                 BandDiagnosticEvent(
                     BandDiagnosticKind.RECONNECT,
@@ -1427,7 +1455,8 @@ class BandSessionMachine(
             state == BandSessionState.IDLE ||
             state == BandSessionState.INCOMPATIBLE ||
             state == BandSessionState.REJECTED ||
-            state == BandSessionState.SECURITY_FAILURE
+            state == BandSessionState.SECURITY_FAILURE ||
+            state == BandSessionState.FIRMWARE_FAILURE
         ) {
             fail(BandFailureCategory.INVALID_STATE)
         }

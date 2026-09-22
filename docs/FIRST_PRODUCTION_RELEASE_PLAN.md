@@ -285,8 +285,11 @@ PR `#15` adds capability schema v2 with separate live/history streams,
 retained and first-lost overflow ranges bound to durable receipts, pending
 persistence protection for established failures, and scan-authority
 revalidation after diagnostics suspension.
+PR `#16` validates retained sample bounds and circular-loss chronology,
+rejects history streams with zero retained history, and distinguishes
+recoverable from terminal firmware failure.
 Current protected `main` is
-`a8f94b5cbda329eaf7793c5a2cece94fb568acc0`. The app consumes the deterministic
+`a486768efb873b57515926740d3efa19787de612`. The app consumes the deterministic
 export from that current protected revision through a digest-pinned,
 supplier-artifact-free boundary. The repository is temporarily public as of
 2026-09-22; D-056 still requires private visibility before release.

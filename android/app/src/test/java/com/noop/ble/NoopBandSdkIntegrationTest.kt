@@ -36,7 +36,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "a8f94b5cbda329eaf7793c5a2cece94fb568acc0",
+            "a486768efb873b57515926740d3efa19787de612",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -71,7 +71,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-a8f94b5",
+            wrapperRevision = "artifact-a486768",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
@@ -132,7 +132,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-a8f94b5",
+            wrapperRevision = "artifact-a486768",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
@@ -571,7 +571,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-a8f94b5",
+            wrapperRevision = "artifact-a486768",
         )
         completeConnection(session, identity, connectionToken, generation)
         val mutableCapabilities = mutableSetOf(BandCapability.HEART_RATE)
@@ -608,7 +608,7 @@ class NoopBandSdkIntegrationTest {
             .map { scenarios.getJSONObject(it) }
             .filter { it.getBoolean("automated") }
 
-        assertEquals(35, automated.size)
+        assertEquals(36, automated.size)
         assertEquals(
             automated.map { it.getString("id") },
             BandConformanceRunner.automatedScenarios,
@@ -678,7 +678,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-a8f94b5",
+            wrapperRevision = "artifact-a486768",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
@@ -766,7 +766,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-a8f94b5",
+            wrapperRevision = "artifact-a486768",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(

@@ -25,6 +25,7 @@ enum class BandDiagnosticOutcome {
     STALE,
     INTERRUPTED,
     FAILED,
+    TERMINAL,
 }
 
 enum class BandCountBucket {
