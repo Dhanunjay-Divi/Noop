@@ -77,6 +77,31 @@ class BandDiagnosticsRecorder(capacity: Int = 128) {
 
     @Synchronized
     fun record(event: BandDiagnosticEvent) {
+        append(event)
+    }
+
+    @Synchronized
+    fun record(events: List<BandDiagnosticEvent>) {
+        events.forEach(::append)
+    }
+
+    @Synchronized
+    fun recordCoalescingConsecutive(event: BandDiagnosticEvent) {
+        val last = events.peekLast()
+        if (
+            last?.kind == event.kind &&
+            last.outcome == event.outcome &&
+            last.failureCategory == null &&
+            event.failureCategory == null
+        ) {
+            events.removeLast()
+            events.addLast(event)
+            return
+        }
+        append(event)
+    }
+
+    private fun append(event: BandDiagnosticEvent) {
         if (events.size == capacity) {
             events.removeFirst()
         }

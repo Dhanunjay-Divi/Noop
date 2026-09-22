@@ -3,6 +3,7 @@ package com.noop.ble
 import com.noop.bandsdk.BandConformanceRunner
 import com.noop.bandsdk.BandCapability
 import com.noop.bandsdk.BandCapabilityReport
+import com.noop.bandsdk.BandConnectionToken
 import com.noop.bandsdk.BandDiagnosticEvent
 import com.noop.bandsdk.BandDiagnosticKind
 import com.noop.bandsdk.BandDiagnosticOutcome
@@ -33,7 +34,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "8fb464471fdd4ae09d5750feedcc25d50bdb1c20",
+            "7794bae631c1704e18ae5c341fbc32e89c9dc647",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -55,7 +56,7 @@ class NoopBandSdkIntegrationTest {
             historyCheckpoint = checkpoint,
         )
         val generation = session.beginScan()
-        session.selectCandidate(
+        val connectionToken = session.selectCandidate(
             BandPairingCandidate(
                 handle = "synthetic-candidate",
                 compatible = true,
@@ -70,7 +71,7 @@ class NoopBandSdkIntegrationTest {
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
             wrapperRevision = "artifact-55fdd89",
         )
-        completeConnection(session, identity, generation)
+        completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
             BandCapabilityReport(
                 schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
@@ -80,6 +81,7 @@ class NoopBandSdkIntegrationTest {
                 historyDays = 7,
                 capabilities = setOf(BandCapability.HEART_RATE),
             ),
+            connectionToken,
             generation,
         )
         assertEquals(
@@ -113,7 +115,7 @@ class NoopBandSdkIntegrationTest {
         val diagnostics = BandDiagnosticsRecorder()
         val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
         val generation = session.beginScan()
-        session.selectCandidate(
+        val connectionToken = session.selectCandidate(
             BandPairingCandidate(
                 handle = "synthetic-candidate",
                 compatible = true,
@@ -128,7 +130,7 @@ class NoopBandSdkIntegrationTest {
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
             wrapperRevision = "artifact-55fdd89",
         )
-        completeConnection(session, identity, generation)
+        completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
             BandCapabilityReport(
                 schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
@@ -138,6 +140,7 @@ class NoopBandSdkIntegrationTest {
                 historyDays = 7,
                 capabilities = setOf(BandCapability.BATTERY),
             ),
+            connectionToken,
             generation,
         )
 
@@ -313,7 +316,7 @@ class NoopBandSdkIntegrationTest {
     fun capabilityAuthorizationUsesImmutableIdempotentSnapshot() {
         val session = NoopBandSdkBoundary.newSession()
         val generation = session.beginScan()
-        session.selectCandidate(
+        val connectionToken = session.selectCandidate(
             BandPairingCandidate(
                 handle = "synthetic-candidate",
                 compatible = true,
@@ -328,7 +331,7 @@ class NoopBandSdkIntegrationTest {
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
             wrapperRevision = "artifact-55fdd89",
         )
-        completeConnection(session, identity, generation)
+        completeConnection(session, identity, connectionToken, generation)
         val mutableCapabilities = mutableSetOf(BandCapability.HEART_RATE)
         val report = BandCapabilityReport(
             schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
@@ -338,8 +341,8 @@ class NoopBandSdkIntegrationTest {
             historyDays = 7,
             capabilities = mutableCapabilities,
         )
-        session.acceptCapabilities(report, generation)
-        session.acceptCapabilities(report, generation)
+        session.acceptCapabilities(report, connectionToken, generation)
+        session.acceptCapabilities(report, connectionToken, generation)
         mutableCapabilities += BandCapability.FIRMWARE_UPDATE
 
         val failure = try {
@@ -414,7 +417,7 @@ class NoopBandSdkIntegrationTest {
     ): Pair<BandSessionMachine, Long> {
         val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
         val generation = session.beginScan()
-        session.selectCandidate(
+        val connectionToken = session.selectCandidate(
             BandPairingCandidate(
                 handle = "synthetic-candidate",
                 compatible = true,
@@ -429,7 +432,7 @@ class NoopBandSdkIntegrationTest {
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
             wrapperRevision = "artifact-55fdd89",
         )
-        completeConnection(session, identity, generation)
+        completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
             BandCapabilityReport(
                 schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
@@ -439,6 +442,7 @@ class NoopBandSdkIntegrationTest {
                 historyDays = 7,
                 capabilities = setOf(BandCapability.HEART_RATE),
             ),
+            connectionToken,
             generation,
         )
         return session to generation
@@ -447,11 +451,12 @@ class NoopBandSdkIntegrationTest {
     private fun completeConnection(
         session: BandSessionMachine,
         identity: BandIdentity,
+        token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
-        session.beginConnection(callbackGeneration)
-        session.beginAuthentication(callbackGeneration)
-        session.completeConnection(identity, callbackGeneration)
+        session.beginConnection(token, callbackGeneration)
+        session.beginAuthentication(token, callbackGeneration)
+        session.completeConnection(identity, token, callbackGeneration)
     }
 
     private fun org.json.JSONArray.toStringList(): List<String> =

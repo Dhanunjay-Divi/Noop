@@ -45,11 +45,12 @@ private fun BandSessionMachine.durablyCommitLiveBatch(
 
 private fun BandSessionMachine.completeConnectionForConformance(
     identity: BandIdentity,
+    token: BandConnectionToken,
     callbackGeneration: Long,
 ) {
-    beginConnection(callbackGeneration)
-    beginAuthentication(callbackGeneration)
-    completeConnection(identity, callbackGeneration)
+    beginConnection(token, callbackGeneration)
+    beginAuthentication(token, callbackGeneration)
+    completeConnection(identity, token, callbackGeneration)
 }
 
 data class BandConformanceResult(
@@ -280,15 +281,24 @@ object BandConformanceRunner {
     private fun readySession(
         capabilities: BandCapabilityReport = VirtualBandFixtures.capabilities,
     ): Pair<BandSessionMachine, Long> {
+        val (session, generation) = readySessionWithToken(capabilities)
+        return session to generation
+    }
+
+    private fun readySessionWithToken(
+        capabilities: BandCapabilityReport = VirtualBandFixtures.capabilities,
+    ): Triple<BandSessionMachine, Long, BandConnectionToken> {
         val session = BandSessionMachine()
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        val connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            connectionToken,
             generation,
         )
-        session.acceptCapabilities(capabilities, generation)
-        return session to generation
+        session.acceptCapabilities(capabilities, connectionToken, generation)
+        return Triple(session, generation, connectionToken)
     }
 
     private fun happyPath(): BandConformanceResult {
@@ -299,14 +309,20 @@ object BandConformanceRunner {
 
         val generation = session.beginScan()
         events += "scan_started"
-        session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        val connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
         events += "candidate_selected"
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            connectionToken,
             generation,
         )
         events += "connected"
-        session.acceptCapabilities(VirtualBandFixtures.capabilities, generation)
+        session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            connectionToken,
+            generation,
+        )
         events += "capabilities_accepted"
         session.beginLive()
         accepted += session.durablyCommitLiveBatch(
@@ -808,9 +824,11 @@ object BandConformanceRunner {
     private fun operationCapabilityFailsClosed(): BandConformanceResult {
         val session = BandSessionMachine()
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        val connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            connectionToken,
             generation,
         )
         session.acceptCapabilities(
@@ -825,6 +843,7 @@ object BandConformanceRunner {
                     BandCapability.HEART_RATE,
                 ),
             ),
+            connectionToken,
             generation,
         )
         val events = mutableListOf("ready")
@@ -878,12 +897,17 @@ object BandConformanceRunner {
         val events = mutableListOf<String>()
         val generation = session.beginScan()
         events += "scan_started"
-        session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        val connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
         events += "candidate_selected"
         val identity = VirtualBandFixtures.identity.copy(
             protocolVersion = "noop-band-v2",
         )
-        session.completeConnectionForConformance(identity, generation)
+        session.completeConnectionForConformance(
+            identity,
+            connectionToken,
+            generation,
+        )
         events += "connected"
         val report = BandCapabilityReport(
             schemaVersion = 2,
@@ -895,7 +919,7 @@ object BandConformanceRunner {
         )
         var failure: BandFailureCategory? = null
         try {
-            session.acceptCapabilities(report, generation)
+            session.acceptCapabilities(report, connectionToken, generation)
         } catch (error: BandException) {
             failure = error.category
             events += "capability_rejected"
@@ -988,12 +1012,18 @@ object BandConformanceRunner {
         )
         val session = BandSessionMachine(restoredHistoryCheckpoint = checkpoint)
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        val connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            connectionToken,
             generation,
         )
-        session.acceptCapabilities(VirtualBandFixtures.capabilities, generation)
+        session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            connectionToken,
+            generation,
+        )
         val events = mutableListOf("ready")
         if (session.snapshot().acknowledgedHistoryCursor != "cursor-2") {
             fail(BandFailureCategory.INTERNAL_FAILURE)
@@ -1299,7 +1329,8 @@ object BandConformanceRunner {
     }
 
     private fun staleCapabilityCallbackRejected(): BandConformanceResult {
-        val (session, oldGeneration) = readySession()
+        val (session, oldGeneration, oldConnectionToken) =
+            readySessionWithToken()
         val events = mutableListOf("ready")
         val reconnectGeneration =
             session.interruptForReconnect(oldGeneration)
@@ -1309,6 +1340,7 @@ object BandConformanceRunner {
         try {
             session.acceptCapabilities(
                 VirtualBandFixtures.capabilities,
+                oldConnectionToken,
                 oldGeneration,
             )
         } catch (error: BandException) {
@@ -1409,9 +1441,11 @@ object BandConformanceRunner {
                 throw error
             }
         }
-        session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        val initialConnectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            initialConnectionToken,
             generation,
         )
         val report = BandCapabilityReport(
@@ -1425,20 +1459,30 @@ object BandConformanceRunner {
                 BandCapability.FIRMWARE_UPDATE,
             ),
         )
-        session.acceptCapabilities(report, generation)
+        session.acceptCapabilities(
+            report,
+            initialConnectionToken,
+            generation,
+        )
         val events = mutableListOf("ready")
         val token = session.beginOperation(BandOperationClass.FIRMWARE)
         session.completeOperation(token)
         val postFirmwareGeneration = session.beginScan()
-        session.selectCandidate(
-            VirtualBandFixtures.candidate,
-            postFirmwareGeneration,
-        )
+        val postFirmwareConnectionToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                postFirmwareGeneration,
+            )
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            postFirmwareConnectionToken,
             postFirmwareGeneration,
         )
-        session.acceptCapabilities(report, postFirmwareGeneration)
+        session.acceptCapabilities(
+            report,
+            postFirmwareConnectionToken,
+            postFirmwareGeneration,
+        )
         session.beginLive()
         try {
             session.beginOperation(BandOperationClass.FIRMWARE)
@@ -1451,15 +1495,21 @@ object BandConformanceRunner {
         val staleToken = session.beginOperation(BandOperationClass.FIRMWARE)
         session.interruptForReconnect(postFirmwareGeneration)
         val recoveryGeneration = session.beginScan()
-        session.selectCandidate(
-            VirtualBandFixtures.candidate,
-            recoveryGeneration,
-        )
+        val recoveryConnectionToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                recoveryGeneration,
+            )
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            recoveryConnectionToken,
             recoveryGeneration,
         )
-        session.acceptCapabilities(report, recoveryGeneration)
+        session.acceptCapabilities(
+            report,
+            recoveryConnectionToken,
+            recoveryGeneration,
+        )
         try {
             session.completeOperation(staleToken)
         } catch (error: BandException) {
@@ -1617,9 +1667,11 @@ object BandConformanceRunner {
         )
         val session = BandSessionMachine(restoredHistoryCheckpoint = checkpoint)
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        val connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            connectionToken,
             generation,
         )
         val capabilities = VirtualBandFixtures.capabilities.copy(
@@ -1627,7 +1679,7 @@ object BandConformanceRunner {
                 VirtualBandFixtures.capabilities.capabilities +
                     BandCapability.ACCELEROMETER,
         )
-        session.acceptCapabilities(capabilities, generation)
+        session.acceptCapabilities(capabilities, connectionToken, generation)
         val events = mutableListOf("ready")
         val next = BandSample(
             identity = BandSampleIdentity(
@@ -1693,12 +1745,18 @@ object BandConformanceRunner {
         val diagnostics = BandDiagnosticsRecorder()
         val session = BandSessionMachine(diagnostics)
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        val connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            connectionToken,
             generation,
         )
-        session.acceptCapabilities(VirtualBandFixtures.capabilities, generation)
+        session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            connectionToken,
+            generation,
+        )
         val events = mutableListOf("ready")
         val cancelled = session.beginOperation(BandOperationClass.BATTERY)
         session.cancelOperation(cancelled)
@@ -1774,16 +1832,19 @@ object BandConformanceRunner {
         }
         val replacement = BandSessionMachine(diagnostics)
         val replacementGeneration = replacement.beginScan()
-        replacement.selectCandidate(
-            VirtualBandFixtures.candidate,
-            replacementGeneration,
-        )
+        val replacementConnectionToken =
+            replacement.selectCandidate(
+                VirtualBandFixtures.candidate,
+                replacementGeneration,
+            )
         replacement.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            replacementConnectionToken,
             replacementGeneration,
         )
         replacement.acceptCapabilities(
             VirtualBandFixtures.capabilities,
+            replacementConnectionToken,
             replacementGeneration,
         )
         events += "replacement_session_ready"
@@ -1801,11 +1862,16 @@ object BandConformanceRunner {
         var failure: BandFailureCategory? = null
 
         val oldGeneration = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate, oldGeneration)
-        session.beginConnection(oldGeneration)
+        val oldConnectionToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                oldGeneration,
+            )
+        session.beginConnection(oldConnectionToken, oldGeneration)
         events += "connection_started"
         session.failConnection(
             BandFailureCategory.TIMEOUT,
+            oldConnectionToken,
             BandConnectionPhase.CONNECTION,
             oldGeneration,
         )
@@ -1816,11 +1882,16 @@ object BandConformanceRunner {
         }
 
         val currentGeneration = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate, currentGeneration)
-        session.beginConnection(currentGeneration)
-        session.beginAuthentication(currentGeneration)
+        val currentConnectionToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                currentGeneration,
+            )
+        session.beginConnection(currentConnectionToken, currentGeneration)
+        session.beginAuthentication(currentConnectionToken, currentGeneration)
         try {
             session.cancelConnection(
+                oldConnectionToken,
                 BandConnectionPhase.CONNECTION,
                 oldGeneration,
             )
@@ -1833,6 +1904,7 @@ object BandConformanceRunner {
         try {
             session.failConnection(
                 BandFailureCategory.TIMEOUT,
+                oldConnectionToken,
                 BandConnectionPhase.CONNECTION,
                 oldGeneration,
             )
@@ -1854,6 +1926,7 @@ object BandConformanceRunner {
         try {
             session.completeConnection(
                 VirtualBandFixtures.identity,
+                oldConnectionToken,
                 oldGeneration,
             )
         } catch (error: BandException) {
@@ -1862,11 +1935,13 @@ object BandConformanceRunner {
         }
         session.completeConnection(
             VirtualBandFixtures.identity,
+            currentConnectionToken,
             currentGeneration,
         )
         events += "connected"
         session.acceptCapabilities(
             VirtualBandFixtures.capabilities,
+            currentConnectionToken,
             currentGeneration,
         )
         events += "capabilities_accepted"
@@ -1921,12 +1996,14 @@ object BandConformanceRunner {
         val events = mutableListOf<String>()
 
         val cancellationGeneration = session.beginScan()
-        session.selectCandidate(
-            VirtualBandFixtures.candidate,
-            cancellationGeneration,
-        )
-        session.beginConnection(cancellationGeneration)
+        val cancellationToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                cancellationGeneration,
+            )
+        session.beginConnection(cancellationToken, cancellationGeneration)
         session.cancelConnection(
+            cancellationToken,
             BandConnectionPhase.CONNECTION,
             cancellationGeneration,
         )
@@ -1937,14 +2014,19 @@ object BandConformanceRunner {
         }
 
         val authenticationGeneration = session.beginScan()
-        session.selectCandidate(
-            VirtualBandFixtures.candidate,
+        val authenticationToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                authenticationGeneration,
+            )
+        session.beginConnection(authenticationToken, authenticationGeneration)
+        session.beginAuthentication(
+            authenticationToken,
             authenticationGeneration,
         )
-        session.beginConnection(authenticationGeneration)
-        session.beginAuthentication(authenticationGeneration)
         session.failConnection(
             BandFailureCategory.AUTHENTICATION,
+            authenticationToken,
             BandConnectionPhase.AUTHENTICATION,
             authenticationGeneration,
         )
@@ -1955,14 +2037,16 @@ object BandConformanceRunner {
         }
 
         val securityGeneration = session.beginScan()
-        session.selectCandidate(
-            VirtualBandFixtures.candidate,
-            securityGeneration,
-        )
-        session.beginConnection(securityGeneration)
-        session.beginAuthentication(securityGeneration)
+        val securityToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                securityGeneration,
+            )
+        session.beginConnection(securityToken, securityGeneration)
+        session.beginAuthentication(securityToken, securityGeneration)
         session.failConnection(
             BandFailureCategory.SECURITY_FAILURE,
+            securityToken,
             BandConnectionPhase.AUTHENTICATION,
             securityGeneration,
         )
@@ -1983,16 +2067,19 @@ object BandConformanceRunner {
         }
         val replacement = BandSessionMachine(diagnostics)
         val replacementGeneration = replacement.beginScan()
-        replacement.selectCandidate(
-            VirtualBandFixtures.candidate,
-            replacementGeneration,
-        )
+        val replacementConnectionToken =
+            replacement.selectCandidate(
+                VirtualBandFixtures.candidate,
+                replacementGeneration,
+            )
         replacement.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            replacementConnectionToken,
             replacementGeneration,
         )
         replacement.acceptCapabilities(
             VirtualBandFixtures.capabilities,
+            replacementConnectionToken,
             replacementGeneration,
         )
         events += "replacement_session_ready"
@@ -2034,13 +2121,16 @@ object BandConformanceRunner {
         val diagnostics = BandDiagnosticsRecorder()
         val session = BandSessionMachine(diagnostics)
         val generation = session.beginScan()
-        session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        val connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            connectionToken,
             generation,
         )
         session.acceptCapabilities(
             VirtualBandFixtures.capabilities,
+            connectionToken,
             generation,
         )
         val token = session.beginOperation(BandOperationClass.HISTORY)
@@ -2098,18 +2188,23 @@ object BandConformanceRunner {
         val events = mutableListOf<String>()
 
         val cancellationGeneration = session.beginScan()
-        session.selectCandidate(
-            VirtualBandFixtures.candidate,
-            cancellationGeneration,
-        )
+        val cancellationToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                cancellationGeneration,
+            )
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            cancellationToken,
             cancellationGeneration,
         )
-        session.cancelCapabilities(cancellationGeneration)
+        session.cancelCapabilities(cancellationToken, cancellationGeneration)
         events += "capability_cancelled"
         try {
-            session.cancelCapabilities(cancellationGeneration)
+            session.cancelCapabilities(
+                cancellationToken,
+                cancellationGeneration,
+            )
         } catch (error: BandException) {
             if (error.category != BandFailureCategory.STALE_CALLBACK) {
                 throw error
@@ -2118,22 +2213,26 @@ object BandConformanceRunner {
         }
 
         val timeoutGeneration = session.beginScan()
-        session.selectCandidate(
-            VirtualBandFixtures.candidate,
-            timeoutGeneration,
-        )
+        val timeoutToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                timeoutGeneration,
+            )
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            timeoutToken,
             timeoutGeneration,
         )
         session.failCapabilities(
             BandFailureCategory.TIMEOUT,
+            timeoutToken,
             timeoutGeneration,
         )
         events += "capability_timed_out"
         try {
             session.failCapabilities(
                 BandFailureCategory.INTERNAL_FAILURE,
+                timeoutToken,
                 timeoutGeneration,
             )
         } catch (error: BandException) {
@@ -2144,47 +2243,56 @@ object BandConformanceRunner {
         }
 
         val authenticationGeneration = session.beginScan()
-        session.selectCandidate(
-            VirtualBandFixtures.candidate,
-            authenticationGeneration,
-        )
+        val authenticationToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                authenticationGeneration,
+            )
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            authenticationToken,
             authenticationGeneration,
         )
         session.failCapabilities(
             BandFailureCategory.AUTHENTICATION,
+            authenticationToken,
             authenticationGeneration,
         )
         events += "capability_authentication_rejected"
 
         val disconnectedGeneration = session.beginScan()
-        session.selectCandidate(
-            VirtualBandFixtures.candidate,
-            disconnectedGeneration,
-        )
+        val disconnectedToken =
+            session.selectCandidate(
+                VirtualBandFixtures.candidate,
+                disconnectedGeneration,
+            )
         session.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            disconnectedToken,
             disconnectedGeneration,
         )
         session.failCapabilities(
             BandFailureCategory.DISCONNECTED,
+            disconnectedToken,
             disconnectedGeneration,
         )
         events += "capability_disconnected"
 
         val securitySession = BandSessionMachine(diagnostics)
         val securityGeneration = securitySession.beginScan()
-        securitySession.selectCandidate(
-            VirtualBandFixtures.candidate,
-            securityGeneration,
-        )
+        val securityToken =
+            securitySession.selectCandidate(
+                VirtualBandFixtures.candidate,
+                securityGeneration,
+            )
         securitySession.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            securityToken,
             securityGeneration,
         )
         securitySession.failCapabilities(
             BandFailureCategory.SECURITY_FAILURE,
+            securityToken,
             securityGeneration,
         )
         events += "capability_security_failure"
@@ -2199,16 +2307,19 @@ object BandConformanceRunner {
 
         val replacement = BandSessionMachine(diagnostics)
         val replacementGeneration = replacement.beginScan()
-        replacement.selectCandidate(
-            VirtualBandFixtures.candidate,
-            replacementGeneration,
-        )
+        val replacementConnectionToken =
+            replacement.selectCandidate(
+                VirtualBandFixtures.candidate,
+                replacementGeneration,
+            )
         replacement.completeConnectionForConformance(
             VirtualBandFixtures.identity,
+            replacementConnectionToken,
             replacementGeneration,
         )
         replacement.acceptCapabilities(
             VirtualBandFixtures.capabilities,
+            replacementConnectionToken,
             replacementGeneration,
         )
         events += "replacement_session_ready"

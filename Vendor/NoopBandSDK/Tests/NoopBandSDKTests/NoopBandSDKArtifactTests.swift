@@ -43,16 +43,20 @@ final class NoopBandSDKArtifactTests: XCTestCase {
     private func completeConnection(
         _ session: BandSessionMachine,
         identity: BandIdentity,
+        token: BandConnectionToken,
         callbackGeneration: UInt64
     ) async throws {
         try await session.beginConnection(
+            token: token,
             callbackGeneration: callbackGeneration
         )
         try await session.beginAuthentication(
+            token: token,
             callbackGeneration: callbackGeneration
         )
         try await session.completeConnection(
             identity,
+            token: token,
             callbackGeneration: callbackGeneration
         )
     }
@@ -60,10 +64,10 @@ final class NoopBandSDKArtifactTests: XCTestCase {
     private func readySession(
         report: BandCapabilityReport? = nil,
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
-    ) async throws -> (BandSessionMachine, UInt64) {
+    ) async throws -> (BandSessionMachine, UInt64, BandConnectionToken) {
         let session = BandSessionMachine(diagnostics: diagnostics)
         let generation = try await session.beginScan()
-        try await session.selectCandidate(
+        let connectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "synthetic-candidate",
                 compatible: true,
@@ -74,17 +78,19 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         try await completeConnection(
             session,
             identity: identity,
+            token: connectionToken,
             callbackGeneration: generation
         )
         try await session.acceptCapabilities(
             report ?? capabilities,
+            token: connectionToken,
             callbackGeneration: generation
         )
-        return (session, generation)
+        return (session, generation, connectionToken)
     }
 
     func testLiveAndHistoryUseOneDurableIdentitySet() async throws {
-        let (session, generation) = try await readySession()
+        let (session, generation, _) = try await readySession()
         let liveSample = sample(sequence: 1, time: 1_000, value: 72)
         let liveBatch = batch(lane: .live, samples: [liveSample, liveSample])
 
@@ -133,7 +139,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
     }
 
     func testHistoryCannotAdvanceWithoutMatchingDurableReceipt() async throws {
-        let (session, generation) = try await readySession()
+        let (session, generation, _) = try await readySession()
         let token = try await session.beginOperation(.history)
         let acceptance = try await session.stageHistoryChunk(
             BandHistoryChunk(
@@ -177,7 +183,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
     }
 
     func testReconnectRejectsStaleCallbacks() async throws {
-        let (session, oldGeneration) = try await readySession()
+        let (session, oldGeneration, _) = try await readySession()
         let reconnectGeneration = try await session.interruptForReconnect(
             callbackGeneration: oldGeneration
         )
@@ -215,7 +221,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
 
         let retryGeneration = try await session.beginScan()
         do {
-            try await session.selectCandidate(
+            _ = try await session.selectCandidate(
                 BandPairingCandidate(
                     handle: "stale-candidate",
                     compatible: true,
@@ -230,7 +236,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         snapshot = await session.snapshot()
         XCTAssertEqual(snapshot.state, .scanning)
 
-        try await session.selectCandidate(
+        _ = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "current-candidate",
                 compatible: true,
@@ -266,12 +272,13 @@ final class NoopBandSDKArtifactTests: XCTestCase {
 
     func testDuplicateCapabilityCallbacksCannotDestroyReadySession() async throws {
         let diagnostics = BandDiagnosticsRecorder()
-        let (session, generation) = try await readySession(
+        let (session, generation, connectionToken) = try await readySession(
             diagnostics: diagnostics
         )
 
         try await session.acceptCapabilities(
             capabilities,
+            token: connectionToken,
             callbackGeneration: generation
         )
         var snapshot = await session.snapshot()
@@ -288,6 +295,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         do {
             try await session.acceptCapabilities(
                 changed,
+                token: connectionToken,
                 callbackGeneration: generation
             )
             XCTFail("A changed late report must require fresh negotiation")
@@ -318,7 +326,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             historyDays: 7,
             capabilities: [.spo2]
         )
-        let (session, generation) = try await readySession(report: report)
+        let (session, generation, _) = try await readySession(report: report)
         let spo2 = BandSample(
             identity: BandSampleIdentity(
                 stream: .spo2,
@@ -348,7 +356,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
 
     func testLiveDeduplicationWaitsForDurableReceipt() async throws {
         let diagnostics = BandDiagnosticsRecorder()
-        let (session, generation) = try await readySession(
+        let (session, generation, _) = try await readySession(
             diagnostics: diagnostics
         )
         let liveBatch = batch(
@@ -420,7 +428,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             $0.outcome == .failed && $0.failureCategory == .storage
         })
         XCTAssertTrue(liveEvents.contains {
-            $0.outcome == .completed && $0.countBucket == .one
+            $0.outcome == .completed && $0.countBucket == .zero
         })
     }
 
@@ -434,7 +442,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             historyDays: 0,
             capabilities: [.heartRate]
         )
-        let (session, _) = try await readySession(
+        let (session, _, _) = try await readySession(
             report: report,
             diagnostics: diagnostics
         )
@@ -466,7 +474,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             historyDays: 7,
             capabilities: [.heartRate, .firmwareUpdate]
         )
-        let (session, generation) = try await readySession(
+        let (session, generation, _) = try await readySession(
             report: firmwareCapabilities
         )
         try await session.beginLive()
@@ -498,7 +506,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         }
 
         let postFirmwareGeneration = try await session.beginScan()
-        try await session.selectCandidate(
+        let postFirmwareConnectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "post-firmware-candidate",
                 compatible: true,
@@ -516,6 +524,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         try await completeConnection(
             session,
             identity: updatedIdentity,
+            token: postFirmwareConnectionToken,
             callbackGeneration: postFirmwareGeneration
         )
         try await session.acceptCapabilities(
@@ -527,6 +536,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                 historyDays: 7,
                 capabilities: [.heartRate, .firmwareUpdate]
             ),
+            token: postFirmwareConnectionToken,
             callbackGeneration: postFirmwareGeneration
         )
         snapshot = await session.snapshot()
@@ -544,7 +554,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             capabilities: [.heartRate, .firmwareUpdate]
         )
 
-        let (cancelledSession, _) = try await readySession(report: report)
+        let (cancelledSession, _, _) = try await readySession(report: report)
         let cancelledToken = try await cancelledSession.beginOperation(.firmware)
         try await cancelledSession.cancelOperation(cancelledToken)
         var snapshot = await cancelledSession.snapshot()
@@ -558,7 +568,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             XCTAssertEqual(error, .invalidState)
         }
 
-        let (failedSession, _) = try await readySession(report: report)
+        let (failedSession, _, _) = try await readySession(report: report)
         let failedToken = try await failedSession.beginOperation(.firmware)
         try await failedSession.failOperation(failedToken, category: .timeout)
         snapshot = await failedSession.snapshot()
@@ -573,7 +583,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         }
 
         let diagnostics = BandDiagnosticsRecorder()
-        let (interruptedSession, _) = try await readySession(
+        let (interruptedSession, _, _) = try await readySession(
             report: report,
             diagnostics: diagnostics
         )
@@ -602,7 +612,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
 
     func testMalformedLiveAndHistoryInputsEmitBoundedRejections() async throws {
         let diagnostics = BandDiagnosticsRecorder()
-        let (session, generation) = try await readySession(
+        let (session, generation, _) = try await readySession(
             diagnostics: diagnostics
         )
         let invalid = sample(sequence: 30, time: -1, value: 72)
@@ -656,7 +666,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
     func testRecoveryScanClearsNegotiationWithoutDiscardingCheckpoint()
         async throws
     {
-        let (session, generation) = try await readySession()
+        let (session, generation, _) = try await readySession()
         try await session.beginLive()
         let accepted = try await durablyCommitLive(
             session: session,
@@ -686,7 +696,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         let checkpoint = try XCTUnwrap(restoredCheckpoint)
         XCTAssertEqual(checkpoint.durableSampleIdentities.count, 1)
 
-        try await session.selectCandidate(
+        let recoveryConnectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "recovery-candidate",
                 compatible: true,
@@ -697,10 +707,12 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         try await completeConnection(
             session,
             identity: identity,
+            token: recoveryConnectionToken,
             callbackGeneration: scanGeneration
         )
         try await session.acceptCapabilities(
             capabilities,
+            token: recoveryConnectionToken,
             callbackGeneration: scanGeneration
         )
         let snapshot = await session.snapshot()

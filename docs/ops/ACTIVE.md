@@ -13,11 +13,11 @@ Last updated: **2026-09-22**
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
 - Current state: the binary-free SDK is merged on protected `main` at
-  `8fb464471fdd4ae09d5750feedcc25d50bdb1c20`, and two independent clean
+  `7794bae631c1704e18ae5c341fbc32e89c9dc647`, and two independent clean
   exports from that exact revision were byte-identical with manifest SHA-256
-  `abc87fb3a6bb91e013af7dc458a49710bfa9fb56cb8e19013b4ab7cb67571cf9`
-  and whole-tree digest
-  `cd371c1e2ff91a0981182208a7520fc11340e6ffcbaf3121359eb9961e92da4e`.
+  `57be20aafa317e2d846521ab54c91bd109fadd27911336b503a44bfad6e15eb0`;
+  the app-owned Swift wrapper is independently pinned at
+  `571637a0f0458155aae1166b875ae42f30c2bc3a63bc3cc95e2180b5cb24a365`.
   The exact ten-file artifact is integrated locally into Apple and Android
   behind a production-default-off source factory; WHOOP remains the default
   comparison transport. The final SDK additionally binds operation tokens and
@@ -52,9 +52,12 @@ Last updated: **2026-09-22**
   transient in the bounded runner's own test (`126` instead of the expected
   timeout `124`); the isolated case then passed once plus five repeats, no
   child process leaked, and the unchanged complete wall passed. The SDK itself
-  passed Swift 40/40, Kotlin 47/47 with `installDist`, 35/35 cross-platform
-  scenarios, and its 48-file repository guard before PR `#13` merged normally.
-  PR `#17` remote head `fe800e8e` passed every Android, macOS, server, package,
+  passed Swift 47/47, Kotlin 52/52 with `installDist`, 35/35 cross-platform
+  scenarios, and its 50-file repository guard before PR `#14` merged normally.
+  PR `#17` remote head `54d0ee9c` passed all non-platform gates and Review
+  Sample; its Apple and Android build walls were intentionally cancelled after
+  the newer protected SDK review findings made that candidate obsolete. An
+  earlier exact head passed every Android, macOS, server, package,
   policy, localization, claims, license, operations, and trust job. Its iOS
   production shell executed 39 tests and failed only the app-report queue
   transition because the shorter queued page retained the long review page's
@@ -70,7 +73,7 @@ Last updated: **2026-09-22**
   pass 9/9 release controls, calibration parity, health-claims, legal and
   distribution provenance, private-data, shell, workflow, Python compilation,
   operations, and diff gates. Supported translation catalogs have zero missing
-  keys; the reviewed 244 Android and 135 Apple hardcoded-literal baseline
+  keys; the reviewed 230 Android and 133 Apple hardcoded-literal baseline
   remains explicit debt. The consolidated local candidate requires one
   replacement push,
   exact-SHA hosted checks, reviewed-thread resolution, protected merge/main

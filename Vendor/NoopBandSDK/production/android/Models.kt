@@ -186,6 +186,13 @@ data class BandPairingCandidate(
     }
 }
 
+class BandConnectionToken internal constructor(
+    internal val sessionNonce: UUID,
+    internal val generation: Long,
+    internal val sequence: Long,
+    internal val candidateHandle: String,
+)
+
 data class BandIdentity(
     val sourceIdentity: String,
     val hardwareRevision: String,

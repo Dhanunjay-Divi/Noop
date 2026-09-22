@@ -27,16 +27,20 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     private func completeConnection(
         _ session: BandSessionMachine,
         identity: BandIdentity,
+        token: BandConnectionToken,
         callbackGeneration: UInt64
     ) async throws {
         try await session.beginConnection(
+            token: token,
             callbackGeneration: callbackGeneration
         )
         try await session.beginAuthentication(
+            token: token,
             callbackGeneration: callbackGeneration
         )
         try await session.completeConnection(
             identity,
+            token: token,
             callbackGeneration: callbackGeneration
         )
     }
@@ -46,7 +50,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     ) async throws -> (BandSessionMachine, UInt64) {
         let session = NoopBandSDKBoundary.makeSession(diagnostics: diagnostics)
         let generation = try await session.beginScan()
-        try await session.selectCandidate(
+        let connectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "synthetic-candidate",
                 compatible: true,
@@ -64,6 +68,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         try await completeConnection(
             session,
             identity: identity,
+            token: connectionToken,
             callbackGeneration: generation
         )
         try await session.acceptCapabilities(
@@ -75,6 +80,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 historyDays: 7,
                 capabilities: [.heartRate]
             ),
+            token: connectionToken,
             callbackGeneration: generation
         )
         return (session, generation)
@@ -83,7 +89,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "8fb464471fdd4ae09d5750feedcc25d50bdb1c20"
+            "7794bae631c1704e18ae5c341fbc32e89c9dc647"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let generation = try await session.beginScan()
@@ -105,7 +111,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             historyCheckpoint: checkpoint
         )
         let generation = try await session.beginScan()
-        try await session.selectCandidate(
+        let connectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "synthetic-candidate",
                 compatible: true,
@@ -123,6 +129,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         try await completeConnection(
             session,
             identity: identity,
+            token: connectionToken,
             callbackGeneration: generation
         )
         try await session.acceptCapabilities(
@@ -134,6 +141,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 historyDays: 7,
                 capabilities: [.heartRate]
             ),
+            token: connectionToken,
             callbackGeneration: generation
         )
         let restoredSnapshot = await session.snapshot()
@@ -167,7 +175,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         let diagnostics = BandDiagnosticsRecorder()
         let session = NoopBandSDKBoundary.makeSession(diagnostics: diagnostics)
         let generation = try await session.beginScan()
-        try await session.selectCandidate(
+        let connectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "synthetic-candidate",
                 compatible: true,
@@ -185,6 +193,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         try await completeConnection(
             session,
             identity: identity,
+            token: connectionToken,
             callbackGeneration: generation
         )
         try await session.acceptCapabilities(
@@ -196,6 +205,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 historyDays: 7,
                 capabilities: [.battery]
             ),
+            token: connectionToken,
             callbackGeneration: generation
         )
 

@@ -18,10 +18,12 @@ public actor BandSessionMachine {
     private let sessionNonce = UUID()
     private var state: BandSessionState = .idle
     private var generation: UInt64 = 0
+    private var nextConnectionSequence: UInt64 = 0
     private var nextOperationSequence: UInt64 = 0
     private var nextLiveReceiptSequence: UInt64 = 0
     private var nextHistoryReceiptSequence: UInt64 = 0
     private var activeOperation: BandOperationToken?
+    private var activeConnectionToken: BandConnectionToken?
     private var liveActive = false
     private var liveStreams: Set<BandStreamKind> = []
     private var identity: BandIdentity?
@@ -92,6 +94,7 @@ public actor BandSessionMachine {
         generation &+= 1
         clearOperationTracking()
         clearLiveTracking()
+        activeConnectionToken = nil
         identity = nil
         capabilityReport = nil
         state = .scanning
@@ -104,7 +107,7 @@ public actor BandSessionMachine {
     public func selectCandidate(
         _ candidate: BandPairingCandidate,
         callbackGeneration: UInt64
-    ) async throws {
+    ) async throws -> BandConnectionToken {
         try ensureNotClosed()
         try await validateCallbackGeneration(
             callbackGeneration,
@@ -135,6 +138,14 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.rejected
         }
+        nextConnectionSequence &+= 1
+        let token = BandConnectionToken(
+            sessionNonce: sessionNonce,
+            generation: generation,
+            sequence: nextConnectionSequence,
+            candidateHandle: candidate.handle
+        )
+        activeConnectionToken = token
         state = .candidateSelected
         await diagnostics.record(
             BandDiagnosticEvent(
@@ -143,6 +154,13 @@ public actor BandSessionMachine {
                 countBucket: .one
             )
         )
+        guard generation == token.generation,
+              state == .candidateSelected,
+              activeConnectionToken == token
+        else {
+            throw BandFailureCategory.staleCallback
+        }
+        return token
     }
 
     public func cancelScan(callbackGeneration: UInt64) async throws {
@@ -162,6 +180,7 @@ public actor BandSessionMachine {
             throw BandFailureCategory.invalidState
         }
         generation &+= 1
+        activeConnectionToken = nil
         state = .idle
         await diagnostics.record(
             BandDiagnosticEvent(kind: .discovery, outcome: .cancelled)
@@ -199,6 +218,7 @@ public actor BandSessionMachine {
                 : BandFailureCategory.invalidState
         }
         generation &+= 1
+        activeConnectionToken = nil
         state = .idle
         await diagnostics.record(
             BandDiagnosticEvent(
@@ -210,10 +230,12 @@ public actor BandSessionMachine {
     }
 
     public func beginConnection(
+        token: BandConnectionToken,
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: .connection
         )
@@ -234,10 +256,12 @@ public actor BandSessionMachine {
     }
 
     public func beginAuthentication(
+        token: BandConnectionToken,
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: .authentication
         )
@@ -253,16 +277,27 @@ public actor BandSessionMachine {
         }
         state = .authenticating
         await diagnostics.record(
-            BandDiagnosticEvent(kind: .authentication, outcome: .began)
+            [
+                BandDiagnosticEvent(
+                    kind: .connection,
+                    outcome: .completed
+                ),
+                BandDiagnosticEvent(
+                    kind: .authentication,
+                    outcome: .began
+                ),
+            ]
         )
     }
 
     public func completeConnection(
         _ newIdentity: BandIdentity,
+        token: BandConnectionToken,
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: .authentication
         )
@@ -327,12 +362,14 @@ public actor BandSessionMachine {
     }
 
     public func cancelConnection(
+        token: BandConnectionToken,
         phase: BandConnectionPhase,
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
         let diagnosticKind = diagnosticKind(for: phase)
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: diagnosticKind
         )
@@ -354,12 +391,14 @@ public actor BandSessionMachine {
 
     public func failConnection(
         _ category: BandFailureCategory,
+        token: BandConnectionToken,
         phase: BandConnectionPhase,
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
         let diagnosticKind = diagnosticKind(for: phase)
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: diagnosticKind
         )
@@ -424,10 +463,12 @@ public actor BandSessionMachine {
 
     public func acceptCapabilities(
         _ report: BandCapabilityReport,
+        token: BandConnectionToken,
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: .capability
         )
@@ -491,10 +532,12 @@ public actor BandSessionMachine {
     }
 
     public func cancelCapabilities(
+        token: BandConnectionToken,
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: .capability
         )
@@ -516,10 +559,12 @@ public actor BandSessionMachine {
 
     public func failCapabilities(
         _ category: BandFailureCategory,
+        token: BandConnectionToken,
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: .capability
         )
@@ -576,6 +621,50 @@ public actor BandSessionMachine {
             BandDiagnosticEvent(
                 kind: .capability,
                 outcome: outcome,
+                failureCategory: category
+            )
+        )
+    }
+
+    public func failEstablishedSession(
+        _ category: BandFailureCategory,
+        callbackGeneration: UInt64
+    ) async throws {
+        try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .authentication
+        )
+        guard state == .ready || state == .liveCollecting else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .authentication,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        guard category == .authentication || category == .securityFailure else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .authentication,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
+
+        invalidateAuthenticatedSession(
+            nextState: category == .securityFailure
+                ? .securityFailure
+                : .rejected
+        )
+        await diagnostics.record(
+            BandDiagnosticEvent(
+                kind: .authentication,
+                outcome: .rejected,
                 failureCategory: category
             )
         )
@@ -793,7 +882,7 @@ public actor BandSessionMachine {
         }
         rememberDurableSampleIdentities(pendingLive.sampleIdentities)
         self.pendingLive = nil
-        await diagnostics.record(
+        await diagnostics.recordCoalescingConsecutive(
             BandDiagnosticEvent(
                 kind: .live,
                 outcome: .completed,
@@ -938,6 +1027,18 @@ public actor BandSessionMachine {
                 outcome: .began
             )
         )
+        guard generation == token.generation,
+              activeOperation == token
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: operationDiagnosticKind,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
         return token
     }
 
@@ -1051,10 +1152,12 @@ public actor BandSessionMachine {
             }
         }
         nextHistoryReceiptSequence &+= 1
+        let effectiveNextCursor =
+            chunk.nextCursor ?? (chunk.complete ? chunk.previousCursor : nil)
         let acceptance = HistoryAcceptance(
             chunkIdentity: chunk.chunkIdentity,
             acknowledgementToken: chunk.acknowledgementToken,
-            nextCursor: chunk.nextCursor,
+            nextCursor: effectiveNextCursor,
             complete: chunk.complete,
             overflowed: chunk.overflowed,
             acceptedSamples: unique,
@@ -1292,6 +1395,7 @@ public actor BandSessionMachine {
         } else if category == .disconnected {
             clearOperationTracking()
             clearLiveTracking()
+            activeConnectionToken = nil
             generation &+= 1
             state = .recovering
         } else {
@@ -1348,6 +1452,7 @@ public actor BandSessionMachine {
             activeOperation?.operationClass == .firmware
         clearOperationTracking()
         clearLiveTracking()
+        activeConnectionToken = nil
         if firmwareWasActive {
             identity = nil
             capabilityReport = nil
@@ -1403,6 +1508,7 @@ public actor BandSessionMachine {
         generation &+= 1
         clearOperationTracking()
         clearLiveTracking()
+        activeConnectionToken = nil
         identity = nil
         capabilityReport = nil
         state = .closed
@@ -1416,6 +1522,30 @@ public actor BandSessionMachine {
         diagnosticKind: BandDiagnosticKind
     ) async throws {
         guard callbackGeneration == generation else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: diagnosticKind,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
+    }
+
+    private func validateConnectionToken(
+        _ token: BandConnectionToken,
+        _ callbackGeneration: UInt64,
+        diagnosticKind: BandDiagnosticKind
+    ) async throws {
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: diagnosticKind
+        )
+        guard token.sessionNonce == sessionNonce,
+              token.generation == generation,
+              token == activeConnectionToken
+        else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: diagnosticKind,
@@ -1532,6 +1662,7 @@ public actor BandSessionMachine {
     ) {
         clearOperationTracking()
         clearLiveTracking()
+        activeConnectionToken = nil
         identity = nil
         capabilityReport = nil
         generation &+= 1

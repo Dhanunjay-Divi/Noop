@@ -159,6 +159,25 @@ public struct BandPairingCandidate: Equatable, Sendable {
     }
 }
 
+public struct BandConnectionToken: Equatable, Sendable {
+    let sessionNonce: UUID
+    let generation: UInt64
+    let sequence: UInt64
+    let candidateHandle: String
+
+    init(
+        sessionNonce: UUID,
+        generation: UInt64,
+        sequence: UInt64,
+        candidateHandle: String
+    ) {
+        self.sessionNonce = sessionNonce
+        self.generation = generation
+        self.sequence = sequence
+        self.candidateHandle = candidateHandle
+    }
+}
+
 public struct BandIdentity: Equatable, Sendable {
     public let sourceIdentity: String
     public let hardwareRevision: String

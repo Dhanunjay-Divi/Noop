@@ -24,10 +24,12 @@ class BandSessionMachine(
     private val sessionNonce = UUID.randomUUID()
     private var state = BandSessionState.IDLE
     private var generation = 0L
+    private var nextConnectionSequence = 0L
     private var nextOperationSequence = 0L
     private var nextLiveReceiptSequence = 0L
     private var nextHistoryReceiptSequence = 0L
     private var activeOperation: BandOperationToken? = null
+    private var activeConnectionToken: BandConnectionToken? = null
     private var liveActive = false
     private var liveStreams = emptySet<BandStreamKind>()
     private var identity: BandIdentity? = null
@@ -88,6 +90,7 @@ class BandSessionMachine(
         generation += 1
         clearOperationTracking()
         clearLiveTracking()
+        activeConnectionToken = null
         identity = null
         capabilityReport = null
         state = BandSessionState.SCANNING
@@ -104,7 +107,7 @@ class BandSessionMachine(
     fun selectCandidate(
         candidate: BandPairingCandidate,
         callbackGeneration: Long,
-    ) {
+    ): BandConnectionToken {
         ensureNotClosed()
         validateCallbackGeneration(
             callbackGeneration,
@@ -136,6 +139,14 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.REJECTED)
         }
+        nextConnectionSequence += 1
+        val token = BandConnectionToken(
+            sessionNonce = sessionNonce,
+            generation = generation,
+            sequence = nextConnectionSequence,
+            candidateHandle = candidate.handle,
+        )
+        activeConnectionToken = token
         state = BandSessionState.CANDIDATE_SELECTED
         diagnostics.record(
             BandDiagnosticEvent(
@@ -144,6 +155,7 @@ class BandSessionMachine(
                 BandCountBucket.ONE,
             ),
         )
+        return token
     }
 
     @Synchronized
@@ -164,6 +176,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_STATE)
         }
         generation += 1
+        activeConnectionToken = null
         state = BandSessionState.IDLE
         diagnostics.record(
             BandDiagnosticEvent(
@@ -204,6 +217,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_INPUT)
         }
         generation += 1
+        activeConnectionToken = null
         state = BandSessionState.IDLE
         diagnostics.record(
             BandDiagnosticEvent(
@@ -219,9 +233,13 @@ class BandSessionMachine(
     }
 
     @Synchronized
-    fun beginConnection(callbackGeneration: Long) {
+    fun beginConnection(
+        token: BandConnectionToken,
+        callbackGeneration: Long,
+    ) {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateConnectionToken(
+            token,
             callbackGeneration,
             BandDiagnosticKind.CONNECTION,
         )
@@ -245,9 +263,13 @@ class BandSessionMachine(
     }
 
     @Synchronized
-    fun beginAuthentication(callbackGeneration: Long) {
+    fun beginAuthentication(
+        token: BandConnectionToken,
+        callbackGeneration: Long,
+    ) {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateConnectionToken(
+            token,
             callbackGeneration,
             BandDiagnosticKind.AUTHENTICATION,
         )
@@ -263,9 +285,15 @@ class BandSessionMachine(
         }
         state = BandSessionState.AUTHENTICATING
         diagnostics.record(
-            BandDiagnosticEvent(
-                BandDiagnosticKind.AUTHENTICATION,
-                BandDiagnosticOutcome.BEGAN,
+            listOf(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.CONNECTION,
+                    BandDiagnosticOutcome.COMPLETED,
+                ),
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.AUTHENTICATION,
+                    BandDiagnosticOutcome.BEGAN,
+                ),
             ),
         )
     }
@@ -273,10 +301,12 @@ class BandSessionMachine(
     @Synchronized
     fun completeConnection(
         newIdentity: BandIdentity,
+        token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateConnectionToken(
+            token,
             callbackGeneration,
             BandDiagnosticKind.AUTHENTICATION,
         )
@@ -316,12 +346,14 @@ class BandSessionMachine(
 
     @Synchronized
     fun cancelConnection(
+        token: BandConnectionToken,
         phase: BandConnectionPhase,
         callbackGeneration: Long,
     ) {
         ensureNotClosed()
         val diagnosticKind = diagnosticKind(phase)
-        validateCallbackGeneration(
+        validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind,
         )
@@ -347,12 +379,14 @@ class BandSessionMachine(
     @Synchronized
     fun failConnection(
         category: BandFailureCategory,
+        token: BandConnectionToken,
         phase: BandConnectionPhase,
         callbackGeneration: Long,
     ) {
         ensureNotClosed()
         val diagnosticKind = diagnosticKind(phase)
-        validateCallbackGeneration(
+        validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind,
         )
@@ -405,10 +439,12 @@ class BandSessionMachine(
     @Synchronized
     fun acceptCapabilities(
         report: BandCapabilityReport,
+        token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateConnectionToken(
+            token,
             callbackGeneration,
             BandDiagnosticKind.CAPABILITY,
         )
@@ -452,9 +488,13 @@ class BandSessionMachine(
     }
 
     @Synchronized
-    fun cancelCapabilities(callbackGeneration: Long) {
+    fun cancelCapabilities(
+        token: BandConnectionToken,
+        callbackGeneration: Long,
+    ) {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateConnectionToken(
+            token,
             callbackGeneration,
             BandDiagnosticKind.CAPABILITY,
         )
@@ -480,10 +520,12 @@ class BandSessionMachine(
     @Synchronized
     fun failCapabilities(
         category: BandFailureCategory,
+        token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateConnectionToken(
+            token,
             callbackGeneration,
             BandDiagnosticKind.CAPABILITY,
         )
@@ -527,6 +569,59 @@ class BandSessionMachine(
             BandDiagnosticEvent(
                 BandDiagnosticKind.CAPABILITY,
                 outcome,
+                failureCategory = category,
+            ),
+        )
+    }
+
+    @Synchronized
+    fun failEstablishedSession(
+        category: BandFailureCategory,
+        callbackGeneration: Long,
+    ) {
+        ensureNotClosed()
+        validateCallbackGeneration(
+            callbackGeneration,
+            BandDiagnosticKind.AUTHENTICATION,
+        )
+        if (
+            state != BandSessionState.READY &&
+            state != BandSessionState.LIVE_COLLECTING
+        ) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.AUTHENTICATION,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_STATE,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_STATE)
+        }
+        if (
+            category != BandFailureCategory.AUTHENTICATION &&
+            category != BandFailureCategory.SECURITY_FAILURE
+        ) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.AUTHENTICATION,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
+
+        invalidateAuthenticatedSession(
+            if (category == BandFailureCategory.SECURITY_FAILURE) {
+                BandSessionState.SECURITY_FAILURE
+            } else {
+                BandSessionState.REJECTED
+            },
+        )
+        diagnostics.record(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.AUTHENTICATION,
+                BandDiagnosticOutcome.REJECTED,
                 failureCategory = category,
             ),
         )
@@ -753,7 +848,7 @@ class BandSessionMachine(
         }
         rememberDurableSampleIdentities(pending.sampleIdentities)
         pendingLive = null
-        diagnostics.record(
+        diagnostics.recordCoalescingConsecutive(
             BandDiagnosticEvent(
                 BandDiagnosticKind.LIVE,
                 BandDiagnosticOutcome.COMPLETED,
@@ -1021,10 +1116,16 @@ class BandSessionMachine(
             }
         }
         nextHistoryReceiptSequence += 1
+        val effectiveNextCursor =
+            immutableChunk.nextCursor ?: if (immutableChunk.complete) {
+                immutableChunk.previousCursor
+            } else {
+                null
+            }
         val acceptance = HistoryAcceptance(
             chunkIdentity = immutableChunk.chunkIdentity,
             acknowledgementToken = immutableChunk.acknowledgementToken,
-            nextCursor = immutableChunk.nextCursor,
+            nextCursor = effectiveNextCursor,
             complete = immutableChunk.complete,
             overflowed = immutableChunk.overflowed,
             acceptedSamples = unique,
@@ -1278,6 +1379,7 @@ class BandSessionMachine(
         } else if (category == BandFailureCategory.DISCONNECTED) {
             clearOperationTracking()
             clearLiveTracking()
+            activeConnectionToken = null
             generation += 1
             state = BandSessionState.RECOVERING
         } else {
@@ -1333,6 +1435,7 @@ class BandSessionMachine(
             activeOperation?.operationClass == BandOperationClass.FIRMWARE
         clearOperationTracking()
         clearLiveTracking()
+        activeConnectionToken = null
         if (firmwareWasActive) {
             identity = null
             capabilityReport = null
@@ -1395,6 +1498,7 @@ class BandSessionMachine(
         generation += 1
         clearOperationTracking()
         clearLiveTracking()
+        activeConnectionToken = null
         identity = null
         capabilityReport = null
         state = BandSessionState.CLOSED
@@ -1436,6 +1540,28 @@ class BandSessionMachine(
         diagnosticKind: BandDiagnosticKind,
     ) {
         if (callbackGeneration != generation) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    diagnosticKind,
+                    BandDiagnosticOutcome.STALE,
+                    failureCategory = BandFailureCategory.STALE_CALLBACK,
+                ),
+            )
+            fail(BandFailureCategory.STALE_CALLBACK)
+        }
+    }
+
+    private fun validateConnectionToken(
+        token: BandConnectionToken,
+        callbackGeneration: Long,
+        diagnosticKind: BandDiagnosticKind,
+    ) {
+        validateCallbackGeneration(callbackGeneration, diagnosticKind)
+        if (
+            token.sessionNonce != sessionNonce ||
+            token.generation != generation ||
+            token !== activeConnectionToken
+        ) {
             diagnostics.record(
                 BandDiagnosticEvent(
                     diagnosticKind,
@@ -1580,6 +1706,7 @@ class BandSessionMachine(
     private fun invalidateAuthenticatedSession(nextState: BandSessionState) {
         clearOperationTracking()
         clearLiveTracking()
+        activeConnectionToken = null
         identity = null
         capabilityReport = null
         generation += 1

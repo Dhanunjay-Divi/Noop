@@ -96,12 +96,41 @@ public struct BandDiagnosticEvent: Equatable, Codable, Sendable {
 public actor BandDiagnosticsRecorder {
     private let capacity: Int
     private var events: [BandDiagnosticEvent] = []
+    private var suspendNextRecordForTesting = false
+    private var suspendedRecordContinuation:
+        CheckedContinuation<Void, Never>?
 
     public init(capacity: Int = 128) {
         self.capacity = max(1, min(capacity, 512))
     }
 
-    public func record(_ event: BandDiagnosticEvent) {
+    public func record(_ event: BandDiagnosticEvent) async {
+        append(event)
+        await suspendRecordIfRequestedForTesting()
+    }
+
+    public func record(_ batch: [BandDiagnosticEvent]) {
+        for event in batch {
+            append(event)
+        }
+    }
+
+    public func recordCoalescingConsecutive(
+        _ event: BandDiagnosticEvent
+    ) {
+        if let last = events.last,
+           last.kind == event.kind,
+           last.outcome == event.outcome,
+           last.failureCategory == nil,
+           event.failureCategory == nil
+        {
+            events[events.count - 1] = event
+            return
+        }
+        append(event)
+    }
+
+    private func append(_ event: BandDiagnosticEvent) {
         if events.count == capacity {
             events.removeFirst()
         }
@@ -110,5 +139,30 @@ public actor BandDiagnosticsRecorder {
 
     public func snapshot() -> [BandDiagnosticEvent] {
         events
+    }
+
+    func requestNextRecordSuspensionForTesting() {
+        suspendNextRecordForTesting = true
+    }
+
+    func waitForRecordSuspensionForTesting() async {
+        while suspendedRecordContinuation == nil {
+            await Task.yield()
+        }
+    }
+
+    func resumeSuspendedRecordForTesting() {
+        suspendedRecordContinuation?.resume()
+        suspendedRecordContinuation = nil
+    }
+
+    private func suspendRecordIfRequestedForTesting() async {
+        guard suspendNextRecordForTesting else {
+            return
+        }
+        suspendNextRecordForTesting = false
+        await withCheckedContinuation { continuation in
+            suspendedRecordContinuation = continuation
+        }
     }
 }

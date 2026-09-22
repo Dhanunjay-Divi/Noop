@@ -278,8 +278,11 @@ capability cancel/fail terminals, and operation-authentication invalidation
 were merged through PR `#12`. Exact provenance-bearing accepted history rows,
 immutable Android acceptance collections, bounded restored-checkpoint
 traversal, and independent staged receipt counts were merged through PR `#13`,
-with current protected `main` at
-`8fb464471fdd4ae09d5750feedcc25d50bdb1c20`. The app consumes the deterministic
+and candidate-bound callbacks, bounded successful-live diagnostics,
+established authentication/security terminals, Swift actor-operation
+revalidation, and terminal-cursor retention were merged through PR `#14`.
+Current protected `main` is
+`7794bae631c1704e18ae5c341fbc32e89c9dc647`. The app consumes the deterministic
 export from that current protected revision through a digest-pinned,
 supplier-artifact-free boundary. The repository is temporarily public as of
 2026-09-22; D-056 still requires private visibility before release.
