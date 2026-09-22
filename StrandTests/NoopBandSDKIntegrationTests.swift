@@ -41,10 +41,49 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         )
     }
 
+    private func readyHistorySession(
+        diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
+    ) async throws -> (BandSessionMachine, UInt64) {
+        let session = NoopBandSDKBoundary.makeSession(diagnostics: diagnostics)
+        let generation = try await session.beginScan()
+        try await session.selectCandidate(
+            BandPairingCandidate(
+                handle: "synthetic-candidate",
+                compatible: true,
+                identifyEligible: true
+            ),
+            callbackGeneration: generation
+        )
+        let identity = BandIdentity(
+            sourceIdentity: "synthetic-source",
+            hardwareRevision: "synthetic-hw-1",
+            firmwareVersion: "synthetic-fw-1",
+            protocolVersion: BandCapabilityReport.supportedProtocolVersion,
+            wrapperRevision: "artifact-55fdd89"
+        )
+        try await completeConnection(
+            session,
+            identity: identity,
+            callbackGeneration: generation
+        )
+        try await session.acceptCapabilities(
+            BandCapabilityReport(
+                schemaVersion: BandCapabilityReport.supportedSchemaVersion,
+                protocolVersion: identity.protocolVersion,
+                hardwareRevision: identity.hardwareRevision,
+                firmwareVersion: identity.firmwareVersion,
+                historyDays: 7,
+                capabilities: [.heartRate]
+            ),
+            callbackGeneration: generation
+        )
+        return (session, generation)
+    }
+
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "277c628d5a1fd9e747871e777d908e41460802fa"
+            "55fdd891fb3e9c4adf610e2b38a21b0adc3fa237"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let generation = try await session.beginScan()
@@ -79,7 +118,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-44559ae"
+            wrapperRevision: "artifact-55fdd89"
         )
         try await completeConnection(
             session,
@@ -141,7 +180,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-44559ae"
+            wrapperRevision: "artifact-55fdd89"
         )
         try await completeConnection(
             session,
@@ -185,6 +224,164 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 )
             )
         )
+    }
+
+    func testInvalidHistoryTokensRecordBoundedRejections() async throws {
+        let diagnostics = BandDiagnosticsRecorder()
+        let (session, generation) = try await readyHistorySession(
+            diagnostics: diagnostics
+        )
+        let supersededToken = try await session.beginOperation(.history)
+        try await session.cancelOperation(supersededToken)
+        let activeToken = try await session.beginOperation(.history)
+        let (foreignSession, _) = try await readyHistorySession()
+        let foreignToken = try await foreignSession.beginOperation(.history)
+        let chunk = BandHistoryChunk(
+            chunkIdentity: "synthetic-chunk",
+            previousCursor: nil,
+            nextCursor: "cursor-1",
+            complete: true,
+            overflowed: false,
+            acknowledgementToken: "ack-1",
+            batches: [
+                BandSampleBatch(
+                    sourceIdentity: "synthetic-source",
+                    lane: .history,
+                    parserRevision: "parser-1",
+                    calibrationRevision: "calibration-1",
+                    samples: [
+                        BandSample(
+                            identity: BandSampleIdentity(
+                                stream: .heartRate,
+                                sequence: 1,
+                                deviceTimeMilliseconds: 1_000
+                            ),
+                            value: 72,
+                            unit: .beatsPerMinute,
+                            quality: .accepted
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        var eventCount = await diagnostics.snapshot().count
+        do {
+            _ = try await session.stageHistoryChunk(
+                chunk,
+                token: supersededToken,
+                callbackGeneration: generation
+            )
+            XCTFail("Expected superseded stage token rejection")
+        } catch let failure as BandFailureCategory {
+            XCTAssertEqual(failure, .invalidState)
+        } catch {
+            XCTFail("Expected a typed history rejection")
+        }
+        var events = await diagnostics.snapshot()
+        XCTAssertEqual(events.count, eventCount + 1)
+        XCTAssertEqual(
+            events.last,
+            BandDiagnosticEvent(
+                kind: .history,
+                outcome: .rejected,
+                failureCategory: .invalidState
+            )
+        )
+
+        eventCount = events.count
+        do {
+            _ = try await session.stageHistoryChunk(
+                chunk,
+                token: foreignToken,
+                callbackGeneration: generation
+            )
+            XCTFail("Expected foreign stage token rejection")
+        } catch let failure as BandFailureCategory {
+            XCTAssertEqual(failure, .staleCallback)
+        } catch {
+            XCTFail("Expected a typed history rejection")
+        }
+        events = await diagnostics.snapshot()
+        XCTAssertEqual(events.count, eventCount + 1)
+        XCTAssertEqual(
+            events.last,
+            BandDiagnosticEvent(
+                kind: .history,
+                outcome: .rejected,
+                failureCategory: .staleCallback
+            )
+        )
+
+        let acceptance = try await session.stageHistoryChunk(
+            chunk,
+            token: activeToken,
+            callbackGeneration: generation
+        )
+        let receipt = DurableHistoryReceipt(
+            acceptance: acceptance,
+            historyStateCommitted: true,
+            committedSamples: acceptance.acceptedSamples,
+            committed: true
+        )
+
+        eventCount = await diagnostics.snapshot().count
+        do {
+            try await session.acknowledgeHistory(
+                receipt: receipt,
+                token: supersededToken,
+                callbackGeneration: generation
+            )
+            XCTFail("Expected superseded acknowledgement token rejection")
+        } catch let failure as BandFailureCategory {
+            XCTAssertEqual(failure, .invalidState)
+        } catch {
+            XCTFail("Expected a typed history rejection")
+        }
+        events = await diagnostics.snapshot()
+        XCTAssertEqual(events.count, eventCount + 1)
+        XCTAssertEqual(
+            events.last,
+            BandDiagnosticEvent(
+                kind: .history,
+                outcome: .rejected,
+                failureCategory: .invalidState
+            )
+        )
+
+        eventCount = events.count
+        do {
+            try await session.acknowledgeHistory(
+                receipt: receipt,
+                token: foreignToken,
+                callbackGeneration: generation
+            )
+            XCTFail("Expected foreign acknowledgement token rejection")
+        } catch let failure as BandFailureCategory {
+            XCTAssertEqual(failure, .staleCallback)
+        } catch {
+            XCTFail("Expected a typed history rejection")
+        }
+        events = await diagnostics.snapshot()
+        XCTAssertEqual(events.count, eventCount + 1)
+        XCTAssertEqual(
+            events.last,
+            BandDiagnosticEvent(
+                kind: .history,
+                outcome: .rejected,
+                failureCategory: .staleCallback
+            )
+        )
+        let unchanged = await session.snapshot()
+        XCTAssertEqual(unchanged.state, .historyCollecting)
+        XCTAssertEqual(unchanged.activeOperation, .history)
+
+        try await session.acknowledgeHistory(
+            receipt: receipt,
+            token: activeToken,
+            callbackGeneration: generation
+        )
+        try await session.completeOperation(activeToken)
     }
 
     @MainActor

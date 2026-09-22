@@ -12,10 +12,12 @@ Last updated: **2026-09-22**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: the private binary-free SDK is merged on private `main` at
-  `277c628d5a1fd9e747871e777d908e41460802fa`, and two independent clean
+- Current state: the binary-free SDK is merged on protected `main` at
+  `55fdd891fb3e9c4adf610e2b38a21b0adc3fa237`, and two independent clean
   exports from that exact revision were byte-identical with manifest SHA-256
-  `eb8ef2cf5b819f937732c7415c3618a42c5024d4325746e1ac7ac5ed3fd0ac7c`.
+  `15fc3a647a1a2ab74145458d2dd11333d4009db78a3b20a5d586c87f3395403a`
+  and whole-tree digest
+  `88e372d88b990af2a97d86a7b5db218ce20694c515468d4156efd167ce1f84ef`.
   The exact ten-file artifact is integrated locally into Apple and Android
   behind a production-default-off source factory; WHOOP remains the default
   comparison transport. The final SDK additionally binds operation tokens and
@@ -26,29 +28,31 @@ Last updated: **2026-09-22**
   authentication phases, generation-fenced completion and categorized
   terminals, bounded pending-history busy diagnostics, immutable snapshots of
   caller-owned Kotlin live/history collections, and terminal authenticated
-  session invalidation after operation security failures. Current focused
-  evidence is green: the exact artifact and six verifier tests pass; the
-  vendored Swift package passes 15/15 while checking all 33 automated
-  scenarios; Android Full passes 5/5 and all instrumentation sources compile;
-  Android Demo compiles independently; the exact API 35
-  continuity-plus-App-Shell sequence passes 14/14; the real macOS app target
-  passes 5/5; and the unsigned iOS simulator graph builds with its embedded
-  Watch app and widget validated. The private SDK itself passed Swift 32/32,
-  Kotlin 35/35, 33/33 cross-platform scenarios, and its 43-file repository
-  guard before PR `#8` merged normally. Two exports from protected SDK
-  `277c628d` are byte-identical. The repinned app artifact passes its exact
-  verifier and six adversarial tests, the vendored Swift package passes 15/15,
-  and Android Full integration, Demo compilation, and Full instrumentation
-  source compilation pass. The focused trust matrix passes 72/72 and the
-  complete Tools wall passes 312/312 with one intentional skip after reviewing
-  and repinning only six terminology line-number shifts; occurrence and
-  category totals remain unchanged with zero forbidden mappings. PR `#17`
-  remote head `7c79eaac` passed all 30 hosted
-  contexts, including Review Sample under the corrected 1.5 GiB one-worker
-  profile, before the late security-terminal review. One final app commit/push,
-  exact-SHA hosted checks, thread resolution, protected merge/main
-  verification, and exact cleanup remain. No supplier binary, firmware, real
-  adapter, or flasher is included.
+  session invalidation after operation security failures. Invalid history
+  operation tokens now also emit one fixed typed rejection event on both
+  platforms without changing the active history operation. Current focused
+  evidence is green: the exact artifact and six adversarial verifier tests
+  pass; the vendored Swift package passes 15/15 while checking all 33 automated
+  scenarios; Android Full integration passes 6/6; Android Demo and Full
+  instrumentation sources compile independently; the API 35 WorkManager
+  attempt-fence class passes 7/7; and the real macOS app target passes 6/6,
+  including the four invalid-token combinations and default compatibility
+  routing. The exact-current unsigned iOS simulator graph also builds
+  successfully with `NOOPWatch.app` and `NOOPWidgets.appex` embedded and
+  validated. The complete 312-test Tools wall passes with one intentional
+  skip. Its first post-repin run exposed one 50 ms spawn-deadline timing
+  transient in the bounded runner's own test (`126` instead of the expected
+  timeout `124`); the isolated case then passed once plus five repeats, no
+  child process leaked, and the unchanged complete wall passed. The SDK itself
+  passed Swift 33/33, Kotlin 36/36 with `installDist`, 33/33 cross-platform
+  scenarios, and its 44-file repository guard before PR `#9` merged normally.
+  PR `#17` remote head `cdecd2ef` passed every hosted context before this final
+  protected-SDK repin. The consolidated local candidate is ready for one final
+  inventory refresh, commit/push, exact-SHA hosted checks, reviewed-thread
+  resolution, protected merge/main verification, and exact cleanup. Both
+  repositories currently report `PUBLIC`; the D-056 private-SDK release target
+  must be restored before release. No supplier binary, firmware, real adapter,
+  or flasher is included.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,
@@ -394,11 +398,13 @@ Resume from:
 
 ## Immediate next actions
 
-1. Commit and push the Review Sample resource-profile replacement to PR `#17`.
-2. Require all ten exact-SHA contexts and resolve only the three reviewed
-   threads covered by matching source and tests.
+1. Finish the final protected-SDK repin evidence and push one exact candidate
+   to PR `#17`.
+2. Require all ten exact-SHA contexts and resolve only reviewed threads covered
+   by matching protected SDK, app source, and tests.
 3. Merge normally only after Apple and Android app compilers/tests are green,
    verify protected `main`, and remove exact round-owned outputs and logs.
-4. Execute the supplier adapter and flashing round only after the exact
+4. Restore the SDK repository's D-056 private visibility before release.
+5. Execute the supplier adapter and flashing round only after the exact
    supplier artifacts, firmware project, rights/SBOM/security evidence, and
    representative physical units are available.

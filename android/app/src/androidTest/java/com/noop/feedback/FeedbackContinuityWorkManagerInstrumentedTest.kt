@@ -11,7 +11,6 @@ import androidx.work.await
 import androidx.work.workDataOf
 import java.io.File
 import java.time.Instant
-import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -406,6 +405,33 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
             assertEquals(newerGeneration, persisted.workerGeneration)
         }
 
+    @Test
+    fun executionProbeDistinguishesRetryAttemptsWithSameWorkId() {
+        val probe = FeedbackWorkerExecutionProbe()
+        val workId = UUID.randomUUID()
+
+        probe.onExecution(workId, FeedbackWorkerExecutionPhase.STARTED)
+        probe.onExecution(workId, FeedbackWorkerExecutionPhase.EXITED)
+        val firstAttempt = probe.snapshot()
+        assertTrue(firstAttempt.allStartedExited)
+        assertEquals(1L, firstAttempt.startedAttempts[workId])
+        assertEquals(1L, firstAttempt.exitedAttempts[workId])
+
+        probe.onExecution(workId, FeedbackWorkerExecutionPhase.STARTED)
+        val retryAttempt = probe.snapshot()
+        assertFalse(retryAttempt.allStartedExited)
+        assertEquals(2L, retryAttempt.startedAttempts[workId])
+        assertEquals(1L, retryAttempt.exitedAttempts[workId])
+        assertFalse(retryAttempt.startedAttempts == firstAttempt.startedAttempts)
+
+        probe.onExecution(workId, FeedbackWorkerExecutionPhase.EXITED)
+        val retryExited = probe.snapshot()
+        assertTrue(retryExited.allStartedExited)
+        assertEquals(2L, retryExited.startedAttempts[workId])
+        assertEquals(2L, retryExited.exitedAttempts[workId])
+        assertFalse(retryExited.startedAttempts == firstAttempt.startedAttempts)
+    }
+
     private fun feedbackEntries(): List<Pair<String, ByteArray>> = listOf(
         "report.txt" to "NOOP instrumentation report\n".toByteArray(),
         "meta.json" to """{"schema":1,"app_version":"9.2.1"}""".toByteArray(),
@@ -435,13 +461,14 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
                     val noNewWork =
                         afterWork.mapTo(mutableSetOf()) { it.id } -
                             beforeWork.mapTo(mutableSetOf()) { it.id }
-                    val noNewExecutions =
-                        afterExecution.started - beforeExecution.started
+                    val noNewExecutionAttempts =
+                        afterExecution.startedAttempts ==
+                            beforeExecution.startedAttempts
                     if (
                         afterWork.all { it.state.isFinished } &&
                         afterExecution.allStartedExited &&
                         noNewWork.isEmpty() &&
-                        noNewExecutions.isEmpty() &&
+                        noNewExecutionAttempts &&
                         (
                             !probeSession.started.isCompleted ||
                                 probeSession.unwound.isCompleted
@@ -456,36 +483,36 @@ class FeedbackContinuityWorkManagerInstrumentedTest {
     }
 
     private class FeedbackWorkerExecutionProbe : FeedbackWorkerExecutionListener {
-        private val started =
-            Collections.synchronizedSet(mutableSetOf<UUID>())
-        private val exited =
-            Collections.synchronizedSet(mutableSetOf<UUID>())
+        private val lock = Any()
+        private val startedAttempts = mutableMapOf<UUID, Long>()
+        private val exitedAttempts = mutableMapOf<UUID, Long>()
 
         override fun onExecution(
             workId: UUID,
             phase: FeedbackWorkerExecutionPhase,
         ) {
-            when (phase) {
-                FeedbackWorkerExecutionPhase.STARTED -> started += workId
-                FeedbackWorkerExecutionPhase.EXITED -> exited += workId
+            synchronized(lock) {
+                val attempts = when (phase) {
+                    FeedbackWorkerExecutionPhase.STARTED -> startedAttempts
+                    FeedbackWorkerExecutionPhase.EXITED -> exitedAttempts
+                }
+                attempts[workId] = attempts.getOrDefault(workId, 0L) + 1L
             }
         }
 
-        fun snapshot(): FeedbackWorkerExecutionSnapshot = synchronized(started) {
-            synchronized(exited) {
-                FeedbackWorkerExecutionSnapshot(
-                    started = started.toSet(),
-                    exited = exited.toSet(),
-                )
-            }
+        fun snapshot(): FeedbackWorkerExecutionSnapshot = synchronized(lock) {
+            FeedbackWorkerExecutionSnapshot(
+                startedAttempts = startedAttempts.toMap(),
+                exitedAttempts = exitedAttempts.toMap(),
+            )
         }
     }
 
     private data class FeedbackWorkerExecutionSnapshot(
-        val started: Set<UUID>,
-        val exited: Set<UUID>,
+        val startedAttempts: Map<UUID, Long>,
+        val exitedAttempts: Map<UUID, Long>,
     ) {
         val allStartedExited: Boolean
-            get() = exited.containsAll(started)
+            get() = startedAttempts == exitedAttempts
     }
 }

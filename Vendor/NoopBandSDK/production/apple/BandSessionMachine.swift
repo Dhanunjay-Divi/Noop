@@ -846,7 +846,18 @@ public actor BandSessionMachine {
             callbackGeneration,
             diagnosticKind: .history
         )
-        try validateActiveToken(token, expected: .history)
+        do {
+            try validateActiveToken(token, expected: .history)
+        } catch let failure as BandFailureCategory {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .rejected,
+                    failureCategory: failure
+                )
+            )
+            throw failure
+        }
         guard pendingHistory == nil else {
             await diagnostics.record(
                 BandDiagnosticEvent(
@@ -970,7 +981,18 @@ public actor BandSessionMachine {
             receipt.sessionNonce,
             diagnosticKind: .history
         )
-        try validateActiveToken(token, expected: .history)
+        do {
+            try validateActiveToken(token, expected: .history)
+        } catch let failure as BandFailureCategory {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .rejected,
+                    failureCategory: failure
+                )
+            )
+            throw failure
+        }
         guard let pendingHistory,
               receipt.receiptSequence
                 == pendingHistory.acceptance.receiptSequence,

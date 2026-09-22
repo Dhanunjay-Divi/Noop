@@ -815,7 +815,18 @@ class BandSessionMachine(
             callbackGeneration,
             BandDiagnosticKind.HISTORY,
         )
-        validateActiveToken(token, BandOperationClass.HISTORY)
+        try {
+            validateActiveToken(token, BandOperationClass.HISTORY)
+        } catch (error: BandException) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.HISTORY,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = error.category,
+                ),
+            )
+            throw error
+        }
         val immutableChunk = chunk.immutableSnapshot()
         if (pendingHistory != null) {
             diagnostics.record(
@@ -946,7 +957,18 @@ class BandSessionMachine(
             receipt.sessionNonce,
             BandDiagnosticKind.HISTORY,
         )
-        validateActiveToken(token, BandOperationClass.HISTORY)
+        try {
+            validateActiveToken(token, BandOperationClass.HISTORY)
+        } catch (error: BandException) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.HISTORY,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = error.category,
+                ),
+            )
+            throw error
+        }
         val pending = pendingHistory
         if (
             pending == null ||
