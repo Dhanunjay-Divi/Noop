@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `SDK PR 20 app repin local evidence green; final digest and push pending`
+- State: `implementation 9dd4698c green; final evidence commit and push pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
@@ -10,9 +10,11 @@
   `e6a932f5accd8c2fc01b1778b52c3d7c0d1b932f`
 - Final SDK PR `#19` repin implementation commit:
   `90b6bbd021dea1621a17e554edda953619cd1c91`
+- Final SDK PR `#20` app repin implementation commit:
+  `9dd4698c19310ba9152154332ca87fc1463d3951`
 - Record commit or PR: PR `#17`; implementation commit
-  `90b6bbd021dea1621a17e554edda953619cd1c91`; the PR `#20` repin and replacement
-  exact-SHA hosted verification remain in progress
+  `9dd4698c19310ba9152154332ca87fc1463d3951`; the final evidence commit and
+  replacement exact-SHA hosted verification remain in progress
 
 ## Objective
 
@@ -528,9 +530,10 @@ Success means:
   Fresh review then opened two P2 threads: the SDK late-capability state defect
   and the stale release-plan revision claim. SDK PR `#20` is merged and the
   local app repin, direct Android regression, source graphs, and unsigned
-  iPhone/Watch/widget graph are green. One consolidated replacement push,
-  exact-SHA protected checks, matching review, and resolution of those two
-  threads remain.
+  iPhone/Watch/widget graph are green in implementation commit
+  `9dd4698c19310ba9152154332ca87fc1463d3951`. One final evidence commit, one
+  consolidated replacement push, exact-SHA protected checks, matching review,
+  and resolution of those two threads remain.
 - Repository visibility verified on 2026-09-22:
   `Dhanunjay-Divi/Noop` and `Dhanunjay-Divi/NoopBandSDK` both report `PUBLIC`
   with default branch `main`. D-056 still requires the SDK repository to be
@@ -561,9 +564,9 @@ Success means:
 
 ## Next round
 
-1. Regenerate the final terminology inventory/digest after this evidence update
-   and rerun the exact final controls.
-2. Push one final exact head.
+1. Regenerate the final terminology inventory/digest after this evidence update,
+   rerun the exact final controls, and create the evidence commit.
+2. Push the implementation and evidence commits together once.
 3. Require every exact-SHA protected context, including the full Apple and
    Android app walls, then resolve the two review threads from matching
    evidence.

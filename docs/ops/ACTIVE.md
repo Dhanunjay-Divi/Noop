@@ -45,10 +45,12 @@ Last updated: **2026-09-22**
   release gates pass 9/9 controls, all ten required contexts, trusted-main
   self-verification, artifact, calibration, terminology, claims,
   legal/distribution, private-data, localization, operations, shell/workflow
-  lint, Python compilation, and diff hygiene. One final terminology digest,
-  one consolidated replacement push, exact-SHA hosted checks, resolution of
-  the two review threads, protected merge/main verification, and exact cleanup
-  remain.
+  lint, Python compilation, and diff hygiene. The verified repin implementation
+  is committed locally at
+  `9dd4698c19310ba9152154332ca87fc1463d3951`. One final terminology digest and
+  evidence commit, one consolidated replacement push, exact-SHA hosted checks,
+  resolution of the two review threads, protected merge/main verification, and
+  exact cleanup remain.
   WHOOP remains the default independent test transport and the first-party
   source factory remains disabled. No supplier binary, firmware, real adapter,
   flasher, physical BLE evidence, background evidence, battery evidence,
