@@ -26,7 +26,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         hardwareRevision: "synthetic-hw-1",
         firmwareVersion: "synthetic-fw-1",
         protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-        wrapperRevision: "artifact-a486768"
+        wrapperRevision: "artifact-823930f"
     )
 
     private var capabilities: BandCapabilityReport {
@@ -96,10 +96,11 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         let liveSample = sample(sequence: 1, time: 1_000, value: 72)
         let liveBatch = batch(lane: .live, samples: [liveSample, liveSample])
 
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         let acceptedLive = try await durablyCommitLive(
             session: session,
             batch: liveBatch,
+            token: liveToken,
             callbackGeneration: generation
         )
         XCTAssertEqual(acceptedLive, 1)
@@ -196,7 +197,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         try await session.resumeAfterReconnect(
             callbackGeneration: reconnectGeneration
         )
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
 
         do {
             _ = try await session.stageLiveBatch(
@@ -204,6 +205,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                     lane: .live,
                     samples: [sample(sequence: 1, time: 1_000, value: 72)]
                 ),
+                token: liveToken,
                 callbackGeneration: oldGeneration
             )
             XCTFail("A callback from the old session generation must be rejected")
@@ -313,7 +315,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         snapshot = await session.snapshot()
         XCTAssertEqual(snapshot.state, .ready)
 
-        try await session.beginLive()
+        _ = try await session.beginLive()
         try await session.stopLive()
         let capabilityEvents = await diagnostics.snapshot().filter {
             $0.kind == .capability
@@ -348,7 +350,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             quality: .accepted
         )
 
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         let accepted = try await durablyCommitLive(
             session: session,
             batch: BandSampleBatch(
@@ -358,6 +360,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                 calibrationRevision: "calibration-v1",
                 samples: [spo2]
             ),
+            token: liveToken,
             callbackGeneration: generation
         )
         XCTAssertEqual(accepted, 1)
@@ -373,10 +376,11 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             lane: .live,
             samples: [sample(sequence: 10, time: 10_000, value: 72)]
         )
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
 
         let first = try await session.stageLiveBatch(
             liveBatch,
+            token: liveToken,
             callbackGeneration: generation
         )
         XCTAssertEqual(first.acceptedSamples.count, 1)
@@ -401,6 +405,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
 
         let retried = try await session.stageLiveBatch(
             liveBatch,
+            token: liveToken,
             callbackGeneration: generation
         )
         XCTAssertEqual(retried.acceptedSamples.count, 1)
@@ -417,6 +422,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
 
         let duplicate = try await session.stageLiveBatch(
             liveBatch,
+            token: liveToken,
             callbackGeneration: generation
         )
         XCTAssertEqual(duplicate.acceptedSamples.count, 0)
@@ -491,13 +497,14 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         let (session, generation, _) = try await readySession(
             report: firmwareCapabilities
         )
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         let accepted = try await durablyCommitLive(
             session: session,
             batch: batch(
                 lane: .live,
                 samples: [sample(sequence: 20, time: 20_000, value: 71)]
             ),
+            token: liveToken,
             callbackGeneration: generation
         )
         XCTAssertEqual(accepted, 1)
@@ -635,10 +642,11 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         )
         let invalid = sample(sequence: 30, time: -1, value: 72)
 
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         do {
             _ = try await session.stageLiveBatch(
                 batch(lane: .live, samples: [invalid]),
+                token: liveToken,
                 callbackGeneration: generation
             )
             XCTFail("Malformed live samples must be rejected")
@@ -687,13 +695,14 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         async throws
     {
         let (session, generation, _) = try await readySession()
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         let accepted = try await durablyCommitLive(
             session: session,
             batch: batch(
                 lane: .live,
                 samples: [sample(sequence: 40, time: 40_000, value: 70)]
             ),
+            token: liveToken,
             callbackGeneration: generation
         )
         XCTAssertEqual(accepted, 1)
@@ -815,10 +824,12 @@ final class NoopBandSDKArtifactTests: XCTestCase {
     private func durablyCommitLive(
         session: BandSessionMachine,
         batch: BandSampleBatch,
+        token: BandLiveToken,
         callbackGeneration: UInt64
     ) async throws -> Int {
         let acceptance = try await session.stageLiveBatch(
             batch,
+            token: token,
             callbackGeneration: callbackGeneration
         )
         try await session.acknowledgeLive(

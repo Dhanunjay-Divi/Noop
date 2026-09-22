@@ -36,7 +36,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "a486768efb873b57515926740d3efa19787de612",
+            "823930fa16d30ea7849a557823215c913a36fb8b",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -71,7 +71,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-a486768",
+            wrapperRevision = "artifact-823930f",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
@@ -132,7 +132,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-a486768",
+            wrapperRevision = "artifact-823930f",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
@@ -185,13 +185,14 @@ class NoopBandSdkIntegrationTest {
         val (session, generation) = readySessionWithStreams(
             diagnostics = diagnostics,
         )
-        session.beginLive()
+        val liveToken = session.beginLive()
         val acceptance = session.stageLiveBatch(
             heartRateBatch(
                 lane = BandProvenanceLane.LIVE,
                 sequence = 10,
                 deviceTimeMilliseconds = 10_000,
             ),
+            liveToken,
             generation,
         )
 
@@ -231,6 +232,60 @@ class NoopBandSdkIntegrationTest {
             generation,
         )
         assertEquals(BandSessionState.REJECTED, session.snapshot().state)
+    }
+
+    @Test
+    fun restartedLiveCollectionRejectsPriorSameSessionToken() {
+        val diagnostics = BandDiagnosticsRecorder()
+        val (session, generation) = readySessionWithStreams(
+            diagnostics = diagnostics,
+        )
+        val priorToken = session.beginLive()
+        session.stopLive()
+        val currentToken = session.beginLive()
+
+        val failure = try {
+            session.stageLiveBatch(
+                heartRateBatch(
+                    lane = BandProvenanceLane.LIVE,
+                    sequence = 11,
+                    deviceTimeMilliseconds = 11_000,
+                ),
+                priorToken,
+                generation,
+            )
+            null
+        } catch (error: BandException) {
+            error.category
+        }
+        assertEquals(BandFailureCategory.STALE_CALLBACK, failure)
+        assertEquals(
+            BandDiagnosticEvent(
+                kind = BandDiagnosticKind.LIVE,
+                outcome = BandDiagnosticOutcome.STALE,
+                failureCategory = BandFailureCategory.STALE_CALLBACK,
+            ),
+            diagnostics.snapshot().last(),
+        )
+
+        val acceptance = session.stageLiveBatch(
+            heartRateBatch(
+                lane = BandProvenanceLane.LIVE,
+                sequence = 11,
+                deviceTimeMilliseconds = 11_000,
+            ),
+            currentToken,
+            generation,
+        )
+        session.acknowledgeLive(
+            DurableLiveReceipt(
+                acceptance = acceptance,
+                committedSamples = acceptance.acceptedSamples.size,
+                committed = true,
+            ),
+            generation,
+        )
+        session.stopLive()
     }
 
     @Test
@@ -276,13 +331,14 @@ class NoopBandSdkIntegrationTest {
             liveStreams = setOf(BandStreamKind.HEART_RATE),
             historyStreams = emptySet(),
         )
-        liveSession.beginLive()
+        val liveToken = liveSession.beginLive()
         val liveAcceptance = liveSession.stageLiveBatch(
             heartRateBatch(
                 lane = BandProvenanceLane.LIVE,
                 sequence = 30,
                 deviceTimeMilliseconds = 30_000,
             ),
+            liveToken,
             liveGeneration,
         )
         liveSession.acknowledgeLive(
@@ -369,13 +425,15 @@ class NoopBandSdkIntegrationTest {
         liveStreams.clear()
         historyStreams.clear()
 
-        session.beginLive(setOf(BandStreamKind.HEART_RATE))
+        val liveToken =
+            session.beginLive(setOf(BandStreamKind.HEART_RATE))
         val liveAcceptance = session.stageLiveBatch(
             heartRateBatch(
                 lane = BandProvenanceLane.LIVE,
                 sequence = 50,
                 deviceTimeMilliseconds = 50_000,
             ),
+            liveToken,
             generation,
         )
         session.acknowledgeLive(
@@ -571,7 +629,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-a486768",
+            wrapperRevision = "artifact-823930f",
         )
         completeConnection(session, identity, connectionToken, generation)
         val mutableCapabilities = mutableSetOf(BandCapability.HEART_RATE)
@@ -608,7 +666,7 @@ class NoopBandSdkIntegrationTest {
             .map { scenarios.getJSONObject(it) }
             .filter { it.getBoolean("automated") }
 
-        assertEquals(36, automated.size)
+        assertEquals(38, automated.size)
         assertEquals(
             automated.map { it.getString("id") },
             BandConformanceRunner.automatedScenarios,
@@ -678,7 +736,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-a486768",
+            wrapperRevision = "artifact-823930f",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
@@ -766,7 +824,7 @@ class NoopBandSdkIntegrationTest {
             hardwareRevision = "synthetic-hw-1",
             firmwareVersion = "synthetic-fw-1",
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
-            wrapperRevision = "artifact-a486768",
+            wrapperRevision = "artifact-823930f",
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(

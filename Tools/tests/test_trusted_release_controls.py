@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,6 +40,34 @@ class FakeCheckClient:
 
 
 class TrustedReleaseControlTests(unittest.TestCase):
+    def _git(
+        self,
+        repository: Path,
+        *arguments: str,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(repository), *arguments],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    def _candidate_with_artifact(
+        self,
+        temporary: str,
+    ) -> tuple[Path, Path]:
+        candidate = Path(temporary).resolve() / "candidate"
+        artifact = candidate / "Vendor" / "NoopBandSDK"
+        artifact.parent.mkdir(parents=True)
+        shutil.copytree(ROOT / "Vendor" / "NoopBandSDK", artifact)
+        self._git(candidate, "init", "-q")
+        self._git(candidate, "config", "user.name", "NOOP Test")
+        self._git(candidate, "config", "user.email", "noop@example.invalid")
+        self._git(candidate, "add", "Vendor/NoopBandSDK")
+        self._git(candidate, "commit", "-qm", "Add synthetic SDK artifact")
+        return candidate, artifact
+
     def test_repository_self_contract_is_valid(self) -> None:
         TRUSTED.verify_self(ROOT)
 
@@ -95,25 +124,47 @@ class TrustedReleaseControlTests(unittest.TestCase):
                 actor="another-builder",
             )
 
-    def test_protected_base_verifier_rejects_tampered_band_artifact(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            candidate = Path(temporary)
-            artifact = candidate / "Vendor" / "NoopBandSDK"
-            artifact.parent.mkdir(parents=True)
-            shutil.copytree(ROOT / "Vendor" / "NoopBandSDK", artifact)
-            model = artifact / "production" / "android" / "Models.kt"
-            model.write_text(
-                model.read_text(encoding="utf-8") + "\n// tampered\n",
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(
-                TRUSTED.TrustedControlError,
-                "protected NOOP Band SDK artifact contract",
-            ):
-                TRUSTED._check_candidate_band_sdk_with_base_verifier(
-                    ROOT,
-                    candidate,
+    def test_protected_base_verifier_rejects_tamper_and_gitlink(self) -> None:
+        with self.subTest(case="content-tamper"):
+            with tempfile.TemporaryDirectory() as temporary:
+                candidate, artifact = self._candidate_with_artifact(temporary)
+                model = artifact / "production" / "android" / "Models.kt"
+                model.write_text(
+                    model.read_text(encoding="utf-8") + "\n// tampered\n",
+                    encoding="utf-8",
                 )
+                with self.assertRaisesRegex(
+                    TRUSTED.TrustedControlError,
+                    "protected NOOP Band SDK artifact contract",
+                ):
+                    TRUSTED._check_candidate_band_sdk_with_base_verifier(
+                        ROOT,
+                        candidate,
+                    )
+
+        with self.subTest(case="gitlink"):
+            with tempfile.TemporaryDirectory() as temporary:
+                candidate, _ = self._candidate_with_artifact(temporary)
+                commit = self._git(candidate, "rev-parse", "HEAD").stdout.strip()
+                self._git(
+                    candidate,
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    (
+                        "160000,"
+                        f"{commit},"
+                        "Vendor/NoopBandSDK/production/unmanifested-submodule"
+                    ),
+                )
+                with self.assertRaisesRegex(
+                    TRUSTED.TrustedControlError,
+                    "protected NOOP Band SDK artifact contract",
+                ):
+                    TRUSTED._check_candidate_band_sdk_with_base_verifier(
+                        ROOT,
+                        candidate,
+                    )
 
     def test_non_owner_cannot_change_a_trust_root(self) -> None:
         with self.assertRaisesRegex(

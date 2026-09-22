@@ -20,10 +20,12 @@ public actor BandSessionMachine {
     private var generation: UInt64 = 0
     private var nextConnectionSequence: UInt64 = 0
     private var nextOperationSequence: UInt64 = 0
+    private var nextLiveSequence: UInt64 = 0
     private var nextLiveReceiptSequence: UInt64 = 0
     private var nextHistoryReceiptSequence: UInt64 = 0
     private var activeOperation: BandOperationToken?
     private var activeConnectionToken: BandConnectionToken?
+    private var activeLiveToken: BandLiveToken?
     private var liveActive = false
     private var liveStreams: Set<BandStreamKind> = []
     private var identity: BandIdentity?
@@ -721,7 +723,7 @@ public actor BandSessionMachine {
 
     public func beginLive(
         streams requestedStreams: Set<BandStreamKind>? = nil
-    ) async throws {
+    ) async throws -> BandLiveToken {
         do {
             try ensureReadyForOperation()
         } catch let failure as BandFailureCategory {
@@ -758,7 +760,13 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.unsupported
         }
-        let liveGeneration = generation
+        nextLiveSequence &+= 1
+        let token = BandLiveToken(
+            sessionNonce: sessionNonce,
+            generation: generation,
+            sequence: nextLiveSequence
+        )
+        activeLiveToken = token
         liveStreams = selectedStreams
         liveActive = true
         state = .liveCollecting
@@ -767,7 +775,8 @@ public actor BandSessionMachine {
         )
         let liveStateIsCurrent =
             state == .liveCollecting || activeOperation != nil
-        guard generation == liveGeneration,
+        guard generation == token.generation,
+              activeLiveToken == token,
               liveActive,
               liveStreams == selectedStreams,
               liveStateIsCurrent
@@ -781,6 +790,7 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.staleCallback
         }
+        return token
     }
 
     public func stopLive() async throws {
@@ -824,6 +834,7 @@ public actor BandSessionMachine {
 
     public func stageLiveBatch(
         _ batch: BandSampleBatch,
+        token: BandLiveToken,
         callbackGeneration: UInt64
     ) async throws -> LiveAcceptance {
         try await validateCallbackGeneration(
@@ -842,6 +853,7 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.invalidState
         }
+        try await validateLiveToken(token)
         guard batch.sourceIdentity == identity?.sourceIdentity else {
             await diagnostics.record(
                 BandDiagnosticEvent(
@@ -1595,16 +1607,22 @@ public actor BandSessionMachine {
     }
 
     public func close() async throws {
+        guard state != .closed else {
+            return
+        }
         guard !hasPendingPersistence else {
+            let pendingKind: BandDiagnosticKind =
+                pendingHistory == nil ? .live : .history
             await diagnostics.record(
                 BandDiagnosticEvent(
-                    kind: .connection,
+                    kind: pendingKind,
                     outcome: .rejected,
                     failureCategory: .busy
                 )
             )
             throw BandFailureCategory.busy
         }
+        let terminalKinds = activeTerminalDiagnosticKinds()
         generation &+= 1
         clearOperationTracking()
         clearLiveTracking()
@@ -1613,7 +1631,9 @@ public actor BandSessionMachine {
         capabilityReport = nil
         state = .closed
         await diagnostics.record(
-            BandDiagnosticEvent(kind: .connection, outcome: .cancelled)
+            terminalKinds.map {
+                BandDiagnosticEvent(kind: $0, outcome: .cancelled)
+            }
         )
     }
 
@@ -1670,6 +1690,24 @@ public actor BandSessionMachine {
               token == activeOperation
         else {
             throw BandFailureCategory.invalidState
+        }
+    }
+
+    private func validateLiveToken(
+        _ token: BandLiveToken
+    ) async throws {
+        guard token.sessionNonce == sessionNonce,
+              token.generation == generation,
+              token == activeLiveToken
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
         }
     }
 
@@ -1738,8 +1776,38 @@ public actor BandSessionMachine {
 
     private func clearLiveTracking() {
         liveActive = false
+        activeLiveToken = nil
         liveStreams.removeAll(keepingCapacity: true)
         pendingLive = nil
+    }
+
+    private func activeTerminalDiagnosticKinds() -> [BandDiagnosticKind] {
+        var kinds: [BandDiagnosticKind] = []
+        if let operation = activeOperation {
+            kinds.append(diagnosticKind(for: operation.operationClass))
+        }
+        if liveActive {
+            kinds.append(.live)
+        }
+        let phaseKind: BandDiagnosticKind?
+        switch state {
+        case .scanning:
+            phaseKind = .discovery
+        case .connecting:
+            phaseKind = .connection
+        case .authenticating:
+            phaseKind = .authentication
+        case .negotiatingCapabilities:
+            phaseKind = .capability
+        case .recovering:
+            phaseKind = .reconnect
+        default:
+            phaseKind = nil
+        }
+        if let phaseKind, !kinds.contains(phaseKind) {
+            kinds.append(phaseKind)
+        }
+        return kinds
     }
 
     private func clearOperationTracking() {

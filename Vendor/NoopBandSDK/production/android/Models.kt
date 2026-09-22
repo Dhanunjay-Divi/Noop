@@ -199,6 +199,12 @@ class BandConnectionToken internal constructor(
     internal val candidateHandle: String,
 )
 
+class BandLiveToken internal constructor(
+    internal val sessionNonce: UUID,
+    internal val generation: Long,
+    internal val sequence: Long,
+)
+
 data class BandIdentity(
     val sourceIdentity: String,
     val hardwareRevision: String,
@@ -412,14 +418,8 @@ data class BandHistoryChunk(
         retainedRange?.validate()
         firstLostRange?.validate()
         batches.forEach { it.validate(BandProvenanceLane.HISTORY) }
-        if (overflowed) {
-            val retained = retainedRange
-                ?: fail(BandFailureCategory.INVALID_INPUT)
-            val lost = firstLostRange
-                ?: fail(BandFailureCategory.INVALID_INPUT)
+        retainedRange?.let { retained ->
             if (
-                lost.endDeviceTimeMilliseconds >=
-                retained.startDeviceTimeMilliseconds ||
                 batches.any { batch ->
                     batch.samples.any { sample ->
                         sample.identity.deviceTimeMilliseconds !in
@@ -427,6 +427,18 @@ data class BandHistoryChunk(
                             retained.endDeviceTimeMilliseconds
                     }
                 }
+            ) {
+                fail(BandFailureCategory.INVALID_INPUT)
+            }
+        }
+        if (overflowed) {
+            val retained = retainedRange
+                ?: fail(BandFailureCategory.INVALID_INPUT)
+            val lost = firstLostRange
+                ?: fail(BandFailureCategory.INVALID_INPUT)
+            if (
+                lost.endDeviceTimeMilliseconds >=
+                retained.startDeviceTimeMilliseconds
             ) {
                 fail(BandFailureCategory.INVALID_INPUT)
             }

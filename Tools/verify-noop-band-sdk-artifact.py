@@ -7,20 +7,21 @@ import argparse
 import hashlib
 import json
 import stat
+import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 
 EXPECTED_MANIFEST_SHA256 = (
-    "703f7eff73298acbf4098b31a9e1a7b50b9a8579515cfd596476f00cace6755f"
+    "ed338ff50e026ce2f9326ef6b1aa854766c33f7f886177da21c776f6196719fc"
 )
 EXPECTED_SOURCE_REPOSITORY = "Dhanunjay-Divi/NoopBandSDK"
-EXPECTED_SOURCE_REVISION = "a486768efb873b57515926740d3efa19787de612"
+EXPECTED_SOURCE_REVISION = "823930fa16d30ea7849a557823215c913a36fb8b"
 EXPORT_DIRECTORIES = ("contract", "production", "test-support")
 EXPECTED_INTEGRATION_FILES = {
     "Package.swift": "16fdef516135df5e4df8dd6c260e910e41ca3a6091e9151ba058e8ce2da95053",
     "Tests/NoopBandSDKTests/NoopBandSDKArtifactTests.swift": (
-        "2704fd896899bfca64de46ea8b10ef64a7ca7dff6ea6ebe6f30196ac8733d8c7"
+        "6fbf791315521028e9cafd2407f21bfe559912631ef5c716f77dbf35b3f92ce3"
     ),
 }
 EXPECTED_TOP_LEVEL_ENTRIES = {
@@ -100,6 +101,81 @@ def _reject_symlinked_artifact_path(root: Path) -> None:
             if current == absolute_root:
                 raise VerificationError("artifact root must not be a symlink")
             raise VerificationError("artifact path ancestor must not be a symlink")
+
+
+def _git_index_paths(root: Path) -> set[str]:
+    try:
+        repository_result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise VerificationError("artifact Git worktree is not inspectable") from error
+    if repository_result.returncode != 0:
+        raise VerificationError("artifact must be inside a Git worktree")
+
+    try:
+        repository_root = Path(
+            repository_result.stdout.decode("utf-8", errors="strict").strip()
+        ).resolve()
+        artifact_relative = root.relative_to(repository_root).as_posix()
+    except (UnicodeError, ValueError) as error:
+        raise VerificationError("artifact Git worktree is invalid") from error
+
+    try:
+        index_result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository_root),
+                "--literal-pathspecs",
+                "ls-files",
+                "--stage",
+                "-z",
+                "--",
+                artifact_relative,
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise VerificationError("artifact Git index is not inspectable") from error
+    if index_result.returncode != 0:
+        raise VerificationError("artifact Git index is not inspectable")
+
+    prefix = f"{artifact_relative.rstrip('/')}/"
+    indexed_paths: set[str] = set()
+    for raw_entry in index_result.stdout.split(b"\0"):
+        if not raw_entry:
+            continue
+        try:
+            metadata, encoded_path = raw_entry.split(b"\t", 1)
+            mode, _object_id, stage = metadata.split(b" ", 2)
+            indexed_path = encoded_path.decode("utf-8", errors="strict")
+        except (UnicodeError, ValueError) as error:
+            raise VerificationError("artifact Git index entry is malformed") from error
+        if mode != b"100644" or stage != b"0":
+            raise VerificationError(
+                "artifact Git index must contain only stage-0 regular files"
+            )
+        if not indexed_path.startswith(prefix):
+            raise VerificationError("artifact Git index path escapes the artifact root")
+        relative = indexed_path[len(prefix) :]
+        pure_path = PurePosixPath(relative)
+        if (
+            not relative
+            or pure_path.is_absolute()
+            or ".." in pure_path.parts
+            or relative in indexed_paths
+        ):
+            raise VerificationError("artifact Git index entry is malformed")
+        indexed_paths.add(relative)
+    return indexed_paths
 
 
 def verify_artifact(root: Path) -> dict[str, Any]:
@@ -200,6 +276,14 @@ def verify_artifact(root: Path) -> dict[str, Any]:
     }
     if exported_paths != listed_paths:
         raise VerificationError("exported source tree differs from the manifest")
+
+    expected_index_paths = (
+        {"noop-band-sdk-manifest.json"}
+        | set(EXPECTED_INTEGRATION_FILES)
+        | listed_paths
+    )
+    if _git_index_paths(root) != expected_index_paths:
+        raise VerificationError("artifact Git index layout is not exact")
 
     return {
         "files": len(entries),

@@ -594,11 +594,43 @@
       }
     },
     {
+      "id": "live_callback_session_bound",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready_pair",
+          "foreign_live_callback_rejected",
+          "own_live_callback_accepted"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 1,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "close_active_phase_terminal",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_and_history_started",
+          "history_cancelled",
+          "live_cancelled",
+          "session_closed"
+        ],
+        "finalState": "closed",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": null
+      }
+    },
+    {
       "id": "closed_session_terminal",
       "automated": true,
       "expected": {
         "events": [
           "session_closed",
+          "no_unmatched_connection_cancellation",
           "operation_rejected"
         ],
         "finalState": "closed",

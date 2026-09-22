@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,31 @@ SPEC.loader.exec_module(VERIFIER)
 
 
 class NoopBandSDKArtifactTest(unittest.TestCase):
+    def _git(
+        self,
+        repository: Path,
+        *arguments: str,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(repository), *arguments],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    def _copy_artifact(self, temporary: str) -> tuple[Path, Path]:
+        repository = Path(temporary).resolve() / "candidate"
+        artifact = repository / "Vendor" / "NoopBandSDK"
+        artifact.parent.mkdir(parents=True)
+        shutil.copytree(ROOT / "Vendor" / "NoopBandSDK", artifact)
+        self._git(repository, "init", "-q")
+        self._git(repository, "config", "user.name", "NOOP Test")
+        self._git(repository, "config", "user.email", "noop@example.invalid")
+        self._git(repository, "add", "Vendor/NoopBandSDK")
+        self._git(repository, "commit", "-qm", "Add synthetic SDK artifact")
+        return repository, artifact
+
     def test_checked_in_artifact_is_exact(self) -> None:
         result = VERIFIER.verify_artifact(ROOT / "Vendor" / "NoopBandSDK")
         self.assertEqual(10, result["files"])
@@ -23,8 +49,7 @@ class NoopBandSDKArtifactTest(unittest.TestCase):
 
     def test_tampered_source_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            copied = Path(temporary).resolve() / "artifact"
-            shutil.copytree(ROOT / "Vendor" / "NoopBandSDK", copied)
+            _, copied = self._copy_artifact(temporary)
             source = copied / "production" / "apple" / "NoopBandModels.swift"
             source.write_bytes(source.read_bytes() + b"\n")
             with self.assertRaisesRegex(
@@ -35,8 +60,7 @@ class NoopBandSDKArtifactTest(unittest.TestCase):
 
     def test_tampered_package_definition_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            copied = Path(temporary).resolve() / "artifact"
-            shutil.copytree(ROOT / "Vendor" / "NoopBandSDK", copied)
+            _, copied = self._copy_artifact(temporary)
             package = copied / "Package.swift"
             package.write_bytes(package.read_bytes() + b"\n")
             with self.assertRaisesRegex(
@@ -47,8 +71,7 @@ class NoopBandSDKArtifactTest(unittest.TestCase):
 
     def test_unmanifested_top_level_source_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            copied = Path(temporary).resolve() / "artifact"
-            shutil.copytree(ROOT / "Vendor" / "NoopBandSDK", copied)
+            _, copied = self._copy_artifact(temporary)
             (copied / "Unexpected.swift").write_text(
                 "fatalError(\"must not compile\")\n",
                 encoding="utf-8",
@@ -61,12 +84,33 @@ class NoopBandSDKArtifactTest(unittest.TestCase):
 
     def test_supplier_binary_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            copied = Path(temporary).resolve() / "artifact"
-            shutil.copytree(ROOT / "Vendor" / "NoopBandSDK", copied)
+            _, copied = self._copy_artifact(temporary)
             (copied / "supplier.aar").write_bytes(b"synthetic")
             with self.assertRaisesRegex(
                 VERIFIER.VerificationError,
                 "binary or archive payload is forbidden",
+            ):
+                VERIFIER.verify_artifact(copied)
+
+    def test_gitlink_inside_export_tree_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository, copied = self._copy_artifact(temporary)
+            commit = self._git(repository, "rev-parse", "HEAD").stdout.strip()
+            self._git(
+                repository,
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                (
+                    "160000,"
+                    f"{commit},"
+                    "Vendor/NoopBandSDK/production/unmanifested-submodule"
+                ),
+            )
+
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationError,
+                "Git index must contain only stage-0 regular files",
             ):
                 VERIFIER.verify_artifact(copied)
 

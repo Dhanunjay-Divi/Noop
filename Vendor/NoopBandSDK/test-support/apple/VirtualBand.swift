@@ -56,10 +56,12 @@ private extension BandSessionMachine {
 
     func durablyCommitLiveBatch(
         _ batch: BandSampleBatch,
+        token: BandLiveToken,
         callbackGeneration: UInt64
     ) async throws -> Int {
         let acceptance = try await stageLiveBatch(
             batch,
+            token: token,
             callbackGeneration: callbackGeneration
         )
         let receipt = await VirtualBandStore().commit(
@@ -291,6 +293,8 @@ public enum BandConformanceRunner {
         "history_pending_busy_diagnostics",
         "diagnostics_bounded",
         "fractional_steps_rejected",
+        "live_callback_session_bound",
+        "close_active_phase_terminal",
         "closed_session_terminal",
     ]
 
@@ -366,6 +370,10 @@ public enum BandConformanceRunner {
             return try fractionalStepsRejected()
         case "diagnostics_bounded":
             return await diagnosticsBounded()
+        case "live_callback_session_bound":
+            return try await liveCallbackSessionBound()
+        case "close_active_phase_terminal":
+            return try await closeActivePhaseTerminal()
         case "closed_session_terminal":
             return try await closedSessionTerminal()
         default:
@@ -436,9 +444,10 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         events.append("capabilities_accepted")
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         accepted += try await session.durablyCommitLiveBatch(
             VirtualBandFixtures.liveBatch,
+            token: liveToken,
             callbackGeneration: generation
         )
         events.append("live_committed")
@@ -502,6 +511,7 @@ public enum BandConformanceRunner {
         let (session, oldGeneration, _) =
             try await readySessionWithToken()
         var events = ["ready"]
+        let staleLiveToken = try await session.beginLive()
         let reconnectGeneration = try await session.interruptForReconnect(
             callbackGeneration: oldGeneration
         )
@@ -513,6 +523,7 @@ public enum BandConformanceRunner {
         do {
             _ = try await session.durablyCommitLiveBatch(
                 VirtualBandFixtures.liveBatch,
+                token: staleLiveToken,
                 callbackGeneration: oldGeneration
             )
         } catch let error as BandFailureCategory {
@@ -537,14 +548,16 @@ public enum BandConformanceRunner {
         var events = ["ready_pair"]
         var failure: BandFailureCategory?
 
-        try await first.beginLive()
-        try await second.beginLive()
+        let firstLiveToken = try await first.beginLive()
+        let secondLiveToken = try await second.beginLive()
         let firstLive = try await first.stageLiveBatch(
             VirtualBandFixtures.liveBatch,
+            token: firstLiveToken,
             callbackGeneration: firstGeneration
         )
         let secondLive = try await second.stageLiveBatch(
             VirtualBandFixtures.liveBatch,
+            token: secondLiveToken,
             callbackGeneration: secondGeneration
         )
         let foreignLiveReceipt = await firstStore.commit(
@@ -706,9 +719,10 @@ public enum BandConformanceRunner {
         var events = ["ready"]
         var failure: BandFailureCategory?
 
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         let firstLive = try await session.stageLiveBatch(
             VirtualBandFixtures.liveBatch,
+            token: liveToken,
             callbackGeneration: generation
         )
         let firstLiveReceipt = await store.commit(acceptance: firstLive)
@@ -737,6 +751,7 @@ public enum BandConformanceRunner {
         )
         let secondLive = try await session.stageLiveBatch(
             secondLiveBatch,
+            token: liveToken,
             callbackGeneration: generation
         )
         do {
@@ -913,9 +928,10 @@ public enum BandConformanceRunner {
         let (session, generation) = try await readySession()
         var events = ["ready"]
         let before = await session.snapshot().acknowledgedHistoryCursor
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         let accepted = try await session.durablyCommitLiveBatch(
             VirtualBandFixtures.liveBatch,
+            token: liveToken,
             callbackGeneration: generation
         )
         events.append("live_committed")
@@ -937,9 +953,10 @@ public enum BandConformanceRunner {
     private static func liveBatchDeduplicated() async throws -> BandConformanceResult {
         let (session, generation) = try await readySession()
         var events = ["ready"]
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         let accepted = try await session.durablyCommitLiveBatch(
             VirtualBandFixtures.duplicateLiveBatch,
+            token: liveToken,
             callbackGeneration: generation
         )
         events.append("live_committed")
@@ -1059,11 +1076,12 @@ public enum BandConformanceRunner {
             calibrationRevision: "calibration-v1",
             samples: VirtualBandFixtures.liveBatch.samples
         )
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         var failure: BandFailureCategory?
         do {
             _ = try await session.durablyCommitLiveBatch(
                 batch,
+                token: liveToken,
                 callbackGeneration: generation
             )
         } catch let error as BandFailureCategory {
@@ -1362,11 +1380,12 @@ public enum BandConformanceRunner {
             calibrationRevision: "calibration-v1",
             samples: [sample]
         )
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         var failure: BandFailureCategory?
         do {
             _ = try await session.durablyCommitLiveBatch(
                 batch,
+                token: liveToken,
                 callbackGeneration: generation
             )
         } catch let error as BandFailureCategory {
@@ -1433,7 +1452,7 @@ public enum BandConformanceRunner {
         )
         let (session, _) = try await readySession(capabilities: report)
         var events = ["ready"]
-        try await session.beginLive()
+        _ = try await session.beginLive()
         events.append("live_started")
         var failure: BandFailureCategory?
         do {
@@ -1662,11 +1681,12 @@ public enum BandConformanceRunner {
             calibrationRevision: "calibration-v1",
             samples: [invalidSample]
         )
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         var failure: BandFailureCategory?
         do {
             _ = try await session.durablyCommitLiveBatch(
                 batch,
+                token: liveToken,
                 callbackGeneration: generation
             )
         } catch let error as BandFailureCategory {
@@ -1778,7 +1798,7 @@ public enum BandConformanceRunner {
             token: postFirmwareConnectionToken,
             callbackGeneration: postFirmwareGeneration
         )
-        try await session.beginLive()
+        _ = try await session.beginLive()
         do {
             _ = try await session.beginOperation(.firmware)
         } catch BandFailureCategory.busy {
@@ -1951,11 +1971,12 @@ public enum BandConformanceRunner {
             calibrationRevision: "calibration-v1",
             samples: VirtualBandFixtures.liveBatch.samples
         )
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         var failure: BandFailureCategory?
         do {
             _ = try await session.durablyCommitLiveBatch(
                 batch,
+                token: liveToken,
                 callbackGeneration: generation
             )
         } catch let error as BandFailureCategory {
@@ -2091,9 +2112,10 @@ public enum BandConformanceRunner {
             calibrationRevision: "calibration-v1",
             samples: [next]
         )
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         let accepted = try await session.durablyCommitLiveBatch(
             batch,
+            token: liveToken,
             callbackGeneration: generation
         )
         let evictedCandidate = BandSample(
@@ -2115,6 +2137,7 @@ public enum BandConformanceRunner {
         )
         let evictionAccepted = try await session.durablyCommitLiveBatch(
             evictionProbe,
+            token: liveToken,
             callbackGeneration: generation
         )
         if accepted == 1,
@@ -2171,7 +2194,7 @@ public enum BandConformanceRunner {
         } else {
             events.append("operation_failure_incorrect")
         }
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         let disconnected = try await session.beginOperation(.battery)
         try await session.failOperation(disconnected, category: .disconnected)
         let recovering = await session.snapshot()
@@ -2186,6 +2209,7 @@ public enum BandConformanceRunner {
         do {
             _ = try await session.durablyCommitLiveBatch(
                 VirtualBandFixtures.liveBatch,
+                token: liveToken,
                 callbackGeneration: generation
             )
         } catch BandFailureCategory.staleCallback {
@@ -2819,9 +2843,15 @@ public enum BandConformanceRunner {
     private static func closedSessionTerminal()
         async throws -> BandConformanceResult
     {
-        let session = BandSessionMachine()
+        let diagnostics = BandDiagnosticsRecorder()
+        let session = BandSessionMachine(diagnostics: diagnostics)
         try await session.close()
         var events = ["session_closed"]
+        if (await cancelledKinds(in: diagnostics)).isEmpty {
+            events.append("no_unmatched_connection_cancellation")
+        } else {
+            events.append("unmatched_connection_cancellation")
+        }
         var failure: BandFailureCategory?
         do {
             _ = try await session.beginScan()
@@ -2837,6 +2867,95 @@ public enum BandConformanceRunner {
             snapshot: await session.snapshot(),
             failure: failure
         )
+    }
+
+    private static func liveCallbackSessionBound()
+        async throws -> BandConformanceResult
+    {
+        let (first, firstGeneration) = try await readySession()
+        let (second, secondGeneration) = try await readySession()
+        let store = VirtualBandStore()
+        let firstToken = try await first.beginLive()
+        let secondToken = try await second.beginLive()
+        var events = ["ready_pair"]
+        var failure: BandFailureCategory?
+
+        do {
+            _ = try await second.stageLiveBatch(
+                VirtualBandFixtures.liveBatch,
+                token: firstToken,
+                callbackGeneration: secondGeneration
+            )
+            events.append("foreign_live_callback_accepted")
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("foreign_live_callback_rejected")
+        }
+
+        let acceptance = try await second.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            token: secondToken,
+            callbackGeneration: secondGeneration
+        )
+        try await second.acknowledgeLive(
+            receipt: await store.commit(acceptance: acceptance),
+            callbackGeneration: secondGeneration
+        )
+        try await first.stopLive()
+        try await second.stopLive()
+        if firstGeneration == secondGeneration,
+           acceptance.acceptedSamples.count == 1
+        {
+            events.append("own_live_callback_accepted")
+        } else {
+            events.append("own_live_callback_incorrect")
+        }
+        return result(
+            scenario: "live_callback_session_bound",
+            events: events,
+            snapshot: await second.snapshot(),
+            acceptedSamples: acceptance.acceptedSamples.count,
+            failure: failure
+        )
+    }
+
+    private static func closeActivePhaseTerminal()
+        async throws -> BandConformanceResult
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let (session, _) = try await readySession(diagnostics: diagnostics)
+        _ = try await session.beginLive()
+        _ = try await session.beginOperation(.history)
+        var events = ["live_and_history_started"]
+        let beforeClose = await diagnostics.snapshot().count
+        try await session.close()
+        let closeEvents = Array(
+            (await diagnostics.snapshot()).dropFirst(beforeClose)
+        )
+        if closeEvents.contains(
+            BandDiagnosticEvent(kind: .history, outcome: .cancelled)
+        ) {
+            events.append("history_cancelled")
+        }
+        if closeEvents.contains(
+            BandDiagnosticEvent(kind: .live, outcome: .cancelled)
+        ) {
+            events.append("live_cancelled")
+        }
+        events.append("session_closed")
+        return result(
+            scenario: "close_active_phase_terminal",
+            events: events,
+            snapshot: await session.snapshot()
+        )
+    }
+
+    private static func cancelledKinds(
+        in recorder: BandDiagnosticsRecorder
+    ) async -> [BandDiagnosticKind] {
+        await recorder.snapshot()
+            .filter { $0.outcome == .cancelled }
+            .map(\.kind)
     }
 
     private static func result(

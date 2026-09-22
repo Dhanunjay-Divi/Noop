@@ -26,10 +26,12 @@ class BandSessionMachine(
     private var generation = 0L
     private var nextConnectionSequence = 0L
     private var nextOperationSequence = 0L
+    private var nextLiveSequence = 0L
     private var nextLiveReceiptSequence = 0L
     private var nextHistoryReceiptSequence = 0L
     private var activeOperation: BandOperationToken? = null
     private var activeConnectionToken: BandConnectionToken? = null
+    private var activeLiveToken: BandLiveToken? = null
     private var liveActive = false
     private var liveStreams = emptySet<BandStreamKind>()
     private var identity: BandIdentity? = null
@@ -448,7 +450,20 @@ class BandSessionMachine(
             callbackGeneration,
             BandDiagnosticKind.CAPABILITY,
         )
-        val immutableReport = report.immutableSnapshot()
+        val immutableReport = try {
+            report.immutableSnapshot()
+        } catch (_: BandException) {
+            state = BandSessionState.INCOMPATIBLE
+            capabilityReport = null
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.CAPABILITY,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
         val currentIdentity = identity
         val identityMatches =
             currentIdentity?.hardwareRevision == immutableReport.hardwareRevision &&
@@ -638,7 +653,9 @@ class BandSessionMachine(
     }
 
     @Synchronized
-    fun beginLive(requestedStreams: Set<BandStreamKind>? = null) {
+    fun beginLive(
+        requestedStreams: Set<BandStreamKind>? = null,
+    ): BandLiveToken {
         try {
             ensureReadyForOperation()
         } catch (error: BandException) {
@@ -676,6 +693,13 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.UNSUPPORTED)
         }
+        nextLiveSequence += 1
+        val token = BandLiveToken(
+            sessionNonce = sessionNonce,
+            generation = generation,
+            sequence = nextLiveSequence,
+        )
+        activeLiveToken = token
         liveStreams = selectedStreams
         liveActive = true
         state = BandSessionState.LIVE_COLLECTING
@@ -685,6 +709,7 @@ class BandSessionMachine(
                 BandDiagnosticOutcome.BEGAN,
             ),
         )
+        return token
     }
 
     @Synchronized
@@ -733,6 +758,7 @@ class BandSessionMachine(
     @Synchronized
     fun stageLiveBatch(
         batch: BandSampleBatch,
+        token: BandLiveToken,
         callbackGeneration: Long,
     ): LiveAcceptance {
         validateCallbackGeneration(
@@ -752,6 +778,7 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.INVALID_STATE)
         }
+        validateLiveToken(token)
         if (batch.sourceIdentity != identity?.sourceIdentity) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -1527,16 +1554,25 @@ class BandSessionMachine(
 
     @Synchronized
     fun close() {
+        if (state == BandSessionState.CLOSED) {
+            return
+        }
         if (hasPendingPersistence) {
+            val pendingKind = if (pendingHistory == null) {
+                BandDiagnosticKind.LIVE
+            } else {
+                BandDiagnosticKind.HISTORY
+            }
             diagnostics.record(
                 BandDiagnosticEvent(
-                    BandDiagnosticKind.CONNECTION,
+                    pendingKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.BUSY,
                 ),
             )
             fail(BandFailureCategory.BUSY)
         }
+        val terminalKinds = activeTerminalDiagnosticKinds()
         generation += 1
         clearOperationTracking()
         clearLiveTracking()
@@ -1545,10 +1581,12 @@ class BandSessionMachine(
         capabilityReport = null
         state = BandSessionState.CLOSED
         diagnostics.record(
-            BandDiagnosticEvent(
-                BandDiagnosticKind.CONNECTION,
-                BandDiagnosticOutcome.CANCELLED,
-            ),
+            terminalKinds.map {
+                BandDiagnosticEvent(
+                    it,
+                    BandDiagnosticOutcome.CANCELLED,
+                )
+            },
         )
     }
 
@@ -1627,6 +1665,23 @@ class BandSessionMachine(
         }
         if (token.operationClass != expected || token != activeOperation) {
             fail(BandFailureCategory.INVALID_STATE)
+        }
+    }
+
+    private fun validateLiveToken(token: BandLiveToken) {
+        if (
+            token.sessionNonce != sessionNonce ||
+            token.generation != generation ||
+            token !== activeLiveToken
+        ) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.LIVE,
+                    BandDiagnosticOutcome.STALE,
+                    failureCategory = BandFailureCategory.STALE_CALLBACK,
+                ),
+            )
+            fail(BandFailureCategory.STALE_CALLBACK)
         }
     }
 
@@ -1727,8 +1782,33 @@ class BandSessionMachine(
 
     private fun clearLiveTracking() {
         liveActive = false
+        activeLiveToken = null
         liveStreams = emptySet()
         pendingLive = null
+    }
+
+    private fun activeTerminalDiagnosticKinds(): List<BandDiagnosticKind> {
+        val kinds = mutableListOf<BandDiagnosticKind>()
+        activeOperation?.let {
+            kinds += diagnosticKind(it.operationClass)
+        }
+        if (liveActive) {
+            kinds += BandDiagnosticKind.LIVE
+        }
+        val phaseKind = when (state) {
+            BandSessionState.SCANNING -> BandDiagnosticKind.DISCOVERY
+            BandSessionState.CONNECTING -> BandDiagnosticKind.CONNECTION
+            BandSessionState.AUTHENTICATING ->
+                BandDiagnosticKind.AUTHENTICATION
+            BandSessionState.NEGOTIATING_CAPABILITIES ->
+                BandDiagnosticKind.CAPABILITY
+            BandSessionState.RECOVERING -> BandDiagnosticKind.RECONNECT
+            else -> null
+        }
+        if (phaseKind != null && phaseKind !in kinds) {
+            kinds += phaseKind
+        }
+        return kinds
     }
 
     private fun clearOperationTracking() {

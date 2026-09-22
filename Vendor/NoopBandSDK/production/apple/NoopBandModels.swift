@@ -205,6 +205,22 @@ public struct BandConnectionToken: Equatable, Sendable {
     }
 }
 
+public struct BandLiveToken: Equatable, Sendable {
+    let sessionNonce: UUID
+    let generation: UInt64
+    let sequence: UInt64
+
+    init(
+        sessionNonce: UUID,
+        generation: UInt64,
+        sequence: UInt64
+    ) {
+        self.sessionNonce = sessionNonce
+        self.generation = generation
+        self.sequence = sequence
+    }
+}
+
 public struct BandIdentity: Equatable, Sendable {
     public let sourceIdentity: String
     public let hardwareRevision: String
@@ -504,18 +520,22 @@ public struct BandHistoryChunk: Equatable, Codable, Sendable {
         try retainedRange?.validate()
         try firstLostRange?.validate()
         try batches.forEach { try $0.validate(expectedLane: .history) }
+        if let retainedRange {
+            guard batches.allSatisfy({ batch in
+                batch.samples.allSatisfy { sample in
+                    retainedRange.startDeviceTimeMilliseconds
+                        ... retainedRange.endDeviceTimeMilliseconds
+                        ~= sample.identity.deviceTimeMilliseconds
+                }
+            }) else {
+                throw BandFailureCategory.invalidInput
+            }
+        }
         if overflowed {
             guard let retainedRange,
                   let firstLostRange,
                   firstLostRange.endDeviceTimeMilliseconds
-                    < retainedRange.startDeviceTimeMilliseconds,
-                  batches.allSatisfy({ batch in
-                      batch.samples.allSatisfy { sample in
-                          retainedRange.startDeviceTimeMilliseconds
-                            ... retainedRange.endDeviceTimeMilliseconds
-                            ~= sample.identity.deviceTimeMilliseconds
-                      }
-                  })
+                    < retainedRange.startDeviceTimeMilliseconds
             else {
                 throw BandFailureCategory.invalidInput
             }

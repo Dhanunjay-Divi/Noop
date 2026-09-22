@@ -64,7 +64,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-a486768"
+            wrapperRevision: "artifact-823930f"
         )
         try await completeConnection(
             session,
@@ -92,7 +92,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "a486768efb873b57515926740d3efa19787de612"
+            "823930fa16d30ea7849a557823215c913a36fb8b"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let generation = try await session.beginScan()
@@ -127,7 +127,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-a486768"
+            wrapperRevision: "artifact-823930f"
         )
         try await completeConnection(
             session,
@@ -193,7 +193,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             hardwareRevision: "synthetic-hw-1",
             firmwareVersion: "synthetic-fw-1",
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-            wrapperRevision: "artifact-a486768"
+            wrapperRevision: "artifact-823930f"
         )
         try await completeConnection(
             session,
@@ -410,9 +410,10 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         let (session, generation) = try await readyHistorySession(
             diagnostics: diagnostics
         )
-        try await session.beginLive()
+        let liveToken = try await session.beginLive()
         let acceptance = try await session.stageLiveBatch(
             liveBatch(sequence: 30),
+            token: liveToken,
             callbackGeneration: generation
         )
 
@@ -453,6 +454,53 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         )
         let rejected = await session.snapshot()
         XCTAssertEqual(rejected.state, .rejected)
+    }
+
+    func testRestartedLiveCollectionRejectsPriorSameSessionToken()
+        async throws
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let (session, generation) = try await readyHistorySession(
+            diagnostics: diagnostics
+        )
+        let priorToken = try await session.beginLive()
+        try await session.stopLive()
+        let currentToken = try await session.beginLive()
+
+        do {
+            _ = try await session.stageLiveBatch(
+                liveBatch(sequence: 31),
+                token: priorToken,
+                callbackGeneration: generation
+            )
+            XCTFail("A prior live token must not authorize restarted collection")
+        } catch let failure as BandFailureCategory {
+            XCTAssertEqual(failure, .staleCallback)
+        }
+        let events = await diagnostics.snapshot()
+        XCTAssertEqual(
+            events.last,
+            BandDiagnosticEvent(
+                kind: .live,
+                outcome: .stale,
+                failureCategory: .staleCallback
+            )
+        )
+
+        let acceptance = try await session.stageLiveBatch(
+            liveBatch(sequence: 31),
+            token: currentToken,
+            callbackGeneration: generation
+        )
+        try await session.acknowledgeLive(
+            receipt: DurableLiveReceipt(
+                acceptance: acceptance,
+                committedSamples: acceptance.acceptedSamples.count,
+                committed: true
+            ),
+            callbackGeneration: generation
+        )
+        try await session.stopLive()
     }
 
     func testLiveAndHistoryStreamsAreAuthorizedIndependently() async throws {
@@ -504,9 +552,10 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         )
         let (liveSession, liveGeneration) =
             try await readyHistorySession(report: liveOnly)
-        try await liveSession.beginLive()
+        let liveToken = try await liveSession.beginLive()
         let liveAcceptance = try await liveSession.stageLiveBatch(
             liveBatch(sequence: 31),
+            token: liveToken,
             callbackGeneration: liveGeneration
         )
         try await liveSession.acknowledgeLive(
