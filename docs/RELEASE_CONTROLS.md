@@ -109,13 +109,23 @@ supplier and physical-device evidence, legal/certification approvals, store
 records, production operations, and final go/no-go approval remain separate
 open gates.
 
-For the active SDK app-integration branch, record these only after they exist:
+For the active SDK app-integration branch, the recorded inputs and current
+local evidence are:
 
-- candidate commit: `<pending exact 40-character SHA>`
-- pull request: `#17`; prior head
-  `4185216a6390e05e67d465dd16ddaee08439cdf1` passed all ten required contexts
-  but is superseded by the unpushed SDK PR `#15` repin
-- required contexts: `<pending 10/10 on the candidate SHA>`
+- upstream SDK source: `NoopBandSDK` PR `#21` protected merge
+  `a9d3f1a2a55b5436bf1b65b0299a27667241afa4`
+- application implementation:
+  `5da77db5d929df7cbce73d7e64a8eab935cc0103`
+- pull request: `#17`; prior exact head:
+  `78eba788b337c3472d32f8bd789965f84ef67b8a`
+- local verification: artifact verifier 9/9, vendored Swift 15/15 across 40
+  automated scenarios, macOS boundary 10/10, Android boundary 12/12, Android
+  Demo and both instrumentation source graphs, and unsigned Release
+  iOS/Watch/widget graph all pass; the complete Tools wall passes 318/318 with
+  one intentional skip and the exact release matrix passes 204/204
+- required contexts: all ten stable contexts completed successfully on the
+  prior exact head on 2026-09-22; the uncommitted PR `#21` repin has no
+  replacement candidate SHA or hosted evidence
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`
 

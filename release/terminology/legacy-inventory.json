@@ -5,7 +5,7 @@
     "customer": 814,
     "fixture": 5596,
     "generated": 21,
-    "historical": 3178,
+    "historical": 3179,
     "import": 871,
     "persisted": 669
   },
@@ -35281,10 +35281,10 @@
         181,
         181,
         181,
-        611,
-        618,
-        618,
-        619
+        614,
+        621,
+        621,
+        622
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -35467,8 +35467,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        249,
-        250
+        250,
+        251
       ],
       "occurrenceCount": 2,
       "path": "docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md",
@@ -35696,8 +35696,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        312,
-        315
+        322,
+        325
       ],
       "occurrenceCount": 2,
       "path": "docs/RELEASE_CONTROLS.md",
@@ -36093,11 +36093,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        54,
-        102,
-        123,
-        267,
-        387
+        57,
+        105,
+        126,
+        270,
+        390
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36417,19 +36417,20 @@
     {
       "category": "historical",
       "lineNumbers": [
-        24,
-        35,
-        56,
-        146,
-        244,
-        471,
-        482
+        31,
+        42,
+        63,
+        153,
+        251,
+        513,
+        514,
+        525
       ],
-      "occurrenceCount": 7,
+      "occurrenceCount": 8,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
-      "sha256": "74c777cab6e95d0001b14f6fbaf1610afa84d7d3f0f7e907733a02ec3885482f",
+      "sha256": "fe0e3a38948e2d8045878dc8794c153ddfbe06acf2c98213d3cb6f46e72ca5e2",
       "tokenCounts": {
-        "whoop": 6,
+        "whoop": 7,
         "whoop-default": 1
       }
     },
@@ -36463,7 +36464,7 @@
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "6fe262bad464e9fb19f878d2193dafd768e5c22e7222d4c70472573d811cd167",
+      "sha256": "e0c5bdbc58157284457e7b28f39267ee6528c648d4fb7ce3c486658953e9753c",
       "tokenCounts": {
         "whoop": 4,
         "whoopstore": 3
@@ -38682,7 +38683,7 @@
       }
     }
   ],
-  "occurrenceCount": 17871,
+  "occurrenceCount": 17872,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

@@ -292,8 +292,11 @@ PR `#19` publishes each platform's ordered conformance list and fails closed on
 contract-order drift. PR `#20` preserves an already ready Kotlin session when a
 malformed delayed capability callback is rejected, while the same malformed
 input still fails capability negotiation when negotiation is active.
+PR `#21` preserves a restored checkpoint across an intervening source and
+adds generation-fenced graceful disconnect with bounded cancellation evidence
+for active live and history operations.
 Current protected `main` is
-`9bc2eedce34c61d49f68001a973fbbda793d04ed`. The app integration candidate
+`a9d3f1a2a55b5436bf1b65b0299a27667241afa4`. The app integration candidate
 consumes the deterministic export from that protected revision through a
 digest-pinned, supplier-artifact-free boundary. The repository is temporarily
 public as of 2026-09-22; D-056 still requires private visibility before
