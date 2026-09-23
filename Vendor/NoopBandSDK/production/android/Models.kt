@@ -296,6 +296,8 @@ data class BandIdentity(
     val protocolVersion: String,
     val wrapperRevision: String,
 ) {
+    override fun toString(): String = "BandIdentity"
+
     fun validate() {
         if (
             !sourceIdentity.hasValidUtf8Length(
@@ -487,7 +489,9 @@ data class BandSampleIdentity(
     val stream: BandStreamKind,
     val sequence: Long,
     val deviceTimeMilliseconds: Long,
-)
+) {
+    override fun toString(): String = "BandSampleIdentity"
+}
 
 data class BandSample(
     val identity: BandSampleIdentity,
@@ -495,6 +499,8 @@ data class BandSample(
     val unit: BandUnit,
     val quality: BandSampleQuality,
 ) {
+    override fun toString(): String = "BandSample"
+
     fun validate() {
         if (
             identity.sequence < 0 ||
@@ -537,6 +543,8 @@ data class BandSampleBatch(
     val calibrationRevision: String,
     val samples: List<BandSample>,
 ) {
+    override fun toString(): String = "BandSampleBatch"
+
     fun validate(expectedLane: BandProvenanceLane) {
         if (
             lane != expectedLane ||
@@ -573,6 +581,8 @@ data class BandHistoryRange(
     val startDeviceTimeMilliseconds: Long,
     val endDeviceTimeMilliseconds: Long,
 ) {
+    override fun toString(): String = "BandHistoryRange"
+
     fun validate() {
         if (
             startDeviceTimeMilliseconds <
@@ -595,6 +605,8 @@ data class BandHistoryChunk(
     val acknowledgementToken: String,
     val batches: List<BandSampleBatch>,
 ) {
+    override fun toString(): String = "BandHistoryChunk"
+
     fun validate() {
         if (
             !chunkIdentity.hasValidUtf8Length(
@@ -745,6 +757,8 @@ data class BandHistoryCheckpoint(
     val lastHistoryComplete: Boolean?,
     val durableSampleIdentities: Set<BandSampleIdentity>,
 ) {
+    override fun toString(): String = "BandHistoryCheckpoint"
+
     fun validate() {
         if (
             !sourceIdentity.hasValidUtf8Length(
@@ -865,7 +879,9 @@ data class BandSessionSnapshot(
     val liveActive: Boolean,
     val acknowledgedHistoryCursor: String?,
     val durableSampleCount: Int,
-)
+) {
+    override fun toString(): String = "BandSessionSnapshot"
+}
 
 internal fun fail(category: BandFailureCategory): Nothing {
     throw BandException(category)

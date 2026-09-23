@@ -1,6 +1,6 @@
 # NOOP Band physical validation handoff
 
-**Updated:** 2026-09-19
+**Updated:** 2026-09-23
 **Purpose:** give the next hardware agent an executable, evidence-bounded plan
 for closing only the supplier, firmware, signed-device, and physical-behavior
 gates that source, unit, simulator, emulator, and synthetic cloud tests cannot
@@ -11,9 +11,10 @@ prove.
 - Keep the existing WHOOP 4.0, 5.0, and MG transport available as a distinct
   comparison and regression adapter until the production NOOP Band path passes
   this matrix. Never relabel WHOOP rows as first-party-band data.
-- The binary-free, NOOP-owned neutral contract remains in the separate private
+- The binary-free, NOOP-owned neutral contract remains in the separate public
   `Dhanunjay-Divi/NoopBandSDK` repository. The original supplier drop and every
-  supplier binary remain outside this repository.
+  supplier binary remain outside this repository, as do firmware, credentials,
+  signing material, private reference inputs, and user or health data.
 - The current compatible-device path is local-authoritative. D-059 targets
   staged cloud authority for durable account history, canonical versioned
   metrics, recommendations, and cross-device state. The active phone still
@@ -28,6 +29,34 @@ prove.
   Mac presentation, SMS/voice fallback, or carrier behavior.
 - The supplier wrapper is not implemented or production-approved merely
   because the candidate SDK exposes an API or the app compiles.
+- App PR `#17` consumes the supplier-neutral SDK at protected merge
+  `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4` while retaining WHOOP as the
+  default comparison transport and leaving the first-party source factory
+  disabled. A device-connected agent must not expect a supplier band to pair
+  until the quarantined exact-model adapter and approved supplier artifacts are
+  integrated and enabled for that test build.
+
+## 1.1 Immediate device-connected continuation
+
+After app PR `#17` is merged and protected `main` is verified:
+
+1. Create a new operations round from clean protected `main`; do not continue
+   from a stale SDK or adapter worktree.
+2. Build and install one exact signed candidate on a clean supported iPhone and
+   Android phone. Complete first-run account and onboarding rather than
+   injecting a preconfigured state.
+3. Run the existing WHOOP transport first to establish a comparison baseline:
+   discovery, connection, battery, live heart rate, available history,
+   disconnect/reconnect, background recovery, and diagnostics export.
+4. Integrate the approved Apple and Android supplier adapters only from the
+   exact hardware/firmware intake. Keep the adapter default-off until its
+   focused source, artifact, network, and signed-build gates pass.
+5. Run the same scenarios against the supplier band, then execute
+   `PHY-CON-007` to switch sources and prove isolation.
+6. Record the exact generalized phone/OS/band/firmware classes, failures,
+   blocked supplier inputs, diagnostics categories, and preserved data. Do not
+   include serials, printed identifiers, addresses, credentials, or health
+   values in Git.
 
 ## 2. Inputs required before testing
 

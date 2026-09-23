@@ -924,7 +924,17 @@ final class NOOPiOSUITests: XCTestCase {
             textFieldIsEmpty(weight, placeholder: "Weight"),
             "Clearing weight must not restore the previously validated value."
         )
-        weight.typeText("82.5")
+        let focusedWeight = app.textFields.matching(
+            NSPredicate(
+                format: "identifier == %@ AND hasKeyboardFocus == true",
+                weight.identifier
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            focusedWeight.waitForExistence(timeout: 3),
+            "Clearing weight must preserve keyboard focus for immediate re-entry."
+        )
+        focusedWeight.typeText("82.5")
         XCTAssertEqual(weight.value as? String, "82.5")
 
         let height = app.textFields["noop.profile.height.cm"]
@@ -939,7 +949,17 @@ final class NOOPiOSUITests: XCTestCase {
             textFieldIsEmpty(height, placeholder: "Height"),
             "Clearing height must not restore the previously validated value."
         )
-        height.typeText("183")
+        let focusedHeight = app.textFields.matching(
+            NSPredicate(
+                format: "identifier == %@ AND hasKeyboardFocus == true",
+                height.identifier
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            focusedHeight.waitForExistence(timeout: 3),
+            "Clearing height must preserve keyboard focus for immediate re-entry."
+        )
+        focusedHeight.typeText("183")
         XCTAssertEqual(height.value as? String, "183")
         keepScreenshot(app, name: "onboarding-editable-measurements")
     }

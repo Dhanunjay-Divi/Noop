@@ -256,7 +256,7 @@ Exact UUIDs and byte layouts remain pending the input dossier.
 ### 6.1 Repository boundaries
 
 The NOOP-owned protocol, adapters, fixtures, and conformance tools live in the
-separate private `Dhanunjay-Divi/NoopBandSDK` repository. The binary-free
+separate public `Dhanunjay-Divi/NoopBandSDK` repository. The binary-free
 neutral Swift/Kotlin implementation was merged at
 `e166773c5d3efd68dc5fa24488c9bbdf3ab6e97b`; its first protected-review
 hardening was merged at `f32633a9fc63a9edd273f38e97b48c216a798234`;
@@ -325,11 +325,13 @@ v3 and makes report equivalence deterministic across Swift and Kotlin,
 including exact per-stream semantics, UTF-8 byte semantics, and explicit
 live-operation allowlists.
 Current protected `main` is
-`b027cbd9702936d4903f3293ca605650cdf5c413`. The app integration candidate
+`9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`. The app integration candidate
 consumes the deterministic export from that protected revision through a
-digest-pinned, supplier-artifact-free boundary. The repository is temporarily
-public as of 2026-09-22; D-056 still requires private visibility before
-release.
+digest-pinned, supplier-artifact-free boundary. By owner decision on
+2026-09-23, the app and SDK repositories remain public. D-056 therefore
+requires a continuously enforced public-source boundary rather than a later
+visibility change: supplier binaries, firmware, credentials, signing material,
+private inputs, and user or health data stay outside both repositories.
 
 ```text
 NoopBandSDK/

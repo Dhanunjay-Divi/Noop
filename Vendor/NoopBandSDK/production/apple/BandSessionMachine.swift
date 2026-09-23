@@ -36,6 +36,7 @@ public actor BandSessionMachine {
     private var pendingLive: PendingLive?
     private var liveReceiptCompleting = false
     private var pendingHistory: PendingHistory?
+    private var historyReceiptCompleting = false
     private var lastDurableHistoryComplete: Bool?
     private var historyOperationReceivedDurableReceipt = false
     private var historyOperationLastReceiptComplete: Bool?
@@ -1456,6 +1457,16 @@ public actor BandSessionMachine {
             )
             throw failure
         }
+        guard !historyReceiptCompleting else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .rejected,
+                    failureCategory: .busy
+                )
+            )
+            throw BandFailureCategory.busy
+        }
         guard let pendingHistory,
               receipt.receiptSequence
                 == pendingHistory.acceptance.receiptSequence,
@@ -1501,12 +1512,12 @@ public actor BandSessionMachine {
             throw BandFailureCategory.storage
         }
 
+        historyReceiptCompleting = true
         rememberDurableSampleIdentities(pendingHistory.sampleIdentities)
         acknowledgedHistoryCursor = receipt.nextCursor
         lastDurableHistoryComplete = pendingHistory.acceptance.complete
         historyOperationReceivedDurableReceipt = true
         historyOperationLastReceiptComplete = pendingHistory.acceptance.complete
-        self.pendingHistory = nil
         await diagnostics.record(
             BandDiagnosticEvent(
                 kind: .history,
@@ -1514,6 +1525,23 @@ public actor BandSessionMachine {
                 countBucket: BandCountBucket(count: receipt.committedSamples)
             )
         )
+        guard generation == callbackGeneration,
+              activeOperation == token,
+              state == .historyCollecting,
+              self.pendingHistory?.acceptance.receiptSequence
+                == receipt.receiptSequence
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .history,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
+        self.pendingHistory = nil
+        historyReceiptCompleting = false
     }
 
     public func completeOperation(_ token: BandOperationToken) async throws {
@@ -2318,6 +2346,7 @@ public actor BandSessionMachine {
     private func clearOperationTracking() {
         activeOperation = nil
         pendingHistory = nil
+        historyReceiptCompleting = false
         historyOperationReceivedDurableReceipt = false
         historyOperationLastReceiptComplete = nil
     }

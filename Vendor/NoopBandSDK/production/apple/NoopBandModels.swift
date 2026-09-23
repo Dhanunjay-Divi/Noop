@@ -471,7 +471,13 @@ public struct BandLiveToken:
     }
 }
 
-public struct BandIdentity: Equatable, Sendable {
+public struct BandIdentity:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let sourceIdentity: String
     public let hardwareRevision: String
     public let firmwareVersion: String
@@ -526,6 +532,12 @@ public struct BandIdentity: Equatable, Sendable {
         else {
             throw BandFailureCategory.invalidInput
         }
+    }
+
+    public var description: String { "BandIdentity" }
+    public var debugDescription: String { "BandIdentity" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandIdentity")
     }
 }
 
@@ -732,7 +744,14 @@ private struct BandStreamSemanticKey: Hashable {
     let stream: BandStreamKind
 }
 
-public struct BandSampleIdentity: Hashable, Codable, Sendable {
+public struct BandSampleIdentity:
+    Hashable,
+    Codable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let stream: BandStreamKind
     public let sequence: UInt64
     public let deviceTimeMilliseconds: Int64
@@ -746,9 +765,22 @@ public struct BandSampleIdentity: Hashable, Codable, Sendable {
         self.sequence = sequence
         self.deviceTimeMilliseconds = deviceTimeMilliseconds
     }
+
+    public var description: String { "BandSampleIdentity" }
+    public var debugDescription: String { "BandSampleIdentity" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandSampleIdentity")
+    }
 }
 
-public struct BandSample: Equatable, Codable, Sendable {
+public struct BandSample:
+    Equatable,
+    Codable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let identity: BandSampleIdentity
     public let value: Double
     public let unit: BandUnit
@@ -811,9 +843,22 @@ public struct BandSample: Equatable, Codable, Sendable {
             throw BandFailureCategory.invalidInput
         }
     }
+
+    public var description: String { "BandSample" }
+    public var debugDescription: String { "BandSample" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandSample")
+    }
 }
 
-public struct BandSampleBatch: Equatable, Codable, Sendable {
+public struct BandSampleBatch:
+    Equatable,
+    Codable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let sourceIdentity: String
     public let lane: BandProvenanceLane
     public let parserRevision: String
@@ -867,9 +912,22 @@ public struct BandSampleBatch: Equatable, Codable, Sendable {
         }
         try samples.forEach { try $0.validate() }
     }
+
+    public var description: String { "BandSampleBatch" }
+    public var debugDescription: String { "BandSampleBatch" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandSampleBatch")
+    }
 }
 
-public struct BandHistoryRange: Equatable, Codable, Sendable {
+public struct BandHistoryRange:
+    Equatable,
+    Codable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let startDeviceTimeMilliseconds: Int64
     public let endDeviceTimeMilliseconds: Int64
 
@@ -889,9 +947,22 @@ public struct BandHistoryRange: Equatable, Codable, Sendable {
             throw BandFailureCategory.invalidInput
         }
     }
+
+    public var description: String { "BandHistoryRange" }
+    public var debugDescription: String { "BandHistoryRange" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandHistoryRange")
+    }
 }
 
-public struct BandHistoryChunk: Equatable, Codable, Sendable {
+public struct BandHistoryChunk:
+    Equatable,
+    Codable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let chunkIdentity: String
     public let previousCursor: String?
     public let nextCursor: String?
@@ -999,9 +1070,21 @@ public struct BandHistoryChunk: Equatable, Codable, Sendable {
             }
         }
     }
+
+    public var description: String { "BandHistoryChunk" }
+    public var debugDescription: String { "BandHistoryChunk" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandHistoryChunk")
+    }
 }
 
-public struct BandHistoryCheckpoint: Equatable, Sendable {
+public struct BandHistoryCheckpoint:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let sourceIdentity: String
     public let acknowledgedCursor: String?
     public let lastHistoryComplete: Bool?
@@ -1052,6 +1135,12 @@ public struct BandHistoryCheckpoint: Equatable, Sendable {
         else {
             throw BandFailureCategory.invalidInput
         }
+    }
+
+    public var description: String { "BandHistoryCheckpoint" }
+    public var debugDescription: String { "BandHistoryCheckpoint" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandHistoryCheckpoint")
     }
 }
 
@@ -1302,7 +1391,13 @@ private func redactedMirror<T>(of value: T, name: String) -> Mirror {
     )
 }
 
-public struct BandSessionSnapshot: Equatable, Sendable {
+public struct BandSessionSnapshot:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let state: BandSessionState
     public let generation: UInt64
     public let activeOperation: BandOperationClass?
@@ -1339,5 +1434,11 @@ public struct BandSessionSnapshot: Equatable, Sendable {
                 rhs.acknowledgedHistoryCursor
             )
             && lhs.durableSampleCount == rhs.durableSampleCount
+    }
+
+    public var description: String { "BandSessionSnapshot" }
+    public var debugDescription: String { "BandSessionSnapshot" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandSessionSnapshot")
     }
 }

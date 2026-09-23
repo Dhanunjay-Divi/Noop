@@ -50,23 +50,26 @@ The executable signed-device and hardware matrix is
 
 ## Repository boundary
 
-The NOOP-owned SDK contract targets the separate private
+The NOOP-owned SDK contract targets the separate public
 `Dhanunjay-Divi/NoopBandSDK` repository. Its initial `main` commit is
 `ee82cc0`, and protected contract remediation is merged through
-`b027cbd9702936d4903f3293ca605650cdf5c413`. The latest remediation retains
+`9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`. The latest remediation retains
 exact connection, live-operation, and opaque one-use reconnect authority;
 preserves Swift actor authority across diagnostic suspension; invalidates
 reconnect authority when recovery restarts; rejects every public Kotlin
 session entry during caller-owned collection traversal; and completes the
 reviewed lifecycle chronology, bounded diagnostics, JVM compatibility,
-capability-report equivalence, and exact UTF-8 byte-semantics contracts.
+capability-report equivalence, exact UTF-8 byte-semantics contracts,
+privacy-safe model rendering, and exact-generation history-acknowledgement
+authority across suspension.
 The repository
 contains only
 English NOOP-owned architecture, capability schema, conformance scenarios,
 supplier-intake records, platform adapter requirements, and local validation.
 It contains no vendor binary and no hosted GitHub Actions workflow. The
-repository was temporarily observed as public on 2026-09-22; D-056 requires
-private visibility before release.
+repository was verified public on 2026-09-23 by owner decision. D-056 requires
+the public tree to remain binary-free and free of firmware, credentials,
+signing material, private inputs, and personal or health data.
 
 The 2026-09-23 local supplier-drop audit found Android Veepoo protocol and
 Bluetooth AARs plus an arm64 iPhoneOS-only `VeepooBleSDK.framework`. Those

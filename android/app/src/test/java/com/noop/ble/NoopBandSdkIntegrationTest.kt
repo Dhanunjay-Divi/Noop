@@ -86,7 +86,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "b027cbd9702936d4903f3293ca605650cdf5c413",
+            "9fd84ff6af3d48c41fb5af3128efec9dcc6948a4",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()

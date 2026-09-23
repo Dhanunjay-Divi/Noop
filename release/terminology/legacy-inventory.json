@@ -5,7 +5,7 @@
     "customer": 814,
     "fixture": 5596,
     "generated": 21,
-    "historical": 3184,
+    "historical": 3190,
     "import": 871,
     "persisted": 669
   },
@@ -127,6 +127,18 @@
       "occurrenceCount": 1,
       "path": ".github/workflows/testing-build.yml",
       "sha256": "80fb2c2c8ce759f29e02cc8e6936acadd11e4850179d0d5902d991a445713f79",
+      "tokenCounts": {
+        "whoop": 1
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        33
+      ],
+      "occurrenceCount": 1,
+      "path": "AGENTS.md",
+      "sha256": "b27e72139190ca7000bb18843c06a97a16deb1f309fdc26a76fda45339fe7582",
       "tokenCounts": {
         "whoop": 1
       }
@@ -12284,15 +12296,15 @@
       "category": "core",
       "lineNumbers": [
         4,
-        1878,
-        1937,
-        2007,
-        2007,
-        2015,
-        2015,
-        2028,
-        2036,
-        2044
+        1880,
+        1939,
+        2009,
+        2009,
+        2017,
+        2017,
+        2030,
+        2038,
+        2046
       ],
       "occurrenceCount": 10,
       "path": "Strand/Onboarding/OnboardingWizard.swift",
@@ -12306,7 +12318,7 @@
     {
       "category": "customer",
       "lineNumbers": [
-        1933
+        1935
       ],
       "occurrenceCount": 1,
       "path": "Strand/Onboarding/OnboardingWizard.swift",
@@ -35281,10 +35293,10 @@
         181,
         181,
         181,
-        643,
-        650,
-        650,
-        651
+        645,
+        652,
+        652,
+        653
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -35467,8 +35479,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        268,
-        269
+        271,
+        272
       ],
       "occurrenceCount": 2,
       "path": "docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md",
@@ -35696,8 +35708,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        327,
-        330
+        326,
+        329
       ],
       "occurrenceCount": 2,
       "path": "docs/RELEASE_CONTROLS.md",
@@ -35884,14 +35896,16 @@
       "lineNumbers": [
         11,
         13,
-        179,
-        179
+        33,
+        48,
+        208,
+        208
       ],
-      "occurrenceCount": 4,
+      "occurrenceCount": 6,
       "path": "docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md",
-      "sha256": "5deece88ba2a487fbf8f64aeab945fadd8dd828d554ac2410fd95c10eac82acd",
+      "sha256": "7c999270bb2649219b4a5fd9cb0f15226f05bb981e1090f63eb9f7549d9bb018",
       "tokenCounts": {
-        "whoop": 4
+        "whoop": 6
       }
     },
     {
@@ -36093,18 +36107,19 @@
     {
       "category": "historical",
       "lineNumbers": [
-        116,
-        164,
-        185,
-        329,
-        461,
-        524
+        118,
+        166,
+        187,
+        331,
+        463,
+        541,
+        545
       ],
-      "occurrenceCount": 6,
+      "occurrenceCount": 7,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "cfea4fc60bcefe256b828df479e75bd2d6e2df06f77058f01842c307e47bf32c",
+      "sha256": "637d87baead379f48c1d61333c7dbe5863dbfe12ad174cf5dacbbd37889d4dce",
       "tokenCounts": {
-        "whoop": 3,
+        "whoop": 4,
         "whoopstore": 3
       }
     },
@@ -36418,24 +36433,26 @@
     {
       "category": "historical",
       "lineNumbers": [
-        39,
-        50,
-        71,
-        257,
-        355,
-        738,
-        739,
-        750,
-        948,
-        964,
-        978,
-        1009
+        43,
+        54,
+        75,
+        261,
+        359,
+        742,
+        743,
+        754,
+        957,
+        973,
+        987,
+        1018,
+        1073,
+        1093
       ],
-      "occurrenceCount": 12,
+      "occurrenceCount": 14,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
-      "sha256": "abd35e8a68d9a7e39e102073d0076688547b90dccee1c1e5a7f3d7e5b4351215",
+      "sha256": "617eea5bd310219a781ba4a63f7269faa65e3a0ec315cf07fb3468bbcb9abba6",
       "tokenCounts": {
-        "whoop": 10,
+        "whoop": 12,
         "whoop-default": 2
       }
     },
@@ -38688,7 +38705,7 @@
       }
     }
   ],
-  "occurrenceCount": 17877,
+  "occurrenceCount": 17883,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

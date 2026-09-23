@@ -12,30 +12,32 @@ Last updated: **2026-09-23**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: `NoopBandSDK` PR `#30` is merged normally at
-  `b027cbd9702936d4903f3293ca605650cdf5c413`. Two independent source-only
+- Current state: `NoopBandSDK` PR `#31` is merged normally at
+  `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`. Two independent source-only
   exports from that exact merge were byte-identical. The ten-file export
   manifest SHA-256 is
-  `d238c162d062d7b10eac6e205aba5b8abcfaff6057f2b8c34052756a5317be6c`;
+  `1290444d1e997a2e9bc4bcc025685f33e9bdd8cf147e49c716f8d7017bc56fa1`;
   the SDK artifact test-wrapper SHA-256 is
-  `6712d8cffc23ccd4db2560a50b697cf868ec60f87aa6b59229ce5a4525ba1f8f`.
-  PR `#30` retains capability schema v3 and closes the final reviewed
-  capability-completion and established-session lifecycle regressions.
-  Upstream verification passes Swift 94/94, Kotlin/JVM tests plus
-  `installDist`, 50 shared conformance scenarios, and the 68-file repository
-  policy gate. Exact-current application verification passes the artifact
+  `f2250d3a7f301c893c280fe091b0a46e32beadadd7938e1e4735dbaeb39e3149`.
+  PR `#31` retains capability schema v3, makes public model rendering
+  privacy-safe, and preserves exact-generation history-acknowledgement
+  authority across suspension. Upstream verification passes Swift 100/100,
+  Kotlin/JVM 102/102 plus `installDist`, 50 shared conformance scenarios, and
+  the 71-file repository policy gate. Exact-current application verification passes the artifact
   verifier and its 9-test adversarial suite, vendored Swift 16/16, the real
   macOS boundary 10/10, Android Full and Demo integration 15/15 each, both
   Android instrumentation source graphs, and the unsigned Release
-  iPhone/Watch/complication/widget graph. Account and ownership onboarding
-  passes 13/13 on Apple and 14/14 in each Android variant. The complete
-  repository wall passes 318 tests with one intentional skip; every direct
-  release, trust, calibration, terminology, provenance, privacy, claims,
-  localization, operations, artifact, shell, and diff gate is green.
-  Independent final review found no P0/P1 blocker or runtime P2 regression;
-  the new SDK behavior assertions remain covered upstream. One consolidated
-  commit/push, hosted exact-head checks, protected integration, and
-  protected-main verification remain pending.
+  iPhone/Watch/complication/widget graph. The exact-current focused iOS
+  profile clear-and-retype regression passes 1/1. Independent SDK review found
+  no P0/P1 blocker; both P2 evidence findings were corrected before merge.
+  Repository-control gates require one final rerun after this documentation
+  repin. Remote app head
+  `6d3b54a01ed6fd7e741e721aa6ff467d3b6bfcb4` passed every hosted context
+  except the iOS production shell, whose only failure was immediate re-entry
+  after clearing a focused profile measurement. The native-button/focus
+  correction passes the exact case three times locally. One narrow follow-up
+  commit/push, replacement hosted exact-head checks, protected integration,
+  and protected-main verification remain pending.
   Historical PR `#27` app evidence remains: the artifact verifier and its
   9-test adversarial suite passed; the vendored Swift package passed 16/16
   across all 46 scenarios plus the app-repository actor-suspension regression;
@@ -459,7 +461,7 @@ Resume from:
   presentation controls, managed Friends parity, macOS viewer foundations,
   evidence-backed UI refinements, and the supplier wrapper handoff.
 - Preserve the current WHOOP compatibility path for physical regression
-  testing. The private `NoopBandSDK` repository now contains the binary-free
+  testing. The public `NoopBandSDK` repository now contains the binary-free
   neutral core and virtual conformance surface, and the app pins that export
   behind a disabled factory. It still does not contain an executable supplier
   adapter or firmware flasher. Keep real scanning, possession proof, history,
@@ -482,7 +484,9 @@ Resume from:
    SDK, app source, and tests.
 3. Merge normally only after Apple and Android app compilers/tests are green,
    verify protected `main`, and remove exact round-owned outputs and logs.
-4. Restore the SDK repository's D-056 private visibility before release.
+4. Keep both repositories public under D-056 while preserving the strict
+   exclusion of supplier binaries, firmware, credentials, signing material,
+   private inputs, and user or health data.
 5. Execute the supplier adapter and flashing round only after the exact
    supplier artifacts, firmware project, rights/SBOM/security evidence, and
    representative physical units are available.
@@ -499,26 +503,48 @@ Resume from:
   capture; 101 GiB is free. Final terminology repin, repository controls, one
   consolidated push, exact-head hosted checks, protected merge/main
   verification, and final log/worktree cleanup remain.
-- The final terminology repin and exact repository controls are now green:
+- The prior PR `#30` terminology repin and repository controls were green:
   318/318 Tools tests with one intentional skip, nine release controls, ten
   required contexts, trusted self-verification, exact SDK artifact,
   calibration, distribution/private-data/health-claim guards, all 84
   operations records, complete supported-language catalog coverage,
-  shell/workflow lint, Python compilation, and diff hygiene. The terminology
-  snapshot records 17,877 occurrences across 1,588 groups with an unchanged
-  active allowlist, zero forbidden mappings, and digest
-  `51ef8da9020a44090f3c03499b1eddb616815e003e8073ae9ffe268111440576`.
+  shell/workflow lint, Python compilation, and diff hygiene. The PR `#31`
+  documentation repin now records 17,883 occurrences across 1,589 groups with
+  an unchanged active allowlist, zero forbidden mappings, and reviewed digest
+  `433d89784f464c4a44f423221cf989a05a09f87c1420a24a217ce64e95ac3005`;
+  replacement repository-control execution passes 318/318 with one skip.
   Candidate `e12b71fb` remains the previous remote head; the PR `#30`
   replacement is still local.
-- SDK PR `#30` is now consumed at
-  `b027cbd9702936d4903f3293ca605650cdf5c413`. Two clean exports are
+- SDK PR `#31` is now consumed at
+  `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`. Two clean exports are
   byte-identical with manifest SHA-256
-  `d238c162d062d7b10eac6e205aba5b8abcfaff6057f2b8c34052756a5317be6c`.
+  `1290444d1e997a2e9bc4bcc025685f33e9bdd8cf147e49c716f8d7017bc56fa1`.
   The vendored tree is byte-identical to the clean export. Exact app,
-  simulator, onboarding, and repository-control verification are green;
-  hosted exact-head verification remains before the app branch can integrate.
+  simulator, and onboarding verification are green. Final repository-control
+  verification and hosted exact-head verification remain before the app branch
+  can integrate.
+- Repository visibility was reverified on 2026-09-23: both
+  `Dhanunjay-Divi/Noop` and `Dhanunjay-Divi/NoopBandSDK` are public. D-056 now
+  records that as the owner-approved operating state, so no post-merge
+  visibility change is pending. The public-source exclusion boundary remains
+  mandatory.
+- App PR `#17` remote head `6d3b54a0` passed every hosted context except the
+  iOS production shell. The app built, and the shell's only failure was
+  immediate typing after clearing a profile measurement because keyboard focus
+  had been removed. The local correction preserves focus, uses native clear
+  buttons, and passes the exact UI case three times. A narrow replacement push
+  and exact-head hosted rerun remain before protected integration.
 - Separate supplier-adapter worktrees are not part of PR `#17`. The Apple
   source-only adapter remains default-off and has no production stream. The
   Android adapter review found uncontained supplier exceptions and terminal
   diagnostic ordering defects; it also retains opt-in and physical gates.
   WHOOP remains the default test transport in the integration candidate.
+- `AGENTS.md` and the physical-validation handoff now direct the next
+  device-connected agent to install exact signed iPhone and Android candidates
+  from protected `main`, complete first-run account/onboarding, establish the
+  WHOOP comparison baseline, and integrate only the exact approved supplier
+  adapter before expecting the supplier band to connect.
+- Final local controls pass: 318 repository tests with one intentional skip,
+  84 operations records, the exact 10-file SDK artifact and its 9 adversarial
+  tests, the reviewed terminology ratchet, and diff hygiene. The branch is
+  ready for its single replacement commit and hosted exact-head run.

@@ -1695,7 +1695,7 @@ private struct ProfileStep: View {
         case .heightInches:
             heightInchesDraft = ""
         }
-        focusedField = nil
+        focusedField = field
         DispatchQueue.main.async {
             guard clearTransitionField == field else { return }
             focusedField = field
@@ -1731,15 +1731,16 @@ private struct ProfileStep: View {
                         .simultaneousGesture(TapGesture().onEnded { focus(.weight) })
                         .accessibilityLabel("Weight value")
                         .accessibilityIdentifier("noop.profile.weight")
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .contentShape(Rectangle())
-                        .onTapGesture { clearDraft(.weight) }
-                        .accessibilityElement()
-                        .accessibilityAddTraits(.isButton)
+                    Button {
+                        clearDraft(.weight)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    .buttonStyle(.plain)
                     .opacity(weightDraft.isEmpty ? 0 : 1)
-                    .allowsHitTesting(!weightDraft.isEmpty)
+                    .disabled(weightDraft.isEmpty)
                     .accessibilityHidden(weightDraft.isEmpty)
                     .accessibilityLabel("Clear weight")
                     .accessibilityIdentifier("noop.profile.weight.clear")
@@ -1782,15 +1783,16 @@ private struct ProfileStep: View {
                             .simultaneousGesture(TapGesture().onEnded { focus(.heightCm) })
                             .accessibilityLabel("Height value")
                             .accessibilityIdentifier("noop.profile.height.cm")
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 15))
-                            .foregroundStyle(StrandPalette.textTertiary)
-                            .contentShape(Rectangle())
-                            .onTapGesture { clearDraft(.heightCm) }
-                            .accessibilityElement()
-                            .accessibilityAddTraits(.isButton)
+                        Button {
+                            clearDraft(.heightCm)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                        .buttonStyle(.plain)
                         .opacity(heightCmDraft.isEmpty ? 0 : 1)
-                        .allowsHitTesting(!heightCmDraft.isEmpty)
+                        .disabled(heightCmDraft.isEmpty)
                         .accessibilityHidden(heightCmDraft.isEmpty)
                         .accessibilityLabel("Clear height")
                         .accessibilityIdentifier("noop.profile.height.clear")
