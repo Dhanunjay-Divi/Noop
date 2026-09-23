@@ -619,6 +619,31 @@ Success means:
   missing `sys.stdlib_module_names` API. The same bundle passed with the
   repository-pinned Homebrew Python 3.14.7. No source or test relaxation was
   made for either failure.
+- Reviewed exact PR `#17` head
+  `a54be2ae1df85fca956a869bd7a784c890948b46` after its terminal hosted
+  result. Android, macOS, server, package, policy, localization, health-claim,
+  license, operations, release-control, and trusted-control jobs passed. The
+  iOS app built, then its 39-case production shell failed only
+  `testRecoveryTrendSupportsExactDateScrubbing` in run `35854528703`, job
+  `107159852090`.
+- Retained failure hierarchy proved a product interaction defect rather than
+  an assertion-only flake: releasing the hold-to-scrub gesture also satisfied
+  the chart's simultaneous tap recognizer and opened Recovery detail, removing
+  the chart before its selected-date value could be read. The shared
+  `TrendChart` now latches a scrub release, consumes only that overlapping tap,
+  expires an unconsumed latch after 300 ms without scheduled state mutation,
+  and preserves an ordinary short tap for metric navigation. The UI test
+  re-queries the stable accessibility identifier after SwiftUI replaces the
+  selected chart node, without assuming that its runtime accessibility element
+  type remains `Other`.
+- The exact focused iOS journey passes 1/1 in 21.607 seconds and proves both
+  outcomes in sequence: hold-and-drag keeps the chart visible with an exact
+  selected-date value, then a short tap opens Recovery detail. `StrandDesign`
+  passes 55/55. The complete local iOS production shell passes 39 tests with
+  one intentional private-pilot skip and zero failures in 636.770 seconds.
+  Xcode 27 then spent its documented 600-second diagnostic timeout in
+  `simctl diagnose`; the bounded command remained under its output/resource
+  caps and exited `0` after diagnostics completed.
 
 ## Data, privacy, and medical truth
 
@@ -695,6 +720,7 @@ Success means:
 | Exact-head hosted resource classification | PR `#17` head `fbbb3b50` passed every hosted context except Review Sample. Run `35681052415` attempt 1 job `106598021250` and attempt 2 job `106602308597` each completed APK preparation, entered the emulator task, then stopped with bounded `resource-memory`; retained evidence has no test-result records. | The two failures are reproducible hosted-runner resource stops, not hidden assertions or product failures | A passing Review Sample execution on the replacement profile |
 | Review Sample resource-profile correction | Both Review Sample commands now use `-Xmx1536m` and `--max-workers=1`, matching the hosted-green production shell. Focused workflow/retry tests pass 66/66, Actionlint passes, and the complete bounded Tools wall passes 312/312 with one intentional skip. | Required workflow structure, fail-closed classification, memory envelope, and repository controls agree locally | Hosted exact-SHA execution of the corrected Review Sample job |
 | Hosted iOS app-report transition correction | Exact head `fe800e8e` passed every hosted context except the iOS production shell, whose only failing case retained the review page's scroll offset after entering the queued phase. The corrected exact case passes 1/1 in 16.098 seconds on a fresh iPhone 17e simulator and 1/1 in 15.841 seconds after the iOS 17 callback correction. The complete unsigned iOS graph then builds with zero source warnings and embeds Watch/widgets. | The queued status, cancellation control, and sheet dismissal are visibly reachable after a long review-page scroll; the correction compiles in the real iOS UI-test graph without a deprecated source API | Replacement exact-SHA hosted execution, physical shake behavior, or production feedback delivery |
+| Hosted Recovery chart interaction correction | PR `#17` head `a54be2ae` passed every applicable hosted context except the iOS production shell. Its single failure retained an accessibility hierarchy showing Recovery detail already open after the hold-and-drag. The corrected focused journey passes 1/1 in 21.607 seconds, `StrandDesign` passes 55/55, and the complete local iOS shell passes 39 with one intentional skip and zero failures in 636.770 seconds. | A chart scrub no longer also navigates, the selected-date accessibility value survives SwiftUI node replacement, and a subsequent short chart tap still opens metric detail | Replacement exact-SHA hosted execution, physical touch behavior, or signed-device accessibility |
 | PR `#24` local trust wall | The reviewed PR `#24` terminology snapshot retains 17,872 occurrences across 1,588 groups, unchanged category totals and active allowlist, and zero forbidden mappings. The complete Tools wall passes 318/318 with one intentional skip; the exact release-workflow matrix passes 204/204; and the direct wall passes 9/9 release controls, all ten required contexts, trusted self-check, exact artifact verification, calibration parity for 12 metrics/3 revisions/13 thresholds/16 guards, legal/distribution/private-data, eight health-claims tests plus a 1,299-file scan, localization, 83 operations records, shell/workflow lint, Python compilation, and diff hygiene. | The historical PR `#24` candidate satisfied the repository-controlled release, privacy, claims, metric, localization, artifact, and process-cleanup contracts locally | Hosted exact-SHA enforcement, physical accessibility, or protected integration |
 | Final policy rerun classification | The first complete wall failed only three fail-closed trust checks because the newly reviewed terminology inventory had not yet been repinned in `RELEASE_SOURCE_DIGESTS`. The final post-review snapshot SHA-256 is `f5969d93f3d074dedd764e6eb8034827254bd3ff7799fcf105440514abeeeacf`; repinning the reviewed snapshot made the focused trust matrix and unchanged complete wall pass. One manual trusted-self invocation omitted the required `--root .` argument and exited on CLI usage; the correctly shaped invocation passed. | The protected evidence ratchet rejects an updated snapshot until its exact digest is reviewed, and the final commands execute rather than silently skip | Hosted exact-SHA execution or physical behavior |
 
@@ -734,9 +760,11 @@ Success means:
 - Branch and remote state: PR `#17` is open from the dedicated branch.
   SDK PR `#26` is merged at
   `eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`. The consolidated SDK source
-  and documentation replacement are carried by its final app candidate. That
-  exact head requires hosted checks, matching review, applicable thread
-  resolution, and protected integration.
+  and documentation replacement are carried by its final app candidate.
+  Remote head `a54be2ae` passed every applicable hosted context except the
+  now-corrected Recovery chart interaction case. The local remediation still
+  requires one exact commit/push, replacement hosted checks, matching review,
+  applicable thread resolution, and protected integration.
 - Repository visibility verified on 2026-09-22:
   `Dhanunjay-Divi/Noop` and `Dhanunjay-Divi/NoopBandSDK` both report `PUBLIC`
   with default branch `main`. D-056 still requires the SDK repository to be
@@ -771,8 +799,8 @@ Success means:
 
 ## Next round
 
-1. Commit and push the final SDK PR `#26` source and documentation closeout
-   without changing the validated runtime contract.
+1. Commit and push the Recovery chart interaction remediation without changing
+   the validated SDK runtime contract.
 2. Require every exact-SHA protected context and matching review on that
    candidate, then resolve only threads proven fixed by matching evidence.
 3. Merge normally, verify protected `main`, and remove exact round-owned logs,
@@ -786,3 +814,36 @@ Success means:
 
 - [x] No credentials, emails, raw biometric exports, personal names, device
       identifiers, signing identities, or absolute personal paths are present.
+
+## September 23 final local pre-push closeout
+
+- A final source review removed the delayed scrub-latch mutation. The chart now
+  uses a short expiry deadline, so a second hold started immediately after the
+  first cannot be cleared by stale scheduled work. It also installs the
+  explicit tap recognizer only when a caller supplies a tap action, preserving
+  the behavior of non-navigating charts.
+- Exact-current verification is green. `StrandDesign` passes 55/55. The
+  focused Recovery scrub-then-tap journey passes 1/1 in 21.660 seconds. The
+  complete iOS production shell passes 39 tests with one intentional private
+  synthetic-pilot skip and zero failures in 628.915 seconds. Xcode's separate
+  simulator diagnostic collection reached its documented 600-second timeout
+  after the tests; the test result remained successful and `xcodebuild`
+  exited `0`.
+- Removed only regenerated round-owned output after preserving the results:
+  the empty SDK `.swiftpm` directory, 175,152 KiB of `StrandDesign` build
+  output, and 3,294,680 KiB of the exact iOS DerivedData directory. No build or
+  test process remained, and free data-volume space increased to 101 GiB.
+- The exact pre-commit repository wall passes 318/318 tests with one
+  intentional Safety smoke skip. Direct entrypoints pass nine release
+  controls, all ten required contexts, trusted self-verification, the exact
+  ten-file SDK artifact contract with supplier payloads absent, calibration
+  parity for 12 metrics, 3 revisions, 13 thresholds, and 16 guards,
+  distribution provenance, private-data and health-claim guards, validation
+  of all 84 operations records, complete translated-key coverage in every
+  supported Apple catalog, shell syntax/ShellCheck, Actionlint, Python
+  compilation, and diff hygiene. The reviewed terminology snapshot remains
+  17,872 occurrences across 1,588 groups with unchanged category totals,
+  unchanged active allowlist, zero forbidden mappings, and SHA-256
+  `a64999a10b979c14656449c7122ab0a9e1ae93471b52d03b61cfaebd0854d42d`.
+  The localization report retains 244 Android hardcoded literals as explicit
+  existing debt rather than hiding them.

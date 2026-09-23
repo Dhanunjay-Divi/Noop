@@ -36097,7 +36097,7 @@
         148,
         169,
         313,
-        433
+        445
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36422,9 +36422,9 @@
         67,
         219,
         317,
-        675,
-        676,
-        687
+        700,
+        701,
+        712
       ],
       "occurrenceCount": 8,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",

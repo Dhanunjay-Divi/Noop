@@ -1209,9 +1209,10 @@ final class NOOPiOSUITests: XCTestCase {
 
     func testRecoveryTrendSupportsExactDateScrubbing() {
         let app = launchApp(tab: "trends")
+        let chartIdentifier = "noop.trends.recovery.chart"
         // NavigationLink mirrors child accessibility metadata onto its button. Select the chart's
         // concrete element so the gesture lands in the plot instead of matching both elements.
-        let chart = app.otherElements["noop.trends.recovery.chart"].firstMatch
+        let chart = app.otherElements[chartIdentifier].firstMatch
         XCTAssertTrue(chart.waitForExistence(timeout: 20))
         let quickActions = app.buttons["noop.quick-actions"]
         XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
@@ -1229,7 +1230,15 @@ final class NOOPiOSUITests: XCTestCase {
         let nearby = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.50))
         july29Area.press(forDuration: 0.35, thenDragTo: nearby)
 
-        let selected = String(describing: chart.value)
+        // SwiftUI may replace the chart's accessibility node after its value changes. Xcode 26.6
+        // classifies the replacement as StaticText even though the stable identifier and semantics
+        // are unchanged, so re-query without pinning the stale pre-scrub `Other` element type.
+        let selectedChart = app.descendants(matching: .any)[chartIdentifier].firstMatch
+        XCTAssertTrue(selectedChart.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            String(describing: selectedChart.value) != summary
+        })
+        let selected = String(describing: selectedChart.value)
         XCTAssertNotEqual(selected, summary)
         XCTAssertFalse(selected.localizedCaseInsensitiveContains("points"))
         keepScreenshot(app, name: "trends-recovery-date-selection")

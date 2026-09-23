@@ -407,6 +407,18 @@ Last updated: **2026-09-23**
   removed five exact regeneratable paths containing 118,883 files and
   approximately 6,111,817,728 bytes. Verification found no remaining build or
   test process, 22 GiB free, and iTerm2 at approximately 310 MiB RSS.
+- Exact PR `#17` head `a54be2ae` passed every applicable hosted context except
+  the iOS production shell. Its only failure was not an infrastructure retry:
+  the Recovery chart's hold-to-scrub release also fired its simultaneous
+  navigation tap. Retained hierarchy showed Recovery detail already open while
+  the test still expected the selected chart value. The shared chart now
+  consumes that one overlapping release while preserving ordinary tap
+  navigation and re-queries its stable accessibility identifier across
+  SwiftUI node replacement. Focused iOS passes 1/1 in 21.607 seconds,
+  `StrandDesign` passes 55/55, and the complete local iOS production shell
+  passes 39 with one intentional skip and zero failures in 636.770 seconds.
+  One exact remediation commit/push, replacement hosted checks, protected
+  review/merge, protected-main verification, and exact cleanup remain.
 
 Resume from:
 
@@ -458,3 +470,25 @@ Resume from:
 5. Execute the supplier adapter and flashing round only after the exact
    supplier artifacts, firmware project, rights/SBOM/security evidence, and
    representative physical units are available.
+
+## September 23 latest local evidence
+
+- The Recovery chart correction now uses an expiry deadline rather than
+  delayed state mutation, preventing a stale first-scrub cleanup from
+  interfering with an immediate second scrub. `StrandDesign` passes 55/55, the
+  exact scrub-then-tap journey passes 1/1 in 21.660 seconds, and the complete
+  iOS production shell passes 39 with one intentional private synthetic-pilot
+  skip and zero failures in 628.915 seconds. The exact SDK cache, package
+  build, and 3.1 GiB iOS DerivedData outputs were removed after evidence
+  capture; 101 GiB is free. Final terminology repin, repository controls, one
+  consolidated push, exact-head hosted checks, protected merge/main
+  verification, and final log/worktree cleanup remain.
+- The final terminology repin and exact repository controls are now green:
+  318/318 Tools tests with one intentional skip, nine release controls, ten
+  required contexts, trusted self-verification, exact SDK artifact,
+  calibration, distribution/private-data/health-claim guards, all 84
+  operations records, complete supported-language catalog coverage,
+  shell/workflow lint, Python compilation, and diff hygiene. The terminology
+  snapshot records 17,872 occurrences across 1,588 groups with zero forbidden
+  mappings and digest `a64999a10b979c14656449c7122ab0a9e1ae93471b52d03b61cfaebd0854d42d`.
+  One consolidated commit/push and exact-head hosted verification remain.
