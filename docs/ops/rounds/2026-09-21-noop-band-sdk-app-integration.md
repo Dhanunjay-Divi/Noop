@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `SDK PR 25 final evidence verified; consolidated push pending`
+- State: `PR #17 final documentation closeout; exact-head hosted verification pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
@@ -20,12 +20,12 @@
   `1be4062c054b210187f4c48f2ab99dd59873923e`.
 - Pre-remediation PR `#17` evidence commit:
   `78eba788b337c3472d32f8bd789965f84ef67b8a`
-- Record commit or PR: PR `#17`; SDK upstream merge
-  `f20f4ed552328a64a8a598aaac72befa1d481262`, app implementation
-  `0a8b3a7a17848ca5c2ee15228ef6e2726813c44c`, and prior exact head `fed31b0f164675b0d1f6ef5a7724262afb23f0af`. All ten required hosted
-  contexts passed on that prior head. The PR `#24` app repin passes the local
-  platform, policy, and independent-review gates; commit, push, and replacement
-  exact-SHA hosted verification remain.
+- Record commit or PR: app PR `#17`; SDK PR `#25` upstream merge
+  `650c89e45ca2ab28e14e76e447a7026479e42b4e`, app implementation
+  `1be4062c054b210187f4c48f2ab99dd59873923e`, and reviewed-evidence commit
+  `b21d8b72288678668ff17d1e365b9abace42c0ef`. The final
+  documentation-only closeout, replacement exact-SHA hosted verification,
+  applicable thread resolution, and protected integration remain.
 
 ## Objective
 
@@ -127,9 +127,11 @@ Success means:
   SwiftPM output, 3.2 GiB macOS DerivedData, and 5.1 GiB iOS DerivedData.
   Separate UI-round cleanup removed 10 GiB of ignored build output without
   changing its dirty source paths.
-- Committed the verified PR `#25` app repin locally at
-  `1be4062c054b210187f4c48f2ab99dd59873923e`. It has not been pushed; the
-  replacement candidate still requires exact-head hosted checks and review.
+- Committed the verified PR `#25` app repin at
+  `1be4062c054b210187f4c48f2ab99dd59873923e` and pushed its final reviewed
+  evidence at `b21d8b72288678668ff17d1e365b9abace42c0ef`. A
+  documentation-only correction now requires replacement exact-head hosted
+  checks and review before protected integration.
 - Independent exact-diff review found no P0/P1. Its three P2 findings are
   corrected locally: the app package now directly exercises reconnect actor
   suspension, PR `#24` table rows are explicitly historical, and the pinned
@@ -645,7 +647,7 @@ Success means:
 | Prior PR `#21` independent clean exports | Two exact-merge source trees are byte-identical; manifest SHA-256 `72e9a93f35f01ad9aa8d1975ec4a1beb76d96cf068e27553a08c0ceef01cc571`, eleven regular files, no symlinks, and app wrapper digest `6fbf791315521028e9cafd2407f21bfe559912631ef5c716f77dbf35b3f92ce3` | The prior vendored artifact was deterministic and traceable to SDK PR `#21` merge `a9d3f1a2` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Prior PR `#22` independent clean exports | Two complete 58-file source exports contain no Git metadata and have identical archive SHA-256 `5eb3e30db3282907ba26432254d3bd2053349f645fe28549097ade3efb72ed8f`; the exact app export manifest SHA-256 is `7299684795367f8e20c488777626ff5988abae72d2264d8ac081878d909ae973`, with app wrapper digest `b24cb6b607710f867d96a3ea5d3c794b3d7517073b995acadfe750153d24d815` | The prior vendored artifact was deterministic and traceable to SDK PR `#22` merge `1883ad33` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Prior PR `#23` independent app exports | Two exact-merge ten-file app-source exports are byte-identical; manifest SHA-256 is `539ec7ab2c5906ea64ab98bb1be0f5ceb70f5ffbf9e0911b5b91cbf0b56e7bc7`, with app wrapper digest `b24cb6b607710f867d96a3ea5d3c794b3d7517073b995acadfe750153d24d815` | The prior vendored artifact was deterministic and traceable to SDK PR `#23` merge `1b4c614e` | Legal rights or supplier provenance beyond the absent-artifact declaration |
-| Current PR `#24` independent app exports | Two independent exact-merge ten-file app-source exports are byte-identical; manifest SHA-256 is `4801fd6ecbece36df653d91e0d0d975f2fea4c1f7d59f81c69a8b08d90f1b9cf`, app wrapper digest is `31705f1ceb14f0d6eac686083b7012ff685403b0e01435c472e5a8fce3ca7943`, supplier payloads are absent, and both normalized file-digest lists match | The current vendored artifact is deterministic and traceable to SDK PR `#24` merge `f20f4ed` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Historical PR `#24` independent app exports | Two independent exact-merge ten-file app-source exports are byte-identical; manifest SHA-256 is `4801fd6ecbece36df653d91e0d0d975f2fea4c1f7d59f81c69a8b08d90f1b9cf`, app wrapper digest is `31705f1ceb14f0d6eac686083b7012ff685403b0e01435c472e5a8fce3ca7943`, supplier payloads are absent, and both normalized file-digest lists match | The historical vendored artifact was deterministic and traceable to SDK PR `#24` merge `f20f4ed` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Prior protected SDK app repin | SDK Swift 55/55, Kotlin 63/63 plus distribution, shared conformance 38/38, and clean repository gate 56/56 passed before PR `#20` merged. The 9-test app verifier suite, vendored Swift 15/15, macOS app boundary 10/10, and Android Full app boundary 12/12 pass; Demo plus Full and Demo instrumentation sources compile. | Ordered conformance publication and the ready-session late-callback correction were consumed while WHOOP remained the default comparison transport and the first-party factory remained disabled | Supplier transport invocation or any physical-device behavior |
 | Current protected SDK app repin | SDK Swift 64/64, Kotlin/JVM 71/71 plus `installDist`, shared conformance 42/42, and the clean 60-file repository gate passed before PR `#24` merged. The app verifier passes 9/9, vendored Swift passes 15/15 across 42 automated scenarios, macOS app boundary passes 10/10, Android Full app boundary passes 13/13, and Demo plus both instrumentation sources compile. | Exact scan authority is consumed before the Apple selection suspension and exact issued-token identity protects Kotlin callbacks in the app's same compilation module, while WHOOP remains the default comparison transport and the first-party factory remains disabled | Supplier transport invocation or any physical-device behavior |
 | Artifact verifier plus unit tests | Exact ten-file export passed; all 9 verifier tests passed, including one positive case and eight adversarial cases covering symlink roots and ancestors, content drift, unexpected files, supplier payloads, and an unmanifested Git mode-160000 entry; no supplier artifacts found | Source, manifest, package wrapper, exact tracked-file layout, complete path/tree symlink policy, Git-index regular-file policy, and no-binary policy are pinned | Physical compatibility |
@@ -705,14 +707,13 @@ Success means:
   alignment `4388058c09130d371c05d86a725c3bddb1354524`; final protected SDK PR `#16`
   repin, verifier hardening, callback correction, and reviewed evidence
   `e6a932f5accd8c2fc01b1778b52c3d7c0d1b932f`.
-- Branch and remote state: PR `#17` is open from the dedicated branch. Remote
-  head `fed31b0f164675b0d1f6ef5a7724262afb23f0af` passed all ten required
-  hosted contexts. Its exact-head review findings were corrected upstream and
-  merged through SDK PR `#24` at
-  `f20f4ed552328a64a8a598aaac72befa1d481262`. The app repin is locally
-  modified and current platform, policy, and independent-review evidence is
-  green. Final commit, replacement candidate SHA, exact-SHA checks, matching
-  hosted review, and applicable thread resolution remain.
+- Branch and remote state: PR `#17` is open from the dedicated branch.
+  SDK PR `#25` is merged at
+  `650c89e45ca2ab28e14e76e447a7026479e42b4e`; app implementation
+  `1be4062c054b210187f4c48f2ab99dd59873923e` and reviewed evidence
+  `b21d8b72288678668ff17d1e365b9abace42c0ef` are remote. The final
+  documentation-only candidate still requires exact-SHA checks, matching
+  hosted review, applicable thread resolution, and protected integration.
 - Repository visibility verified on 2026-09-22:
   `Dhanunjay-Divi/Noop` and `Dhanunjay-Divi/NoopBandSDK` both report `PUBLIC`
   with default branch `main`. D-056 still requires the SDK repository to be
@@ -739,24 +740,24 @@ Success means:
   macOS, Android, iOS/Watch/complications/widget, terminology, complete Tools,
   release-matrix, and direct policy gates. Independent exact-diff review found
   no P0/P1; its three P2 evidence/test findings are corrected in the final
-  evidence commit. Push and replacement exact-SHA hosted verification remain.
-  Prior PR `#17` head `fed31b0f` passed all ten required hosted
-  contexts, but that does not prove the locally committed, unpushed PR `#25`
-  repin.
+  evidence commit. A final documentation-only correction and replacement
+  exact-SHA hosted verification remain. Prior PR `#17` head `fed31b0f` passed
+  all ten required hosted contexts, and reviewed-evidence head `b21d8b72` was
+  pushed, but neither proves the final candidate until its own hosted checks
+  complete.
 - A source-only adapter seam cannot establish that a supplier band is
   compatible or flashable.
 
 ## Next round
 
-1. Resolve any independent exact-diff finding and create the final evidence
-   commit without changing the validated runtime contract.
-2. Push implementation and evidence commits together once.
-3. Require every exact-SHA protected context and matching review on that
+1. Commit and push the final documentation-only closeout without changing the
+   validated runtime contract.
+2. Require every exact-SHA protected context and matching review on that
    candidate, then resolve only threads proven fixed by matching evidence.
-4. Merge normally, verify protected `main`, and remove exact round-owned logs,
+3. Merge normally, verify protected `main`, and remove exact round-owned logs,
    exports, package scratch data, and the dedicated worktree.
-5. Restore the SDK repository to the D-056 private visibility before release.
-6. Keep the supplier adapter/flasher disabled until the exact SDK, firmware,
+4. Restore the SDK repository to the D-056 private visibility before release.
+5. Keep the supplier adapter/flasher disabled until the exact SDK, firmware,
    tooling, keys, rights, and representative physical bands pass their
    acceptance matrix.
 

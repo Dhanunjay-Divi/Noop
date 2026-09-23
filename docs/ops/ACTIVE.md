@@ -36,12 +36,14 @@ Last updated: **2026-09-23**
   mappings. Independent exact-diff review found no P0/P1; all three P2
   test/evidence findings are corrected locally. Generated SwiftPM and 8.3 GiB
   of round-owned Apple DerivedData were removed after evidence capture. The
-  implementation is committed locally at
-  `1be4062c054b210187f4c48f2ab99dd59873923e`. Final review/evidence changes
-  are verified locally. One consolidated push, replacement exact-SHA hosted
-  checks, protected merge/main verification, and supplier physical-device
-  validation remain.
-- Current state: `NoopBandSDK` PR `#24` is merged normally at
+  implementation commit
+  `1be4062c054b210187f4c48f2ab99dd59873923e` and reviewed evidence commit
+  `b21d8b72288678668ff17d1e365b9abace42c0ef` are pushed to app PR `#17`.
+  A final documentation-only closeout supersedes that evidence head; every
+  required hosted context and applicable review thread must pass on the exact
+  resulting head before protected merge/main verification. Supplier
+  physical-device validation remains separate.
+- Historical checkpoint: `NoopBandSDK` PR `#24` merged normally at
   `f20f4ed552328a64a8a598aaac72befa1d481262`. Two independent app-source
   exports from that exact merge are byte-identical. The app's exact ten-file
   source export has manifest SHA-256
@@ -71,7 +73,7 @@ Last updated: **2026-09-23**
   contract without invalidating the accepted connection. Upstream verification
   passed Swift 64/64, Kotlin/JVM 71/71 plus `installDist`, shared conformance
   42/42, and the clean 60-file repository gate.
-  The app is now repinned locally to `f20f4ed5`. The exact artifact verifier
+  At that checkpoint, the app was repinned locally to `f20f4ed5`. The exact artifact verifier
   and its adversarial suite pass 9/9, the vendored Swift package passes 15/15
   across all 42 automated scenarios, the real macOS app boundary passes 10/10,
   and Android Full integration passes 13/13, including a direct app-module
@@ -83,8 +85,10 @@ Last updated: **2026-09-23**
   DerivedData were exact-deleted after evidence capture, restoring 22 GiB free
   disk; the exact artifact verifier passes again.
   PR `#17` remote head `fed31b0f164675b0d1f6ef5a7724262afb23f0af`
-  remains the prior exact head with all ten required hosted contexts green.
-  The PR `#24` app repin is locally modified but not yet committed or pushed.
+  was the prior exact head with all ten required hosted contexts green.
+  The PR `#24` app repin was still locally modified and uncommitted at this
+  historical checkpoint; it was later superseded by the PR `#25` app
+  implementation and reviewed-evidence commits recorded above.
   The reviewed terminology snapshot, complete 318-test Tools wall, exact
   204-test release matrix, direct policy gates, and independent exact-diff
   review are complete. The review's only P2 was stale status wording corrected
