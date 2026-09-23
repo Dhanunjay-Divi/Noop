@@ -116,8 +116,8 @@ local evidence are:
   `650c89e45ca2ab28e14e76e447a7026479e42b4e`
 - application implementation:
   `1be4062c054b210187f4c48f2ab99dd59873923e`
-- pull request: `#17`; prior exact head:
-  `fed31b0f164675b0d1f6ef5a7724262afb23f0af`
+- pull request: `#17`; reviewed evidence head:
+  `b21d8b72288678668ff17d1e365b9abace42c0ef`
 - local verification: artifact verifier 9/9, vendored Swift 16/16 across 45
   automated scenarios plus the Swift actor-suspension regression, macOS
   boundary 10/10, Android boundary, Android
@@ -129,9 +129,9 @@ local evidence are:
   suspension regression, distinguishing PR `#24` historical evidence from the
   current candidate, and labeling the exact test-wrapper digest accurately.
 - required contexts: all ten stable contexts completed successfully on the
-  prior exact head on 2026-09-22; the locally committed, unpushed PR `#25`
-  repin has no
-  replacement candidate SHA or hosted evidence
+  prior exact head on 2026-09-22. The PR `#25` implementation/evidence commits
+  are remote; the final documentation-only candidate must pass exact-SHA hosted
+  checks before protected integration, and no earlier candidate authorizes merge.
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`
 
