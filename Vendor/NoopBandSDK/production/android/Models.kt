@@ -210,13 +210,17 @@ class BandConnectionToken internal constructor(
     internal val generation: Long,
     internal val sequence: Long,
     internal val candidateHandle: String,
-)
+) {
+    override fun toString(): String = "BandConnectionToken"
+}
 
 class BandLiveToken internal constructor(
     internal val sessionNonce: UUID,
     internal val generation: Long,
     internal val sequence: Long,
-)
+) {
+    override fun toString(): String = "BandLiveToken"
+}
 
 data class BandIdentity(
     val sourceIdentity: String,

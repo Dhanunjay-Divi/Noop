@@ -48,7 +48,11 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     private func readyHistorySession(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
         report: BandCapabilityReport? = nil
-    ) async throws -> (BandSessionMachine, UInt64) {
+    ) async throws -> (
+        BandSessionMachine,
+        UInt64,
+        BandConnectionToken
+    ) {
         let session = NoopBandSDKBoundary.makeSession(diagnostics: diagnostics)
         let scanToken = try await session.beginScan()
         let generation = scanToken.generation
@@ -87,13 +91,13 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             token: connectionToken,
             callbackGeneration: generation
         )
-        return (session, generation)
+        return (session, generation, connectionToken)
     }
 
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "f20f4ed552328a64a8a598aaac72befa1d481262"
+            "650c89e45ca2ab28e14e76e447a7026479e42b4e"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let scanToken = try await session.beginScan()
@@ -248,13 +252,13 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
 
     func testInvalidHistoryTokensRecordBoundedRejections() async throws {
         let diagnostics = BandDiagnosticsRecorder()
-        let (session, generation) = try await readyHistorySession(
+        let (session, generation, _) = try await readyHistorySession(
             diagnostics: diagnostics
         )
         let supersededToken = try await session.beginOperation(.history)
         try await session.cancelOperation(supersededToken)
         let activeToken = try await session.beginOperation(.history)
-        let (foreignSession, _) = try await readyHistorySession()
+        let (foreignSession, _, _) = try await readyHistorySession()
         let foreignToken = try await foreignSession.beginOperation(.history)
         let chunk = BandHistoryChunk(
             chunkIdentity: "synthetic-chunk",
@@ -410,7 +414,8 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         async throws
     {
         let diagnostics = BandDiagnosticsRecorder()
-        let (session, generation) = try await readyHistorySession(
+        let (session, generation, connectionToken) =
+            try await readyHistorySession(
             diagnostics: diagnostics
         )
         let liveToken = try await session.beginLive()
@@ -423,6 +428,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         do {
             try await session.failEstablishedSession(
                 .authentication,
+                token: connectionToken,
                 callbackGeneration: generation
             )
             XCTFail("Pending persistence must defer session invalidation")
@@ -453,6 +459,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         )
         try await session.failEstablishedSession(
             .authentication,
+            token: connectionToken,
             callbackGeneration: generation
         )
         let rejected = await session.snapshot()
@@ -463,11 +470,11 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         async throws
     {
         let diagnostics = BandDiagnosticsRecorder()
-        let (session, generation) = try await readyHistorySession(
+        let (session, generation, _) = try await readyHistorySession(
             diagnostics: diagnostics
         )
         let priorToken = try await session.beginLive()
-        try await session.stopLive()
+        try await session.stopLive(token: priorToken)
         let currentToken = try await session.beginLive()
 
         do {
@@ -503,7 +510,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             ),
             callbackGeneration: generation
         )
-        try await session.stopLive()
+        try await session.stopLive(token: currentToken)
     }
 
     func testLiveAndHistoryStreamsAreAuthorizedIndependently() async throws {
@@ -517,7 +524,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             liveStreams: [],
             historyStreams: [.heartRate]
         )
-        let (historySession, historyGeneration) =
+        let (historySession, historyGeneration, _) =
             try await readyHistorySession(report: historyOnly)
         do {
             _ = try await historySession.beginLive()
@@ -553,7 +560,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             liveStreams: [.heartRate],
             historyStreams: []
         )
-        let (liveSession, liveGeneration) =
+        let (liveSession, liveGeneration, _) =
             try await readyHistorySession(report: liveOnly)
         let liveToken = try await liveSession.beginLive()
         let liveAcceptance = try await liveSession.stageLiveBatch(
@@ -569,7 +576,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             ),
             callbackGeneration: liveGeneration
         )
-        try await liveSession.stopLive()
+        try await liveSession.stopLive(token: liveToken)
         do {
             _ = try await liveSession.beginOperation(.history)
             XCTFail("A live-only stream must not authorize history collection")
@@ -589,7 +596,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             startDeviceTimeMilliseconds: 30_000,
             endDeviceTimeMilliseconds: 39_999
         )
-        let (session, generation) = try await readyHistorySession()
+        let (session, generation, _) = try await readyHistorySession()
         let token = try await session.beginOperation(.history)
         let acceptance = try await session.stageHistoryChunk(
             historyChunk(

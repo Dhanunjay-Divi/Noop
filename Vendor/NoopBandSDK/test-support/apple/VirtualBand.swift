@@ -264,6 +264,9 @@ public enum BandConformanceRunner {
         "scan_callback_session_bound",
         "scan_callback_consumed_after_selection",
         "cross_session_credentials_rejected",
+        "established_failure_session_bound",
+        "reconnected_established_failure_authorized",
+        "superseded_live_stop_rejected",
         "same_session_replay_rejected",
         "stale_terminal_callbacks_rejected",
         "history_requires_durable_receipt",
@@ -316,6 +319,12 @@ public enum BandConformanceRunner {
             return try await scanCallbackConsumedAfterSelection()
         case "cross_session_credentials_rejected":
             return try await crossSessionCredentialsRejected()
+        case "established_failure_session_bound":
+            return try await establishedFailureSessionBound()
+        case "reconnected_established_failure_authorized":
+            return try await reconnectedEstablishedFailureAuthorized()
+        case "superseded_live_stop_rejected":
+            return try await supersededLiveStopRejected()
         case "same_session_replay_rejected":
             return try await sameSessionReplayRejected()
         case "stale_terminal_callbacks_rejected":
@@ -466,7 +475,7 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         events.append("live_committed")
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
 
         let token = try await session.beginOperation(.history)
         let acceptance = try await session.stageHistoryChunk(
@@ -756,8 +765,8 @@ public enum BandConformanceRunner {
             receipt: ownLiveReceipt,
             callbackGeneration: secondGeneration
         )
-        try await first.stopLive()
-        try await second.stopLive()
+        try await first.stopLive(token: firstLiveToken)
+        try await second.stopLive(token: secondLiveToken)
         events.append("own_live_receipt_accepted")
 
         let firstToken = try await first.beginOperation(.history)
@@ -884,6 +893,145 @@ public enum BandConformanceRunner {
         )
     }
 
+    private static func establishedFailureSessionBound()
+        async throws -> BandConformanceResult
+    {
+        let (_, firstGeneration, firstToken) =
+            try await readySessionWithToken()
+        let (second, secondGeneration, secondToken) =
+            try await readySessionWithToken()
+        guard firstGeneration == secondGeneration else {
+            throw BandFailureCategory.internalFailure
+        }
+
+        var events = ["ready_pair"]
+        var failure: BandFailureCategory?
+        do {
+            try await second.failEstablishedSession(
+                .authentication,
+                token: firstToken,
+                callbackGeneration: secondGeneration
+            )
+        } catch let error as BandFailureCategory {
+            guard error == .staleCallback else {
+                throw BandFailureCategory.internalFailure
+            }
+            failure = error
+            events.append("foreign_failure_rejected")
+        }
+
+        let preserved = await second.snapshot()
+        guard preserved.state == .ready else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("current_session_preserved")
+
+        try await second.failEstablishedSession(
+            .authentication,
+            token: secondToken,
+            callbackGeneration: secondGeneration
+        )
+        events.append("own_failure_accepted")
+
+        return result(
+            scenario: "established_failure_session_bound",
+            events: events,
+            snapshot: await second.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func reconnectedEstablishedFailureAuthorized()
+        async throws -> BandConformanceResult
+    {
+        let (session, generation, originalToken) =
+            try await readySessionWithToken()
+        var events = ["ready"]
+        var failure: BandFailureCategory?
+
+        let reconnectGeneration = try await session.interruptForReconnect(
+            callbackGeneration: generation
+        )
+        let reconnectToken = try await session.resumeAfterReconnect(
+            callbackGeneration: reconnectGeneration
+        )
+        events.append("reconnected")
+
+        do {
+            try await session.failEstablishedSession(
+                .authentication,
+                token: originalToken,
+                callbackGeneration: reconnectGeneration
+            )
+        } catch let error as BandFailureCategory {
+            guard error == .staleCallback else {
+                throw BandFailureCategory.internalFailure
+            }
+            failure = error
+            events.append("stale_previous_failure_rejected")
+        }
+
+        guard await session.snapshot().state == .ready else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("resumed_session_preserved")
+
+        try await session.failEstablishedSession(
+            .authentication,
+            token: reconnectToken,
+            callbackGeneration: reconnectGeneration
+        )
+        events.append("resumed_failure_accepted")
+
+        return result(
+            scenario: "reconnected_established_failure_authorized",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func supersededLiveStopRejected()
+        async throws -> BandConformanceResult
+    {
+        let (session, _) = try await readySession()
+        var events = ["ready"]
+        var failure: BandFailureCategory?
+
+        let firstToken = try await session.beginLive()
+        try await session.stopLive(token: firstToken)
+        events.append("first_live_stopped")
+
+        let secondToken = try await session.beginLive()
+        do {
+            try await session.stopLive(token: firstToken)
+        } catch let error as BandFailureCategory {
+            guard error == .staleCallback else {
+                throw BandFailureCategory.internalFailure
+            }
+            failure = error
+            events.append("stale_stop_rejected")
+        }
+
+        let preserved = await session.snapshot()
+        guard preserved.state == .liveCollecting,
+              preserved.liveActive
+        else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("current_live_preserved")
+
+        try await session.stopLive(token: secondToken)
+        events.append("current_stop_accepted")
+
+        return result(
+            scenario: "superseded_live_stop_rejected",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
     private static func sameSessionReplayRejected()
         async throws -> BandConformanceResult
     {
@@ -940,7 +1088,7 @@ public enum BandConformanceRunner {
             receipt: await store.commit(acceptance: secondLive),
             callbackGeneration: generation
         )
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
         events.append("second_live_committed")
 
         let firstCommand = try await session.beginOperation(.battery)
@@ -1113,7 +1261,7 @@ public enum BandConformanceRunner {
             throw BandFailureCategory.internalFailure
         }
         events.append("cursor_unchanged")
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
         events.append("live_stopped")
         return result(
             scenario: "live_does_not_advance_history",
@@ -1133,7 +1281,7 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         events.append("live_committed")
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
         events.append("live_stopped")
         return result(
             scenario: "live_batch_deduplicated",
@@ -1262,7 +1410,7 @@ public enum BandConformanceRunner {
             failure = error
             events.append("oversized_metadata_rejected")
         }
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
         events.append("live_stopped")
         return result(
             scenario: "oversized_metadata_rejected",
@@ -1666,7 +1814,7 @@ public enum BandConformanceRunner {
             failure = error
             events.append("live_stream_rejected")
         }
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
         events.append("live_stopped")
         let historyToken = try await session.beginOperation(.history)
         let historyChunk = BandHistoryChunk(
@@ -1726,7 +1874,7 @@ public enum BandConformanceRunner {
         )
         let (session, _) = try await readySession(capabilities: report)
         var events = ["ready"]
-        _ = try await session.beginLive()
+        let liveToken = try await session.beginLive()
         events.append("live_started")
         var failure: BandFailureCategory?
         do {
@@ -1735,7 +1883,7 @@ public enum BandConformanceRunner {
             failure = error
             events.append("firmware_rejected")
         }
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
         events.append("live_stopped")
         return result(
             scenario: "firmware_blocked_during_live",
@@ -1967,7 +2115,7 @@ public enum BandConformanceRunner {
             failure = error
             events.append("invalid_device_time_rejected")
         }
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
         events.append("live_stopped")
         return result(
             scenario: "invalid_device_time_rejected",
@@ -2074,13 +2222,13 @@ public enum BandConformanceRunner {
             token: postFirmwareConnectionToken,
             callbackGeneration: postFirmwareGeneration
         )
-        _ = try await session.beginLive()
+        let liveToken = try await session.beginLive()
         do {
             _ = try await session.beginOperation(.firmware)
         } catch BandFailureCategory.busy {
             // The diagnostic assertion below verifies the rejection family.
         }
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
         let staleToken = try await session.beginOperation(.firmware)
         _ = try await session.interruptForReconnect(
             callbackGeneration: postFirmwareGeneration
@@ -2260,7 +2408,7 @@ public enum BandConformanceRunner {
             failure = error
             events.append("utf8_limit_rejected")
         }
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
         events.append("live_stopped")
         return result(
             scenario: "utf8_length_cross_platform",
@@ -2427,7 +2575,7 @@ public enum BandConformanceRunner {
         } else {
             events.append("identity_cache_unbounded")
         }
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
         events.append("live_stopped")
         return result(
             scenario: "durable_identity_cache_bounded",
@@ -3268,8 +3416,8 @@ public enum BandConformanceRunner {
             receipt: await store.commit(acceptance: acceptance),
             callbackGeneration: secondGeneration
         )
-        try await first.stopLive()
-        try await second.stopLive()
+        try await first.stopLive(token: firstToken)
+        try await second.stopLive(token: secondToken)
         if firstGeneration == secondGeneration,
            acceptance.acceptedSamples.count == 1
         {

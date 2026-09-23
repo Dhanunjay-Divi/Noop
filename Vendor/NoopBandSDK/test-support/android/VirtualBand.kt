@@ -216,6 +216,9 @@ object BandConformanceRunner {
         "scan_callback_session_bound",
         "scan_callback_consumed_after_selection",
         "cross_session_credentials_rejected",
+        "established_failure_session_bound",
+        "reconnected_established_failure_authorized",
+        "superseded_live_stop_rejected",
         "same_session_replay_rejected",
         "stale_terminal_callbacks_rejected",
         "history_requires_durable_receipt",
@@ -263,6 +266,12 @@ object BandConformanceRunner {
             scanCallbackConsumedAfterSelection()
         "cross_session_credentials_rejected" ->
             crossSessionCredentialsRejected()
+        "established_failure_session_bound" ->
+            establishedFailureSessionBound()
+        "reconnected_established_failure_authorized" ->
+            reconnectedEstablishedFailureAuthorized()
+        "superseded_live_stop_rejected" ->
+            supersededLiveStopRejected()
         "same_session_replay_rejected" ->
             sameSessionReplayRejected()
         "stale_terminal_callbacks_rejected" ->
@@ -373,7 +382,7 @@ object BandConformanceRunner {
             generation,
         )
         events += "live_committed"
-        session.stopLive()
+        session.stopLive(liveToken)
 
         val token = session.beginOperation(BandOperationClass.HISTORY)
         val acceptance = session.stageHistoryChunk(
@@ -623,8 +632,8 @@ object BandConformanceRunner {
             store.commit(acceptance),
             secondGeneration,
         )
-        first.stopLive()
-        second.stopLive()
+        first.stopLive(firstToken)
+        second.stopLive(secondToken)
         events += "own_live_callback_accepted"
         check(firstGeneration == secondGeneration)
         return result(
@@ -669,8 +678,8 @@ object BandConformanceRunner {
         first.acknowledgeLive(foreignLiveReceipt, firstGeneration)
         val ownLiveReceipt = secondStore.commit(secondLive)
         second.acknowledgeLive(ownLiveReceipt, secondGeneration)
-        first.stopLive()
-        second.stopLive()
+        first.stopLive(firstLiveToken)
+        second.stopLive(secondLiveToken)
         events += "own_live_receipt_accepted"
 
         val firstToken = first.beginOperation(BandOperationClass.HISTORY)
@@ -781,6 +790,125 @@ object BandConformanceRunner {
         )
     }
 
+    private fun establishedFailureSessionBound(): BandConformanceResult {
+        val (_, firstGeneration, firstToken) = readySessionWithToken()
+        val (second, secondGeneration, secondToken) = readySessionWithToken()
+        check(firstGeneration == secondGeneration)
+
+        val events = mutableListOf("ready_pair")
+        var failure: BandFailureCategory? = null
+        try {
+            second.failEstablishedSession(
+                BandFailureCategory.AUTHENTICATION,
+                firstToken,
+                secondGeneration,
+            )
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                fail(BandFailureCategory.INTERNAL_FAILURE)
+            }
+            failure = error.category
+            events += "foreign_failure_rejected"
+        }
+
+        check(second.snapshot().state == BandSessionState.READY)
+        events += "current_session_preserved"
+
+        second.failEstablishedSession(
+            BandFailureCategory.AUTHENTICATION,
+            secondToken,
+            secondGeneration,
+        )
+        events += "own_failure_accepted"
+
+        return result(
+            "established_failure_session_bound",
+            events,
+            second.snapshot(),
+            failure = failure,
+        )
+    }
+
+    private fun reconnectedEstablishedFailureAuthorized():
+        BandConformanceResult {
+        val (session, generation, originalToken) = readySessionWithToken()
+        val events = mutableListOf("ready")
+        var failure: BandFailureCategory? = null
+
+        val reconnectGeneration =
+            session.interruptForReconnect(generation)
+        val reconnectToken =
+            session.resumeAfterReconnect(reconnectGeneration)
+        events += "reconnected"
+
+        try {
+            session.failEstablishedSession(
+                BandFailureCategory.AUTHENTICATION,
+                originalToken,
+                reconnectGeneration,
+            )
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                fail(BandFailureCategory.INTERNAL_FAILURE)
+            }
+            failure = error.category
+            events += "stale_previous_failure_rejected"
+        }
+
+        check(session.snapshot().state == BandSessionState.READY)
+        events += "resumed_session_preserved"
+
+        session.failEstablishedSession(
+            BandFailureCategory.AUTHENTICATION,
+            reconnectToken,
+            reconnectGeneration,
+        )
+        events += "resumed_failure_accepted"
+
+        return result(
+            "reconnected_established_failure_authorized",
+            events,
+            session.snapshot(),
+            failure = failure,
+        )
+    }
+
+    private fun supersededLiveStopRejected(): BandConformanceResult {
+        val (session, _) = readySession()
+        val events = mutableListOf("ready")
+        var failure: BandFailureCategory? = null
+
+        val firstToken = session.beginLive()
+        session.stopLive(firstToken)
+        events += "first_live_stopped"
+
+        val secondToken = session.beginLive()
+        try {
+            session.stopLive(firstToken)
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                fail(BandFailureCategory.INTERNAL_FAILURE)
+            }
+            failure = error.category
+            events += "stale_stop_rejected"
+        }
+
+        val preserved = session.snapshot()
+        check(preserved.state == BandSessionState.LIVE_COLLECTING)
+        check(preserved.liveActive)
+        events += "current_live_preserved"
+
+        session.stopLive(secondToken)
+        events += "current_stop_accepted"
+
+        return result(
+            "superseded_live_stop_rejected",
+            events,
+            session.snapshot(),
+            failure = failure,
+        )
+    }
+
     private fun sameSessionReplayRejected(): BandConformanceResult {
         val (session, generation) = readySession()
         val store = VirtualBandStore()
@@ -826,7 +954,7 @@ object BandConformanceRunner {
             events += "stale_live_receipt_rejected"
         }
         session.acknowledgeLive(store.commit(secondLive), generation)
-        session.stopLive()
+        session.stopLive(liveToken)
         events += "second_live_committed"
 
         val firstCommand =
@@ -992,7 +1120,7 @@ object BandConformanceRunner {
             fail(BandFailureCategory.INTERNAL_FAILURE)
         }
         events += "cursor_unchanged"
-        session.stopLive()
+        session.stopLive(liveToken)
         events += "live_stopped"
         return result(
             "live_does_not_advance_history",
@@ -1012,7 +1140,7 @@ object BandConformanceRunner {
             generation,
         )
         events += "live_committed"
-        session.stopLive()
+        session.stopLive(liveToken)
         events += "live_stopped"
         return result(
             "live_batch_deduplicated",
@@ -1126,7 +1254,7 @@ object BandConformanceRunner {
             failure = error.category
             events += "oversized_metadata_rejected"
         }
-        session.stopLive()
+        session.stopLive(liveToken)
         events += "live_stopped"
         return result(
             "oversized_metadata_rejected",
@@ -1484,7 +1612,7 @@ object BandConformanceRunner {
             failure = error.category
             events += "live_stream_rejected"
         }
-        session.stopLive()
+        session.stopLive(liveToken)
         events += "live_stopped"
         val historyToken = session.beginOperation(BandOperationClass.HISTORY)
         val historyChunk = BandHistoryChunk(
@@ -1541,7 +1669,7 @@ object BandConformanceRunner {
         )
         val (session, _) = readySession(report)
         val events = mutableListOf("ready")
-        session.beginLive()
+        val liveToken = session.beginLive()
         events += "live_started"
         var failure: BandFailureCategory? = null
         try {
@@ -1550,7 +1678,7 @@ object BandConformanceRunner {
             failure = error.category
             events += "firmware_rejected"
         }
-        session.stopLive()
+        session.stopLive(liveToken)
         events += "live_stopped"
         return result(
             "firmware_blocked_during_live",
@@ -1747,7 +1875,7 @@ object BandConformanceRunner {
             failure = error.category
             events += "invalid_device_time_rejected"
         }
-        session.stopLive()
+        session.stopLive(liveToken)
         events += "live_stopped"
         return result(
             "invalid_device_time_rejected",
@@ -1848,7 +1976,7 @@ object BandConformanceRunner {
             postFirmwareConnectionToken,
             postFirmwareGeneration,
         )
-        session.beginLive()
+        val liveToken = session.beginLive()
         try {
             session.beginOperation(BandOperationClass.FIRMWARE)
         } catch (error: BandException) {
@@ -1856,7 +1984,7 @@ object BandConformanceRunner {
                 throw error
             }
         }
-        session.stopLive()
+        session.stopLive(liveToken)
         val staleToken = session.beginOperation(BandOperationClass.FIRMWARE)
         session.interruptForReconnect(postFirmwareGeneration)
         val recoveryScanToken = session.beginScan()
@@ -2027,7 +2155,7 @@ object BandConformanceRunner {
             failure = error.category
             events += "utf8_limit_rejected"
         }
-        session.stopLive()
+        session.stopLive(liveToken)
         events += "live_stopped"
         return result(
             "utf8_length_cross_platform",
@@ -2171,7 +2299,7 @@ object BandConformanceRunner {
         } else {
             events += "identity_cache_unbounded"
         }
-        session.stopLive()
+        session.stopLive(liveToken)
         events += "live_stopped"
         return result(
             "durable_identity_cache_bounded",

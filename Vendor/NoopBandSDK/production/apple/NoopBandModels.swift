@@ -218,7 +218,13 @@ public struct BandScanToken:
     }
 }
 
-public struct BandConnectionToken: Equatable, Sendable {
+public struct BandConnectionToken:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     let sessionNonce: UUID
     let generation: UInt64
     let sequence: UInt64
@@ -235,9 +241,21 @@ public struct BandConnectionToken: Equatable, Sendable {
         self.sequence = sequence
         self.candidateHandle = candidateHandle
     }
+
+    public var description: String { "BandConnectionToken" }
+    public var debugDescription: String { "BandConnectionToken" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandConnectionToken")
+    }
 }
 
-public struct BandLiveToken: Equatable, Sendable {
+public struct BandLiveToken:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     let sessionNonce: UUID
     let generation: UInt64
     let sequence: UInt64
@@ -250,6 +268,12 @@ public struct BandLiveToken: Equatable, Sendable {
         self.sessionNonce = sessionNonce
         self.generation = generation
         self.sequence = sequence
+    }
+
+    public var description: String { "BandLiveToken" }
+    public var debugDescription: String { "BandLiveToken" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandLiveToken")
     }
 }
 
@@ -615,7 +639,13 @@ public struct BandHistoryCheckpoint: Equatable, Sendable {
     }
 }
 
-public struct BandOperationToken: Equatable, Sendable {
+public struct BandOperationToken:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     let sessionNonce: UUID
     let generation: UInt64
     let sequence: UInt64
@@ -632,9 +662,21 @@ public struct BandOperationToken: Equatable, Sendable {
         self.sequence = sequence
         self.operationClass = operationClass
     }
+
+    public var description: String { "BandOperationToken" }
+    public var debugDescription: String { "BandOperationToken" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandOperationToken")
+    }
 }
 
-public struct LiveAcceptance: Equatable, Sendable {
+public struct LiveAcceptance:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let acceptedSamples: [BandSample]
     public let duplicateSamples: Int
     let sessionNonce: UUID
@@ -654,9 +696,21 @@ public struct LiveAcceptance: Equatable, Sendable {
         self.generation = generation
         self.receiptSequence = receiptSequence
     }
+
+    public var description: String { "LiveAcceptance" }
+    public var debugDescription: String { "LiveAcceptance" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "LiveAcceptance")
+    }
 }
 
-public struct AcceptedHistorySample: Equatable, Sendable {
+public struct AcceptedHistorySample:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let sourceIdentity: String
     public let lane: BandProvenanceLane
     public let parserRevision: String
@@ -670,9 +724,21 @@ public struct AcceptedHistorySample: Equatable, Sendable {
         calibrationRevision = batch.calibrationRevision
         self.sample = sample
     }
+
+    public var description: String { "AcceptedHistorySample" }
+    public var debugDescription: String { "AcceptedHistorySample" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "AcceptedHistorySample")
+    }
 }
 
-public struct DurableLiveReceipt: Equatable, Sendable {
+public struct DurableLiveReceipt:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let committedSamples: Int
     public let committed: Bool
     let sessionNonce: UUID
@@ -690,9 +756,21 @@ public struct DurableLiveReceipt: Equatable, Sendable {
         generation = acceptance.generation
         receiptSequence = acceptance.receiptSequence
     }
+
+    public var description: String { "DurableLiveReceipt" }
+    public var debugDescription: String { "DurableLiveReceipt" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "DurableLiveReceipt")
+    }
 }
 
-public struct HistoryAcceptance: Equatable, Sendable {
+public struct HistoryAcceptance:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let chunkIdentity: String
     public let acknowledgementToken: String
     public let nextCursor: String?
@@ -730,9 +808,21 @@ public struct HistoryAcceptance: Equatable, Sendable {
         self.sessionNonce = sessionNonce
         self.receiptSequence = receiptSequence
     }
+
+    public var description: String { "HistoryAcceptance" }
+    public var debugDescription: String { "HistoryAcceptance" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "HistoryAcceptance")
+    }
 }
 
-public struct DurableHistoryReceipt: Equatable, Sendable {
+public struct DurableHistoryReceipt:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let chunkIdentity: String
     public let acknowledgementToken: String
     public let nextCursor: String?
@@ -765,6 +855,20 @@ public struct DurableHistoryReceipt: Equatable, Sendable {
         sessionNonce = acceptance.sessionNonce
         receiptSequence = acceptance.receiptSequence
     }
+
+    public var description: String { "DurableHistoryReceipt" }
+    public var debugDescription: String { "DurableHistoryReceipt" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "DurableHistoryReceipt")
+    }
+}
+
+private func redactedMirror<T>(of value: T, name: String) -> Mirror {
+    Mirror(
+        value,
+        children: ["redacted": name],
+        displayStyle: .struct
+    )
 }
 
 public struct BandSessionSnapshot: Equatable, Sendable {

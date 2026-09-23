@@ -306,8 +306,11 @@ PR `#24` makes Swift consume the active scan token before
 candidate-selection diagnostics suspend. Delayed select, cancel, and failure
 callbacks therefore fail with the same `staleCallback` category as Kotlin
 while the accepted connection remains usable.
+PR `#25` requires the exact issued connection and live-operation tokens for
+established-session failure and live stop, returns fresh connection authority
+after reconnect, and preserves that authority across Swift actor suspension.
 Current protected `main` is
-`f20f4ed552328a64a8a598aaac72befa1d481262`. The app integration candidate
+`650c89e45ca2ab28e14e76e447a7026479e42b4e`. The app integration candidate
 consumes the deterministic export from that protected revision through a
 digest-pinned, supplier-artifact-free boundary. The repository is temporarily
 public as of 2026-09-22; D-056 still requires private visibility before

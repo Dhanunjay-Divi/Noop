@@ -59,7 +59,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "f20f4ed552328a64a8a598aaac72befa1d481262",
+            "650c89e45ca2ab28e14e76e447a7026479e42b4e",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -233,7 +233,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun pendingLiveReceiptMakesEstablishedAuthenticationFailureBusyUntilAcknowledged() {
         val diagnostics = BandDiagnosticsRecorder()
-        val (session, generation) = readySessionWithStreams(
+        val (session, generation, connectionToken) = readySessionWithStreams(
             diagnostics = diagnostics,
         )
         val liveToken = session.beginLive()
@@ -250,6 +250,7 @@ class NoopBandSdkIntegrationTest {
         val failure = try {
             session.failEstablishedSession(
                 BandFailureCategory.AUTHENTICATION,
+                connectionToken,
                 generation,
             )
             null
@@ -280,6 +281,7 @@ class NoopBandSdkIntegrationTest {
         )
         session.failEstablishedSession(
             BandFailureCategory.AUTHENTICATION,
+            connectionToken,
             generation,
         )
         assertEquals(BandSessionState.REJECTED, session.snapshot().state)
@@ -288,11 +290,11 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun restartedLiveCollectionRejectsPriorSameSessionToken() {
         val diagnostics = BandDiagnosticsRecorder()
-        val (session, generation) = readySessionWithStreams(
+        val (session, generation, _) = readySessionWithStreams(
             diagnostics = diagnostics,
         )
         val priorToken = session.beginLive()
-        session.stopLive()
+        session.stopLive(priorToken)
         val currentToken = session.beginLive()
 
         val failure = try {
@@ -336,12 +338,12 @@ class NoopBandSdkIntegrationTest {
             ),
             generation,
         )
-        session.stopLive()
+        session.stopLive(currentToken)
     }
 
     @Test
     fun liveAndHistoryStreamSetsAuthorizeLanesIndependently() {
-        val (historySession, historyGeneration) = readySessionWithStreams(
+        val (historySession, historyGeneration, _) = readySessionWithStreams(
             liveStreams = emptySet(),
             historyStreams = setOf(BandStreamKind.HEART_RATE),
         )
@@ -378,7 +380,7 @@ class NoopBandSdkIntegrationTest {
         )
         historySession.completeOperation(historyToken)
 
-        val (liveSession, liveGeneration) = readySessionWithStreams(
+        val (liveSession, liveGeneration, _) = readySessionWithStreams(
             liveStreams = setOf(BandStreamKind.HEART_RATE),
             historyStreams = emptySet(),
         )
@@ -400,7 +402,7 @@ class NoopBandSdkIntegrationTest {
             ),
             liveGeneration,
         )
-        liveSession.stopLive()
+        liveSession.stopLive(liveToken)
 
         val historyFailure = try {
             liveSession.beginOperation(BandOperationClass.HISTORY)
@@ -413,7 +415,7 @@ class NoopBandSdkIntegrationTest {
 
     @Test
     fun overflowRangesSurviveAcceptanceAndDurableReceipt() {
-        val (session, generation) = readySessionWithStreams()
+        val (session, generation, _) = readySessionWithStreams()
         val token = session.beginOperation(BandOperationClass.HISTORY)
         val retainedRange = BandHistoryRange(
             startDeviceTimeMilliseconds = 40_000,
@@ -456,7 +458,7 @@ class NoopBandSdkIntegrationTest {
     fun callerMutableStreamSetsAreSnapshotted() {
         val liveStreams = mutableSetOf(BandStreamKind.HEART_RATE)
         val historyStreams = mutableSetOf(BandStreamKind.HEART_RATE)
-        val (session, generation) = readySessionWithStreams(
+        val (session, generation, _) = readySessionWithStreams(
             liveStreams = liveStreams,
             historyStreams = historyStreams,
         )
@@ -482,7 +484,7 @@ class NoopBandSdkIntegrationTest {
             ),
             generation,
         )
-        session.stopLive()
+        session.stopLive(liveToken)
 
         val historyToken = session.beginOperation(BandOperationClass.HISTORY)
         val historyAcceptance = session.stageHistoryChunk(
@@ -512,12 +514,12 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun invalidHistoryTokensRecordBoundedRejections() {
         val diagnostics = BandDiagnosticsRecorder()
-        val (session, generation) = readyHistorySession(diagnostics)
+        val (session, generation, _) = readyHistorySession(diagnostics)
         val supersededToken =
             session.beginOperation(BandOperationClass.HISTORY)
         session.cancelOperation(supersededToken)
         val activeToken = session.beginOperation(BandOperationClass.HISTORY)
-        val (foreignSession, _) = readyHistorySession()
+        val (foreignSession, _, _) = readyHistorySession()
         val foreignToken =
             foreignSession.beginOperation(BandOperationClass.HISTORY)
         val chunk = BandHistoryChunk(
@@ -779,7 +781,7 @@ class NoopBandSdkIntegrationTest {
             .map { scenarios.getJSONObject(it) }
             .filter { it.getBoolean("automated") }
 
-        assertEquals(42, automated.size)
+        assertEquals(45, automated.size)
         assertEquals(
             automated.map { it.getString("id") },
             BandConformanceRunner.automatedScenarios,
@@ -833,7 +835,7 @@ class NoopBandSdkIntegrationTest {
             setOf(BandStreamKind.HEART_RATE),
         historyStreams: Set<BandStreamKind> =
             setOf(BandStreamKind.HEART_RATE),
-    ): Pair<BandSessionMachine, Long> {
+    ): Triple<BandSessionMachine, Long, BandConnectionToken> {
         val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
         val scanToken = session.beginScan()
         val generation = scanToken.generation
@@ -867,7 +869,7 @@ class NoopBandSdkIntegrationTest {
             connectionToken,
             generation,
         )
-        return session to generation
+        return Triple(session, generation, connectionToken)
     }
 
     private fun heartRateBatch(
@@ -922,7 +924,7 @@ class NoopBandSdkIntegrationTest {
 
     private fun readyHistorySession(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
-    ): Pair<BandSessionMachine, Long> {
+    ): Triple<BandSessionMachine, Long, BandConnectionToken> {
         val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
         val scanToken = session.beginScan()
         val generation = scanToken.generation
@@ -956,7 +958,7 @@ class NoopBandSdkIntegrationTest {
             connectionToken,
             generation,
         )
-        return session to generation
+        return Triple(session, generation, connectionToken)
     }
 
     private fun completeConnection(

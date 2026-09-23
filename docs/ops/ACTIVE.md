@@ -12,6 +12,30 @@ Last updated: **2026-09-23**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
+- Current state: `NoopBandSDK` PR `#25` is merged normally at
+  `650c89e45ca2ab28e14e76e447a7026479e42b4e`. Two independent source-only
+  exports from that exact merge were byte-identical. The ten-file export
+  manifest SHA-256 is
+  `9dfb7a97036b05218d7aee08db3a855920d626cfef7ef33a21f0c5f190787a3f`;
+  the app-owned Swift wrapper SHA-256 is
+  `2a7c74944a381684d6a75fcedc615542bd10035a192c3e8b1caa5eaca39aa95c`.
+  PR `#25` requires exact connection and live-operation tokens, returns fresh
+  reconnect authority, and preserves Swift actor authority across diagnostic
+  suspension. Upstream Swift passes 69/69, Kotlin/JVM plus `installDist`
+  passes, shared conformance passes 45/45, and the 61-file repository gate
+  passes. The app repin is locally verified: the exact artifact verifier and
+  its 9-test adversarial suite pass; the vendored Swift package passes 15/15
+  across all 45 scenarios; the real macOS boundary passes 10/10; the Android
+  Full boundary passes and Demo plus Full/Demo instrumentation sources compile;
+  and the unsigned Release iPhone graph embeds and validates Watch,
+  complications, and widgets. The complete Tools wall passes 318/318 with one
+  intentional skip; required-CI verifies ten contexts and trusted-main
+  self-verification passes. The terminology inventory remains semantically
+  unchanged at 17,872 occurrences across 1,588 groups with zero forbidden
+  mappings. Generated SwiftPM and 8.3 GiB of round-owned Apple DerivedData were
+  removed after evidence capture. Commit, one consolidated push, replacement
+  exact-SHA hosted checks, protected merge/main verification, and supplier
+  physical-device validation remain.
 - Current state: `NoopBandSDK` PR `#24` is merged normally at
   `f20f4ed552328a64a8a598aaac72befa1d481262`. Two independent app-source
   exports from that exact merge are byte-identical. The app's exact ten-file

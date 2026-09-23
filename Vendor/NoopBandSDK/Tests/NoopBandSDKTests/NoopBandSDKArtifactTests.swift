@@ -105,7 +105,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             callbackGeneration: generation
         )
         XCTAssertEqual(acceptedLive, 1)
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
 
         let historySample = sample(sequence: 2, time: 2_000, value: 70)
         let token = try await session.beginOperation(.history)
@@ -317,8 +317,8 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         snapshot = await session.snapshot()
         XCTAssertEqual(snapshot.state, .ready)
 
-        _ = try await session.beginLive()
-        try await session.stopLive()
+        let liveToken = try await session.beginLive()
+        try await session.stopLive(token: liveToken)
         let capabilityEvents = await diagnostics.snapshot().filter {
             $0.kind == .capability
         }
@@ -366,7 +366,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             callbackGeneration: generation
         )
         XCTAssertEqual(accepted, 1)
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
     }
 
     func testLiveDeduplicationWaitsForDurableReceipt() async throws {
@@ -437,7 +437,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             ),
             callbackGeneration: generation
         )
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
 
         let liveEvents = await diagnostics.snapshot().filter {
             $0.kind == .live
@@ -510,7 +510,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             callbackGeneration: generation
         )
         XCTAssertEqual(accepted, 1)
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
 
         let firmware = try await session.beginOperation(.firmware)
         try await session.completeOperation(firmware)
@@ -656,7 +656,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         } catch let error as BandFailureCategory {
             XCTAssertEqual(error, .invalidInput)
         }
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
 
         let history = try await session.beginOperation(.history)
         do {
@@ -709,7 +709,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             callbackGeneration: generation
         )
         XCTAssertEqual(accepted, 1)
-        try await session.stopLive()
+        try await session.stopLive(token: liveToken)
 
         _ = try await session.interruptForReconnect(
             callbackGeneration: generation

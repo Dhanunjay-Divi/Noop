@@ -681,10 +681,12 @@ public actor BandSessionMachine {
 
     public func failEstablishedSession(
         _ category: BandFailureCategory,
+        token: BandConnectionToken,
         callbackGeneration: UInt64
     ) async throws {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: .authentication
         )
@@ -805,8 +807,9 @@ public actor BandSessionMachine {
         return token
     }
 
-    public func stopLive() async throws {
+    public func stopLive(token: BandLiveToken) async throws {
         try ensureNotClosed()
+        try await validateLiveToken(token)
         guard liveActive else {
             await diagnostics.record(
                 BandDiagnosticEvent(
@@ -1610,24 +1613,46 @@ public actor BandSessionMachine {
         return reconnectGeneration
     }
 
+    @discardableResult
     public func resumeAfterReconnect(
         callbackGeneration: UInt64
-    ) async throws {
+    ) async throws -> BandConnectionToken {
         try ensureNotClosed()
         try await validateCallbackGeneration(
             callbackGeneration,
             diagnosticKind: .reconnect
         )
         guard state == .recovering,
-              identity != nil,
+              let identity,
               capabilityReport != nil
         else {
             throw BandFailureCategory.invalidState
         }
+        nextConnectionSequence &+= 1
+        let token = BandConnectionToken(
+            sessionNonce: sessionNonce,
+            generation: generation,
+            sequence: nextConnectionSequence,
+            candidateHandle: identity.sourceIdentity
+        )
+        activeConnectionToken = token
         state = .ready
         await diagnostics.record(
             BandDiagnosticEvent(kind: .reconnect, outcome: .completed)
         )
+        guard generation == token.generation,
+              activeConnectionToken == token
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
+        return token
     }
 
     @discardableResult

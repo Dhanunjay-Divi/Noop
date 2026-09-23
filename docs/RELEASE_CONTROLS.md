@@ -112,13 +112,13 @@ open gates.
 For the active SDK app-integration branch, the recorded inputs and current
 local evidence are:
 
-- upstream SDK source: `NoopBandSDK` PR `#24` protected merge
-  `f20f4ed552328a64a8a598aaac72befa1d481262`
-- application implementation: `0a8b3a7a17848ca5c2ee15228ef6e2726813c44c`
+- upstream SDK source: `NoopBandSDK` PR `#25` protected merge
+  `650c89e45ca2ab28e14e76e447a7026479e42b4e`
+- application implementation: `<pending local PR 25 repin commit>`
 - pull request: `#17`; prior exact head:
   `fed31b0f164675b0d1f6ef5a7724262afb23f0af`
-- local verification: artifact verifier 9/9, vendored Swift 15/15 across 42
-  automated scenarios, macOS boundary 10/10, Android boundary 13/13, Android
+- local verification: artifact verifier 9/9, vendored Swift 15/15 across 45
+  automated scenarios, macOS boundary 10/10, Android boundary, Android
   Demo and both instrumentation source graphs, and unsigned Release
   iOS/Watch/Watch-complications/widget graph all pass. The reviewed terminology
   snapshot, complete 318-test Tools wall, exact 204-test release matrix, and
@@ -126,7 +126,7 @@ local evidence are:
   or release-control defect; its only P2 was stale status wording corrected in
   these authoritative records.
 - required contexts: all ten stable contexts completed successfully on the
-  prior exact head on 2026-09-22; the uncommitted PR `#24` repin has no
+  prior exact head on 2026-09-22; the uncommitted PR `#25` repin has no
   replacement candidate SHA or hosted evidence
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`

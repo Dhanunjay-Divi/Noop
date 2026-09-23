@@ -109,6 +109,56 @@
       }
     },
     {
+      "id": "established_failure_session_bound",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready_pair",
+          "foreign_failure_rejected",
+          "current_session_preserved",
+          "own_failure_accepted"
+        ],
+        "finalState": "rejected",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "reconnected_established_failure_authorized",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "reconnected",
+          "stale_previous_failure_rejected",
+          "resumed_session_preserved",
+          "resumed_failure_accepted"
+        ],
+        "finalState": "rejected",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "superseded_live_stop_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "first_live_stopped",
+          "stale_stop_rejected",
+          "current_live_preserved",
+          "current_stop_accepted"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
       "id": "same_session_replay_rejected",
       "automated": true,
       "expected": {

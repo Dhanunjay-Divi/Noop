@@ -603,10 +603,12 @@ class BandSessionMachine(
     @Synchronized
     fun failEstablishedSession(
         category: BandFailureCategory,
+        token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateConnectionToken(
+            token,
             callbackGeneration,
             BandDiagnosticKind.AUTHENTICATION,
         )
@@ -724,8 +726,9 @@ class BandSessionMachine(
     }
 
     @Synchronized
-    fun stopLive() {
+    fun stopLive(token: BandLiveToken) {
         ensureNotClosed()
+        validateLiveToken(token)
         if (!liveActive) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -1555,19 +1558,30 @@ class BandSessionMachine(
     }
 
     @Synchronized
-    fun resumeAfterReconnect(callbackGeneration: Long) {
+    fun resumeAfterReconnect(
+        callbackGeneration: Long,
+    ): BandConnectionToken {
         ensureNotClosed()
         validateCallbackGeneration(
             callbackGeneration,
             BandDiagnosticKind.RECONNECT,
         )
+        val connectedIdentity = identity
         if (
             state != BandSessionState.RECOVERING ||
-            identity == null ||
+            connectedIdentity == null ||
             capabilityReport == null
         ) {
             fail(BandFailureCategory.INVALID_STATE)
         }
+        nextConnectionSequence += 1
+        val token = BandConnectionToken(
+            sessionNonce = sessionNonce,
+            generation = generation,
+            sequence = nextConnectionSequence,
+            candidateHandle = connectedIdentity.sourceIdentity,
+        )
+        activeConnectionToken = token
         state = BandSessionState.READY
         diagnostics.record(
             BandDiagnosticEvent(
@@ -1575,6 +1589,7 @@ class BandSessionMachine(
                 BandDiagnosticOutcome.COMPLETED,
             ),
         )
+        return token
     }
 
     @Synchronized

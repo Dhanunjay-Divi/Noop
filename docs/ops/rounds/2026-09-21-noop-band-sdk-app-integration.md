@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `SDK PR 24 app repin local gates and independent review green; commit and push pending`
+- State: `SDK PR 25 app repin local gates green; final review, commit, and push pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
@@ -16,6 +16,7 @@
   `5da77db5d929df7cbce73d7e64a8eab935cc0103`
 - Final SDK PR `#22`, `#23`, and `#24` app repin implementation commit:
   `0a8b3a7a17848ca5c2ee15228ef6e2726813c44c`
+- SDK PR `#25` app repin: locally verified and not yet committed.
 - Pre-remediation PR `#17` evidence commit:
   `78eba788b337c3472d32f8bd789965f84ef67b8a`
 - Record commit or PR: PR `#17`; SDK upstream merge
@@ -101,6 +102,27 @@ Success means:
   redistribution rights for any future supplier binary.
 
 ## Delivered
+
+- Repinned the app to protected SDK PR `#25`, merged normally at
+  `650c89e45ca2ab28e14e76e447a7026479e42b4e`. Two independent exports are
+  byte-identical; the source-only manifest SHA-256 is
+  `9dfb7a97036b05218d7aee08db3a855920d626cfef7ef33a21f0c5f190787a3f`
+  and the app-owned Swift wrapper SHA-256 is
+  `2a7c74944a381684d6a75fcedc615542bd10035a192c3e8b1caa5eaca39aa95c`.
+  Exact connection/live tokens, fresh reconnect authority, and the Swift actor
+  reentrancy correction are exercised across 45 shared scenarios.
+- Current app evidence is green: artifact verifier and adversarial suite 9/9,
+  vendored Swift package 15/15, macOS app boundary 10/10, Android Full
+  boundary plus Demo and both instrumentation-source compiles, and unsigned
+  Release iPhone/Watch/complication/widget embedding validation. The complete
+  Tools wall passes 318/318 with one intentional skip; required-CI and trusted
+  self-verification pass. The reviewed terminology snapshot retains 17,872
+  occurrences across 1,588 groups with unchanged category totals and zero
+  forbidden mappings.
+- Removed only generated round-owned caches after evidence capture: vendored
+  SwiftPM output, 3.2 GiB macOS DerivedData, and 5.1 GiB iOS DerivedData.
+  Separate UI-round cleanup removed 10 GiB of ignored build output without
+  changing its dirty source paths.
 
 - Re-exported the exact ten-file source artifact from private SDK `main`
   revision `277c628d5a1fd9e747871e777d908e41460802fa` twice from a clean
@@ -702,7 +724,7 @@ Success means:
   release-matrix, direct policy gates, and independent exact-diff review.
   Commit/push and replacement exact-SHA hosted verification remain.
   Prior PR `#17` head `fed31b0f` passed all ten required hosted
-  contexts, but that does not prove the uncommitted PR `#24` repin.
+  contexts, but that does not prove the uncommitted PR `#25` repin.
 - A source-only adapter seam cannot establish that a supplier band is
   compatible or flashable.
 
