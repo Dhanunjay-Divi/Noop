@@ -265,9 +265,10 @@ an untrusted transport/parser dependency, not an application architecture.
 10. Do not add the binaries to Git until distribution authority, notices, SBOM,
     security review, privacy disclosures, exact versions, and update ownership
     are approved.
-11. Publish the neutral SDK from the separate private repository as pinned
-    Apple and Android artifacts. The NOOP app repository consumes an exact
-    version and digest; it does not host supplier source or binaries.
+11. Publish the neutral SDK from the separate public, source-only repository as
+    pinned Apple and Android artifacts. The NOOP app repository consumes an
+    exact version and digest; neither public repository hosts supplier source,
+    binaries, firmware, credentials, signing material, or private inputs.
 12. Keep the existing WHOOP adapter selectable for controlled regression and
     comparison until every applicable `PHY-*` supplier row passes. WHOOP and
     supplier rows, cursors, diagnostics, and provenance must never be merged.

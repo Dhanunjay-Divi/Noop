@@ -119,8 +119,8 @@ Last updated: **2026-09-23**
   source factory remains disabled. No supplier binary, firmware, real adapter,
   flasher, physical BLE evidence, background evidence, battery evidence,
   haptic evidence, or physiological-accuracy evidence is included. Both
-  repositories currently report `PUBLIC`; D-056 requires the SDK repository
-  to be restored to `PRIVATE` before release.
+  repositories reported `PUBLIC`; that historical visibility gate was later
+  superseded by the current public, source-only D-056 decision.
 - Current state: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,
@@ -509,10 +509,13 @@ Resume from:
   calibration, distribution/private-data/health-claim guards, all 84
   operations records, complete supported-language catalog coverage,
   shell/workflow lint, Python compilation, and diff hygiene. The PR `#31`
-  documentation repin now records 17,883 occurrences across 1,589 groups with
+  documentation repin recorded 17,883 occurrences across 1,589 groups with
   an unchanged active allowlist, zero forbidden mappings, and reviewed digest
   `433d89784f464c4a44f423221cf989a05a09f87c1420a24a217ce64e95ac3005`;
-  replacement repository-control execution passes 318/318 with one skip.
+  replacement repository-control execution passed 318/318 with one skip. The
+  final public-repository handoff correction now records 17,884 occurrences
+  across the same 1,589 groups, zero forbidden mappings, and reviewed digest
+  `d266cf5458193d6e6d54fac1b9eb949438f537e7ee2a4866c284d04a91e9a529`.
   Candidate `e12b71fb` remains the previous remote head; the PR `#30`
   replacement is still local.
 - SDK PR `#31` is now consumed at

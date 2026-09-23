@@ -67,9 +67,10 @@ authoritative for the physical scenarios and evidence package.
 - D-055 permits exactly one phone collector. Mac, Watch, and additional
   signed-in devices are viewers or companions unless a future collector
   handoff is separately validated.
-- D-056 keeps the NOOP-owned neutral SDK in the private `NoopBandSDK`
-  repository and consumes only approved, pinned platform artifacts. Supplier
-  binaries and the original supplier drop remain outside this repository.
+- D-056 keeps the NOOP-owned neutral SDK in the public, source-only
+  `NoopBandSDK` repository and consumes only approved, pinned platform
+  artifacts. Supplier binaries and the original supplier drop remain outside
+  both public repositories.
 - D-059 targets cloud authority for durable account history, canonical
   versioned metric publication, recommendations, and cross-device state
   through per-data-class and per-formula gates. The phone remains the encrypted
@@ -274,11 +275,11 @@ the neutral store models used by the platform.
 
 ### 5.6 Repository and artifact boundary
 
-The separate private `Dhanunjay-Divi/NoopBandSDK` repository is the only home
-for the NOOP-owned neutral wrapper contract. At this review its binary-free
-scaffold is pinned at `ee82cc0`; its local gate reports 14 repository files
-passing language, binary, and JSON checks. That proves only repository hygiene,
-not an implemented adapter or hardware behavior.
+The separate public, source-only `Dhanunjay-Divi/NoopBandSDK` repository is the
+only home for the NOOP-owned neutral wrapper contract. At this review its
+binary-free scaffold is pinned at `ee82cc0`; its local gate reports 14
+repository files passing language, binary, and JSON checks. That proves only
+repository hygiene, not an implemented adapter or hardware behavior.
 
 The intended module split is:
 
@@ -1171,7 +1172,8 @@ These steps can be completed and verified without claiming access to the
 production band, supplier binary behavior, or firmware capability:
 
 1. Complete the binary-free neutral contract, synthetic fixtures, virtual
-   band, and conformance scenarios in the private `NoopBandSDK` repository.
+   band, and conformance scenarios in the public, source-only `NoopBandSDK`
+   repository.
 2. Define Apple and Android adapter composition points without exposing
    supplier types in public NOOP APIs or linking a supplier binary into
    simulator, macOS, Watch, widget, or pure-package targets.

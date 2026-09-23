@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `SDK PR #31 and hosted iOS remediation locally green; final controls and push pending`
+- State: `final public-source handoff locally green; push and hosted checks pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
@@ -1099,3 +1099,25 @@ Success means:
   hygiene. The remaining work is the consolidated commit/push, hosted
   exact-head checks, protected integration, protected-main verification, and
   exact cleanup.
+
+## September 23 final public-repository handoff correction
+
+- Live GitHub state and current D-056 both keep the app and SDK repositories
+  public. A final handoff review found current-facing references in the iOS
+  install guide, SDK wrapper handoff, supplier assessment, release checklist,
+  and one historical paragraph in `ACTIVE.md` that still described the
+  superseded private-repository gate.
+- Those references now distinguish public source visibility from artifact
+  approval and preserve the exclusion of supplier source/binaries, firmware,
+  credentials, signing material, private inputs, and personal or health data.
+  Archived operations records remain historical evidence and were not
+  rewritten.
+- The reviewed terminology snapshot now records 17,884 occurrences across
+  1,589 groups with an unchanged active allowlist, zero forbidden mappings,
+  and SHA-256
+  `d266cf5458193d6e6d54fac1b9eb949438f537e7ee2a4866c284d04a91e9a529`.
+- Runtime source, UI behavior, WHOOP routing, the disabled supplier source
+  factory, health claims, and physical acceptance gates are unchanged. The
+  replacement repository wall passes 318/318 with one intentional skip,
+  focused trust checks pass 64/64, and all 84 operations records validate.
+  Replacement exact-head hosted checks remain before protected integration.

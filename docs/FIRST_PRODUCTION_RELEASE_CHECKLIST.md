@@ -136,7 +136,7 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] CI-080 [OWNER] Restore or fund hosted CI capacity sufficient for all
   required release gates.
 - [x] CI-090 [OWNER] Enable protected `main` or an equivalent reviewed release
-  control for the private repository. (Evidence: strict live branch protection
+  control for the public repository. (Evidence: strict live branch protection
   with administrator enforcement, conversation resolution, linear history,
   ten app-bound required contexts, and no force-push or deletion bypass;
   `ops/rounds/2026-09-08-trusted-release-control-activation.md`)
@@ -276,10 +276,11 @@ position without changing its ID. This inbox intentionally starts empty.
   network findings, claims boundary, and physical acceptance matrix without
   copying the private package into Git. (Evidence:
   `docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`)
-- [x] SDK-006 [ENG] Establish a separate private, English-only, binary-free
+- [x] SDK-006 [ENG] Establish a separate English-only, binary-free
   `Dhanunjay-Divi/NoopBandSDK` repository with local language/binary/JSON
-  validation and no hosted Actions workflow. (Evidence: initial `main` commit
-  `ee82cc0`, `docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`)
+  validation and no hosted Actions workflow; keep it public under D-056's
+  source-only exclusion boundary. (Evidence: initial `main` commit `ee82cc0`,
+  `docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`)
 - [x] SDK-006A [ENG] Implement the supplier-neutral Swift/Kotlin session core,
   bounded diagnostics, deterministic virtual conformance, and one
   digest-pinned source-only app boundary. Keep every production NOOP-band
