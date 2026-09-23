@@ -12,37 +12,39 @@ Last updated: **2026-09-23**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: `NoopBandSDK` PR `#25` is merged normally at
-  `650c89e45ca2ab28e14e76e447a7026479e42b4e`. Two independent source-only
+- Current state: `NoopBandSDK` PR `#26` is merged normally at
+  `eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`. Two independent source-only
   exports from that exact merge were byte-identical. The ten-file export
   manifest SHA-256 is
-  `9dfb7a97036b05218d7aee08db3a855920d626cfef7ef33a21f0c5f190787a3f`;
+  `31a791b15fe3ffa5dea1a4416bd82a3b6e0eff0cfcb37c90d33732a2443f5b32`;
   the SDK artifact test-wrapper SHA-256 is
-  `c604c471f003068586d50a1964db112aa26b14ea1416750eb919244ebf253722`.
-  PR `#25` requires exact connection and live-operation tokens, returns fresh
-  reconnect authority, and preserves Swift actor authority across diagnostic
-  suspension. Upstream Swift passes 69/69, Kotlin/JVM plus `installDist`
-  passes, shared conformance passes 45/45, and the 61-file repository gate
-  passes. The app repin is locally verified: the exact artifact verifier and
-  its 9-test adversarial suite pass; the vendored Swift package passes 16/16
-  across all 45 scenarios plus the app-repository actor-suspension regression;
-  the real macOS boundary passes 10/10; the Android
-  Full boundary passes and Demo plus Full/Demo instrumentation sources compile;
-  and the unsigned Release iPhone graph embeds and validates Watch,
-  complications, and widgets. The complete Tools wall passes 318/318 with one
-  intentional skip; required-CI verifies ten contexts and trusted-main
-  self-verification passes. The terminology inventory remains semantically
-  unchanged at 17,872 occurrences across 1,588 groups with zero forbidden
-  mappings. Independent exact-diff review found no P0/P1; all three P2
-  test/evidence findings are corrected locally. Generated SwiftPM and 8.3 GiB
-  of round-owned Apple DerivedData were removed after evidence capture. The
-  implementation commit
-  `1be4062c054b210187f4c48f2ab99dd59873923e` and reviewed evidence commit
-  `b21d8b72288678668ff17d1e365b9abace42c0ef` are pushed to app PR `#17`.
-  A final documentation-only closeout supersedes that evidence head; every
-  required hosted context and applicable review thread must pass on the exact
-  resulting head before protected merge/main verification. Supplier
-  physical-device validation remains separate.
+  `1d9f71d65fe7b9f4637c85645cecfd2187b8c8950aeceaa023c59bb85d821304`.
+  PR `#26` requires exact connection, live-operation, and reconnect
+  interruption authority; returns opaque one-use reconnect authority; keeps
+  firmware recovery scan-only; and invalidates stale reconnect authority when
+  a new recovery scan starts. The app repin is locally verified: the exact
+  artifact verifier and its 9-test adversarial suite pass; the vendored Swift
+  package passes 16/16
+  across all 46 scenarios plus the app-repository actor-suspension regression;
+  the real macOS boundary passes 10/10 and the complete macOS wall passes 2,228
+  with one intentional skip; the Android Full boundary passes 14/14 and Demo
+  plus Full/Demo instrumentation sources compile; the iOS production shell
+  passes 39 with one intentional skip; and the unsigned Release iPhone graph
+  embeds and validates Watch, complications, and widgets. The complete Tools
+  wall passes 318/318 with one intentional skip; required-CI verifies ten
+  contexts and trusted-main self-verification passes. The reviewed terminology
+  snapshot remains 17,872 occurrences across 1,588 groups with unchanged
+  category totals, unchanged active allowlist, and zero forbidden mappings.
+  Final dirty-diff review found no P0/P1; its three P2 findings are corrected:
+  Android rejects a same-session field-identical forged reconnect token in a
+  fresh 14/14 integration run, while incomplete cross-platform notification
+  states and local-retention approval remain open checklist gates.
+  Generated SwiftPM and Apple DerivedData were removed after evidence capture.
+  The final PR `#26` source and documentation replacement are carried by the
+  dedicated app PR `#17` branch. Every required hosted context and applicable
+  review thread must pass on that exact candidate head before protected
+  merge/main verification. Supplier physical-device validation remains
+  separate.
 - Historical checkpoint: `NoopBandSDK` PR `#24` merged normally at
   `f20f4ed552328a64a8a598aaac72befa1d481262`. Two independent app-source
   exports from that exact merge are byte-identical. The app's exact ten-file

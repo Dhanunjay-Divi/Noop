@@ -53,9 +53,10 @@ The executable signed-device and hardware matrix is
 The NOOP-owned SDK contract targets the separate private
 `Dhanunjay-Divi/NoopBandSDK` repository. Its initial `main` commit is
 `ee82cc0`, and protected contract remediation is merged through
-`650c89e45ca2ab28e14e76e447a7026479e42b4e`. The latest remediation requires
-exact connection and live-operation authority, returns fresh reconnect
-authority, and preserves Swift actor authority across diagnostic suspension.
+`eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`. The latest remediation requires
+exact connection and live-operation authority, returns opaque one-use
+reconnect authority, preserves Swift actor authority across diagnostic
+suspension, and invalidates reconnect authority when recovery restarts.
 The repository
 contains only
 English NOOP-owned architecture, capability schema, conformance scenarios,
@@ -63,6 +64,19 @@ supplier-intake records, platform adapter requirements, and local validation.
 It contains no vendor binary and no hosted GitHub Actions workflow. The
 repository was temporarily observed as public on 2026-09-22; D-056 requires
 private visibility before release.
+
+The 2026-09-23 local supplier-drop audit found Android Veepoo protocol and
+Bluetooth AARs plus an arm64 iPhoneOS-only `VeepooBleSDK.framework`. Those
+artifacts expose scan, connect, password confirmation, capability, battery,
+live-heart-rate, history-reader, raw-sensor, and vendor-specific OTA entry
+points, but they remain outside Git and are not production inputs. The drop
+does not provide an approved exact-SKU capability contract, per-device
+authentication lifecycle, device-origin timestamp/cursor semantics,
+redistribution authorization and complete SBOM, iOS simulator/XCFramework
+support and privacy manifest, firmware payload/signature compatibility data,
+or physical reconnect/background/history/haptic/accuracy/recovery evidence.
+It can support a separately gated experimental device bridge; it cannot yet
+close the production supplier-adapter or flashing gates.
 
 The original supplier package is not rewritten to remove Chinese comments or
 documentation. It remains immutable and outside Git so its provenance and

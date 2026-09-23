@@ -214,6 +214,14 @@ class BandConnectionToken internal constructor(
     override fun toString(): String = "BandConnectionToken"
 }
 
+class BandReconnectToken internal constructor(
+    internal val sessionNonce: UUID,
+    val generation: Long,
+    internal val sequence: Long,
+) {
+    override fun toString(): String = "BandReconnectToken"
+}
+
 class BandLiveToken internal constructor(
     internal val sessionNonce: UUID,
     internal val generation: Long,
@@ -477,9 +485,11 @@ data class BandHistoryChunk(
     }
 }
 
-private fun <T> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
+internal fun <T : Any> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
     val expectedSize = try {
         size
+    } catch (_: BandException) {
+        fail(BandFailureCategory.INVALID_INPUT)
     } catch (_: RuntimeException) {
         fail(BandFailureCategory.INVALID_INPUT)
     }
@@ -493,10 +503,15 @@ private fun <T> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
             if (snapshot.size == maximumSize) {
                 fail(BandFailureCategory.INVALID_INPUT)
             }
-            snapshot += iterator.next()
+            val element: Any? = iterator.next()
+            if (element == null) {
+                fail(BandFailureCategory.INVALID_INPUT)
+            }
+            @Suppress("UNCHECKED_CAST")
+            snapshot += element as T
         }
-    } catch (error: BandException) {
-        throw error
+    } catch (_: BandException) {
+        fail(BandFailureCategory.INVALID_INPUT)
     } catch (_: RuntimeException) {
         fail(BandFailureCategory.INVALID_INPUT)
     }
@@ -506,9 +521,11 @@ private fun <T> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
     return snapshot
 }
 
-private fun <T> Set<T>.boundedSnapshot(maximumSize: Int): Set<T> {
+internal fun <T : Any> Set<T>.boundedSnapshot(maximumSize: Int): Set<T> {
     val expectedSize = try {
         size
+    } catch (_: BandException) {
+        fail(BandFailureCategory.INVALID_INPUT)
     } catch (_: RuntimeException) {
         fail(BandFailureCategory.INVALID_INPUT)
     }
@@ -524,10 +541,15 @@ private fun <T> Set<T>.boundedSnapshot(maximumSize: Int): Set<T> {
                 fail(BandFailureCategory.INVALID_INPUT)
             }
             iteratorSteps += 1
-            snapshot += iterator.next()
+            val element: Any? = iterator.next()
+            if (element == null) {
+                fail(BandFailureCategory.INVALID_INPUT)
+            }
+            @Suppress("UNCHECKED_CAST")
+            snapshot += element as T
         }
-    } catch (error: BandException) {
-        throw error
+    } catch (_: BandException) {
+        fail(BandFailureCategory.INVALID_INPUT)
     } catch (_: RuntimeException) {
         fail(BandFailureCategory.INVALID_INPUT)
     }

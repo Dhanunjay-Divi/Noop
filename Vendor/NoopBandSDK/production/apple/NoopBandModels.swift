@@ -249,6 +249,34 @@ public struct BandConnectionToken:
     }
 }
 
+public struct BandReconnectToken:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
+    let sessionNonce: UUID
+    public let generation: UInt64
+    let sequence: UInt64
+
+    init(
+        sessionNonce: UUID,
+        generation: UInt64,
+        sequence: UInt64
+    ) {
+        self.sessionNonce = sessionNonce
+        self.generation = generation
+        self.sequence = sequence
+    }
+
+    public var description: String { "BandReconnectToken" }
+    public var debugDescription: String { "BandReconnectToken" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandReconnectToken")
+    }
+}
+
 public struct BandLiveToken:
     Equatable,
     Sendable,

@@ -17,6 +17,7 @@ import com.noop.bandsdk.BandIdentity
 import com.noop.bandsdk.BandOperationClass
 import com.noop.bandsdk.BandPairingCandidate
 import com.noop.bandsdk.BandProvenanceLane
+import com.noop.bandsdk.BandReconnectToken
 import com.noop.bandsdk.BandSample
 import com.noop.bandsdk.BandSampleBatch
 import com.noop.bandsdk.BandSampleIdentity
@@ -59,7 +60,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "650c89e45ca2ab28e14e76e447a7026479e42b4e",
+            "eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -91,6 +92,34 @@ class NoopBandSdkIntegrationTest {
         assertEquals(BandFailureCategory.STALE_CALLBACK, forgedFailure)
         session.selectCandidate(candidate, issuedToken)
         assertEquals(BandSessionState.CANDIDATE_SELECTED, session.snapshot().state)
+    }
+
+    @Test
+    fun appModuleCannotForgeReconnectCallbackAuthority() {
+        val (session, generation, connectionToken) = readySessionWithStreams()
+        session.beginLive()
+        val issuedToken =
+            session.interruptForReconnect(connectionToken, generation)
+        val forgedToken = BandReconnectToken(
+            sessionNonce = issuedToken.sessionNonce,
+            generation = issuedToken.generation,
+            sequence = issuedToken.sequence,
+        )
+
+        val forgedFailure = try {
+            session.resumeAfterReconnect(
+                forgedToken,
+                forgedToken.generation,
+            )
+            null
+        } catch (error: BandException) {
+            error.category
+        }
+
+        assertEquals(BandFailureCategory.STALE_CALLBACK, forgedFailure)
+        assertEquals(BandSessionState.RECOVERING, session.snapshot().state)
+        session.resumeAfterReconnect(issuedToken, issuedToken.generation)
+        assertEquals(BandSessionState.READY, session.snapshot().state)
     }
 
     @Test
@@ -781,7 +810,7 @@ class NoopBandSdkIntegrationTest {
             .map { scenarios.getJSONObject(it) }
             .filter { it.getBoolean("automated") }
 
-        assertEquals(45, automated.size)
+        assertEquals(46, automated.size)
         assertEquals(
             automated.map { it.getString("id") },
             BandConformanceRunner.automatedScenarios,

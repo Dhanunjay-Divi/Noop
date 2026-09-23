@@ -265,6 +265,7 @@ public enum BandConformanceRunner {
         "scan_callback_consumed_after_selection",
         "cross_session_credentials_rejected",
         "established_failure_session_bound",
+        "reconnect_callback_session_bound",
         "reconnected_established_failure_authorized",
         "superseded_live_stop_rejected",
         "same_session_replay_rejected",
@@ -321,6 +322,8 @@ public enum BandConformanceRunner {
             return try await crossSessionCredentialsRejected()
         case "established_failure_session_bound":
             return try await establishedFailureSessionBound()
+        case "reconnect_callback_session_bound":
+            return try await reconnectCallbackSessionBound()
         case "reconnected_established_failure_authorized":
             return try await reconnectedEstablishedFailureAuthorized()
         case "superseded_live_stop_rejected":
@@ -532,15 +535,17 @@ public enum BandConformanceRunner {
     }
 
     private static func staleCallbackRejected() async throws -> BandConformanceResult {
-        let (session, oldGeneration, _) =
+        let (session, oldGeneration, connectionToken) =
             try await readySessionWithToken()
         var events = ["ready"]
         let staleLiveToken = try await session.beginLive()
-        let reconnectGeneration = try await session.interruptForReconnect(
+        let reconnectToken = try await session.interruptForReconnect(
+            token: connectionToken,
             callbackGeneration: oldGeneration
         )
         try await session.resumeAfterReconnect(
-            callbackGeneration: reconnectGeneration
+            token: reconnectToken,
+            callbackGeneration: reconnectToken.generation
         )
         events.append("generation_advanced")
         var failure: BandFailureCategory?
@@ -851,10 +856,12 @@ public enum BandConformanceRunner {
         }
         try await scanSession.cancelScan(callbackGeneration: secondScan)
 
-        let (session, generation) = try await readySession()
+        let (session, generation, connectionToken) =
+            try await readySessionWithToken()
         events.append("ready")
         do {
             _ = try await session.interruptForReconnect(
+                token: connectionToken,
                 callbackGeneration: generation - 1
             )
         } catch let error as BandFailureCategory {
@@ -862,27 +869,32 @@ public enum BandConformanceRunner {
             events.append("stale_reconnect_interrupt_rejected")
         }
         let firstReconnect = try await session.interruptForReconnect(
+            token: connectionToken,
             callbackGeneration: generation
         )
         events.append("reconnect_started")
-        try await session.resumeAfterReconnect(
-            callbackGeneration: firstReconnect
+        let firstConnectionToken = try await session.resumeAfterReconnect(
+            token: firstReconnect,
+            callbackGeneration: firstReconnect.generation
         )
         events.append("first_reconnect_completed")
         let secondReconnect = try await session.interruptForReconnect(
-            callbackGeneration: firstReconnect
+            token: firstConnectionToken,
+            callbackGeneration: firstReconnect.generation
         )
         events.append("second_reconnect_started")
         do {
             try await session.resumeAfterReconnect(
-                callbackGeneration: firstReconnect
+                token: firstReconnect,
+                callbackGeneration: firstReconnect.generation
             )
         } catch let error as BandFailureCategory {
             failure = error
             events.append("stale_reconnect_completion_rejected")
         }
         try await session.resumeAfterReconnect(
-            callbackGeneration: secondReconnect
+            token: secondReconnect,
+            callbackGeneration: secondReconnect.generation
         )
         events.append("reconnected")
         return result(
@@ -941,6 +953,101 @@ public enum BandConformanceRunner {
         )
     }
 
+    private static func reconnectCallbackSessionBound()
+        async throws -> BandConformanceResult
+    {
+        let (foreignSession, foreignGeneration, foreignConnectionToken) =
+            try await readySessionWithToken()
+        let diagnostics = BandDiagnosticsRecorder()
+        let (session, generation, connectionToken) =
+            try await readySessionWithToken(diagnostics: diagnostics)
+        guard generation == foreignGeneration else {
+            throw BandFailureCategory.internalFailure
+        }
+
+        var events = ["ready_pair"]
+        var failure: BandFailureCategory?
+        _ = try await session.beginLive()
+        do {
+            _ = try await session.interruptForReconnect(
+                token: foreignConnectionToken,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            guard error == .staleCallback else {
+                throw BandFailureCategory.internalFailure
+            }
+            failure = error
+            events.append("foreign_interrupt_rejected")
+        }
+
+        let livePreserved = await session.snapshot()
+        guard livePreserved.state == .liveCollecting,
+              livePreserved.liveActive
+        else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("current_live_preserved")
+
+        let eventCount = await diagnostics.snapshot().count
+        let reconnectToken = try await session.interruptForReconnect(
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        let foreignReconnectToken =
+            try await foreignSession.interruptForReconnect(
+                token: foreignConnectionToken,
+                callbackGeneration: foreignGeneration
+            )
+        guard reconnectToken.generation == foreignReconnectToken.generation
+        else {
+            throw BandFailureCategory.internalFailure
+        }
+
+        let interruptionEvents =
+            Array(await diagnostics.snapshot().dropFirst(eventCount))
+        guard interruptionEvents == [
+            BandDiagnosticEvent(kind: .live, outcome: .interrupted),
+            BandDiagnosticEvent(kind: .reconnect, outcome: .interrupted),
+        ] else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("live_interruption_ordered")
+
+        do {
+            _ = try await session.resumeAfterReconnect(
+                token: foreignReconnectToken,
+                callbackGeneration: reconnectToken.generation
+            )
+        } catch let error as BandFailureCategory {
+            guard error == .staleCallback else {
+                throw BandFailureCategory.internalFailure
+            }
+            failure = error
+            events.append("foreign_resume_rejected")
+        }
+
+        let recoveryPreserved = await session.snapshot()
+        guard recoveryPreserved.state == .recovering,
+              !recoveryPreserved.liveActive
+        else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("current_recovery_preserved")
+
+        _ = try await session.resumeAfterReconnect(
+            token: reconnectToken,
+            callbackGeneration: reconnectToken.generation
+        )
+        events.append("own_resume_accepted")
+        return result(
+            scenario: "reconnect_callback_session_bound",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
     private static func reconnectedEstablishedFailureAuthorized()
         async throws -> BandConformanceResult
     {
@@ -949,11 +1056,13 @@ public enum BandConformanceRunner {
         var events = ["ready"]
         var failure: BandFailureCategory?
 
-        let reconnectGeneration = try await session.interruptForReconnect(
+        let reconnectAuthority = try await session.interruptForReconnect(
+            token: originalToken,
             callbackGeneration: generation
         )
         let reconnectToken = try await session.resumeAfterReconnect(
-            callbackGeneration: reconnectGeneration
+            token: reconnectAuthority,
+            callbackGeneration: reconnectAuthority.generation
         )
         events.append("reconnected")
 
@@ -961,7 +1070,7 @@ public enum BandConformanceRunner {
             try await session.failEstablishedSession(
                 .authentication,
                 token: originalToken,
-                callbackGeneration: reconnectGeneration
+                callbackGeneration: reconnectAuthority.generation
             )
         } catch let error as BandFailureCategory {
             guard error == .staleCallback else {
@@ -979,7 +1088,7 @@ public enum BandConformanceRunner {
         try await session.failEstablishedSession(
             .authentication,
             token: reconnectToken,
-            callbackGeneration: reconnectGeneration
+            callbackGeneration: reconnectAuthority.generation
         )
         events.append("resumed_failure_accepted")
 
@@ -1476,7 +1585,8 @@ public enum BandConformanceRunner {
     }
 
     private static func historyInterruptedResume() async throws -> BandConformanceResult {
-        let (session, generation) = try await readySession()
+        let (session, generation, connectionToken) =
+            try await readySessionWithToken()
         let store = VirtualBandStore()
         var events = ["ready"]
         var failure: BandFailureCategory?
@@ -1490,6 +1600,7 @@ public enum BandConformanceRunner {
         events.append("history_received")
         do {
             _ = try await session.interruptForReconnect(
+                token: connectionToken,
                 callbackGeneration: generation
             )
         } catch BandFailureCategory.busy {
@@ -1509,20 +1620,22 @@ public enum BandConformanceRunner {
         } catch BandFailureCategory.storage {
             events.append("persistence_failed")
         }
-        let resumedGeneration = try await session.interruptForReconnect(
+        let reconnectToken = try await session.interruptForReconnect(
+            token: connectionToken,
             callbackGeneration: generation
         )
         failure = .disconnected
         events.append("history_interrupted")
         try await session.resumeAfterReconnect(
-            callbackGeneration: resumedGeneration
+            token: reconnectToken,
+            callbackGeneration: reconnectToken.generation
         )
         events.append("reconnected")
         let secondToken = try await session.beginOperation(.history)
         let acceptance = try await session.stageHistoryChunk(
             VirtualBandFixtures.historyChunk,
             token: secondToken,
-            callbackGeneration: resumedGeneration
+            callbackGeneration: reconnectToken.generation
         )
         events.append("history_resumed")
         let receipt = await store.commit(acceptance: acceptance)
@@ -1530,7 +1643,7 @@ public enum BandConformanceRunner {
         try await session.acknowledgeHistory(
             receipt: receipt,
             token: secondToken,
-            callbackGeneration: resumedGeneration
+            callbackGeneration: reconnectToken.generation
         )
         events.append("history_acknowledged")
         try await session.completeOperation(secondToken)
@@ -2052,11 +2165,13 @@ public enum BandConformanceRunner {
         let (session, oldGeneration, oldConnectionToken) =
             try await readySessionWithToken()
         var events = ["ready"]
-        let reconnectGeneration = try await session.interruptForReconnect(
+        let reconnectToken = try await session.interruptForReconnect(
+            token: oldConnectionToken,
             callbackGeneration: oldGeneration
         )
         try await session.resumeAfterReconnect(
-            callbackGeneration: reconnectGeneration
+            token: reconnectToken,
+            callbackGeneration: reconnectToken.generation
         )
         events.append("generation_advanced")
         var failure: BandFailureCategory?
@@ -2230,9 +2345,12 @@ public enum BandConformanceRunner {
         }
         try await session.stopLive(token: liveToken)
         let staleToken = try await session.beginOperation(.firmware)
-        _ = try await session.interruptForReconnect(
-            callbackGeneration: postFirmwareGeneration
-        )
+        guard try await session.failOperation(
+            staleToken,
+            category: .disconnected
+        ) == nil else {
+            throw BandFailureCategory.internalFailure
+        }
         let recoveryScanToken = try await session.beginScan()
         let recoveryGeneration = recoveryScanToken.generation
         let recoveryConnectionToken = try await session.selectCandidate(
@@ -2296,7 +2414,7 @@ public enum BandConformanceRunner {
             historyStreams: []
         )
         let diagnostics = BandDiagnosticsRecorder()
-        let (session, _) = try await readySession(
+        let (session, _, connectionToken) = try await readySessionWithToken(
             capabilities: report,
             diagnostics: diagnostics
         )
@@ -2313,13 +2431,16 @@ public enum BandConformanceRunner {
 
         do {
             _ = try await session.interruptForReconnect(
+                token: connectionToken,
                 callbackGeneration: terminalGeneration
             )
-        } catch BandFailureCategory.invalidState {
+        } catch BandFailureCategory.staleCallback {
             events.append("reconnect_rejected")
         }
 
-        if await diagnostics.snapshot().last == BandDiagnosticEvent(
+        if await diagnostics.snapshot().last(where: {
+            $0.kind == .firmware
+        }) == BandDiagnosticEvent(
             kind: .firmware,
             outcome: .terminal,
             failureCategory: .updateVerification
@@ -2623,7 +2744,12 @@ public enum BandConformanceRunner {
         }
         let liveToken = try await session.beginLive()
         let disconnected = try await session.beginOperation(.battery)
-        try await session.failOperation(disconnected, category: .disconnected)
+        guard let reconnectAuthority = try await session.failOperation(
+            disconnected,
+            category: .disconnected
+        ) else {
+            throw BandFailureCategory.internalFailure
+        }
         let recovering = await session.snapshot()
         if recovering.state == .recovering,
            recovering.generation == generation + 1,
@@ -2642,11 +2768,12 @@ public enum BandConformanceRunner {
         } catch BandFailureCategory.staleCallback {
             events.append("stale_callback_rejected")
         }
-        try await session.resumeAfterReconnect(
-            callbackGeneration: recovering.generation
+        _ = try await session.resumeAfterReconnect(
+            token: reconnectAuthority,
+            callbackGeneration: reconnectAuthority.generation
         )
         events.append("reconnected")
-        let securityGeneration = await session.snapshot().generation
+        let securityGeneration = reconnectAuthority.generation
         let securityFailed = try await session.beginOperation(.battery)
         try await session.failOperation(
             securityFailed,

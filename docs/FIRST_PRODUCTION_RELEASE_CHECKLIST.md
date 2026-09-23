@@ -69,16 +69,20 @@ position without changing its ID. This inbox intentionally starts empty.
   later fallback; band-triggered and automatic origins follow their separate
   gates. (Evidence:
   `ops/rounds/2026-09-07-launch-owner-decisions.md`, 2026-09-07)
-- [ ] DEC-070 [OWNER] Confirm that automatic medical, anomaly, Rhythm, SpO2,
-  temperature, stress, and fall paging remains unavailable.
+- [x] DEC-070 [OWNER] Confirm that automatic medical, anomaly, Rhythm, SpO2,
+  temperature, stress, and fall paging remains unavailable. (Evidence:
+  decisions D-023 and D-052, `FEATURE_PARITY.md`,
+  `ops/rounds/2026-09-07-launch-owner-decisions.md`)
 - [ ] DEC-080 [OWNER] Confirm the public product and band names after trademark
   review.
 - [ ] DEC-090 [OWNER] Confirm the public app version and monotonic Apple and
   Android build numbers.
 - [ ] DEC-100 [OWNER] Confirm free NOOP versus NOOP+ pricing and entitlement
   boundaries.
-- [ ] DEC-110 [OWNER] Confirm that every core local metric remains account-free
-  and available without a subscription.
+- [x] DEC-110 [OWNER] Confirm that every core local metric remains account-free
+  and available without a subscription. (Evidence: decisions D-046 and D-049,
+  `PLATFORM_ARCHITECTURE.md`,
+  `ops/rounds/2026-09-05-band-ownership-onboarding.md`)
 - [x] DEC-115 [OWNER] Keep v1 bands bound to the claiming account for the
   band's ordinary lifetime with no user-facing unpair or transfer; permit
   consumer release only through an eligible successor-band upgrade while
@@ -281,7 +285,7 @@ position without changing its ID. This inbox intentionally starts empty.
   digest-pinned source-only app boundary. Keep every production NOOP-band
   factory disabled and retain WHOOP as the comparison transport until the
   supplier and physical gates pass. (Evidence: protected SDK merge
-  `650c89e45ca2ab28e14e76e447a7026479e42b4e`,
+  `eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`,
   `ops/rounds/2026-09-21-noop-band-sdk-app-integration.md`)
 - [ ] SDK-007 [ENG] Build quarantined Apple and Android supplier adapters behind
   neutral NOOP session/sample types; keep vendor callbacks, persistence, and
@@ -559,8 +563,10 @@ position without changing its ID. This inbox intentionally starts empty.
   occurrence. (Evidence: `release/terminology/legacy-inventory.json`,
   `Tools/terminology-audit.py`,
   `ops/rounds/2026-09-07-production-readiness-execution.md`)
-- [ ] MIG-020 [JOINT] Approve categories for customer, core, persisted, import,
+- [x] MIG-020 [JOINT] Approve categories for customer, core, persisted, import,
   compatibility, legal, fixture, generated, and historical references.
+  (Evidence: decision D-044, `release/terminology/README.md`,
+  `ops/rounds/2026-09-05-first-production-release-plan.md`)
 - [x] MIG-030 [ENG] Create a machine-readable exception allowlist with reason,
   owner, and removal condition. (Evidence:
   `release/terminology/active-allowlist.json`,
@@ -605,7 +611,10 @@ position without changing its ID. This inbox intentionally starts empty.
   required legal notices.
 - [ ] MIG-230 [ENG] Isolate or remove the direct legacy adapter only after NOOP
   Band physical parity.
-- [ ] MIG-240 [ENG] Reach zero unallowlisted customer and active-core matches.
+- [x] MIG-240 [ENG] Reach zero unallowlisted customer and active-core matches.
+  (Evidence: `Tools/terminology-audit.py`,
+  `release/terminology/legacy-inventory.json`, final 2026-09-23 terminology
+  gate with zero forbidden mappings)
 
 ## 8. Apple and Android product experience
 

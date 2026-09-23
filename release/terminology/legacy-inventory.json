@@ -35255,12 +35255,12 @@
     {
       "category": "historical",
       "lineNumbers": [
-        282,
-        573,
-        573,
-        574,
-        575,
-        580
+        286,
+        579,
+        579,
+        580,
+        581,
+        586
       ],
       "occurrenceCount": 6,
       "path": "docs/FIRST_PRODUCTION_RELEASE_CHECKLIST.md",
@@ -35281,10 +35281,10 @@
         181,
         181,
         181,
-        628,
-        635,
-        635,
-        636
+        632,
+        639,
+        639,
+        640
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -35467,8 +35467,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        251,
-        252
+        265,
+        266
       ],
       "occurrenceCount": 2,
       "path": "docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md",
@@ -35696,8 +35696,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        328,
-        331
+        326,
+        329
       ],
       "occurrenceCount": 2,
       "path": "docs/RELEASE_CONTROLS.md",
@@ -36093,11 +36093,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        98,
-        146,
-        167,
-        311,
-        431
+        100,
+        148,
+        169,
+        313,
+        433
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36420,15 +36420,15 @@
         35,
         46,
         67,
-        195,
-        293,
-        651,
-        652,
-        663
+        219,
+        317,
+        675,
+        676,
+        687
       ],
       "occurrenceCount": 8,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
-      "sha256": "9a862e871b65023f4be41f0d1df081a50d40ac197dd109a4028de848c127ca5f",
+      "sha256": "0b7187e3abca771609920f5167393dd84fed23b436690a8d08237dd8817a8605",
       "tokenCounts": {
         "whoop": 7,
         "whoop-default": 1
@@ -36454,17 +36454,17 @@
     {
       "category": "historical",
       "lineNumbers": [
-        8,
         9,
-        13,
-        18,
-        39,
-        75,
-        75
+        10,
+        14,
+        19,
+        40,
+        76,
+        76
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "fd99d8bb03910ce0355069f97e1187db08c7f3674f41fbccc0c3e4751d0e4098",
+      "sha256": "af14cfc2a4ccff9e55d75850e81121e02fd5b6b18e3431a3dd0063b7c2996177",
       "tokenCounts": {
         "whoop": 4,
         "whoopstore": 3

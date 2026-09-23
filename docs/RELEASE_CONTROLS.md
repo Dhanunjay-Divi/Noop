@@ -112,26 +112,24 @@ open gates.
 For the active SDK app-integration branch, the recorded inputs and current
 local evidence are:
 
-- upstream SDK source: `NoopBandSDK` PR `#25` protected merge
-  `650c89e45ca2ab28e14e76e447a7026479e42b4e`
-- application implementation:
-  `1be4062c054b210187f4c48f2ab99dd59873923e`
-- pull request: `#17`; reviewed evidence head:
-  `b21d8b72288678668ff17d1e365b9abace42c0ef`
-- local verification: artifact verifier 9/9, vendored Swift 16/16 across 45
+- upstream SDK source: `NoopBandSDK` PR `#26` protected merge
+  `eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`
+- application candidate: the consolidated SDK PR `#26` source and evidence
+  replacement carried by this branch
+- pull request: `#17`; only its final exact candidate head can authorize merge
+- local verification: artifact verifier 9/9, vendored Swift 16/16 across 46
   automated scenarios plus the Swift actor-suspension regression, macOS
-  boundary 10/10, Android boundary, Android
-  Demo and both instrumentation source graphs, and unsigned Release
+  boundary 10/10, full macOS 2,228 tests with one intentional skip, Android
+  boundary 14/14, Android Demo and both instrumentation source graphs, iOS
+  production shell 39 tests with one intentional skip, and unsigned Release
   iOS/Watch/Watch-complications/widget graph all pass. The reviewed terminology
   snapshot, complete 318-test Tools wall, exact 204-test release matrix, and
-  direct policy gates also pass. Independent exact-diff review found no P0/P1.
-  Its three P2 findings were corrected by adding the app-repository Swift
-  suspension regression, distinguishing PR `#24` historical evidence from the
-  current candidate, and labeling the exact test-wrapper digest accurately.
-- required contexts: all ten stable contexts completed successfully on the
-  prior exact head on 2026-09-22. The PR `#25` implementation/evidence commits
-  are remote; the final documentation-only candidate must pass exact-SHA hosted
-  checks before protected integration, and no earlier candidate authorizes merge.
+  direct policy gates also pass. Final independent dirty-diff review found no
+  P0/P1; all three P2 findings are corrected, including a fresh 14/14 Android
+  integration run for forged reconnect authority.
+- required contexts: prior exact heads do not authorize this replacement. The
+  final PR `#26` source and documentation candidate must pass all ten exact-SHA
+  hosted contexts before protected integration.
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`
 

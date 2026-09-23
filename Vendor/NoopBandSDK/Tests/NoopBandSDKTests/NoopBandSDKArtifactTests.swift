@@ -192,12 +192,14 @@ final class NoopBandSDKArtifactTests: XCTestCase {
     }
 
     func testReconnectRejectsStaleCallbacks() async throws {
-        let (session, oldGeneration, _) = try await readySession()
-        let reconnectGeneration = try await session.interruptForReconnect(
+        let (session, oldGeneration, connectionToken) = try await readySession()
+        let reconnectAuthority = try await session.interruptForReconnect(
+            token: connectionToken,
             callbackGeneration: oldGeneration
         )
-        try await session.resumeAfterReconnect(
-            callbackGeneration: reconnectGeneration
+        _ = try await session.resumeAfterReconnect(
+            token: reconnectAuthority,
+            callbackGeneration: reconnectAuthority.generation
         )
         let liveToken = try await session.beginLive()
 
@@ -218,17 +220,19 @@ final class NoopBandSDKArtifactTests: XCTestCase {
 
     func testReconnectTokenSurvivesLiveStartDuringDiagnostics() async throws {
         let diagnostics = BandDiagnosticsRecorder(capacity: 64)
-        let (session, generation, _) = try await readySession(
+        let (session, generation, connectionToken) = try await readySession(
             diagnostics: diagnostics
         )
-        let reconnectGeneration = try await session.interruptForReconnect(
+        let reconnectAuthority = try await session.interruptForReconnect(
+            token: connectionToken,
             callbackGeneration: generation
         )
         await diagnostics.requestNextRecordSuspensionForTesting()
 
         let resumeTask = Task {
             try await session.resumeAfterReconnect(
-                callbackGeneration: reconnectGeneration
+                token: reconnectAuthority,
+                callbackGeneration: reconnectAuthority.generation
             )
         }
         await diagnostics.waitForRecordSuspensionForTesting()
@@ -241,7 +245,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         try await session.failEstablishedSession(
             .authentication,
             token: reconnectToken,
-            callbackGeneration: reconnectGeneration
+            callbackGeneration: reconnectAuthority.generation
         )
         let rejected = await session.snapshot()
         XCTAssertEqual(rejected.state, .rejected)
@@ -552,17 +556,9 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         XCTAssertEqual(snapshot.generation, generation + 1)
         XCTAssertEqual(snapshot.durableSampleCount, 1)
 
-        do {
-            try await session.resumeAfterReconnect(
-                callbackGeneration: snapshot.generation
-            )
-            XCTFail("Firmware completion must invalidate prior negotiation")
-        } catch let error as BandFailureCategory {
-            XCTAssertEqual(error, .invalidState)
-        }
-
         let postFirmwareScanToken = try await session.beginScan()
         let postFirmwareGeneration = postFirmwareScanToken.generation
+        XCTAssertEqual(postFirmwareGeneration, generation + 2)
         let postFirmwareConnectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "post-firmware-candidate",
@@ -615,54 +611,43 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             historyStreams: [.heartRate]
         )
 
-        let (cancelledSession, _, _) = try await readySession(report: report)
+        let (cancelledSession, cancelledGeneration, _) =
+            try await readySession(report: report)
         let cancelledToken = try await cancelledSession.beginOperation(.firmware)
         try await cancelledSession.cancelOperation(cancelledToken)
         var snapshot = await cancelledSession.snapshot()
         XCTAssertEqual(snapshot.state, .recovering)
-        do {
-            try await cancelledSession.resumeAfterReconnect(
-                callbackGeneration: snapshot.generation
-            )
-            XCTFail("Cancelled firmware must require fresh negotiation")
-        } catch let error as BandFailureCategory {
-            XCTAssertEqual(error, .invalidState)
-        }
+        let cancelledScanToken = try await cancelledSession.beginScan()
+        XCTAssertEqual(cancelledScanToken.generation, cancelledGeneration + 2)
 
-        let (failedSession, _, _) = try await readySession(report: report)
+        let (failedSession, failedGeneration, _) =
+            try await readySession(report: report)
         let failedToken = try await failedSession.beginOperation(.firmware)
         try await failedSession.failOperation(failedToken, category: .timeout)
         snapshot = await failedSession.snapshot()
         XCTAssertEqual(snapshot.state, .recovering)
-        do {
-            try await failedSession.resumeAfterReconnect(
-                callbackGeneration: snapshot.generation
-            )
-            XCTFail("Failed firmware must require fresh negotiation")
-        } catch let error as BandFailureCategory {
-            XCTAssertEqual(error, .invalidState)
-        }
+        let failedScanToken = try await failedSession.beginScan()
+        XCTAssertEqual(failedScanToken.generation, failedGeneration + 2)
 
         let diagnostics = BandDiagnosticsRecorder()
-        let (interruptedSession, _, _) = try await readySession(
+        let (interruptedSession, interruptedGeneration, _) = try await readySession(
             report: report,
             diagnostics: diagnostics
         )
-        _ = try await interruptedSession.beginOperation(.firmware)
-        let interruptedGeneration =
-            try await interruptedSession.interruptForReconnect(
-                callbackGeneration: (await interruptedSession.snapshot()).generation
-            )
+        let interruptedToken =
+            try await interruptedSession.beginOperation(.firmware)
+        let reconnectAuthority = try await interruptedSession.failOperation(
+            interruptedToken,
+            category: .disconnected
+        )
+        XCTAssertNil(reconnectAuthority)
         snapshot = await interruptedSession.snapshot()
         XCTAssertEqual(snapshot.state, .recovering)
-        do {
-            try await interruptedSession.resumeAfterReconnect(
-                callbackGeneration: interruptedGeneration
-            )
-            XCTFail("Interrupted firmware must require fresh negotiation")
-        } catch let error as BandFailureCategory {
-            XCTAssertEqual(error, .invalidState)
-        }
+        let interruptedScanToken = try await interruptedSession.beginScan()
+        XCTAssertEqual(
+            interruptedScanToken.generation,
+            interruptedGeneration + 2
+        )
         let events = await diagnostics.snapshot()
         XCTAssertTrue(events.contains {
             $0.kind == .firmware
@@ -730,7 +715,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
     func testRecoveryScanClearsNegotiationWithoutDiscardingCheckpoint()
         async throws
     {
-        let (session, generation, _) = try await readySession()
+        let (session, generation, connectionToken) = try await readySession()
         let liveToken = try await session.beginLive()
         let accepted = try await durablyCommitLive(
             session: session,
@@ -744,18 +729,20 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         XCTAssertEqual(accepted, 1)
         try await session.stopLive(token: liveToken)
 
-        _ = try await session.interruptForReconnect(
+        let reconnectAuthority = try await session.interruptForReconnect(
+            token: connectionToken,
             callbackGeneration: generation
         )
         let recoveryScanToken = try await session.beginScan()
         let scanGeneration = recoveryScanToken.generation
         do {
             try await session.resumeAfterReconnect(
-                callbackGeneration: scanGeneration
+                token: reconnectAuthority,
+                callbackGeneration: reconnectAuthority.generation
             )
             XCTFail("A new scan must discard prior negotiation state")
         } catch let error as BandFailureCategory {
-            XCTAssertEqual(error, .invalidState)
+            XCTAssertEqual(error, .staleCallback)
         }
 
         let restoredCheckpoint = await session.historyCheckpoint()

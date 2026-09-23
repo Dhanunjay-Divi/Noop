@@ -217,6 +217,7 @@ object BandConformanceRunner {
         "scan_callback_consumed_after_selection",
         "cross_session_credentials_rejected",
         "established_failure_session_bound",
+        "reconnect_callback_session_bound",
         "reconnected_established_failure_authorized",
         "superseded_live_stop_rejected",
         "same_session_replay_rejected",
@@ -268,6 +269,8 @@ object BandConformanceRunner {
             crossSessionCredentialsRejected()
         "established_failure_session_bound" ->
             establishedFailureSessionBound()
+        "reconnect_callback_session_bound" ->
+            reconnectCallbackSessionBound()
         "reconnected_established_failure_authorized" ->
             reconnectedEstablishedFailureAuthorized()
         "superseded_live_stop_rejected" ->
@@ -434,12 +437,16 @@ object BandConformanceRunner {
     }
 
     private fun staleCallbackRejected(): BandConformanceResult {
-        val (session, oldGeneration) = readySession()
+        val (session, oldGeneration, connectionToken) =
+            readySessionWithToken()
         val events = mutableListOf("ready")
         val staleLiveToken = session.beginLive()
-        val reconnectGeneration =
-            session.interruptForReconnect(oldGeneration)
-        session.resumeAfterReconnect(reconnectGeneration)
+        val reconnectToken =
+            session.interruptForReconnect(connectionToken, oldGeneration)
+        session.resumeAfterReconnect(
+            reconnectToken,
+            reconnectToken.generation,
+        )
         events += "generation_advanced"
         var failure: BandFailureCategory? = null
         try {
@@ -758,29 +765,41 @@ object BandConformanceRunner {
         }
         scanSession.cancelScan(secondScan)
 
-        val (session, generation) = readySession()
+        val (session, generation, connectionToken) = readySessionWithToken()
         events += "ready"
         try {
-            session.interruptForReconnect(generation - 1)
+            session.interruptForReconnect(connectionToken, generation - 1)
         } catch (error: BandException) {
             failure = error.category
             events += "stale_reconnect_interrupt_rejected"
         }
         val firstReconnect =
-            session.interruptForReconnect(generation)
+            session.interruptForReconnect(connectionToken, generation)
         events += "reconnect_started"
-        session.resumeAfterReconnect(firstReconnect)
+        val firstConnectionToken = session.resumeAfterReconnect(
+            firstReconnect,
+            firstReconnect.generation,
+        )
         events += "first_reconnect_completed"
         val secondReconnect =
-            session.interruptForReconnect(firstReconnect)
+            session.interruptForReconnect(
+                firstConnectionToken,
+                firstReconnect.generation,
+            )
         events += "second_reconnect_started"
         try {
-            session.resumeAfterReconnect(firstReconnect)
+            session.resumeAfterReconnect(
+                firstReconnect,
+                firstReconnect.generation,
+            )
         } catch (error: BandException) {
             failure = error.category
             events += "stale_reconnect_completion_rejected"
         }
-        session.resumeAfterReconnect(secondReconnect)
+        session.resumeAfterReconnect(
+            secondReconnect,
+            secondReconnect.generation,
+        )
         events += "reconnected"
         return result(
             "stale_terminal_callbacks_rejected",
@@ -829,23 +848,109 @@ object BandConformanceRunner {
         )
     }
 
+    private fun reconnectCallbackSessionBound(): BandConformanceResult {
+        val (foreignSession, foreignGeneration, foreignConnectionToken) =
+            readySessionWithToken()
+        val diagnostics = BandDiagnosticsRecorder()
+        val (session, generation, connectionToken) =
+            readySessionWithToken(diagnostics = diagnostics)
+        check(generation == foreignGeneration)
+
+        val events = mutableListOf("ready_pair")
+        var failure: BandFailureCategory? = null
+        session.beginLive()
+        try {
+            session.interruptForReconnect(
+                foreignConnectionToken,
+                generation,
+            )
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                fail(BandFailureCategory.INTERNAL_FAILURE)
+            }
+            failure = error.category
+            events += "foreign_interrupt_rejected"
+        }
+
+        val livePreserved = session.snapshot()
+        check(livePreserved.state == BandSessionState.LIVE_COLLECTING)
+        check(livePreserved.liveActive)
+        events += "current_live_preserved"
+
+        val eventCount = diagnostics.snapshot().size
+        val reconnectToken =
+            session.interruptForReconnect(connectionToken, generation)
+        val foreignReconnectToken =
+            foreignSession.interruptForReconnect(
+                foreignConnectionToken,
+                foreignGeneration,
+            )
+        check(reconnectToken.generation == foreignReconnectToken.generation)
+        check(
+            diagnostics.snapshot().drop(eventCount) == listOf(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.LIVE,
+                    BandDiagnosticOutcome.INTERRUPTED,
+                ),
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.RECONNECT,
+                    BandDiagnosticOutcome.INTERRUPTED,
+                ),
+            ),
+        )
+        events += "live_interruption_ordered"
+
+        try {
+            session.resumeAfterReconnect(
+                foreignReconnectToken,
+                reconnectToken.generation,
+            )
+        } catch (error: BandException) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
+                fail(BandFailureCategory.INTERNAL_FAILURE)
+            }
+            failure = error.category
+            events += "foreign_resume_rejected"
+        }
+
+        val recoveryPreserved = session.snapshot()
+        check(recoveryPreserved.state == BandSessionState.RECOVERING)
+        check(!recoveryPreserved.liveActive)
+        events += "current_recovery_preserved"
+
+        session.resumeAfterReconnect(
+            reconnectToken,
+            reconnectToken.generation,
+        )
+        events += "own_resume_accepted"
+        return result(
+            "reconnect_callback_session_bound",
+            events,
+            session.snapshot(),
+            failure = failure,
+        )
+    }
+
     private fun reconnectedEstablishedFailureAuthorized():
         BandConformanceResult {
         val (session, generation, originalToken) = readySessionWithToken()
         val events = mutableListOf("ready")
         var failure: BandFailureCategory? = null
 
-        val reconnectGeneration =
-            session.interruptForReconnect(generation)
+        val reconnectAuthority =
+            session.interruptForReconnect(originalToken, generation)
         val reconnectToken =
-            session.resumeAfterReconnect(reconnectGeneration)
+            session.resumeAfterReconnect(
+                reconnectAuthority,
+                reconnectAuthority.generation,
+            )
         events += "reconnected"
 
         try {
             session.failEstablishedSession(
                 BandFailureCategory.AUTHENTICATION,
                 originalToken,
-                reconnectGeneration,
+                reconnectAuthority.generation,
             )
         } catch (error: BandException) {
             if (error.category != BandFailureCategory.STALE_CALLBACK) {
@@ -861,7 +966,7 @@ object BandConformanceRunner {
         session.failEstablishedSession(
             BandFailureCategory.AUTHENTICATION,
             reconnectToken,
-            reconnectGeneration,
+            reconnectAuthority.generation,
         )
         events += "resumed_failure_accepted"
 
@@ -1308,7 +1413,7 @@ object BandConformanceRunner {
     }
 
     private fun historyInterruptedResume(): BandConformanceResult {
-        val (session, generation) = readySession()
+        val (session, generation, connectionToken) = readySessionWithToken()
         val store = VirtualBandStore()
         val events = mutableListOf("ready")
         val firstToken = session.beginOperation(BandOperationClass.HISTORY)
@@ -1319,7 +1424,7 @@ object BandConformanceRunner {
         )
         events += "history_received"
         try {
-            session.interruptForReconnect(generation)
+            session.interruptForReconnect(connectionToken, generation)
         } catch (error: BandException) {
             if (error.category != BandFailureCategory.BUSY) {
                 throw error
@@ -1343,17 +1448,20 @@ object BandConformanceRunner {
             }
             events += "persistence_failed"
         }
-        val resumedGeneration =
-            session.interruptForReconnect(generation)
+        val reconnectToken =
+            session.interruptForReconnect(connectionToken, generation)
         val failure = BandFailureCategory.DISCONNECTED
         events += "history_interrupted"
-        session.resumeAfterReconnect(resumedGeneration)
+        session.resumeAfterReconnect(
+            reconnectToken,
+            reconnectToken.generation,
+        )
         events += "reconnected"
         val secondToken = session.beginOperation(BandOperationClass.HISTORY)
         val acceptance = session.stageHistoryChunk(
             VirtualBandFixtures.historyChunk,
             secondToken,
-            resumedGeneration,
+            reconnectToken.generation,
         )
         events += "history_resumed"
         val receipt = store.commit(acceptance)
@@ -1361,7 +1469,7 @@ object BandConformanceRunner {
         session.acknowledgeHistory(
             receipt,
             secondToken,
-            resumedGeneration,
+            reconnectToken.generation,
         )
         events += "history_acknowledged"
         session.completeOperation(secondToken)
@@ -1821,9 +1929,15 @@ object BandConformanceRunner {
         val (session, oldGeneration, oldConnectionToken) =
             readySessionWithToken()
         val events = mutableListOf("ready")
-        val reconnectGeneration =
-            session.interruptForReconnect(oldGeneration)
-        session.resumeAfterReconnect(reconnectGeneration)
+        val reconnectToken =
+            session.interruptForReconnect(
+                oldConnectionToken,
+                oldGeneration,
+            )
+        session.resumeAfterReconnect(
+            reconnectToken,
+            reconnectToken.generation,
+        )
         events += "generation_advanced"
         var failure: BandFailureCategory? = null
         try {
@@ -1986,7 +2100,12 @@ object BandConformanceRunner {
         }
         session.stopLive(liveToken)
         val staleToken = session.beginOperation(BandOperationClass.FIRMWARE)
-        session.interruptForReconnect(postFirmwareGeneration)
+        check(
+            session.failOperation(
+                staleToken,
+                BandFailureCategory.DISCONNECTED,
+            ) == null,
+        )
         val recoveryScanToken = session.beginScan()
         val recoveryGeneration = recoveryScanToken.generation
         val recoveryConnectionToken =
@@ -2056,7 +2175,8 @@ object BandConformanceRunner {
             historyStreams = emptySet(),
         )
         val diagnostics = BandDiagnosticsRecorder()
-        val (session, _) = readySession(report, diagnostics)
+        val (session, _, connectionToken) =
+            readySessionWithToken(report, diagnostics)
         val events = mutableListOf("ready")
         val token = session.beginOperation(BandOperationClass.FIRMWARE)
         events += "firmware_started"
@@ -2069,16 +2189,21 @@ object BandConformanceRunner {
         val terminalGeneration = session.snapshot().generation
 
         try {
-            session.interruptForReconnect(terminalGeneration)
+            session.interruptForReconnect(
+                connectionToken,
+                terminalGeneration,
+            )
         } catch (error: BandException) {
-            if (error.category != BandFailureCategory.INVALID_STATE) {
+            if (error.category != BandFailureCategory.STALE_CALLBACK) {
                 throw error
             }
             events += "reconnect_rejected"
         }
 
         if (
-            diagnostics.snapshot().last() == BandDiagnosticEvent(
+            diagnostics.snapshot().last {
+                it.kind == BandDiagnosticKind.FIRMWARE
+            } == BandDiagnosticEvent(
                 BandDiagnosticKind.FIRMWARE,
                 BandDiagnosticOutcome.TERMINAL,
                 failureCategory = BandFailureCategory.UPDATE_VERIFICATION,
@@ -2344,7 +2469,10 @@ object BandConformanceRunner {
         }
         val liveToken = session.beginLive()
         val disconnected = session.beginOperation(BandOperationClass.BATTERY)
-        session.failOperation(disconnected, BandFailureCategory.DISCONNECTED)
+        val reconnectAuthority = session.failOperation(
+            disconnected,
+            BandFailureCategory.DISCONNECTED,
+        ) ?: fail(BandFailureCategory.INTERNAL_FAILURE)
         val recovering = session.snapshot()
         if (
             recovering.state == BandSessionState.RECOVERING &&
@@ -2367,9 +2495,12 @@ object BandConformanceRunner {
             }
             events += "stale_callback_rejected"
         }
-        session.resumeAfterReconnect(recovering.generation)
+        session.resumeAfterReconnect(
+            reconnectAuthority,
+            reconnectAuthority.generation,
+        )
         events += "reconnected"
-        val securityGeneration = session.snapshot().generation
+        val securityGeneration = reconnectAuthority.generation
         val securityFailed = session.beginOperation(BandOperationClass.BATTERY)
         session.failOperation(
             securityFailed,

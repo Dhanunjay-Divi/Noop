@@ -19,6 +19,7 @@ public actor BandSessionMachine {
     private var state: BandSessionState = .idle
     private var generation: UInt64 = 0
     private var nextConnectionSequence: UInt64 = 0
+    private var nextReconnectSequence: UInt64 = 0
     private var nextOperationSequence: UInt64 = 0
     private var nextLiveSequence: UInt64 = 0
     private var nextLiveReceiptSequence: UInt64 = 0
@@ -26,6 +27,7 @@ public actor BandSessionMachine {
     private var activeOperation: BandOperationToken?
     private var activeScanToken: BandScanToken?
     private var activeConnectionToken: BandConnectionToken?
+    private var activeReconnectToken: BandReconnectToken?
     private var activeLiveToken: BandLiveToken?
     private var liveActive = false
     private var liveStreams: Set<BandStreamKind> = []
@@ -105,6 +107,7 @@ public actor BandSessionMachine {
         clearLiveTracking()
         activeScanToken = scanToken
         activeConnectionToken = nil
+        activeReconnectToken = nil
         identity = nil
         capabilityReport = nil
         state = .scanning
@@ -1458,11 +1461,12 @@ public actor BandSessionMachine {
         )
     }
 
+    @discardableResult
     public func failOperation(
         _ token: BandOperationToken,
         category: BandFailureCategory,
         firmwareDisposition: BandFirmwareFailureDisposition = .recoverable
-    ) async throws {
+    ) async throws -> BandReconnectToken? {
         let operationDiagnosticKind = diagnosticKind(for: token.operationClass)
         do {
             try validateActiveToken(token, expected: token.operationClass)
@@ -1514,21 +1518,102 @@ public actor BandSessionMachine {
             invalidateAuthenticatedSession(nextState: .firmwareFailure)
         } else if category == .authentication {
             invalidateAuthenticatedSession(nextState: .rejected)
+        } else if token.operationClass == .firmware,
+                  category == .disconnected
+        {
+            invalidateNegotiationAfterFirmware()
+            let recoveryGeneration = generation
+            await diagnostics.record([
+                BandDiagnosticEvent(
+                    kind: .firmware,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                ),
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                ),
+            ])
+            guard state == .recovering,
+                  generation == recoveryGeneration
+            else {
+                await diagnostics.record(
+                    BandDiagnosticEvent(
+                        kind: .firmware,
+                        outcome: .stale,
+                        failureCategory: .staleCallback
+                    )
+                )
+                throw BandFailureCategory.staleCallback
+            }
+            return nil
         } else if token.operationClass == .firmware {
             invalidateNegotiationAfterFirmware()
         } else if category == .disconnected {
+            nextReconnectSequence &+= 1
+            generation &+= 1
+            let reconnectToken = BandReconnectToken(
+                sessionNonce: sessionNonce,
+                generation: generation,
+                sequence: nextReconnectSequence
+            )
+            activeReconnectToken = reconnectToken
+            state = .recovering
+            var interruptionEvents: [BandDiagnosticEvent] = [
+                BandDiagnosticEvent(
+                    kind: operationDiagnosticKind,
+                    outcome: .failed,
+                    failureCategory: category
+                ),
+            ]
+            if liveActive {
+                interruptionEvents.append(
+                    BandDiagnosticEvent(
+                        kind: .live,
+                        outcome: .interrupted
+                    )
+                )
+            }
+            interruptionEvents.append(
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .interrupted,
+                    failureCategory: .disconnected
+                )
+            )
+            await diagnostics.record(interruptionEvents)
+            guard generation == reconnectToken.generation,
+                  state == .recovering,
+                  activeOperation == token,
+                  activeReconnectToken == reconnectToken
+            else {
+                await diagnostics.record(
+                    BandDiagnosticEvent(
+                        kind: operationDiagnosticKind,
+                        outcome: .stale,
+                        failureCategory: .staleCallback
+                    )
+                )
+                throw BandFailureCategory.staleCallback
+            }
             clearOperationTracking()
             clearLiveTracking()
             activeConnectionToken = nil
-            generation &+= 1
-            state = .recovering
+            return reconnectToken
         } else {
             clearActiveOperation()
+        }
+        let operationOutcome: BandDiagnosticOutcome
+        if terminalFirmwareFailure {
+            operationOutcome = .terminal
+        } else {
+            operationOutcome = .failed
         }
         await diagnostics.record(
             BandDiagnosticEvent(
                 kind: operationDiagnosticKind,
-                outcome: terminalFirmwareFailure ? .terminal : .failed,
+                outcome: operationOutcome,
                 failureCategory: category
             )
         )
@@ -1541,24 +1626,31 @@ public actor BandSessionMachine {
                 )
             )
         }
+        return nil
     }
 
     @discardableResult
     public func interruptForReconnect(
+        token: BandConnectionToken,
         callbackGeneration: UInt64
-    ) async throws -> UInt64 {
+    ) async throws -> BandReconnectToken {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateConnectionToken(
+            token,
             callbackGeneration,
             diagnosticKind: .reconnect
         )
-        guard state != .idle,
-              state != .disconnecting,
-              state != .incompatible,
-              state != .rejected,
-              state != .securityFailure,
-              state != .firmwareFailure
+        guard identity != nil,
+              capabilityReport != nil,
+              activeOperation?.operationClass != .firmware
         else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .reconnect,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
             throw BandFailureCategory.invalidState
         }
         guard !hasPendingPersistence else {
@@ -1574,20 +1666,18 @@ public actor BandSessionMachine {
         let interruptedOperationKind = activeOperation.map {
             diagnosticKind(for: $0.operationClass)
         }
-        let firmwareWasActive =
-            activeOperation?.operationClass == .firmware
-        clearOperationTracking()
-        clearLiveTracking()
-        activeConnectionToken = nil
-        if firmwareWasActive {
-            identity = nil
-            capabilityReport = nil
-        }
+        nextReconnectSequence &+= 1
         generation &+= 1
-        let reconnectGeneration = generation
+        let reconnectToken = BandReconnectToken(
+            sessionNonce: sessionNonce,
+            generation: generation,
+            sequence: nextReconnectSequence
+        )
+        activeReconnectToken = reconnectToken
         state = .recovering
+        var interruptionEvents: [BandDiagnosticEvent] = []
         if let interruptedOperationKind {
-            await diagnostics.record(
+            interruptionEvents.append(
                 BandDiagnosticEvent(
                     kind: interruptedOperationKind,
                     outcome: .interrupted,
@@ -1595,11 +1685,21 @@ public actor BandSessionMachine {
                 )
             )
         }
-        await diagnostics.record(
+        if liveActive {
+            interruptionEvents.append(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .interrupted
+                )
+            )
+        }
+        interruptionEvents.append(
             BandDiagnosticEvent(kind: .reconnect, outcome: .interrupted)
         )
-        guard generation == reconnectGeneration,
-              state == .recovering
+        await diagnostics.record(interruptionEvents)
+        guard generation == reconnectToken.generation,
+              state == .recovering,
+              activeReconnectToken == reconnectToken
         else {
             await diagnostics.record(
                 BandDiagnosticEvent(
@@ -1610,15 +1710,20 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.staleCallback
         }
-        return reconnectGeneration
+        clearOperationTracking()
+        clearLiveTracking()
+        activeConnectionToken = nil
+        return reconnectToken
     }
 
     @discardableResult
     public func resumeAfterReconnect(
+        token reconnectToken: BandReconnectToken,
         callbackGeneration: UInt64
     ) async throws -> BandConnectionToken {
         try ensureNotClosed()
-        try await validateCallbackGeneration(
+        try await validateReconnectToken(
+            reconnectToken,
             callbackGeneration,
             diagnosticKind: .reconnect
         )
@@ -1636,6 +1741,7 @@ public actor BandSessionMachine {
             candidateHandle: identity.sourceIdentity
         )
         activeConnectionToken = token
+        activeReconnectToken = nil
         state = .ready
         await diagnostics.record(
             BandDiagnosticEvent(kind: .reconnect, outcome: .completed)
@@ -1725,6 +1831,7 @@ public actor BandSessionMachine {
         clearOperationTracking()
         clearLiveTracking()
         activeConnectionToken = nil
+        activeReconnectToken = nil
         identity = nil
         capabilityReport = nil
         state = .idle
@@ -1775,6 +1882,7 @@ public actor BandSessionMachine {
         clearLiveTracking()
         activeScanToken = nil
         activeConnectionToken = nil
+        activeReconnectToken = nil
         identity = nil
         capabilityReport = nil
         state = .closed
@@ -1832,6 +1940,30 @@ public actor BandSessionMachine {
         guard token.sessionNonce == sessionNonce,
               token.generation == generation,
               token == activeConnectionToken
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: diagnosticKind,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
+    }
+
+    private func validateReconnectToken(
+        _ token: BandReconnectToken,
+        _ callbackGeneration: UInt64,
+        diagnosticKind: BandDiagnosticKind
+    ) async throws {
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: diagnosticKind
+        )
+        guard token.sessionNonce == sessionNonce,
+              token.generation == generation,
+              token == activeReconnectToken
         else {
             await diagnostics.record(
                 BandDiagnosticEvent(
@@ -2000,6 +2132,7 @@ public actor BandSessionMachine {
         clearOperationTracking()
         clearLiveTracking()
         activeConnectionToken = nil
+        activeReconnectToken = nil
         identity = nil
         capabilityReport = nil
         generation &+= 1

@@ -97,7 +97,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "650c89e45ca2ab28e14e76e447a7026479e42b4e"
+            "eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let scanToken = try await session.beginScan()

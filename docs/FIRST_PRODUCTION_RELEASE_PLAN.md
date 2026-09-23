@@ -309,8 +309,12 @@ while the accepted connection remains usable.
 PR `#25` requires the exact issued connection and live-operation tokens for
 established-session failure and live stop, returns fresh connection authority
 after reconnect, and preserves that authority across Swift actor suspension.
+PR `#26` additionally makes reconnect interruption require the exact active
+connection token, returns opaque one-use reconnect authority, keeps firmware
+failure recovery scan-only, and invalidates stale reconnect authority when a
+new recovery scan starts.
 Current protected `main` is
-`650c89e45ca2ab28e14e76e447a7026479e42b4e`. The app integration candidate
+`eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`. The app integration candidate
 consumes the deterministic export from that protected revision through a
 digest-pinned, supplier-artifact-free boundary. The repository is temporarily
 public as of 2026-09-22; D-056 still requires private visibility before

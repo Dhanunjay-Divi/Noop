@@ -111,10 +111,11 @@ public actor BandDiagnosticsRecorder {
         await suspendRecordIfRequestedForTesting()
     }
 
-    public func record(_ batch: [BandDiagnosticEvent]) {
+    public func record(_ batch: [BandDiagnosticEvent]) async {
         for event in batch {
             append(event)
         }
+        await suspendRecordIfRequestedForTesting()
     }
 
     public func recordCoalescingConsecutive(
