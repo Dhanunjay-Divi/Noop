@@ -12,7 +12,7 @@ import com.noop.bandsdk.BandSessionMachine
  */
 object NoopBandSdkBoundary {
     const val PINNED_SOURCE_REVISION =
-        "eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c"
+        "38cf7de3b1c92dd30dad343af2adfa2cb61dea2e"
 
     fun newSession(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),

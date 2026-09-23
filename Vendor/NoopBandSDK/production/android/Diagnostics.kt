@@ -71,7 +71,25 @@ data class BandDiagnosticEvent(
     val countBucket: BandCountBucket? = null,
     val durationBucket: BandDurationBucket? = null,
     val failureCategory: BandFailureCategory? = null,
-)
+    val operationClass: BandOperationClass? = null,
+    val disconnectReason: BandDisconnectReason? = null,
+) {
+    constructor(
+        kind: BandDiagnosticKind,
+        outcome: BandDiagnosticOutcome,
+        countBucket: BandCountBucket?,
+        durationBucket: BandDurationBucket?,
+        failureCategory: BandFailureCategory?,
+    ) : this(
+        kind = kind,
+        outcome = outcome,
+        countBucket = countBucket,
+        durationBucket = durationBucket,
+        failureCategory = failureCategory,
+        operationClass = null,
+        disconnectReason = null,
+    )
+}
 
 class BandDiagnosticsRecorder(capacity: Int = 128) {
     private val capacity = capacity.coerceIn(1, 512)
@@ -89,12 +107,61 @@ class BandDiagnosticsRecorder(capacity: Int = 128) {
 
     @Synchronized
     fun recordCoalescingConsecutive(event: BandDiagnosticEvent) {
+        if (
+            event.kind == BandDiagnosticKind.LIVE &&
+            event.outcome == BandDiagnosticOutcome.COMPLETED &&
+            event.failureCategory == null &&
+            events.size >= 3
+        ) {
+            val snapshot = events.toList()
+            val priorStaged = snapshot[snapshot.lastIndex - 2]
+            val priorCompleted = snapshot[snapshot.lastIndex - 1]
+            val currentStaged = snapshot[snapshot.lastIndex]
+            if (
+                priorStaged.kind == BandDiagnosticKind.LIVE &&
+                priorStaged.outcome == BandDiagnosticOutcome.STAGED &&
+                priorStaged.failureCategory == null &&
+                priorCompleted.kind == BandDiagnosticKind.LIVE &&
+                priorCompleted.outcome == BandDiagnosticOutcome.COMPLETED &&
+                priorCompleted.failureCategory == null &&
+                currentStaged.kind == BandDiagnosticKind.LIVE &&
+                currentStaged.outcome == BandDiagnosticOutcome.STAGED &&
+                currentStaged.failureCategory == null
+            ) {
+                events.removeLast()
+                events.removeLast()
+                events.removeLast()
+                events.addLast(currentStaged)
+                append(event)
+                return
+            }
+        }
         val last = events.peekLast()
         if (
             last?.kind == event.kind &&
             last.outcome == event.outcome &&
             last.failureCategory == null &&
-            event.failureCategory == null
+            event.failureCategory == null &&
+            last.operationClass == event.operationClass &&
+            last.disconnectReason == event.disconnectReason
+        ) {
+            events.removeLast()
+            events.addLast(event)
+            return
+        }
+        append(event)
+    }
+
+    @Synchronized
+    fun recordCoalescingLatest(event: BandDiagnosticEvent) {
+        val last = events.peekLast()
+        if (
+            last?.kind == event.kind &&
+            last.outcome == event.outcome &&
+            last.failureCategory == null &&
+            event.failureCategory == null &&
+            last.operationClass == event.operationClass &&
+            last.disconnectReason == event.disconnectReason
         ) {
             events.removeLast()
             events.addLast(event)

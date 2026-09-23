@@ -96,6 +96,7 @@ object VirtualBandFixtures {
 
     val capabilities = BandCapabilityReport(
         schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
+        reportRevision = "virtual-report-v1",
         protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
         hardwareRevision = identity.hardwareRevision,
         firmwareVersion = identity.firmwareVersion,
@@ -118,6 +119,20 @@ object VirtualBandFixtures {
         historyStreams = setOf(
             BandStreamKind.HEART_RATE,
             BandStreamKind.RR_INTERVAL,
+        ),
+        operationsAllowedDuringLive = BandOperationClass.entries
+            .filterNot { it == BandOperationClass.FIRMWARE }
+            .toSet(),
+        streamSemantics = BandCapabilityReport.virtualStreamSemantics(
+            liveStreams = setOf(
+                BandStreamKind.HEART_RATE,
+                BandStreamKind.RR_INTERVAL,
+                BandStreamKind.ACCELERATION,
+            ),
+            historyStreams = setOf(
+                BandStreamKind.HEART_RATE,
+                BandStreamKind.RR_INTERVAL,
+            ),
         ),
     )
 
@@ -208,6 +223,36 @@ object VirtualBandFixtures {
     )
 }
 
+private fun virtualCapabilityReport(
+    schemaVersion: Int = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
+    protocolVersion: String =
+        BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
+    hardwareRevision: String =
+        VirtualBandFixtures.identity.hardwareRevision,
+    firmwareVersion: String =
+        VirtualBandFixtures.identity.firmwareVersion,
+    historyDays: Int,
+    capabilities: Set<BandCapability>,
+    liveStreams: Set<BandStreamKind>,
+    historyStreams: Set<BandStreamKind>,
+    operationsAllowedDuringLive: Set<BandOperationClass> = emptySet(),
+): BandCapabilityReport = BandCapabilityReport(
+    schemaVersion = schemaVersion,
+    reportRevision = "virtual-report-v1",
+    protocolVersion = protocolVersion,
+    hardwareRevision = hardwareRevision,
+    firmwareVersion = firmwareVersion,
+    historyDays = historyDays,
+    capabilities = capabilities,
+    liveStreams = liveStreams,
+    historyStreams = historyStreams,
+    operationsAllowedDuringLive = operationsAllowedDuringLive,
+    streamSemantics = BandCapabilityReport.virtualStreamSemantics(
+        liveStreams,
+        historyStreams,
+    ),
+)
+
 object BandConformanceRunner {
     val automatedScenarios = listOf(
         "happy_path",
@@ -256,6 +301,10 @@ object BandConformanceRunner {
         "graceful_disconnect_to_idle",
         "close_active_phase_terminal",
         "closed_session_terminal",
+        "live_operation_allowed",
+        "live_operation_denied",
+        "stream_semantics_mismatch_rejected",
+        "live_staged_before_durable",
     )
 
     fun run(scenario: String): BandConformanceResult = when (scenario) {
@@ -321,6 +370,11 @@ object BandConformanceRunner {
         "graceful_disconnect_to_idle" -> gracefulDisconnectToIdle()
         "close_active_phase_terminal" -> closeActivePhaseTerminal()
         "closed_session_terminal" -> closedSessionTerminal()
+        "live_operation_allowed" -> liveOperationAllowed()
+        "live_operation_denied" -> liveOperationDenied()
+        "stream_semantics_mismatch_rejected" ->
+            streamSemanticsMismatchRejected()
+        "live_staged_before_durable" -> liveStagedBeforeDurable()
         else -> fail(BandFailureCategory.INVALID_INPUT)
     }
 
@@ -351,6 +405,25 @@ object BandConformanceRunner {
         )
         session.acceptCapabilities(capabilities, connectionToken, generation)
         return Triple(session, generation, connectionToken)
+    }
+
+    private fun liveOperationCapabilities(
+        allowed: Set<BandOperationClass>,
+    ): BandCapabilityReport {
+        val base = VirtualBandFixtures.capabilities
+        return BandCapabilityReport(
+            schemaVersion = base.schemaVersion,
+            reportRevision = base.reportRevision,
+            protocolVersion = base.protocolVersion,
+            hardwareRevision = base.hardwareRevision,
+            firmwareVersion = base.firmwareVersion,
+            historyDays = base.historyDays,
+            capabilities = base.capabilities,
+            liveStreams = base.liveStreams,
+            historyStreams = base.historyStreams,
+            operationsAllowedDuringLive = allowed,
+            streamSemantics = base.streamSemantics,
+        )
     }
 
     private fun happyPath(): BandConformanceResult {
@@ -1307,7 +1380,7 @@ object BandConformanceRunner {
             generation,
         )
         session.acceptCapabilities(
-            BandCapabilityReport(
+            virtualCapabilityReport(
                 schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
                 protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
                 hardwareRevision = VirtualBandFixtures.identity.hardwareRevision,
@@ -1387,7 +1460,7 @@ object BandConformanceRunner {
             generation,
         )
         events += "connected"
-        val report = BandCapabilityReport(
+        val report = virtualCapabilityReport(
             schemaVersion = 2,
             protocolVersion = "noop-band-v2",
             hardwareRevision = identity.hardwareRevision,
@@ -1655,7 +1728,7 @@ object BandConformanceRunner {
     }
 
     private fun firmwareEligibilitySpecific(): BandConformanceResult {
-        val report = BandCapabilityReport(
+        val report = virtualCapabilityReport(
             schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
             hardwareRevision = VirtualBandFixtures.identity.hardwareRevision,
@@ -1683,7 +1756,7 @@ object BandConformanceRunner {
     }
 
     private fun unnegotiatedStreamRejected(): BandConformanceResult {
-        val report = BandCapabilityReport(
+        val report = virtualCapabilityReport(
             schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
             hardwareRevision = VirtualBandFixtures.identity.hardwareRevision,
@@ -1762,7 +1835,7 @@ object BandConformanceRunner {
     }
 
     private fun firmwareBlockedDuringLive(): BandConformanceResult {
-        val report = BandCapabilityReport(
+        val report = virtualCapabilityReport(
             schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
             hardwareRevision = VirtualBandFixtures.identity.hardwareRevision,
@@ -2052,7 +2125,7 @@ object BandConformanceRunner {
             initialConnectionToken,
             generation,
         )
-        val report = BandCapabilityReport(
+        val report = virtualCapabilityReport(
             schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
             hardwareRevision = VirtualBandFixtures.identity.hardwareRevision,
@@ -2136,17 +2209,17 @@ object BandConformanceRunner {
         val firmwareEvidence = firmwareEvents.map {
             "${it.outcome.name.lowercase()}:${
                 it.failureCategory?.wireValue ?: "none"
-            }"
+            }:${it.operationClass?.wireValue ?: "none"}"
         }
         if (
             firmwareEvidence == listOf(
-                "rejected:invalidState",
-                "began:none",
-                "completed:none",
-                "rejected:busy",
-                "began:none",
-                "interrupted:disconnected",
-                "rejected:staleCallback",
+                "rejected:invalidState:firmware",
+                "began:none:firmware",
+                "completed:none:firmware",
+                "rejected:busy:firmware",
+                "began:none:firmware",
+                "interrupted:disconnected:firmware",
+                "rejected:staleCallback:firmware",
             )
         ) {
             events += "firmware_diagnostics_specific"
@@ -2161,7 +2234,7 @@ object BandConformanceRunner {
     }
 
     private fun firmwareTerminalFailure(): BandConformanceResult {
-        val report = BandCapabilityReport(
+        val report = virtualCapabilityReport(
             schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
             hardwareRevision = VirtualBandFixtures.identity.hardwareRevision,
@@ -2207,6 +2280,7 @@ object BandConformanceRunner {
                 BandDiagnosticKind.FIRMWARE,
                 BandDiagnosticOutcome.TERMINAL,
                 failureCategory = BandFailureCategory.UPDATE_VERIFICATION,
+                operationClass = BandOperationClass.FIRMWARE,
             )
         ) {
             events += "terminal_diagnostic_recorded"
@@ -2291,7 +2365,7 @@ object BandConformanceRunner {
     }
 
     private fun samplingRequiresSensorCapability(): BandConformanceResult {
-        val report = BandCapabilityReport(
+        val report = virtualCapabilityReport(
             schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
             protocolVersion = BandCapabilityReport.SUPPORTED_PROTOCOL_VERSION,
             hardwareRevision = VirtualBandFixtures.identity.hardwareRevision,
@@ -3193,6 +3267,7 @@ object BandConformanceRunner {
             BandDiagnosticEvent(
                 BandDiagnosticKind.HISTORY,
                 BandDiagnosticOutcome.CANCELLED,
+                operationClass = BandOperationClass.HISTORY,
             ) in disconnectEvents
         ) {
             events += "history_cancelled"
@@ -3209,10 +3284,12 @@ object BandConformanceRunner {
             BandDiagnosticEvent(
                 BandDiagnosticKind.DISCONNECT,
                 BandDiagnosticOutcome.BEGAN,
+                disconnectReason = BandDisconnectReason.COLLECTOR_HANDOFF,
             ) in disconnectEvents &&
             BandDiagnosticEvent(
                 BandDiagnosticKind.DISCONNECT,
                 BandDiagnosticOutcome.COMPLETED,
+                disconnectReason = BandDisconnectReason.COLLECTOR_HANDOFF,
             ) in disconnectEvents
         ) {
             events += "disconnect_completed"
@@ -3256,11 +3333,11 @@ object BandConformanceRunner {
         val beforeClose = diagnostics.snapshot().size
         session.close()
         val closeEvents = diagnostics.snapshot().drop(beforeClose)
-        if (
-            BandDiagnosticEvent(
-                BandDiagnosticKind.HISTORY,
-                BandDiagnosticOutcome.CANCELLED,
-            ) in closeEvents
+        if (closeEvents.any {
+                it.kind == BandDiagnosticKind.HISTORY &&
+                    it.outcome == BandDiagnosticOutcome.CANCELLED &&
+                    it.operationClass == BandOperationClass.HISTORY
+            }
         ) {
             events += "history_cancelled"
         }
@@ -3306,6 +3383,184 @@ object BandConformanceRunner {
             events,
             session.snapshot(),
             failure = failure,
+        )
+    }
+
+    private fun liveOperationAllowed(): BandConformanceResult {
+        val report = liveOperationCapabilities(
+            setOf(BandOperationClass.BATTERY),
+        )
+        val (session, _) = readySession(report)
+        val liveToken = session.beginLive()
+        val events = mutableListOf("live_started")
+        val operationToken = session.beginOperation(
+            BandOperationClass.BATTERY,
+            BandCapability.BATTERY,
+        )
+        events += "battery_allowed"
+        session.completeOperation(operationToken)
+        events += "operation_completed"
+        session.stopLive(liveToken)
+        events += "live_stopped"
+        return result(
+            "live_operation_allowed",
+            events,
+            session.snapshot(),
+        )
+    }
+
+    private fun liveOperationDenied(): BandConformanceResult {
+        val diagnostics = BandDiagnosticsRecorder()
+        val report = liveOperationCapabilities(
+            setOf(BandOperationClass.BATTERY),
+        )
+        val (session, _) = readySession(report, diagnostics)
+        val liveToken = session.beginLive()
+        val events = mutableListOf("live_started")
+        var failure: BandFailureCategory? = null
+        try {
+            session.beginOperation(
+                BandOperationClass.HAPTIC,
+                BandCapability.HAPTICS,
+            )
+        } catch (error: BandException) {
+            failure = error.category
+            events += "haptic_denied"
+        }
+        check(
+            diagnostics.snapshot().last() == BandDiagnosticEvent(
+                BandDiagnosticKind.COMMAND,
+                BandDiagnosticOutcome.REJECTED,
+                failureCategory = BandFailureCategory.BUSY,
+                operationClass = BandOperationClass.HAPTIC,
+            ),
+        )
+        events += "operation_class_recorded"
+        session.stopLive(liveToken)
+        events += "live_stopped"
+        return result(
+            "live_operation_denied",
+            events,
+            session.snapshot(),
+            failure = failure,
+        )
+    }
+
+    private fun streamSemanticsMismatchRejected(): BandConformanceResult {
+        val diagnostics = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(diagnostics = diagnostics)
+        val liveToken = session.beginLive()
+        val events = mutableListOf("live_started")
+        val mismatchedBatch = BandSampleBatch(
+            sourceIdentity = VirtualBandFixtures.liveBatch.sourceIdentity,
+            lane = BandProvenanceLane.LIVE,
+            parserRevision = "parser-v2",
+            calibrationRevision =
+                VirtualBandFixtures.liveBatch.calibrationRevision,
+            samples = VirtualBandFixtures.liveBatch.samples,
+        )
+        var failure: BandFailureCategory? = null
+        try {
+            session.stageLiveBatch(
+                mismatchedBatch,
+                liveToken,
+                generation,
+            )
+        } catch (error: BandException) {
+            failure = error.category
+            events += "semantic_revision_rejected"
+        }
+        check(
+            diagnostics.snapshot().none {
+                it.kind == BandDiagnosticKind.LIVE &&
+                    it.outcome == BandDiagnosticOutcome.STAGED
+            },
+        )
+        events += "no_batch_staged"
+        session.stopLive(liveToken)
+        events += "live_stopped"
+        return result(
+            "stream_semantics_mismatch_rejected",
+            events,
+            session.snapshot(),
+            failure = failure,
+        )
+    }
+
+    private fun liveStagedBeforeDurable(): BandConformanceResult {
+        val diagnostics = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(diagnostics = diagnostics)
+        val store = VirtualBandStore()
+        val liveToken = session.beginLive()
+        val events = mutableListOf("live_started")
+        val acceptance = session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            liveToken,
+            generation,
+        )
+        val stagedEvents = diagnostics.snapshot()
+        check(
+            stagedEvents.last() == BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.STAGED,
+                BandCountBucket.ONE,
+            ),
+        )
+        check(
+            stagedEvents.none {
+                it.kind == BandDiagnosticKind.LIVE &&
+                    it.outcome == BandDiagnosticOutcome.COMPLETED
+            },
+        )
+        events += "accepted_before_persistence"
+        session.acknowledgeLive(store.commit(acceptance), generation)
+        check(
+            diagnostics.snapshot().last() == BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.COMPLETED,
+                BandCountBucket.ONE,
+            ),
+        )
+        events += "durable_completion_recorded"
+        val duplicateAcceptance = session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            liveToken,
+            generation,
+        )
+        check(duplicateAcceptance.acceptedSamples.isEmpty())
+        check(
+            diagnostics.snapshot().last() == BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.STAGED,
+                BandCountBucket.ZERO,
+            ),
+        )
+        check(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.COMPLETED,
+                BandCountBucket.ZERO,
+            ) !in diagnostics.snapshot(),
+        )
+        events += "duplicate_zero_recorded"
+        session.acknowledgeLive(
+            store.commit(duplicateAcceptance),
+            generation,
+        )
+        check(
+            diagnostics.snapshot().last() == BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.COMPLETED,
+                BandCountBucket.ZERO,
+            ),
+        )
+        session.stopLive(liveToken)
+        events += "live_stopped"
+        return result(
+            "live_staged_before_durable",
+            events,
+            session.snapshot(),
+            acceptedSamples = acceptance.acceptedSamples.size,
         )
     }
 

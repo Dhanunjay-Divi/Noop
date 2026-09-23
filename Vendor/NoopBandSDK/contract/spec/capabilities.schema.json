@@ -1,10 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://noop.example/spec/band-capabilities-v2.schema.json",
+  "$id": "https://noop.example/spec/band-capabilities-v3.schema.json",
   "title": "NOOP Band Capabilities",
-  "$comment": "x-noop-maxUtf8Bytes is the normative cross-platform string bound; maxLength remains a generic-validator upper bound.",
+  "$comment": "x-noop-maxUtf8Bytes is the normative cross-platform string bound. x-noop-exactStreamSemantics requires exactly one semantic entry for every advertised lane/stream pair and no others.",
   "type": "object",
   "additionalProperties": false,
+  "x-noop-exactStreamSemantics": true,
   "allOf": [
     {
       "if": {
@@ -28,17 +29,26 @@
   ],
   "required": [
     "schemaVersion",
+    "reportRevision",
     "protocolVersion",
     "hardwareRevision",
     "firmwareVersion",
     "historyDays",
     "capabilities",
     "liveStreams",
-    "historyStreams"
+    "historyStreams",
+    "operationsAllowedDuringLive",
+    "streamSemantics"
   ],
   "properties": {
     "schemaVersion": {
-      "const": 2
+      "const": 3
+    },
+    "reportRevision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "x-noop-maxUtf8Bytes": 64
     },
     "protocolVersion": {
       "const": "noop-band-v1"
@@ -118,6 +128,272 @@
           "temperature",
           "acceleration"
         ]
+      }
+    },
+    "operationsAllowedDuringLive": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "history",
+          "battery",
+          "wearState",
+          "haptic",
+          "alarm",
+          "sampling"
+        ]
+      }
+    },
+    "streamSemantics": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "stream": {
+                  "const": "heartRate"
+                }
+              },
+              "required": [
+                "stream"
+              ]
+            },
+            "then": {
+              "properties": {
+                "unit": {
+                  "const": "beatsPerMinute"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "stream": {
+                  "const": "rrInterval"
+                }
+              },
+              "required": [
+                "stream"
+              ]
+            },
+            "then": {
+              "properties": {
+                "unit": {
+                  "const": "milliseconds"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "stream": {
+                  "const": "steps"
+                }
+              },
+              "required": [
+                "stream"
+              ]
+            },
+            "then": {
+              "properties": {
+                "unit": {
+                  "const": "count"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "stream": {
+                  "const": "spo2"
+                }
+              },
+              "required": [
+                "stream"
+              ]
+            },
+            "then": {
+              "properties": {
+                "unit": {
+                  "const": "percent"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "stream": {
+                  "const": "respiration"
+                }
+              },
+              "required": [
+                "stream"
+              ]
+            },
+            "then": {
+              "properties": {
+                "unit": {
+                  "const": "breathsPerMinute"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "stream": {
+                  "const": "temperature"
+                }
+              },
+              "required": [
+                "stream"
+              ]
+            },
+            "then": {
+              "properties": {
+                "unit": {
+                  "const": "celsius"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "stream": {
+                  "const": "acceleration"
+                }
+              },
+              "required": [
+                "stream"
+              ]
+            },
+            "then": {
+              "properties": {
+                "unit": {
+                  "const": "gravity"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "cadence": {
+                  "const": "eventDriven"
+                }
+              },
+              "required": [
+                "cadence"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "nominalIntervalMilliseconds"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "cadence": {
+                  "enum": [
+                    "periodic",
+                    "aggregateWindow"
+                  ]
+                }
+              },
+              "required": [
+                "cadence"
+              ]
+            },
+            "then": {
+              "required": [
+                "nominalIntervalMilliseconds"
+              ]
+            }
+          }
+        ],
+        "required": [
+          "lane",
+          "stream",
+          "unit",
+          "cadence",
+          "quality",
+          "timestamp",
+          "parserRevision",
+          "calibrationRevision"
+        ],
+        "properties": {
+          "lane": {
+            "enum": [
+              "live",
+              "history"
+            ]
+          },
+          "stream": {
+            "enum": [
+              "heartRate",
+              "rrInterval",
+              "steps",
+              "spo2",
+              "respiration",
+              "temperature",
+              "acceleration"
+            ]
+          },
+          "unit": {
+            "enum": [
+              "beatsPerMinute",
+              "milliseconds",
+              "count",
+              "percent",
+              "breathsPerMinute",
+              "celsius",
+              "gravity"
+            ]
+          },
+          "cadence": {
+            "enum": [
+              "periodic",
+              "eventDriven",
+              "aggregateWindow"
+            ]
+          },
+          "nominalIntervalMilliseconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400000
+          },
+          "quality": {
+            "const": "acceptedOrDegraded"
+          },
+          "timestamp": {
+            "const": "deviceMilliseconds"
+          },
+          "parserRevision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "x-noop-maxUtf8Bytes": 64
+          },
+          "calibrationRevision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "x-noop-maxUtf8Bytes": 64
+          }
+        }
       }
     }
   }

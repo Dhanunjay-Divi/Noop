@@ -12,23 +12,34 @@ Last updated: **2026-09-23**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: `NoopBandSDK` PR `#26` is merged normally at
-  `eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`. Two independent source-only
+- Current state: `NoopBandSDK` PR `#29` is merged normally at
+  `38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`. Two independent source-only
   exports from that exact merge were byte-identical. The ten-file export
   manifest SHA-256 is
-  `31a791b15fe3ffa5dea1a4416bd82a3b6e0eff0cfcb37c90d33732a2443f5b32`;
+  `5df5d94235f39ec806b6998581656cdf2f5c479451933fe8ebf95583ce8cad8e`;
   the SDK artifact test-wrapper SHA-256 is
-  `1d9f71d65fe7b9f4637c85645cecfd2187b8c8950aeceaa023c59bb85d821304`.
-  PR `#26` requires exact connection, live-operation, and reconnect
-  interruption authority; returns opaque one-use reconnect authority; keeps
-  firmware recovery scan-only; and invalidates stale reconnect authority when
-  a new recovery scan starts. The app repin is locally verified: the exact
-  artifact verifier and its 9-test adversarial suite pass; the vendored Swift
-  package passes 16/16
+  `476582712df3456c142e4924e5d9aff30d7b430e33bb09dc96bb3d9020803ec5`.
+  PR `#29` retains the prior authority and lifecycle contracts and completes
+  capability-report equivalence plus exact UTF-8 byte semantics. Upstream
+  verification passes Swift 91/91, Kotlin/JVM 99/99 plus `installDist`, 50
+  shared conformance scenarios, and the 67-file repository policy gate.
+  Exact-current app verification passes the 9-test artifact wall, vendored
+  Swift 16/16, macOS app boundary 10/10, Android Full and Demo integration
+  15/15 each, both Android instrumentation source graphs, and the unsigned
+  Release iPhone graph with zero source warnings/errors and embedded Watch,
+  complication, and widget products. The complete repository wall passes 318
+  tests with one intentional skip plus every direct release, trust,
+  calibration, terminology, provenance, privacy, claims, localization,
+  operations, artifact, and diff gate. Hosted exact-head checks remain
+  pending.
+  Historical PR `#27` app evidence remains: the artifact verifier and its
+  9-test adversarial suite passed; the vendored Swift package passed 16/16
   across all 46 scenarios plus the app-repository actor-suspension regression;
   the real macOS boundary passes 10/10 and the complete macOS wall passes 2,228
-  with one intentional skip; the Android Full boundary passes 14/14 and Demo
-  plus Full/Demo instrumentation sources compile; the iOS production shell
+  with one intentional skip; the prior Android Full boundary passes 14/14 and
+  the exact PR `#27` integration class passes 15/15, including reentrant
+  close/disconnect rejection with continued live-session usability. Demo plus
+  Full/Demo instrumentation sources compile; the iOS production shell
   passes 39 with one intentional skip; and the unsigned Release iPhone graph
   embeds and validates Watch, complications, and widgets. The complete Tools
   wall passes 318/318 with one intentional skip; required-CI verifies ten
@@ -40,8 +51,9 @@ Last updated: **2026-09-23**
   fresh 14/14 integration run, while incomplete cross-platform notification
   states and local-retention approval remain open checklist gates.
   Generated SwiftPM and Apple DerivedData were removed after evidence capture.
-  The final PR `#26` source and documentation replacement are carried by the
-  dedicated app PR `#17` branch. Every required hosted context and applicable
+  Those PR `#27` results remain historical and do not replace the PR `#29`
+  exact-current evidence carried by
+  the dedicated app PR `#17` branch. Every required hosted context and applicable
   review thread must pass on that exact candidate head before protected
   merge/main verification. Supplier physical-device validation remains
   separate.
@@ -489,6 +501,14 @@ Resume from:
   calibration, distribution/private-data/health-claim guards, all 84
   operations records, complete supported-language catalog coverage,
   shell/workflow lint, Python compilation, and diff hygiene. The terminology
-  snapshot records 17,872 occurrences across 1,588 groups with zero forbidden
-  mappings and digest `a64999a10b979c14656449c7122ab0a9e1ae93471b52d03b61cfaebd0854d42d`.
+  snapshot records 17,873 occurrences across 1,588 groups with zero forbidden
+  mappings and digest `8987d82ed8cef6f94851c4f5c021afa44bb9e9c133fe0a0c67c6bc2df6a840d8`.
   One consolidated commit/push and exact-head hosted verification remain.
+- SDK PR `#29` is now consumed at
+  `38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`. Two clean exports are
+  byte-identical with manifest SHA-256
+  `5df5d94235f39ec806b6998581656cdf2f5c479451933fe8ebf95583ce8cad8e`.
+  The vendored tree is byte-identical to the clean export. Exact artifact,
+  Swift, macOS boundary, Android Full/Demo, Android instrumentation-source,
+  and iOS/Watch/widget verification pass. The complete repository wall also
+  passes; one consolidated push and hosted exact-head verification remain.

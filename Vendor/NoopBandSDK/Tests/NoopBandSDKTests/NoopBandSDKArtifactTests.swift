@@ -2,6 +2,93 @@ import XCTest
 @_exported import NoopBandSDK
 @testable import NoopBandSDK
 
+extension BandCapabilityReport {
+    init(
+        schemaVersion: Int,
+        protocolVersion: String,
+        hardwareRevision: String,
+        firmwareVersion: String,
+        historyDays: Int,
+        capabilities: Set<BandCapability>,
+        liveStreams: Set<BandStreamKind>,
+        historyStreams: Set<BandStreamKind>
+    ) {
+        func semantics(
+            lane: BandProvenanceLane,
+            stream: BandStreamKind
+        ) -> BandStreamSemantics {
+            let unit: BandUnit
+            switch stream {
+            case .heartRate:
+                unit = .beatsPerMinute
+            case .rrInterval:
+                unit = .milliseconds
+            case .steps:
+                unit = .count
+            case .spo2:
+                unit = .percent
+            case .respiration:
+                unit = .breathsPerMinute
+            case .temperature:
+                unit = .celsius
+            case .acceleration:
+                unit = .gravity
+            }
+
+            let cadence: BandCadenceKind
+            let nominalIntervalMilliseconds: Int?
+            switch stream {
+            case .rrInterval:
+                cadence = .eventDriven
+                nominalIntervalMilliseconds = nil
+            case .steps:
+                cadence = .aggregateWindow
+                nominalIntervalMilliseconds = 60_000
+            case .acceleration:
+                cadence = .periodic
+                nominalIntervalMilliseconds = 40
+            default:
+                cadence = .periodic
+                nominalIntervalMilliseconds = stream == .heartRate
+                    ? 1_000
+                    : 60_000
+            }
+
+            return BandStreamSemantics(
+                lane: lane,
+                stream: stream,
+                unit: unit,
+                cadence: cadence,
+                nominalIntervalMilliseconds: nominalIntervalMilliseconds,
+                quality: .acceptedOrDegraded,
+                timestamp: .deviceMilliseconds,
+                parserRevision: "parser-v1",
+                calibrationRevision: "calibration-v1"
+            )
+        }
+
+        self.init(
+            schemaVersion: schemaVersion,
+            reportRevision: "virtual-report-v1",
+            protocolVersion: protocolVersion,
+            hardwareRevision: hardwareRevision,
+            firmwareVersion: firmwareVersion,
+            historyDays: historyDays,
+            capabilities: capabilities,
+            liveStreams: liveStreams,
+            historyStreams: historyStreams,
+            operationsAllowedDuringLive: Set(
+                BandOperationClass.allCases.filter { $0 != .firmware }
+            ),
+            streamSemantics: liveStreams.map {
+                semantics(lane: .live, stream: $0)
+            } + historyStreams.map {
+                semantics(lane: .history, stream: $0)
+            }
+        )
+    }
+}
+
 final class NoopBandSDKArtifactTests: XCTestCase {
     private struct ConformanceContract: Decodable {
         let schemaVersion: Int
@@ -27,7 +114,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         hardwareRevision: "synthetic-hw-1",
         firmwareVersion: "synthetic-fw-1",
         protocolVersion: BandCapabilityReport.supportedProtocolVersion,
-        wrapperRevision: "artifact-823930f"
+        wrapperRevision: "artifact-38cf7de"
     )
 
     private var capabilities: BandCapabilityReport {

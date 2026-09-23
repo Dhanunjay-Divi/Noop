@@ -8,6 +8,7 @@ import com.noop.bandsdk.BandDiagnosticEvent
 import com.noop.bandsdk.BandDiagnosticKind
 import com.noop.bandsdk.BandDiagnosticOutcome
 import com.noop.bandsdk.BandDiagnosticsRecorder
+import com.noop.bandsdk.BandDisconnectReason
 import com.noop.bandsdk.BandException
 import com.noop.bandsdk.BandFailureCategory
 import com.noop.bandsdk.BandHistoryCheckpoint
@@ -57,10 +58,35 @@ class NoopBandSdkIntegrationTest {
             listOf(initialValue, addedValue).iterator()
     }
 
+    private class ReentrantTraversalSet<T>(
+        private val values: Set<T>,
+        private val onFirstElement: () -> Unit,
+    ) : AbstractSet<T>() {
+        override val size: Int
+            get() = values.size
+
+        override fun iterator(): Iterator<T> {
+            val delegate = values.iterator()
+            var invoked = false
+            return object : Iterator<T> {
+                override fun hasNext(): Boolean = delegate.hasNext()
+
+                override fun next(): T {
+                    val value = delegate.next()
+                    if (!invoked) {
+                        invoked = true
+                        onFirstElement()
+                    }
+                    return value
+                }
+            }
+        }
+    }
+
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c",
+            "38cf7de3b1c92dd30dad343af2adfa2cb61dea2e",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -154,7 +180,7 @@ class NoopBandSdkIntegrationTest {
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
-            BandCapabilityReport(
+            capabilityReport(
                 schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
                 protocolVersion = identity.protocolVersion,
                 hardwareRevision = identity.hardwareRevision,
@@ -186,6 +212,7 @@ class NoopBandSdkIntegrationTest {
                     kind = BandDiagnosticKind.HISTORY,
                     outcome = BandDiagnosticOutcome.FAILED,
                     failureCategory = BandFailureCategory.STORAGE,
+                    operationClass = BandOperationClass.HISTORY,
                 ),
             ),
         )
@@ -216,7 +243,7 @@ class NoopBandSdkIntegrationTest {
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
-            BandCapabilityReport(
+            capabilityReport(
                 schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
                 protocolVersion = identity.protocolVersion,
                 hardwareRevision = identity.hardwareRevision,
@@ -244,6 +271,7 @@ class NoopBandSdkIntegrationTest {
                     kind = BandDiagnosticKind.COMMAND,
                     outcome = BandDiagnosticOutcome.FAILED,
                     failureCategory = BandFailureCategory.DISCONNECTED,
+                    operationClass = BandOperationClass.BATTERY,
                 ),
             ),
         )
@@ -564,8 +592,8 @@ class NoopBandSdkIntegrationTest {
                 BandSampleBatch(
                     sourceIdentity = "synthetic-source",
                     lane = BandProvenanceLane.HISTORY,
-                    parserRevision = "parser-1",
-                    calibrationRevision = "calibration-1",
+                    parserRevision = "parser-v1",
+                    calibrationRevision = "calibration-v1",
                     samples = listOf(
                         BandSample(
                             identity = BandSampleIdentity(
@@ -703,7 +731,7 @@ class NoopBandSdkIntegrationTest {
         )
         completeConnection(session, identity, connectionToken, generation)
         val mutableCapabilities = mutableSetOf(BandCapability.HEART_RATE)
-        val report = BandCapabilityReport(
+        val report = capabilityReport(
             schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
             protocolVersion = identity.protocolVersion,
             hardwareRevision = identity.hardwareRevision,
@@ -758,7 +786,7 @@ class NoopBandSdkIntegrationTest {
                 wrapperRevision = "artifact-9bc2eed",
             )
             completeConnection(session, identity, connectionToken, generation)
-            val report = BandCapabilityReport(
+            val report = capabilityReport(
                 schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
                 protocolVersion = identity.protocolVersion,
                 hardwareRevision = identity.hardwareRevision,
@@ -802,6 +830,65 @@ class NoopBandSdkIntegrationTest {
     }
 
     @Test
+    fun requestedStreamsRejectSessionMutationReentry() {
+        fun verifyRejectedMutation(
+            mutate: (BandSessionMachine, Long) -> Unit,
+        ) {
+            val diagnostics = BandDiagnosticsRecorder()
+            val (session, generation, _) =
+                readySessionWithStreams(diagnostics)
+            val before = session.snapshot()
+            val eventCount = diagnostics.snapshot().size
+            val requested = ReentrantTraversalSet(
+                setOf(BandStreamKind.HEART_RATE),
+            ) {
+                mutate(session, generation)
+            }
+
+            val failure = try {
+                session.beginLive(requested)
+                null
+            } catch (error: BandException) {
+                error.category
+            }
+
+            assertEquals(BandFailureCategory.INVALID_INPUT, failure)
+            assertEquals(before, session.snapshot())
+            assertEquals(
+                listOf(
+                    BandDiagnosticEvent(
+                        kind = BandDiagnosticKind.DISCONNECT,
+                        outcome = BandDiagnosticOutcome.REJECTED,
+                        failureCategory = BandFailureCategory.INVALID_INPUT,
+                    ),
+                    BandDiagnosticEvent(
+                        kind = BandDiagnosticKind.LIVE,
+                        outcome = BandDiagnosticOutcome.REJECTED,
+                        failureCategory = BandFailureCategory.INVALID_INPUT,
+                    ),
+                ),
+                diagnostics.snapshot().drop(eventCount),
+            )
+
+            session.beginLive()
+            assertEquals(
+                BandSessionState.LIVE_COLLECTING,
+                session.snapshot().state,
+            )
+        }
+
+        verifyRejectedMutation { session, _ ->
+            session.close()
+        }
+        verifyRejectedMutation { session, generation ->
+            session.disconnect(
+                BandDisconnectReason.USER_PAUSED,
+                generation,
+            )
+        }
+    }
+
+    @Test
     fun allExportedConformanceScenariosMatchContractInAppModule() {
         val contract = JSONObject(contractFile().readText())
         assertEquals(1, contract.getInt("schemaVersion"))
@@ -810,7 +897,7 @@ class NoopBandSdkIntegrationTest {
             .map { scenarios.getJSONObject(it) }
             .filter { it.getBoolean("automated") }
 
-        assertEquals(46, automated.size)
+        assertEquals(50, automated.size)
         assertEquals(
             automated.map { it.getString("id") },
             BandConformanceRunner.automatedScenarios,
@@ -885,7 +972,7 @@ class NoopBandSdkIntegrationTest {
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
-            BandCapabilityReport(
+            capabilityReport(
                 schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
                 protocolVersion = identity.protocolVersion,
                 hardwareRevision = identity.hardwareRevision,
@@ -908,8 +995,8 @@ class NoopBandSdkIntegrationTest {
     ): BandSampleBatch = BandSampleBatch(
         sourceIdentity = "synthetic-source",
         lane = lane,
-        parserRevision = "parser-1",
-        calibrationRevision = "calibration-1",
+        parserRevision = "parser-v1",
+        calibrationRevision = "calibration-v1",
         samples = listOf(
             BandSample(
                 identity = BandSampleIdentity(
@@ -974,7 +1061,7 @@ class NoopBandSdkIntegrationTest {
         )
         completeConnection(session, identity, connectionToken, generation)
         session.acceptCapabilities(
-            BandCapabilityReport(
+            capabilityReport(
                 schemaVersion = BandCapabilityReport.SUPPORTED_SCHEMA_VERSION,
                 protocolVersion = identity.protocolVersion,
                 hardwareRevision = identity.hardwareRevision,
@@ -989,6 +1076,33 @@ class NoopBandSdkIntegrationTest {
         )
         return Triple(session, generation, connectionToken)
     }
+
+    private fun capabilityReport(
+        schemaVersion: Int,
+        protocolVersion: String,
+        hardwareRevision: String,
+        firmwareVersion: String,
+        historyDays: Int,
+        capabilities: Set<BandCapability>,
+        liveStreams: Set<BandStreamKind>,
+        historyStreams: Set<BandStreamKind>,
+    ): BandCapabilityReport = BandCapabilityReport(
+        schemaVersion = schemaVersion,
+        reportRevision = "virtual-report-v1",
+        protocolVersion = protocolVersion,
+        hardwareRevision = hardwareRevision,
+        firmwareVersion = firmwareVersion,
+        historyDays = historyDays,
+        capabilities = capabilities,
+        liveStreams = liveStreams,
+        historyStreams = historyStreams,
+        operationsAllowedDuringLive = BandOperationClass.entries
+            .filterTo(mutableSetOf()) { it != BandOperationClass.FIRMWARE },
+        streamSemantics = BandCapabilityReport.virtualStreamSemantics(
+            liveStreams = liveStreams,
+            historyStreams = historyStreams,
+        ),
+    )
 
     private fun completeConnection(
         session: BandSessionMachine,

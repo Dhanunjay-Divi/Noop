@@ -79,19 +79,25 @@ public struct BandDiagnosticEvent: Equatable, Codable, Sendable {
     public let failureCategory: BandFailureCategory?
     public let countBucket: BandCountBucket?
     public let durationBucket: BandDurationBucket?
+    public let operationClass: BandOperationClass?
+    public let disconnectReason: BandDisconnectReason?
 
     public init(
         kind: BandDiagnosticKind,
         outcome: BandDiagnosticOutcome,
         failureCategory: BandFailureCategory? = nil,
         countBucket: BandCountBucket? = nil,
-        durationBucket: BandDurationBucket? = nil
+        durationBucket: BandDurationBucket? = nil,
+        operationClass: BandOperationClass? = nil,
+        disconnectReason: BandDisconnectReason? = nil
     ) {
         self.kind = kind
         self.outcome = outcome
         self.failureCategory = failureCategory
         self.countBucket = countBucket
         self.durationBucket = durationBucket
+        self.operationClass = operationClass
+        self.disconnectReason = disconnectReason
     }
 }
 
@@ -120,17 +126,64 @@ public actor BandDiagnosticsRecorder {
 
     public func recordCoalescingConsecutive(
         _ event: BandDiagnosticEvent
-    ) {
+    ) async {
+        if event.kind == .live,
+           event.outcome == .completed,
+           event.failureCategory == nil,
+           events.count >= 3
+        {
+            let priorStaged = events[events.count - 3]
+            let priorCompleted = events[events.count - 2]
+            let currentStaged = events[events.count - 1]
+            if priorStaged.kind == .live,
+               priorStaged.outcome == .staged,
+               priorStaged.failureCategory == nil,
+               priorCompleted.kind == .live,
+               priorCompleted.outcome == .completed,
+               priorCompleted.failureCategory == nil,
+               currentStaged.kind == .live,
+               currentStaged.outcome == .staged,
+               currentStaged.failureCategory == nil
+            {
+                events.removeSubrange((events.count - 3)..<(events.count - 1))
+                append(event)
+                await suspendRecordIfRequestedForTesting()
+                return
+            }
+        }
         if let last = events.last,
            last.kind == event.kind,
            last.outcome == event.outcome,
            last.failureCategory == nil,
-           event.failureCategory == nil
+           event.failureCategory == nil,
+           last.operationClass == event.operationClass,
+           last.disconnectReason == event.disconnectReason
         {
             events[events.count - 1] = event
+            await suspendRecordIfRequestedForTesting()
             return
         }
         append(event)
+        await suspendRecordIfRequestedForTesting()
+    }
+
+    public func recordCoalescingLatest(
+        _ event: BandDiagnosticEvent
+    ) async {
+        if let last = events.last,
+           last.kind == event.kind,
+           last.outcome == event.outcome,
+           last.failureCategory == nil,
+           event.failureCategory == nil,
+           last.operationClass == event.operationClass,
+           last.disconnectReason == event.disconnectReason
+        {
+            events[events.count - 1] = event
+            await suspendRecordIfRequestedForTesting()
+            return
+        }
+        append(event)
+        await suspendRecordIfRequestedForTesting()
     }
 
     private func append(_ event: BandDiagnosticEvent) {

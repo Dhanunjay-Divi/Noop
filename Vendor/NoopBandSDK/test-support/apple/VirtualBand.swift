@@ -304,6 +304,10 @@ public enum BandConformanceRunner {
         "graceful_disconnect_to_idle",
         "close_active_phase_terminal",
         "closed_session_terminal",
+        "live_operation_allowed",
+        "live_operation_denied",
+        "stream_semantics_mismatch_rejected",
+        "live_staged_before_durable",
     ]
 
     public static func run(_ scenario: String) async throws -> BandConformanceResult {
@@ -400,6 +404,14 @@ public enum BandConformanceRunner {
             return try await closeActivePhaseTerminal()
         case "closed_session_terminal":
             return try await closedSessionTerminal()
+        case "live_operation_allowed":
+            return try await liveOperationAllowed()
+        case "live_operation_denied":
+            return try await liveOperationDenied()
+        case "stream_semantics_mismatch_rejected":
+            return try await streamSemanticsMismatchRejected()
+        case "live_staged_before_durable":
+            return try await liveStagedBeforeDurable()
         default:
             throw BandFailureCategory.invalidInput
         }
@@ -442,6 +454,25 @@ public enum BandConformanceRunner {
             callbackGeneration: generation
         )
         return (session, generation, connectionToken)
+    }
+
+    private static func liveOperationCapabilities(
+        allowed: Set<BandOperationClass>
+    ) -> BandCapabilityReport {
+        let base = VirtualBandFixtures.capabilities
+        return BandCapabilityReport(
+            schemaVersion: base.schemaVersion,
+            reportRevision: base.reportRevision,
+            protocolVersion: base.protocolVersion,
+            hardwareRevision: base.hardwareRevision,
+            firmwareVersion: base.firmwareVersion,
+            historyDays: base.historyDays,
+            capabilities: base.capabilities,
+            liveStreams: base.liveStreams,
+            historyStreams: base.historyStreams,
+            operationsAllowedDuringLive: allowed,
+            streamSemantics: base.streamSemantics
+        )
     }
 
     private static func happyPath() async throws -> BandConformanceResult {
@@ -2378,15 +2409,17 @@ public enum BandConformanceRunner {
         let firmwareEvidence = firmwareEvents.map {
             "\($0.outcome.rawValue):"
                 + ($0.failureCategory?.rawValue ?? "none")
+                + ":"
+                + ($0.operationClass?.rawValue ?? "none")
         }
         if firmwareEvidence == [
-            "rejected:invalidState",
-            "began:none",
-            "completed:none",
-            "rejected:busy",
-            "began:none",
-            "interrupted:disconnected",
-            "rejected:staleCallback",
+            "rejected:invalidState:firmware",
+            "began:none:firmware",
+            "completed:none:firmware",
+            "rejected:busy:firmware",
+            "began:none:firmware",
+            "interrupted:disconnected:firmware",
+            "rejected:staleCallback:firmware",
         ]
         {
             events.append("firmware_diagnostics_specific")
@@ -2443,7 +2476,8 @@ public enum BandConformanceRunner {
         }) == BandDiagnosticEvent(
             kind: .firmware,
             outcome: .terminal,
-            failureCategory: .updateVerification
+            failureCategory: .updateVerification,
+            operationClass: .firmware
         ) {
             events.append("terminal_diagnostic_recorded")
         }
@@ -3435,7 +3469,11 @@ public enum BandConformanceRunner {
             (await diagnostics.snapshot()).dropFirst(beforeDisconnect)
         )
         if disconnectEvents.contains(
-            BandDiagnosticEvent(kind: .history, outcome: .cancelled)
+            BandDiagnosticEvent(
+                kind: .history,
+                outcome: .cancelled,
+                operationClass: .history
+            )
         ) {
             events.append("history_cancelled")
         }
@@ -3445,10 +3483,18 @@ public enum BandConformanceRunner {
             events.append("live_cancelled")
         }
         if disconnectEvents.contains(
-            BandDiagnosticEvent(kind: .disconnect, outcome: .began)
+            BandDiagnosticEvent(
+                kind: .disconnect,
+                outcome: .began,
+                disconnectReason: .collectorHandoff
+            )
         ),
            disconnectEvents.contains(
-               BandDiagnosticEvent(kind: .disconnect, outcome: .completed)
+               BandDiagnosticEvent(
+                   kind: .disconnect,
+                   outcome: .completed,
+                   disconnectReason: .collectorHandoff
+               )
            )
         {
             events.append("disconnect_completed")
@@ -3508,6 +3554,196 @@ public enum BandConformanceRunner {
             events: events,
             snapshot: await session.snapshot(),
             failure: failure
+        )
+    }
+
+    private static func liveOperationAllowed()
+        async throws -> BandConformanceResult
+    {
+        let report = liveOperationCapabilities(allowed: [.battery])
+        let (session, _) = try await readySession(capabilities: report)
+        let liveToken = try await session.beginLive()
+        var events = ["live_started"]
+        let operationToken = try await session.beginOperation(
+            .battery,
+            requiredCapability: .battery
+        )
+        events.append("battery_allowed")
+        try await session.completeOperation(operationToken)
+        events.append("operation_completed")
+        try await session.stopLive(token: liveToken)
+        events.append("live_stopped")
+        return result(
+            scenario: "live_operation_allowed",
+            events: events,
+            snapshot: await session.snapshot()
+        )
+    }
+
+    private static func liveOperationDenied()
+        async throws -> BandConformanceResult
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let report = liveOperationCapabilities(allowed: [.battery])
+        let (session, _) = try await readySession(
+            capabilities: report,
+            diagnostics: diagnostics
+        )
+        let liveToken = try await session.beginLive()
+        var events = ["live_started"]
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.beginOperation(
+                .haptic,
+                requiredCapability: .haptics
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("haptic_denied")
+        }
+        guard (await diagnostics.snapshot()).last == BandDiagnosticEvent(
+            kind: .command,
+            outcome: .rejected,
+            failureCategory: .busy,
+            operationClass: .haptic
+        ) else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("operation_class_recorded")
+        try await session.stopLive(token: liveToken)
+        events.append("live_stopped")
+        return result(
+            scenario: "live_operation_denied",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func streamSemanticsMismatchRejected()
+        async throws -> BandConformanceResult
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let (session, generation) = try await readySession(
+            diagnostics: diagnostics
+        )
+        let liveToken = try await session.beginLive()
+        var events = ["live_started"]
+        let mismatchedBatch = BandSampleBatch(
+            sourceIdentity: VirtualBandFixtures.liveBatch.sourceIdentity,
+            lane: .live,
+            parserRevision: "parser-v2",
+            calibrationRevision:
+                VirtualBandFixtures.liveBatch.calibrationRevision,
+            samples: VirtualBandFixtures.liveBatch.samples
+        )
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.stageLiveBatch(
+                mismatchedBatch,
+                token: liveToken,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("semantic_revision_rejected")
+        }
+        let recorded = await diagnostics.snapshot()
+        guard !recorded.contains(where: {
+            $0.kind == .live && $0.outcome == .staged
+        }) else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("no_batch_staged")
+        try await session.stopLive(token: liveToken)
+        events.append("live_stopped")
+        return result(
+            scenario: "stream_semantics_mismatch_rejected",
+            events: events,
+            snapshot: await session.snapshot(),
+            failure: failure
+        )
+    }
+
+    private static func liveStagedBeforeDurable()
+        async throws -> BandConformanceResult
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let (session, generation) = try await readySession(
+            diagnostics: diagnostics
+        )
+        let store = VirtualBandStore()
+        let liveToken = try await session.beginLive()
+        var events = ["live_started"]
+        let acceptance = try await session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            token: liveToken,
+            callbackGeneration: generation
+        )
+        let stagedEvents = await diagnostics.snapshot()
+        guard stagedEvents.last == BandDiagnosticEvent(
+            kind: .live,
+            outcome: .staged,
+            countBucket: .one
+        ),
+        !stagedEvents.contains(where: {
+            $0.kind == .live && $0.outcome == .completed
+        }) else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("accepted_before_persistence")
+        try await session.acknowledgeLive(
+            receipt: await store.commit(acceptance: acceptance),
+            callbackGeneration: generation
+        )
+        guard (await diagnostics.snapshot()).last == BandDiagnosticEvent(
+            kind: .live,
+            outcome: .completed,
+            countBucket: .one
+        ) else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("durable_completion_recorded")
+        let duplicateAcceptance = try await session.stageLiveBatch(
+            VirtualBandFixtures.liveBatch,
+            token: liveToken,
+            callbackGeneration: generation
+        )
+        guard duplicateAcceptance.acceptedSamples.isEmpty,
+              (await diagnostics.snapshot()).last == BandDiagnosticEvent(
+                  kind: .live,
+                  outcome: .staged,
+                  countBucket: .zero
+              ),
+              !(await diagnostics.snapshot()).contains(
+                  BandDiagnosticEvent(
+                      kind: .live,
+                      outcome: .completed,
+                      countBucket: .zero
+                  )
+              )
+        else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("duplicate_zero_recorded")
+        try await session.acknowledgeLive(
+            receipt: await store.commit(acceptance: duplicateAcceptance),
+            callbackGeneration: generation
+        )
+        guard (await diagnostics.snapshot()).last == BandDiagnosticEvent(
+            kind: .live,
+            outcome: .completed,
+            countBucket: .zero
+        ) else {
+            throw BandFailureCategory.internalFailure
+        }
+        try await session.stopLive(token: liveToken)
+        events.append("live_stopped")
+        return result(
+            scenario: "live_staged_before_durable",
+            events: events,
+            snapshot: await session.snapshot(),
+            acceptedSamples: acceptance.acceptedSamples.count
         )
     }
 
@@ -3574,9 +3810,11 @@ public enum BandConformanceRunner {
         let closeEvents = Array(
             (await diagnostics.snapshot()).dropFirst(beforeClose)
         )
-        if closeEvents.contains(
-            BandDiagnosticEvent(kind: .history, outcome: .cancelled)
-        ) {
+        if closeEvents.contains(where: {
+            $0.kind == .history
+                && $0.outcome == .cancelled
+                && $0.operationClass == .history
+        }) {
             events.append("history_cancelled")
         }
         if closeEvents.contains(

@@ -780,6 +780,71 @@
       }
     },
     {
+      "id": "live_operation_allowed",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_started",
+          "battery_allowed",
+          "operation_completed",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": null
+      }
+    },
+    {
+      "id": "live_operation_denied",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_started",
+          "haptic_denied",
+          "operation_class_recorded",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "busy"
+      }
+    },
+    {
+      "id": "stream_semantics_mismatch_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_started",
+          "semantic_revision_rejected",
+          "no_batch_staged",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "unsupported"
+      }
+    },
+    {
+      "id": "live_staged_before_durable",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_started",
+          "accepted_before_persistence",
+          "durable_completion_recorded",
+          "duplicate_zero_recorded",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 1,
+        "failure": null
+      }
+    },
+    {
       "id": "firmware_possession_proof",
       "automated": false,
       "externalGate": "Requires approved challenge-bound firmware proof and physical bands."

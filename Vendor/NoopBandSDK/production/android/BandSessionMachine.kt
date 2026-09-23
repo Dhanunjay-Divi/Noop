@@ -73,17 +73,21 @@ class BandSessionMachine(
     private var acknowledgedHistoryCursor: String? = null
 
     @Synchronized
-    fun snapshot(): BandSessionSnapshot = BandSessionSnapshot(
-        state = state,
-        generation = generation,
-        activeOperation = activeOperation?.operationClass,
-        liveActive = liveActive,
-        acknowledgedHistoryCursor = acknowledgedHistoryCursor,
-        durableSampleCount = durableSampleIdentities.size,
-    )
+    fun snapshot(): BandSessionSnapshot {
+        rejectCallerTraversalReentry(BandDiagnosticKind.COMMAND)
+        return BandSessionSnapshot(
+            state = state,
+            generation = generation,
+            activeOperation = activeOperation?.operationClass,
+            liveActive = liveActive,
+            acknowledgedHistoryCursor = acknowledgedHistoryCursor,
+            durableSampleCount = durableSampleIdentities.size,
+        )
+    }
 
     @Synchronized
     fun historyCheckpoint(): BandHistoryCheckpoint? {
+        rejectCallerTraversalReentry(BandDiagnosticKind.HISTORY)
         val sourceIdentity =
             durableSourceIdentity ?: identity?.sourceIdentity ?: return null
         return BandHistoryCheckpoint(
@@ -96,6 +100,7 @@ class BandSessionMachine(
 
     @Synchronized
     fun beginScan(): BandScanToken {
+        rejectCallerTraversalReentry(BandDiagnosticKind.DISCOVERY)
         ensureNotClosed()
         if (hasPendingPersistence) {
             diagnostics.record(
@@ -141,6 +146,7 @@ class BandSessionMachine(
         candidate: BandPairingCandidate,
         callbackGeneration: BandScanToken,
     ): BandConnectionToken {
+        rejectCallerTraversalReentry(BandDiagnosticKind.DISCOVERY)
         ensureNotClosed()
         validateScanToken(
             callbackGeneration,
@@ -194,6 +200,7 @@ class BandSessionMachine(
 
     @Synchronized
     fun cancelScan(callbackGeneration: BandScanToken) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.DISCOVERY)
         ensureNotClosed()
         validateScanToken(
             callbackGeneration,
@@ -226,6 +233,7 @@ class BandSessionMachine(
         category: BandFailureCategory,
         callbackGeneration: BandScanToken,
     ) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.DISCOVERY)
         ensureNotClosed()
         validateScanToken(
             callbackGeneration,
@@ -273,6 +281,7 @@ class BandSessionMachine(
         token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.CONNECTION)
         ensureNotClosed()
         validateConnectionToken(
             token,
@@ -303,6 +312,7 @@ class BandSessionMachine(
         token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.AUTHENTICATION)
         ensureNotClosed()
         validateConnectionToken(
             token,
@@ -340,6 +350,7 @@ class BandSessionMachine(
         token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.AUTHENTICATION)
         ensureNotClosed()
         validateConnectionToken(
             token,
@@ -386,8 +397,9 @@ class BandSessionMachine(
         phase: BandConnectionPhase,
         callbackGeneration: Long,
     ) {
-        ensureNotClosed()
         val diagnosticKind = diagnosticKind(phase)
+        rejectCallerTraversalReentry(diagnosticKind)
+        ensureNotClosed()
         validateConnectionToken(
             token,
             callbackGeneration,
@@ -419,8 +431,9 @@ class BandSessionMachine(
         phase: BandConnectionPhase,
         callbackGeneration: Long,
     ) {
-        ensureNotClosed()
         val diagnosticKind = diagnosticKind(phase)
+        rejectCallerTraversalReentry(diagnosticKind)
+        ensureNotClosed()
         validateConnectionToken(
             token,
             callbackGeneration,
@@ -512,6 +525,21 @@ class BandSessionMachine(
             traversalFence,
             BandDiagnosticKind.CAPABILITY,
         )
+        try {
+            immutableReport.validate()
+        } catch (_: BandException) {
+            if (state == BandSessionState.NEGOTIATING_CAPABILITIES) {
+                rejectCapabilities(mutateSession = true)
+            }
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.CAPABILITY,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
         val currentIdentity = identity
         val identityMatches =
             currentIdentity?.hardwareRevision == immutableReport.hardwareRevision &&
@@ -534,11 +562,6 @@ class BandSessionMachine(
         ) {
             rejectCapabilities(mutateSession = true)
         }
-        try {
-            immutableReport.validate()
-        } catch (_: BandException) {
-            rejectCapabilities(mutateSession = true)
-        }
         capabilityReport = immutableReport
         state = BandSessionState.READY
         diagnostics.record(
@@ -555,6 +578,7 @@ class BandSessionMachine(
         token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.CAPABILITY)
         ensureNotClosed()
         validateConnectionToken(
             token,
@@ -586,6 +610,7 @@ class BandSessionMachine(
         token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.CAPABILITY)
         ensureNotClosed()
         validateConnectionToken(
             token,
@@ -643,6 +668,7 @@ class BandSessionMachine(
         token: BandConnectionToken,
         callbackGeneration: Long,
     ) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.AUTHENTICATION)
         ensureNotClosed()
         validateConnectionToken(
             token,
@@ -789,6 +815,7 @@ class BandSessionMachine(
 
     @Synchronized
     fun stopLive(token: BandLiveToken) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.LIVE)
         ensureNotClosed()
         validateLiveToken(token)
         if (!liveActive) {
@@ -911,11 +938,13 @@ class BandSessionMachine(
             traversalFence,
             BandDiagnosticKind.LIVE,
         )
-        validateNegotiatedStreams(
-            immutableBatch.samples,
+        validateNegotiatedBatch(
+            immutableBatch,
             BandDiagnosticKind.LIVE,
             liveStreams,
         )
+        val negotiatedReport = capabilityReport
+            ?: fail(BandFailureCategory.INVALID_STATE)
         val acceptedIdentities = mutableSetOf<BandSampleIdentity>()
         val unique = immutableBatch.samples.filter {
             it.identity !in durableSampleIdentities &&
@@ -925,6 +954,9 @@ class BandSessionMachine(
         val acceptance = LiveAcceptance(
             acceptedSamples = unique,
             duplicateSamples = immutableBatch.samples.size - unique.size,
+            capabilityReportRevision = negotiatedReport.reportRevision,
+            parserRevision = immutableBatch.parserRevision,
+            calibrationRevision = immutableBatch.calibrationRevision,
             sessionNonce = sessionNonce,
             generation = generation,
             receiptSequence = nextLiveReceiptSequence,
@@ -934,6 +966,13 @@ class BandSessionMachine(
             sampleIdentities = unique.map(BandSample::identity),
             expectedSampleCount = unique.size,
         )
+        diagnostics.recordCoalescingLatest(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.STAGED,
+                BandCountBucket.from(unique.size),
+            ),
+        )
         return acceptance
     }
 
@@ -942,6 +981,7 @@ class BandSessionMachine(
         receipt: DurableLiveReceipt,
         callbackGeneration: Long,
     ) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.LIVE)
         validateCallbackGeneration(
             callbackGeneration,
             BandDiagnosticKind.LIVE,
@@ -996,6 +1036,7 @@ class BandSessionMachine(
         requiredCapability: BandCapability? = null,
     ): BandOperationToken {
         val operationDiagnosticKind = diagnosticKind(operationClass)
+        rejectCallerTraversalReentry(operationDiagnosticKind)
         try {
             ensureNotClosed()
         } catch (error: BandException) {
@@ -1004,6 +1045,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = error.category,
+                    operationClass = operationClass,
                 ),
             )
             throw error
@@ -1014,6 +1056,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.BUSY,
+                    operationClass = operationClass,
                 ),
             )
             fail(BandFailureCategory.BUSY)
@@ -1026,9 +1069,25 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = error.category,
+                    operationClass = operationClass,
                 ),
             )
             throw error
+        }
+        if (
+            liveActive &&
+            capabilityReport?.operationsAllowedDuringLive
+                ?.contains(operationClass) != true
+        ) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    operationDiagnosticKind,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.BUSY,
+                    operationClass = operationClass,
+                ),
+            )
+            fail(BandFailureCategory.BUSY)
         }
         if (operationClass == BandOperationClass.FIRMWARE && liveActive) {
             diagnostics.record(
@@ -1036,6 +1095,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.BUSY,
+                    operationClass = operationClass,
                 ),
             )
             fail(BandFailureCategory.BUSY)
@@ -1049,6 +1109,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.UPDATE_NOT_ELIGIBLE,
+                    operationClass = operationClass,
                 ),
             )
             fail(BandFailureCategory.UPDATE_NOT_ELIGIBLE)
@@ -1065,6 +1126,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.UNSUPPORTED,
+                    operationClass = operationClass,
                 ),
             )
             fail(BandFailureCategory.UNSUPPORTED)
@@ -1083,6 +1145,7 @@ class BandSessionMachine(
                         operationDiagnosticKind,
                         BandDiagnosticOutcome.REJECTED,
                         failureCategory = BandFailureCategory.UNSUPPORTED,
+                        operationClass = operationClass,
                     ),
                 )
                 fail(BandFailureCategory.UNSUPPORTED)
@@ -1098,6 +1161,7 @@ class BandSessionMachine(
                             operationDiagnosticKind,
                             BandDiagnosticOutcome.REJECTED,
                             failureCategory = BandFailureCategory.UNSUPPORTED,
+                            operationClass = operationClass,
                         ),
                     )
                     fail(BandFailureCategory.UNSUPPORTED)
@@ -1126,6 +1190,7 @@ class BandSessionMachine(
             BandDiagnosticEvent(
                 operationDiagnosticKind,
                 BandDiagnosticOutcome.BEGAN,
+                operationClass = operationClass,
             ),
         )
         return token
@@ -1197,11 +1262,15 @@ class BandSessionMachine(
             traversalFence,
             BandDiagnosticKind.HISTORY,
         )
-        validateNegotiatedStreams(
-            immutableChunk.batches.flatMap(BandSampleBatch::samples),
-            BandDiagnosticKind.HISTORY,
-            capabilityReport?.historyStreams.orEmpty(),
-        )
+        immutableChunk.batches.forEach {
+            validateNegotiatedBatch(
+                it,
+                BandDiagnosticKind.HISTORY,
+                capabilityReport?.historyStreams.orEmpty(),
+            )
+        }
+        val negotiatedReport = capabilityReport
+            ?: fail(BandFailureCategory.INVALID_STATE)
         if (immutableChunk.previousCursor != acknowledgedHistoryCursor) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -1259,6 +1328,8 @@ class BandSessionMachine(
                         lane = batch.lane,
                         parserRevision = batch.parserRevision,
                         calibrationRevision = batch.calibrationRevision,
+                        capabilityReportRevision =
+                            negotiatedReport.reportRevision,
                         sample = sample,
                     )
                 }
@@ -1305,6 +1376,7 @@ class BandSessionMachine(
         token: BandOperationToken,
         callbackGeneration: Long,
     ) {
+        rejectCallerTraversalReentry(BandDiagnosticKind.HISTORY)
         validateCallbackGeneration(
             callbackGeneration,
             BandDiagnosticKind.HISTORY,
@@ -1380,6 +1452,7 @@ class BandSessionMachine(
     @Synchronized
     fun completeOperation(token: BandOperationToken) {
         val operationDiagnosticKind = diagnosticKind(token.operationClass)
+        rejectCallerTraversalReentry(operationDiagnosticKind)
         try {
             validateActiveToken(token, token.operationClass)
         } catch (error: BandException) {
@@ -1388,6 +1461,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = error.category,
+                    operationClass = token.operationClass,
                 ),
             )
             throw error
@@ -1401,6 +1475,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.FAILED,
                     failureCategory = BandFailureCategory.STORAGE,
+                    operationClass = token.operationClass,
                 ),
             )
             fail(BandFailureCategory.STORAGE)
@@ -1414,6 +1489,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.FAILED,
                     failureCategory = BandFailureCategory.STORAGE,
+                    operationClass = token.operationClass,
                 ),
             )
             fail(BandFailureCategory.STORAGE)
@@ -1427,6 +1503,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.FAILED,
                     failureCategory = BandFailureCategory.HISTORY_STALLED,
+                    operationClass = token.operationClass,
                 ),
             )
             fail(BandFailureCategory.HISTORY_STALLED)
@@ -1440,6 +1517,7 @@ class BandSessionMachine(
             BandDiagnosticEvent(
                 operationDiagnosticKind,
                 BandDiagnosticOutcome.COMPLETED,
+                operationClass = token.operationClass,
             ),
         )
     }
@@ -1447,6 +1525,7 @@ class BandSessionMachine(
     @Synchronized
     fun cancelOperation(token: BandOperationToken) {
         val operationDiagnosticKind = diagnosticKind(token.operationClass)
+        rejectCallerTraversalReentry(operationDiagnosticKind)
         try {
             validateActiveToken(token, token.operationClass)
         } catch (error: BandException) {
@@ -1455,6 +1534,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = error.category,
+                    operationClass = token.operationClass,
                 ),
             )
             throw error
@@ -1468,6 +1548,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.BUSY,
+                    operationClass = token.operationClass,
                 ),
             )
             fail(BandFailureCategory.BUSY)
@@ -1481,6 +1562,7 @@ class BandSessionMachine(
             BandDiagnosticEvent(
                 operationDiagnosticKind,
                 BandDiagnosticOutcome.CANCELLED,
+                operationClass = token.operationClass,
             ),
         )
     }
@@ -1493,6 +1575,7 @@ class BandSessionMachine(
             BandFirmwareFailureDisposition.RECOVERABLE,
     ): BandReconnectToken? {
         val operationDiagnosticKind = diagnosticKind(token.operationClass)
+        rejectCallerTraversalReentry(operationDiagnosticKind)
         try {
             validateActiveToken(token, token.operationClass)
         } catch (error: BandException) {
@@ -1501,6 +1584,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = error.category,
+                    operationClass = token.operationClass,
                 ),
             )
             throw error
@@ -1514,6 +1598,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.INVALID_INPUT,
+                    operationClass = token.operationClass,
                 ),
             )
             fail(BandFailureCategory.INVALID_INPUT)
@@ -1538,6 +1623,7 @@ class BandSessionMachine(
                     operationDiagnosticKind,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.BUSY,
+                    operationClass = token.operationClass,
                 ),
             )
             fail(BandFailureCategory.BUSY)
@@ -1559,6 +1645,7 @@ class BandSessionMachine(
                         BandDiagnosticKind.FIRMWARE,
                         BandDiagnosticOutcome.INTERRUPTED,
                         failureCategory = BandFailureCategory.DISCONNECTED,
+                        operationClass = BandOperationClass.FIRMWARE,
                     ),
                     BandDiagnosticEvent(
                         BandDiagnosticKind.RECONNECT,
@@ -1586,6 +1673,7 @@ class BandSessionMachine(
                         operationDiagnosticKind,
                         BandDiagnosticOutcome.FAILED,
                         failureCategory = category,
+                        operationClass = token.operationClass,
                     ),
                 )
                 if (liveActive) {
@@ -1621,6 +1709,7 @@ class BandSessionMachine(
                     BandDiagnosticOutcome.FAILED
                 },
                 failureCategory = category,
+                operationClass = token.operationClass,
             ),
         )
         if (
@@ -1643,6 +1732,7 @@ class BandSessionMachine(
         token: BandConnectionToken,
         callbackGeneration: Long,
     ): BandReconnectToken {
+        rejectCallerTraversalReentry(BandDiagnosticKind.RECONNECT)
         ensureNotClosed()
         validateConnectionToken(
             token,
@@ -1673,9 +1763,7 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.BUSY)
         }
-        val interruptedOperationKind = activeOperation?.let {
-            diagnosticKind(it.operationClass)
-        }
+        val interruptedOperation = activeOperation
         nextReconnectSequence += 1
         generation += 1
         val reconnectToken = BandReconnectToken(
@@ -1686,12 +1774,13 @@ class BandSessionMachine(
         activeReconnectToken = reconnectToken
         state = BandSessionState.RECOVERING
         val interruptionEvents = buildList {
-            interruptedOperationKind?.let {
+            interruptedOperation?.let {
                 add(
                     BandDiagnosticEvent(
-                        it,
+                        diagnosticKind(it.operationClass),
                         BandDiagnosticOutcome.INTERRUPTED,
                         failureCategory = BandFailureCategory.DISCONNECTED,
+                        operationClass = it.operationClass,
                     ),
                 )
             }
@@ -1722,6 +1811,7 @@ class BandSessionMachine(
         reconnectToken: BandReconnectToken,
         callbackGeneration: Long,
     ): BandConnectionToken {
+        rejectCallerTraversalReentry(BandDiagnosticKind.RECONNECT)
         ensureNotClosed()
         validateReconnectToken(
             reconnectToken,
@@ -1760,10 +1850,12 @@ class BandSessionMachine(
         reason: BandDisconnectReason,
         callbackGeneration: Long,
     ): Long {
+        rejectCallerTraversalReentry(BandDiagnosticKind.DISCONNECT)
         ensureNotClosed()
         validateCallbackGeneration(
             callbackGeneration,
             BandDiagnosticKind.DISCONNECT,
+            disconnectReason = reason,
         )
         if (
             state == BandSessionState.IDLE ||
@@ -1778,6 +1870,7 @@ class BandSessionMachine(
                     BandDiagnosticKind.DISCONNECT,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.INVALID_STATE,
+                    disconnectReason = reason,
                 ),
             )
             fail(BandFailureCategory.INVALID_STATE)
@@ -1788,6 +1881,7 @@ class BandSessionMachine(
                     BandDiagnosticKind.DISCONNECT,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.BUSY,
+                    disconnectReason = reason,
                 ),
             )
             fail(BandFailureCategory.BUSY)
@@ -1800,11 +1894,13 @@ class BandSessionMachine(
                     BandDiagnosticKind.DISCONNECT,
                     BandDiagnosticOutcome.REJECTED,
                     failureCategory = BandFailureCategory.INVALID_STATE,
+                    disconnectReason = reason,
                 ),
             )
             fail(BandFailureCategory.INVALID_STATE)
         }
 
+        val cancelledOperationClass = activeOperation?.operationClass
         val cancelledKinds = activeTerminalDiagnosticKinds()
         state = BandSessionState.DISCONNECTING
         generation += 1
@@ -1819,6 +1915,7 @@ class BandSessionMachine(
             BandDiagnosticEvent(
                 BandDiagnosticKind.DISCONNECT,
                 BandDiagnosticOutcome.BEGAN,
+                disconnectReason = reason,
             ),
         )
         state = BandSessionState.IDLE
@@ -1827,10 +1924,14 @@ class BandSessionMachine(
                 BandDiagnosticEvent(
                     it,
                     BandDiagnosticOutcome.CANCELLED,
+                    operationClass = cancelledOperationClass?.takeIf {
+                        operation -> diagnosticKind(operation) == it
+                    },
                 )
             } + BandDiagnosticEvent(
                 BandDiagnosticKind.DISCONNECT,
                 BandDiagnosticOutcome.COMPLETED,
+                disconnectReason = reason,
             ),
         )
         return idleGeneration
@@ -1838,6 +1939,7 @@ class BandSessionMachine(
 
     @Synchronized
     fun close() {
+        rejectCallerTraversalReentry(BandDiagnosticKind.DISCONNECT)
         if (state == BandSessionState.CLOSED) {
             return
         }
@@ -1856,6 +1958,7 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.BUSY)
         }
+        val terminalOperationClass = activeOperation?.operationClass
         val terminalKinds = activeTerminalDiagnosticKinds()
         generation += 1
         clearOperationTracking()
@@ -1870,6 +1973,9 @@ class BandSessionMachine(
                 BandDiagnosticEvent(
                     it,
                     BandDiagnosticOutcome.CANCELLED,
+                    operationClass = terminalOperationClass?.takeIf {
+                        operation -> diagnosticKind(operation) == it
+                    },
                 )
             },
         )
@@ -1903,6 +2009,7 @@ class BandSessionMachine(
     private fun validateCallbackGeneration(
         callbackGeneration: Long,
         diagnosticKind: BandDiagnosticKind,
+        disconnectReason: BandDisconnectReason? = null,
     ) {
         if (callbackGeneration != generation) {
             diagnostics.record(
@@ -1910,6 +2017,7 @@ class BandSessionMachine(
                     diagnosticKind,
                     BandDiagnosticOutcome.STALE,
                     failureCategory = BandFailureCategory.STALE_CALLBACK,
+                    disconnectReason = disconnectReason,
                 ),
             )
             fail(BandFailureCategory.STALE_CALLBACK)
@@ -2047,6 +2155,8 @@ class BandSessionMachine(
     private fun rejectCallerTraversalReentry(
         diagnosticKind: BandDiagnosticKind,
     ) {
+        // JVM synchronized monitors are reentrant, so every public entry must
+        // reject while a caller-owned collection is being traversed.
         if (callerTraversalActive) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -2340,20 +2450,30 @@ class BandSessionMachine(
         }
     }
 
-    private fun validateNegotiatedStreams(
-        samples: List<BandSample>,
+    private fun validateNegotiatedBatch(
+        batch: BandSampleBatch,
         diagnosticKind: BandDiagnosticKind,
         allowedStreams: Set<BandStreamKind>? = null,
     ) {
-        val capabilities = capabilityReport?.capabilities
+        val report = capabilityReport
         if (
-            capabilities == null ||
-            samples.any {
-                requiredCapability(it.identity.stream) !in capabilities ||
+            report == null ||
+            batch.samples.any {
+                val stream = it.identity.stream
+                requiredCapability(stream) !in report.capabilities ||
                     (
                         allowedStreams != null &&
-                            it.identity.stream !in allowedStreams
-                        )
+                            stream !in allowedStreams
+                        ) ||
+                    report.streamSemantics.none { semantics ->
+                        semantics.lane == batch.lane &&
+                            semantics.stream == stream &&
+                            semantics.unit == it.unit &&
+                            semantics.parserRevision ==
+                            batch.parserRevision &&
+                            semantics.calibrationRevision ==
+                            batch.calibrationRevision
+                    }
             }
         ) {
             diagnostics.record(

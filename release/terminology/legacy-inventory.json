@@ -5,7 +5,7 @@
     "customer": 814,
     "fixture": 5596,
     "generated": 21,
-    "historical": 3179,
+    "historical": 3180,
     "import": 871,
     "persisted": 669
   },
@@ -15751,8 +15751,8 @@
       "category": "historical",
       "lineNumbers": [
         4,
-        631,
-        682
+        718,
+        769
       ],
       "occurrenceCount": 3,
       "path": "StrandTests/NoopBandSDKIntegrationTests.swift",
@@ -15764,8 +15764,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        675,
-        706
+        762,
+        793
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/NoopBandSDKIntegrationTests.swift",
@@ -35281,10 +35281,10 @@
         181,
         181,
         181,
-        632,
-        639,
-        639,
-        640
+        642,
+        649,
+        649,
+        650
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -35467,8 +35467,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        265,
-        266
+        268,
+        269
       ],
       "occurrenceCount": 2,
       "path": "docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md",
@@ -35696,8 +35696,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        326,
-        329
+        327,
+        330
       ],
       "occurrenceCount": 2,
       "path": "docs/RELEASE_CONTROLS.md",
@@ -36093,11 +36093,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        100,
-        148,
-        169,
-        313,
-        445
+        112,
+        160,
+        181,
+        325,
+        457
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36420,17 +36420,18 @@
         35,
         46,
         67,
-        219,
-        317,
-        700,
-        701,
-        712
+        253,
+        351,
+        734,
+        735,
+        746,
+        946
       ],
-      "occurrenceCount": 8,
+      "occurrenceCount": 9,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
-      "sha256": "0b7187e3abca771609920f5167393dd84fed23b436690a8d08237dd8817a8605",
+      "sha256": "5153bd0d8cdf7b9807dece9840f95d097ce354f5f60a00f2ce3e6272c3b8b3c6",
       "tokenCounts": {
-        "whoop": 7,
+        "whoop": 8,
         "whoop-default": 1
       }
     },
@@ -38683,7 +38684,7 @@
       }
     }
   ],
-  "occurrenceCount": 17872,
+  "occurrenceCount": 17873,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

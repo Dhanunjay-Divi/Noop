@@ -138,14 +138,14 @@ class BandException(
     val category: BandFailureCategory,
 ) : Exception(category.wireValue)
 
-enum class BandOperationClass {
-    HISTORY,
-    BATTERY,
-    WEAR_STATE,
-    HAPTIC,
-    ALARM,
-    SAMPLING,
-    FIRMWARE,
+enum class BandOperationClass(val wireValue: String) {
+    HISTORY("history"),
+    BATTERY("battery"),
+    WEAR_STATE("wearState"),
+    HAPTIC("haptic"),
+    ALARM("alarm"),
+    SAMPLING("sampling"),
+    FIRMWARE("firmware"),
 }
 
 enum class BandFirmwareFailureDisposition {
@@ -178,10 +178,69 @@ enum class BandUnit {
     GRAVITY,
 }
 
+internal fun requiredUnit(stream: BandStreamKind): BandUnit = when (stream) {
+    BandStreamKind.HEART_RATE -> BandUnit.BEATS_PER_MINUTE
+    BandStreamKind.RR_INTERVAL -> BandUnit.MILLISECONDS
+    BandStreamKind.STEPS -> BandUnit.COUNT
+    BandStreamKind.SPO2 -> BandUnit.PERCENT
+    BandStreamKind.RESPIRATION -> BandUnit.BREATHS_PER_MINUTE
+    BandStreamKind.TEMPERATURE -> BandUnit.CELSIUS
+    BandStreamKind.ACCELERATION -> BandUnit.GRAVITY
+}
+
 enum class BandSampleQuality {
     ACCEPTED,
     DEGRADED,
     REJECTED,
+}
+
+enum class BandCadenceKind(val wireValue: String) {
+    PERIODIC("periodic"),
+    EVENT_DRIVEN("eventDriven"),
+    AGGREGATE_WINDOW("aggregateWindow"),
+}
+
+enum class BandQualitySemantics(val wireValue: String) {
+    ACCEPTED_OR_DEGRADED("acceptedOrDegraded"),
+}
+
+enum class BandTimestampSemantics(val wireValue: String) {
+    DEVICE_MILLISECONDS("deviceMilliseconds"),
+}
+
+data class BandStreamSemantics(
+    val lane: BandProvenanceLane,
+    val stream: BandStreamKind,
+    val unit: BandUnit,
+    val cadence: BandCadenceKind,
+    val nominalIntervalMilliseconds: Int?,
+    val quality: BandQualitySemantics,
+    val timestamp: BandTimestampSemantics,
+    val parserRevision: String,
+    val calibrationRevision: String,
+) {
+    fun validate() {
+        val cadenceIsValid = when (cadence) {
+            BandCadenceKind.EVENT_DRIVEN ->
+                nominalIntervalMilliseconds == null
+            BandCadenceKind.PERIODIC,
+            BandCadenceKind.AGGREGATE_WINDOW,
+            ->
+                nominalIntervalMilliseconds in 1..86_400_000
+        }
+        if (
+            unit != requiredUnit(stream) ||
+            !cadenceIsValid ||
+            !parserRevision.hasValidUtf8Length(
+                BandContractLimits.REVISION_LENGTH,
+            ) ||
+            !calibrationRevision.hasValidUtf8Length(
+                BandContractLimits.REVISION_LENGTH,
+            )
+        ) {
+            fail(BandFailureCategory.INCOMPATIBLE)
+        }
+    }
 }
 
 data class BandPairingCandidate(
@@ -258,6 +317,7 @@ data class BandIdentity(
 
 data class BandCapabilityReport(
     val schemaVersion: Int,
+    val reportRevision: String,
     val protocolVersion: String,
     val hardwareRevision: String,
     val firmwareVersion: String,
@@ -265,10 +325,58 @@ data class BandCapabilityReport(
     val capabilities: Set<BandCapability>,
     val liveStreams: Set<BandStreamKind>,
     val historyStreams: Set<BandStreamKind>,
+    val operationsAllowedDuringLive: Set<BandOperationClass>,
+    val streamSemantics: List<BandStreamSemantics>,
 ) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BandCapabilityReport) return false
+        return schemaVersion == other.schemaVersion &&
+            reportRevision == other.reportRevision &&
+            protocolVersion == other.protocolVersion &&
+            hardwareRevision == other.hardwareRevision &&
+            firmwareVersion == other.firmwareVersion &&
+            historyDays == other.historyDays &&
+            capabilities == other.capabilities &&
+            liveStreams == other.liveStreams &&
+            historyStreams == other.historyStreams &&
+            operationsAllowedDuringLive == other.operationsAllowedDuringLive &&
+            streamSemanticFrequencies() ==
+                other.streamSemanticFrequencies()
+    }
+
+    override fun hashCode(): Int {
+        var result = schemaVersion
+        result = 31 * result + reportRevision.hashCode()
+        result = 31 * result + protocolVersion.hashCode()
+        result = 31 * result + hardwareRevision.hashCode()
+        result = 31 * result + firmwareVersion.hashCode()
+        result = 31 * result + historyDays
+        result = 31 * result + capabilities.hashCode()
+        result = 31 * result + liveStreams.hashCode()
+        result = 31 * result + historyStreams.hashCode()
+        result = 31 * result + operationsAllowedDuringLive.hashCode()
+        result = 31 * result + streamSemanticFrequencies().hashCode()
+        return result
+    }
+
+    private fun streamSemanticFrequencies(): Map<BandStreamSemantics, Int> =
+        streamSemantics.groupingBy { it }.eachCount()
+
     fun validate() {
+        val expectedSemantics =
+            liveStreams.map { BandStreamSemanticKey(BandProvenanceLane.LIVE, it) } +
+                historyStreams.map {
+                    BandStreamSemanticKey(BandProvenanceLane.HISTORY, it)
+                }
+        val actualSemantics = streamSemantics.map {
+            BandStreamSemanticKey(it.lane, it.stream)
+        }
         if (
             schemaVersion != SUPPORTED_SCHEMA_VERSION ||
+            !reportRevision.hasValidUtf8Length(
+                BandContractLimits.REVISION_LENGTH,
+            ) ||
             protocolVersion != SUPPORTED_PROTOCOL_VERSION ||
             !hardwareRevision.hasValidUtf8Length(32) ||
             !firmwareVersion.hasValidUtf8Length(
@@ -277,12 +385,16 @@ data class BandCapabilityReport(
             historyDays !in 0..255 ||
             capabilities.isEmpty() ||
             (historyStreams.isNotEmpty() && historyDays == 0) ||
+            BandOperationClass.FIRMWARE in operationsAllowedDuringLive ||
+            actualSemantics.toSet().size != streamSemantics.size ||
+            actualSemantics.toSet() != expectedSemantics.toSet() ||
             (liveStreams + historyStreams).any {
                 requiredCapability(it) !in capabilities
             }
         ) {
             fail(BandFailureCategory.INCOMPATIBLE)
         }
+        streamSemantics.forEach(BandStreamSemantics::validate)
     }
 
     internal fun immutableSnapshot(): BandCapabilityReport = copy(
@@ -295,13 +407,81 @@ data class BandCapabilityReport(
         historyStreams = historyStreams.boundedSnapshot(
             BandStreamKind.entries.size,
         ),
+        operationsAllowedDuringLive = operationsAllowedDuringLive.boundedSnapshot(
+            BandOperationClass.entries.size,
+        ),
+        streamSemantics = streamSemantics.boundedSnapshot(
+            BandStreamKind.entries.size * BandProvenanceLane.entries.size,
+        ),
     )
 
     companion object {
-        const val SUPPORTED_SCHEMA_VERSION = 2
+        const val SUPPORTED_SCHEMA_VERSION = 3
         const val SUPPORTED_PROTOCOL_VERSION = "noop-band-v1"
+        internal val MAXIMUM_STREAM_SEMANTICS =
+            BandStreamKind.entries.size * BandProvenanceLane.entries.size
+
+        internal fun virtualStreamSemantics(
+            liveStreams: Set<BandStreamKind>,
+            historyStreams: Set<BandStreamKind>,
+        ): List<BandStreamSemantics> {
+            fun semantics(
+                lane: BandProvenanceLane,
+                stream: BandStreamKind,
+            ): BandStreamSemantics {
+                val cadence: BandCadenceKind
+                val nominalIntervalMilliseconds: Int?
+                when (stream) {
+                    BandStreamKind.RR_INTERVAL -> {
+                        cadence = BandCadenceKind.EVENT_DRIVEN
+                        nominalIntervalMilliseconds = null
+                    }
+                    BandStreamKind.STEPS -> {
+                        cadence = BandCadenceKind.AGGREGATE_WINDOW
+                        nominalIntervalMilliseconds = 60_000
+                    }
+                    BandStreamKind.ACCELERATION -> {
+                        cadence = BandCadenceKind.PERIODIC
+                        nominalIntervalMilliseconds = 40
+                    }
+                    else -> {
+                        cadence = BandCadenceKind.PERIODIC
+                        nominalIntervalMilliseconds =
+                            if (stream == BandStreamKind.HEART_RATE) {
+                                1_000
+                            } else {
+                                60_000
+                            }
+                    }
+                }
+                return BandStreamSemantics(
+                    lane = lane,
+                    stream = stream,
+                    unit = requiredUnit(stream),
+                    cadence = cadence,
+                    nominalIntervalMilliseconds =
+                        nominalIntervalMilliseconds,
+                    quality =
+                        BandQualitySemantics.ACCEPTED_OR_DEGRADED,
+                    timestamp =
+                        BandTimestampSemantics.DEVICE_MILLISECONDS,
+                    parserRevision = "parser-v1",
+                    calibrationRevision = "calibration-v1",
+                )
+            }
+            return liveStreams.map {
+                semantics(BandProvenanceLane.LIVE, it)
+            } + historyStreams.map {
+                semantics(BandProvenanceLane.HISTORY, it)
+            }
+        }
     }
 }
+
+private data class BandStreamSemanticKey(
+    val lane: BandProvenanceLane,
+    val stream: BandStreamKind,
+)
 
 data class BandSampleIdentity(
     val stream: BandStreamKind,
@@ -604,6 +784,9 @@ class BandOperationToken internal constructor(
 class LiveAcceptance internal constructor(
     acceptedSamples: List<BandSample>,
     val duplicateSamples: Int,
+    val capabilityReportRevision: String,
+    val parserRevision: String,
+    val calibrationRevision: String,
     internal val sessionNonce: UUID,
     internal val generation: Long,
     internal val receiptSequence: Long,
@@ -619,6 +802,7 @@ class AcceptedHistorySample internal constructor(
     val lane: BandProvenanceLane,
     val parserRevision: String,
     val calibrationRevision: String,
+    val capabilityReportRevision: String,
     val sample: BandSample,
 ) {
     override fun toString(): String = "AcceptedHistorySample"

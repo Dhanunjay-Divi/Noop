@@ -45,6 +45,91 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         )
     }
 
+    private func capabilityReport(
+        schemaVersion: Int,
+        protocolVersion: String,
+        hardwareRevision: String,
+        firmwareVersion: String,
+        historyDays: Int,
+        capabilities: Set<BandCapability>,
+        liveStreams: Set<BandStreamKind>,
+        historyStreams: Set<BandStreamKind>
+    ) -> BandCapabilityReport {
+        func semantics(
+            lane: BandProvenanceLane,
+            stream: BandStreamKind
+        ) -> BandStreamSemantics {
+            let unit: BandUnit
+            switch stream {
+            case .heartRate:
+                unit = .beatsPerMinute
+            case .rrInterval:
+                unit = .milliseconds
+            case .steps:
+                unit = .count
+            case .spo2:
+                unit = .percent
+            case .respiration:
+                unit = .breathsPerMinute
+            case .temperature:
+                unit = .celsius
+            case .acceleration:
+                unit = .gravity
+            }
+
+            let cadence: BandCadenceKind
+            let nominalIntervalMilliseconds: Int?
+            switch stream {
+            case .rrInterval:
+                cadence = .eventDriven
+                nominalIntervalMilliseconds = nil
+            case .steps:
+                cadence = .aggregateWindow
+                nominalIntervalMilliseconds = 60_000
+            case .acceleration:
+                cadence = .periodic
+                nominalIntervalMilliseconds = 40
+            default:
+                cadence = .periodic
+                nominalIntervalMilliseconds = stream == .heartRate
+                    ? 1_000
+                    : 60_000
+            }
+
+            return BandStreamSemantics(
+                lane: lane,
+                stream: stream,
+                unit: unit,
+                cadence: cadence,
+                nominalIntervalMilliseconds: nominalIntervalMilliseconds,
+                quality: .acceptedOrDegraded,
+                timestamp: .deviceMilliseconds,
+                parserRevision: "parser-v1",
+                calibrationRevision: "calibration-v1"
+            )
+        }
+
+        return BandCapabilityReport(
+            schemaVersion: schemaVersion,
+            reportRevision: "virtual-report-v1",
+            protocolVersion: protocolVersion,
+            hardwareRevision: hardwareRevision,
+            firmwareVersion: firmwareVersion,
+            historyDays: historyDays,
+            capabilities: capabilities,
+            liveStreams: liveStreams,
+            historyStreams: historyStreams,
+            operationsAllowedDuringLive: Set(
+                BandOperationClass.allCases.filter { $0 != .firmware }
+            ),
+            streamSemantics: liveStreams.map {
+                semantics(lane: .live, stream: $0)
+            } + historyStreams.map {
+                semantics(lane: .history, stream: $0)
+            }
+        )
+    }
+
     private func readyHistorySession(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
         report: BandCapabilityReport? = nil
@@ -78,7 +163,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             callbackGeneration: generation
         )
         try await session.acceptCapabilities(
-            report ?? BandCapabilityReport(
+            report ?? capabilityReport(
                 schemaVersion: BandCapabilityReport.supportedSchemaVersion,
                 protocolVersion: identity.protocolVersion,
                 hardwareRevision: identity.hardwareRevision,
@@ -97,7 +182,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c"
+            "38cf7de3b1c92dd30dad343af2adfa2cb61dea2e"
         )
         let session = NoopBandSDKBoundary.makeSession()
         let scanToken = try await session.beginScan()
@@ -142,7 +227,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             callbackGeneration: generation
         )
         try await session.acceptCapabilities(
-            BandCapabilityReport(
+            capabilityReport(
                 schemaVersion: BandCapabilityReport.supportedSchemaVersion,
                 protocolVersion: identity.protocolVersion,
                 hardwareRevision: identity.hardwareRevision,
@@ -173,7 +258,8 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 BandDiagnosticEvent(
                     kind: .history,
                     outcome: .failed,
-                    failureCategory: .storage
+                    failureCategory: .storage,
+                    operationClass: .history
                 )
             )
         )
@@ -209,7 +295,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             callbackGeneration: generation
         )
         try await session.acceptCapabilities(
-            BandCapabilityReport(
+            capabilityReport(
                 schemaVersion: BandCapabilityReport.supportedSchemaVersion,
                 protocolVersion: identity.protocolVersion,
                 hardwareRevision: identity.hardwareRevision,
@@ -235,7 +321,8 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 BandDiagnosticEvent(
                     kind: .command,
                     outcome: .failed,
-                    failureCategory: .disconnected
+                    failureCategory: .disconnected,
+                    operationClass: .battery
                 )
             )
         )
@@ -273,8 +360,8 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 BandSampleBatch(
                     sourceIdentity: "synthetic-source",
                     lane: .history,
-                    parserRevision: "parser-1",
-                    calibrationRevision: "calibration-1",
+                    parserRevision: "parser-v1",
+                    calibrationRevision: "calibration-v1",
                     samples: [
                         BandSample(
                             identity: BandSampleIdentity(
@@ -514,7 +601,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     }
 
     func testLiveAndHistoryStreamsAreAuthorizedIndependently() async throws {
-        let historyOnly = BandCapabilityReport(
+        let historyOnly = capabilityReport(
             schemaVersion: BandCapabilityReport.supportedSchemaVersion,
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
             hardwareRevision: "synthetic-hw-1",
@@ -550,7 +637,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         )
         try await historySession.completeOperation(historyToken)
 
-        let liveOnly = BandCapabilityReport(
+        let liveOnly = capabilityReport(
             schemaVersion: BandCapabilityReport.supportedSchemaVersion,
             protocolVersion: BandCapabilityReport.supportedProtocolVersion,
             hardwareRevision: "synthetic-hw-1",
@@ -713,8 +800,8 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         BandSampleBatch(
             sourceIdentity: "synthetic-source",
             lane: .live,
-            parserRevision: "parser-1",
-            calibrationRevision: "calibration-1",
+            parserRevision: "parser-v1",
+            calibrationRevision: "calibration-v1",
             samples: [
                 BandSample(
                     identity: BandSampleIdentity(
@@ -748,8 +835,8 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 BandSampleBatch(
                     sourceIdentity: "synthetic-source",
                     lane: .history,
-                    parserRevision: "parser-1",
-                    calibrationRevision: "calibration-1",
+                    parserRevision: "parser-v1",
+                    calibrationRevision: "calibration-v1",
                     samples: [
                         BandSample(
                             identity: BandSampleIdentity(

@@ -34,6 +34,7 @@ public actor BandSessionMachine {
     private var identity: BandIdentity?
     private var capabilityReport: BandCapabilityReport?
     private var pendingLive: PendingLive?
+    private var liveReceiptCompleting = false
     private var pendingHistory: PendingHistory?
     private var lastDurableHistoryComplete: Bool?
     private var historyOperationReceivedDurableReceipt = false
@@ -380,7 +381,9 @@ public actor BandSessionMachine {
         }
         if !restoredHistoryCheckpointConsumed,
            let restoredHistoryCheckpoint,
-           restoredHistoryCheckpoint.sourceIdentity == newIdentity.sourceIdentity
+           restoredHistoryCheckpoint.sourceIdentity.hasIdenticalUTF8(
+               to: newIdentity.sourceIdentity
+           )
         {
             do {
                 try restoredHistoryCheckpoint.validate()
@@ -403,7 +406,10 @@ public actor BandSessionMachine {
                 restoredHistoryCheckpoint.lastHistoryComplete
             durableSourceIdentity = newIdentity.sourceIdentity
             restoredHistoryCheckpointConsumed = true
-        } else if durableSourceIdentity != newIdentity.sourceIdentity {
+        } else if !optionalStringsHaveIdenticalUTF8(
+            durableSourceIdentity,
+            newIdentity.sourceIdentity
+        ) {
             clearDurableSampleIdentities()
             acknowledgedHistoryCursor = nil
             lastDurableHistoryComplete = nil
@@ -415,6 +421,22 @@ public actor BandSessionMachine {
         await diagnostics.record(
             BandDiagnosticEvent(kind: .authentication, outcome: .completed)
         )
+        let authenticationProgressRemainsCurrent =
+            state == .negotiatingCapabilities || capabilityReport != nil
+        guard generation == token.generation,
+              activeConnectionToken == token,
+              identity == newIdentity,
+              authenticationProgressRemainsCurrent
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .authentication,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
     }
 
     public func cancelConnection(
@@ -528,6 +550,30 @@ public actor BandSessionMachine {
             callbackGeneration,
             diagnosticKind: .capability
         )
+        do {
+            try report.validate()
+        } catch {
+            if state == .negotiatingCapabilities {
+                state = .incompatible
+                capabilityReport = nil
+                await diagnostics.record(
+                    BandDiagnosticEvent(
+                        kind: .capability,
+                        outcome: .rejected,
+                        failureCategory: .incompatible
+                    )
+                )
+                throw BandFailureCategory.incompatible
+            }
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .capability,
+                    outcome: .rejected,
+                    failureCategory: .invalidInput
+                )
+            )
+            throw BandFailureCategory.invalidInput
+        }
         if state != .negotiatingCapabilities {
             if capabilityReport == report {
                 await diagnostics.record(
@@ -545,25 +591,17 @@ public actor BandSessionMachine {
             throw BandFailureCategory.invalidState
         }
         guard state == .negotiatingCapabilities,
-              identity?.hardwareRevision == report.hardwareRevision,
-              identity?.firmwareVersion == report.firmwareVersion,
-              identity?.protocolVersion == report.protocolVersion
+              let identity,
+              identity.hardwareRevision.hasIdenticalUTF8(
+                  to: report.hardwareRevision
+              ),
+              identity.firmwareVersion.hasIdenticalUTF8(
+                  to: report.firmwareVersion
+              ),
+              identity.protocolVersion.hasIdenticalUTF8(
+                  to: report.protocolVersion
+              )
         else {
-            state = .incompatible
-            capabilityReport = nil
-            await diagnostics.record(
-                BandDiagnosticEvent(
-                    kind: .capability,
-                    outcome: .rejected,
-                    failureCategory: .incompatible
-                )
-            )
-            throw BandFailureCategory.incompatible
-        }
-
-        do {
-            try report.validate()
-        } catch {
             state = .incompatible
             capabilityReport = nil
             await diagnostics.record(
@@ -882,7 +920,9 @@ public actor BandSessionMachine {
             throw BandFailureCategory.invalidState
         }
         try await validateLiveToken(token)
-        guard batch.sourceIdentity == identity?.sourceIdentity else {
+        guard let sourceIdentity = identity?.sourceIdentity,
+              batch.sourceIdentity.hasIdenticalUTF8(to: sourceIdentity)
+        else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .live,
@@ -914,11 +954,14 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.invalidInput
         }
-        try await validateNegotiatedStreams(
-            batch.samples,
+        try await validateNegotiatedBatch(
+            batch,
             diagnosticKind: .live,
             allowedStreams: liveStreams
         )
+        guard let capabilityReport else {
+            throw BandFailureCategory.invalidState
+        }
         var acceptedIdentities: Set<BandSampleIdentity> = []
         let unique = batch.samples.filter { sample in
             !durableSampleIdentities.contains(sample.identity)
@@ -928,6 +971,9 @@ public actor BandSessionMachine {
         let acceptance = LiveAcceptance(
             acceptedSamples: unique,
             duplicateSamples: batch.samples.count - unique.count,
+            capabilityReportRevision: capabilityReport.reportRevision,
+            parserRevision: batch.parserRevision,
+            calibrationRevision: batch.calibrationRevision,
             sessionNonce: sessionNonce,
             generation: generation,
             receiptSequence: nextLiveReceiptSequence
@@ -937,6 +983,27 @@ public actor BandSessionMachine {
             sampleIdentities: unique.map(\.identity),
             expectedSampleCount: unique.count
         )
+        await diagnostics.recordCoalescingLatest(
+            BandDiagnosticEvent(
+                kind: .live,
+                outcome: .staged,
+                countBucket: BandCountBucket(count: unique.count)
+            )
+        )
+        guard generation == acceptance.generation,
+              activeLiveToken == token,
+              pendingLive?.acceptance.receiptSequence
+                == acceptance.receiptSequence
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
         return acceptance
     }
 
@@ -953,6 +1020,7 @@ public actor BandSessionMachine {
             diagnosticKind: .live
         )
         guard let pendingLive,
+              !liveReceiptCompleting,
               receipt.generation == pendingLive.acceptance.generation,
               receipt.receiptSequence
                 == pendingLive.acceptance.receiptSequence
@@ -981,7 +1049,7 @@ public actor BandSessionMachine {
             throw BandFailureCategory.storage
         }
         rememberDurableSampleIdentities(pendingLive.sampleIdentities)
-        self.pendingLive = nil
+        liveReceiptCompleting = true
         await diagnostics.recordCoalescingConsecutive(
             BandDiagnosticEvent(
                 kind: .live,
@@ -991,6 +1059,8 @@ public actor BandSessionMachine {
                 )
             )
         )
+        self.pendingLive = nil
+        liveReceiptCompleting = false
     }
 
     public func beginOperation(
@@ -1005,7 +1075,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: failure
+                    failureCategory: failure,
+                    operationClass: operationClass
                 )
             )
             throw failure
@@ -1015,7 +1086,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: .busy
+                    failureCategory: .busy,
+                    operationClass: operationClass
                 )
             )
             throw BandFailureCategory.busy
@@ -1027,17 +1099,34 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: failure
+                    failureCategory: failure,
+                    operationClass: operationClass
                 )
             )
             throw failure
+        }
+        if liveActive,
+           capabilityReport?.operationsAllowedDuringLive.contains(
+               operationClass
+           ) != true
+        {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: operationDiagnosticKind,
+                    outcome: .rejected,
+                    failureCategory: .busy,
+                    operationClass: operationClass
+                )
+            )
+            throw BandFailureCategory.busy
         }
         if operationClass == .firmware, liveActive {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: .busy
+                    failureCategory: .busy,
+                    operationClass: operationClass
                 )
             )
             throw BandFailureCategory.busy
@@ -1049,7 +1138,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: .updateNotEligible
+                    failureCategory: .updateNotEligible,
+                    operationClass: operationClass
                 )
             )
             throw BandFailureCategory.updateNotEligible
@@ -1067,7 +1157,8 @@ public actor BandSessionMachine {
                     BandDiagnosticEvent(
                         kind: operationDiagnosticKind,
                         outcome: .rejected,
-                        failureCategory: .unsupported
+                        failureCategory: .unsupported,
+                        operationClass: operationClass
                     )
                 )
                 throw BandFailureCategory.unsupported
@@ -1080,7 +1171,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: .unsupported
+                    failureCategory: .unsupported,
+                    operationClass: operationClass
                 )
             )
             throw BandFailureCategory.unsupported
@@ -1096,7 +1188,8 @@ public actor BandSessionMachine {
                         BandDiagnosticEvent(
                             kind: operationDiagnosticKind,
                             outcome: .rejected,
-                            failureCategory: .unsupported
+                            failureCategory: .unsupported,
+                            operationClass: operationClass
                         )
                     )
                     throw BandFailureCategory.unsupported
@@ -1125,7 +1218,8 @@ public actor BandSessionMachine {
         await diagnostics.record(
             BandDiagnosticEvent(
                 kind: operationDiagnosticKind,
-                outcome: .began
+                outcome: .began,
+                operationClass: operationClass
             )
         )
         guard generation == token.generation,
@@ -1135,7 +1229,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .stale,
-                    failureCategory: .staleCallback
+                    failureCategory: .staleCallback,
+                    operationClass: operationClass
                 )
             )
             throw BandFailureCategory.staleCallback
@@ -1196,12 +1291,20 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.invalidInput
         }
-        try await validateNegotiatedStreams(
-            chunk.batches.flatMap(\.samples),
-            diagnosticKind: .history,
-            allowedStreams: capabilityReport?.historyStreams ?? []
-        )
-        guard chunk.previousCursor == acknowledgedHistoryCursor else {
+        for batch in chunk.batches {
+            try await validateNegotiatedBatch(
+                batch,
+                diagnosticKind: .history,
+                allowedStreams: capabilityReport?.historyStreams ?? []
+            )
+        }
+        guard let capabilityReport else {
+            throw BandFailureCategory.invalidState
+        }
+        guard optionalStringsHaveIdenticalUTF8(
+            chunk.previousCursor,
+            acknowledgedHistoryCursor
+        ) else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .history,
@@ -1213,7 +1316,10 @@ public actor BandSessionMachine {
         }
         guard chunk.complete
             || (chunk.nextCursor != nil
-                && chunk.nextCursor != chunk.previousCursor)
+                && !optionalStringsHaveIdenticalUTF8(
+                    chunk.nextCursor,
+                    chunk.previousCursor
+                ))
         else {
             await diagnostics.record(
                 BandDiagnosticEvent(
@@ -1224,9 +1330,11 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.historyStalled
         }
-        guard chunk.batches.allSatisfy({
-            $0.sourceIdentity == identity?.sourceIdentity
-        }) else {
+        guard let sourceIdentity = identity?.sourceIdentity,
+              chunk.batches.allSatisfy({
+                  $0.sourceIdentity.hasIdenticalUTF8(to: sourceIdentity)
+              })
+        else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .history,
@@ -1248,7 +1356,12 @@ public actor BandSessionMachine {
                     duplicateCount += 1
                 } else {
                     unique.append(
-                        AcceptedHistorySample(batch: batch, sample: sample)
+                        AcceptedHistorySample(
+                            batch: batch,
+                            capabilityReportRevision:
+                                capabilityReport.reportRevision,
+                            sample: sample
+                        )
                     )
                 }
             }
@@ -1312,10 +1425,16 @@ public actor BandSessionMachine {
         guard let pendingHistory,
               receipt.receiptSequence
                 == pendingHistory.acceptance.receiptSequence,
-              receipt.chunkIdentity == pendingHistory.acceptance.chunkIdentity,
-              receipt.acknowledgementToken
-                == pendingHistory.acceptance.acknowledgementToken,
-              receipt.nextCursor == pendingHistory.acceptance.nextCursor,
+              receipt.chunkIdentity.hasIdenticalUTF8(
+                  to: pendingHistory.acceptance.chunkIdentity
+              ),
+              receipt.acknowledgementToken.hasIdenticalUTF8(
+                  to: pendingHistory.acceptance.acknowledgementToken
+              ),
+              optionalStringsHaveIdenticalUTF8(
+                  receipt.nextCursor,
+                  pendingHistory.acceptance.nextCursor
+              ),
               receipt.complete == pendingHistory.acceptance.complete,
               receipt.overflowed == pendingHistory.acceptance.overflowed,
               receipt.retainedRange
@@ -1372,7 +1491,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: failure
+                    failureCategory: failure,
+                    operationClass: token.operationClass
                 )
             )
             throw failure
@@ -1382,7 +1502,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .failed,
-                    failureCategory: .storage
+                    failureCategory: .storage,
+                    operationClass: token.operationClass
                 )
             )
             throw BandFailureCategory.storage
@@ -1394,7 +1515,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .failed,
-                    failureCategory: .storage
+                    failureCategory: .storage,
+                    operationClass: token.operationClass
                 )
             )
             throw BandFailureCategory.storage
@@ -1406,7 +1528,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .failed,
-                    failureCategory: .historyStalled
+                    failureCategory: .historyStalled,
+                    operationClass: token.operationClass
                 )
             )
             throw BandFailureCategory.historyStalled
@@ -1419,7 +1542,8 @@ public actor BandSessionMachine {
         await diagnostics.record(
             BandDiagnosticEvent(
                 kind: operationDiagnosticKind,
-                outcome: .completed
+                outcome: .completed,
+                operationClass: token.operationClass
             )
         )
     }
@@ -1433,7 +1557,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: failure
+                    failureCategory: failure,
+                    operationClass: token.operationClass
                 )
             )
             throw failure
@@ -1443,7 +1568,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: .busy
+                    failureCategory: .busy,
+                    operationClass: token.operationClass
                 )
             )
             throw BandFailureCategory.busy
@@ -1456,7 +1582,8 @@ public actor BandSessionMachine {
         await diagnostics.record(
             BandDiagnosticEvent(
                 kind: operationDiagnosticKind,
-                outcome: .cancelled
+                outcome: .cancelled,
+                operationClass: token.operationClass
             )
         )
     }
@@ -1475,7 +1602,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: failure
+                    failureCategory: failure,
+                    operationClass: token.operationClass
                 )
             )
             throw failure
@@ -1487,7 +1615,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: .invalidInput
+                    failureCategory: .invalidInput,
+                    operationClass: token.operationClass
                 )
             )
             throw BandFailureCategory.invalidInput
@@ -1507,7 +1636,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .rejected,
-                    failureCategory: .busy
+                    failureCategory: .busy,
+                    operationClass: token.operationClass
                 )
             )
             throw BandFailureCategory.busy
@@ -1527,7 +1657,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: .firmware,
                     outcome: .interrupted,
-                    failureCategory: .disconnected
+                    failureCategory: .disconnected,
+                    operationClass: .firmware
                 ),
                 BandDiagnosticEvent(
                     kind: .reconnect,
@@ -1542,7 +1673,8 @@ public actor BandSessionMachine {
                     BandDiagnosticEvent(
                         kind: .firmware,
                         outcome: .stale,
-                        failureCategory: .staleCallback
+                        failureCategory: .staleCallback,
+                        operationClass: .firmware
                     )
                 )
                 throw BandFailureCategory.staleCallback
@@ -1564,7 +1696,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: operationDiagnosticKind,
                     outcome: .failed,
-                    failureCategory: category
+                    failureCategory: category,
+                    operationClass: token.operationClass
                 ),
             ]
             if liveActive {
@@ -1589,11 +1722,12 @@ public actor BandSessionMachine {
                   activeReconnectToken == reconnectToken
             else {
                 await diagnostics.record(
-                    BandDiagnosticEvent(
-                        kind: operationDiagnosticKind,
-                        outcome: .stale,
-                        failureCategory: .staleCallback
-                    )
+                        BandDiagnosticEvent(
+                            kind: operationDiagnosticKind,
+                            outcome: .stale,
+                            failureCategory: .staleCallback,
+                            operationClass: token.operationClass
+                        )
                 )
                 throw BandFailureCategory.staleCallback
             }
@@ -1614,7 +1748,8 @@ public actor BandSessionMachine {
             BandDiagnosticEvent(
                 kind: operationDiagnosticKind,
                 outcome: operationOutcome,
-                failureCategory: category
+                failureCategory: category,
+                operationClass: token.operationClass
             )
         )
         if category == .disconnected && !terminalFirmwareFailure {
@@ -1663,9 +1798,7 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.busy
         }
-        let interruptedOperationKind = activeOperation.map {
-            diagnosticKind(for: $0.operationClass)
-        }
+        let interruptedOperation = activeOperation
         nextReconnectSequence &+= 1
         generation &+= 1
         let reconnectToken = BandReconnectToken(
@@ -1676,12 +1809,15 @@ public actor BandSessionMachine {
         activeReconnectToken = reconnectToken
         state = .recovering
         var interruptionEvents: [BandDiagnosticEvent] = []
-        if let interruptedOperationKind {
+        if let interruptedOperation {
             interruptionEvents.append(
                 BandDiagnosticEvent(
-                    kind: interruptedOperationKind,
+                    kind: diagnosticKind(
+                        for: interruptedOperation.operationClass
+                    ),
                     outcome: .interrupted,
-                    failureCategory: .disconnected
+                    failureCategory: .disconnected,
+                    operationClass: interruptedOperation.operationClass
                 )
             )
         }
@@ -1763,13 +1899,14 @@ public actor BandSessionMachine {
 
     @discardableResult
     public func disconnect(
-        reason _: BandDisconnectReason,
+        reason: BandDisconnectReason,
         callbackGeneration: UInt64
     ) async throws -> UInt64 {
         try ensureNotClosed()
         try await validateCallbackGeneration(
             callbackGeneration,
-            diagnosticKind: .disconnect
+            diagnosticKind: .disconnect,
+            disconnectReason: reason
         )
         guard state != .idle,
               state != .disconnecting,
@@ -1782,7 +1919,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: .disconnect,
                     outcome: .rejected,
-                    failureCategory: .invalidState
+                    failureCategory: .invalidState,
+                    disconnectReason: reason
                 )
             )
             throw BandFailureCategory.invalidState
@@ -1792,7 +1930,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: .disconnect,
                     outcome: .rejected,
-                    failureCategory: .busy
+                    failureCategory: .busy,
+                    disconnectReason: reason
                 )
             )
             throw BandFailureCategory.busy
@@ -1802,18 +1941,24 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: .disconnect,
                     outcome: .rejected,
-                    failureCategory: .invalidState
+                    failureCategory: .invalidState,
+                    disconnectReason: reason
                 )
             )
             throw BandFailureCategory.invalidState
         }
 
+        let cancelledOperationClass = activeOperation?.operationClass
         let cancelledKinds = activeTerminalDiagnosticKinds()
         state = .disconnecting
         generation &+= 1
         let idleGeneration = generation
         await diagnostics.record(
-            BandDiagnosticEvent(kind: .disconnect, outcome: .began)
+            BandDiagnosticEvent(
+                kind: .disconnect,
+                outcome: .began,
+                disconnectReason: reason
+            )
         )
         guard generation == idleGeneration,
               state == .disconnecting
@@ -1822,7 +1967,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: .disconnect,
                     outcome: .stale,
-                    failureCategory: .staleCallback
+                    failureCategory: .staleCallback,
+                    disconnectReason: reason
                 )
             )
             throw BandFailureCategory.staleCallback
@@ -1836,12 +1982,22 @@ public actor BandSessionMachine {
         capabilityReport = nil
         state = .idle
         await diagnostics.record(
-            cancelledKinds.map {
-                BandDiagnosticEvent(kind: $0, outcome: .cancelled)
+            cancelledKinds.map { kind in
+                BandDiagnosticEvent(
+                    kind: kind,
+                    outcome: .cancelled,
+                    operationClass: cancelledOperationClass.flatMap {
+                        operation in
+                        diagnosticKind(for: operation) == kind
+                            ? operation
+                            : nil
+                    }
+                )
             } + [
                 BandDiagnosticEvent(
                     kind: .disconnect,
-                    outcome: .completed
+                    outcome: .completed,
+                    disconnectReason: reason
                 ),
             ]
         )
@@ -1852,7 +2008,8 @@ public actor BandSessionMachine {
                 BandDiagnosticEvent(
                     kind: .disconnect,
                     outcome: .stale,
-                    failureCategory: .staleCallback
+                    failureCategory: .staleCallback,
+                    disconnectReason: reason
                 )
             )
             throw BandFailureCategory.staleCallback
@@ -1876,6 +2033,7 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.busy
         }
+        let terminalOperationClass = activeOperation?.operationClass
         let terminalKinds = activeTerminalDiagnosticKinds()
         generation &+= 1
         clearOperationTracking()
@@ -1887,22 +2045,33 @@ public actor BandSessionMachine {
         capabilityReport = nil
         state = .closed
         await diagnostics.record(
-            terminalKinds.map {
-                BandDiagnosticEvent(kind: $0, outcome: .cancelled)
+            terminalKinds.map { kind in
+                BandDiagnosticEvent(
+                    kind: kind,
+                    outcome: .cancelled,
+                    operationClass: terminalOperationClass.flatMap {
+                        operation in
+                        diagnosticKind(for: operation) == kind
+                            ? operation
+                            : nil
+                    }
+                )
             }
         )
     }
 
     private func validateCallbackGeneration(
         _ callbackGeneration: UInt64,
-        diagnosticKind: BandDiagnosticKind
+        diagnosticKind: BandDiagnosticKind,
+        disconnectReason: BandDisconnectReason? = nil
     ) async throws {
         guard callbackGeneration == generation else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: diagnosticKind,
                     outcome: .stale,
-                    failureCategory: .staleCallback
+                    failureCategory: .staleCallback,
+                    disconnectReason: disconnectReason
                 )
             )
             throw BandFailureCategory.staleCallback
@@ -2078,6 +2247,7 @@ public actor BandSessionMachine {
         activeLiveToken = nil
         liveStreams.removeAll(keepingCapacity: true)
         pendingLive = nil
+        liveReceiptCompleting = false
     }
 
     private func activeTerminalDiagnosticKinds() -> [BandDiagnosticKind] {
@@ -2210,15 +2380,29 @@ public actor BandSessionMachine {
         return lhs.stream.rawValue < rhs.stream.rawValue
     }
 
-    private func validateNegotiatedStreams(
-        _ samples: [BandSample],
+    private func validateNegotiatedBatch(
+        _ batch: BandSampleBatch,
         diagnosticKind: BandDiagnosticKind,
         allowedStreams: Set<BandStreamKind>? = nil
     ) async throws {
-        guard let capabilities = capabilityReport?.capabilities,
-              samples.allSatisfy({
-                  capabilities.contains(requiredCapability(for: $0.identity.stream))
-                    && (allowedStreams?.contains($0.identity.stream) ?? true)
+        guard let capabilityReport,
+              batch.samples.allSatisfy({ sample in
+                  let stream = sample.identity.stream
+                  return capabilityReport.capabilities.contains(
+                      requiredCapability(for: stream)
+                  )
+                    && (allowedStreams?.contains(stream) ?? true)
+                    && capabilityReport.streamSemantics.contains {
+                        $0.lane == batch.lane
+                            && $0.stream == stream
+                            && $0.unit == sample.unit
+                            && $0.parserRevision.hasIdenticalUTF8(
+                                to: batch.parserRevision
+                            )
+                            && $0.calibrationRevision.hasIdenticalUTF8(
+                                to: batch.calibrationRevision
+                            )
+                    }
               })
         else {
             await diagnostics.record(

@@ -313,8 +313,18 @@ PR `#26` additionally makes reconnect interruption require the exact active
 connection token, returns opaque one-use reconnect authority, keeps firmware
 failure recovery scan-only, and invalidates stale reconnect authority when a
 new recovery scan starts.
+PR `#27` rejects every public Kotlin session-machine entry while a
+caller-owned supplier collection is being traversed. JVM monitor reentrancy
+therefore cannot use `close`, `disconnect`, or another public operation to
+mutate the session before the outer collection snapshot is validated.
+PR `#28` completes the supplier-neutral lifecycle chronology, bounded
+diagnostic compatibility, Swift actor-reentrancy, firmware disconnect
+classification, and JVM source/binary compatibility closeout.
+PR `#29` makes capability-report equivalence deterministic across Swift and
+Kotlin, including exact UTF-8 byte semantics and explicit live-operation
+allowlists.
 Current protected `main` is
-`eb5d6d4c6171efaa87a8e36a3c4ba3906efbfb2c`. The app integration candidate
+`38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`. The app integration candidate
 consumes the deterministic export from that protected revision through a
 digest-pinned, supplier-artifact-free boundary. The repository is temporarily
 public as of 2026-09-22; D-056 still requires private visibility before
