@@ -103,6 +103,12 @@ enum class BandConnectionPhase(val wireValue: String) {
     AUTHENTICATION("authentication"),
 }
 
+enum class BandDisconnectReason(val wireValue: String) {
+    USER_PAUSED("userPaused"),
+    COLLECTOR_HANDOFF("collectorHandoff"),
+    TRANSPORT_REPLACED("transportReplaced"),
+}
+
 enum class BandFailureCategory(val wireValue: String) {
     UNAVAILABLE("unavailable"),
     PERMISSION("permission"),
@@ -461,7 +467,11 @@ data class BandHistoryChunk(
 }
 
 private fun <T> List<T>.boundedSnapshot(maximumSize: Int): List<T> {
-    val expectedSize = size
+    val expectedSize = try {
+        size
+    } catch (_: RuntimeException) {
+        fail(BandFailureCategory.INVALID_INPUT)
+    }
     if (maximumSize < 0 || expectedSize < 0 || expectedSize > maximumSize) {
         fail(BandFailureCategory.INVALID_INPUT)
     }

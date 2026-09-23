@@ -58,7 +58,7 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "9bc2eedce34c61d49f68001a973fbbda793d04ed",
+            "a9d3f1a2a55b5436bf1b65b0299a27667241afa4",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
@@ -761,7 +761,7 @@ class NoopBandSdkIntegrationTest {
             .map { scenarios.getJSONObject(it) }
             .filter { it.getBoolean("automated") }
 
-        assertEquals(38, automated.size)
+        assertEquals(40, automated.size)
         assertEquals(
             automated.map { it.getString("id") },
             BandConformanceRunner.automatedScenarios,

@@ -40,6 +40,7 @@ public actor BandSessionMachine {
     private var durableSampleIdentityNextEviction = 0
     private var acknowledgedHistoryCursor: String?
     private var durableSourceIdentity: String?
+    private var restoredHistoryCheckpointConsumed = false
 
     public init(
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
@@ -364,7 +365,7 @@ public actor BandSessionMachine {
             )
             throw BandFailureCategory.invalidInput
         }
-        if durableSourceIdentity == nil,
+        if !restoredHistoryCheckpointConsumed,
            let restoredHistoryCheckpoint,
            restoredHistoryCheckpoint.sourceIdentity == newIdentity.sourceIdentity
         {
@@ -388,6 +389,7 @@ public actor BandSessionMachine {
             lastDurableHistoryComplete =
                 restoredHistoryCheckpoint.lastHistoryComplete
             durableSourceIdentity = newIdentity.sourceIdentity
+            restoredHistoryCheckpointConsumed = true
         } else if durableSourceIdentity != newIdentity.sourceIdentity {
             clearDurableSampleIdentities()
             acknowledgedHistoryCursor = nil
@@ -796,6 +798,16 @@ public actor BandSessionMachine {
     public func stopLive() async throws {
         try ensureNotClosed()
         guard liveActive else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .live,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        guard state == .liveCollecting else {
             await diagnostics.record(
                 BandDiagnosticEvent(
                     kind: .live,
@@ -1527,6 +1539,7 @@ public actor BandSessionMachine {
             diagnosticKind: .reconnect
         )
         guard state != .idle,
+              state != .disconnecting,
               state != .incompatible,
               state != .rejected,
               state != .securityFailure,
@@ -1604,6 +1617,104 @@ public actor BandSessionMachine {
         await diagnostics.record(
             BandDiagnosticEvent(kind: .reconnect, outcome: .completed)
         )
+    }
+
+    @discardableResult
+    public func disconnect(
+        reason _: BandDisconnectReason,
+        callbackGeneration: UInt64
+    ) async throws -> UInt64 {
+        try ensureNotClosed()
+        try await validateCallbackGeneration(
+            callbackGeneration,
+            diagnosticKind: .disconnect
+        )
+        guard state != .idle,
+              state != .disconnecting,
+              state != .incompatible,
+              state != .rejected,
+              state != .securityFailure,
+              state != .firmwareFailure
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .disconnect,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+        guard !hasPendingPersistence else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .disconnect,
+                    outcome: .rejected,
+                    failureCategory: .busy
+                )
+            )
+            throw BandFailureCategory.busy
+        }
+        guard activeOperation?.operationClass != .firmware else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .disconnect,
+                    outcome: .rejected,
+                    failureCategory: .invalidState
+                )
+            )
+            throw BandFailureCategory.invalidState
+        }
+
+        let cancelledKinds = activeTerminalDiagnosticKinds()
+        state = .disconnecting
+        generation &+= 1
+        let idleGeneration = generation
+        await diagnostics.record(
+            BandDiagnosticEvent(kind: .disconnect, outcome: .began)
+        )
+        guard generation == idleGeneration,
+              state == .disconnecting
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .disconnect,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
+
+        clearOperationTracking()
+        clearLiveTracking()
+        activeConnectionToken = nil
+        identity = nil
+        capabilityReport = nil
+        state = .idle
+        await diagnostics.record(
+            cancelledKinds.map {
+                BandDiagnosticEvent(kind: $0, outcome: .cancelled)
+            } + [
+                BandDiagnosticEvent(
+                    kind: .disconnect,
+                    outcome: .completed
+                ),
+            ]
+        )
+        guard generation == idleGeneration,
+              state == .idle
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .disconnect,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
+        return idleGeneration
     }
 
     public func close() async throws {
@@ -1801,6 +1912,8 @@ public actor BandSessionMachine {
             phaseKind = .capability
         case .recovering:
             phaseKind = .reconnect
+        case .disconnecting:
+            phaseKind = .disconnect
         default:
             phaseKind = nil
         }

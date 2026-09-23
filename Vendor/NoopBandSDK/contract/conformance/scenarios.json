@@ -260,6 +260,21 @@
       }
     },
     {
+      "id": "history_checkpoint_survives_source_mismatch",
+      "automated": true,
+      "expected": {
+        "events": [
+          "alternate_source_ready",
+          "alternate_source_disconnected",
+          "checkpoint_restored"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 2,
+        "failure": null
+      }
+    },
+    {
       "id": "firmware_eligibility_specific",
       "automated": true,
       "expected": {
@@ -605,6 +620,24 @@
         "finalState": "ready",
         "acknowledgedCursor": null,
         "acceptedSamples": 1,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "graceful_disconnect_to_idle",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_and_history_started",
+          "history_cancelled",
+          "live_cancelled",
+          "disconnect_completed",
+          "stale_callback_rejected",
+          "session_reusable"
+        ],
+        "finalState": "idle",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
         "failure": "staleCallback"
       }
     },

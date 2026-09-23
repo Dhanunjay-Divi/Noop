@@ -727,6 +727,16 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.INVALID_STATE)
         }
+        if (state != BandSessionState.LIVE_COLLECTING) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.LIVE,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_STATE,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_STATE)
+        }
         if (pendingLive != null) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -1482,6 +1492,7 @@ class BandSessionMachine(
         )
         if (
             state == BandSessionState.IDLE ||
+            state == BandSessionState.DISCONNECTING ||
             state == BandSessionState.INCOMPATIBLE ||
             state == BandSessionState.REJECTED ||
             state == BandSessionState.SECURITY_FAILURE ||
@@ -1552,6 +1563,86 @@ class BandSessionMachine(
                 BandDiagnosticOutcome.COMPLETED,
             ),
         )
+    }
+
+    @Synchronized
+    fun disconnect(
+        reason: BandDisconnectReason,
+        callbackGeneration: Long,
+    ): Long {
+        ensureNotClosed()
+        validateCallbackGeneration(
+            callbackGeneration,
+            BandDiagnosticKind.DISCONNECT,
+        )
+        if (
+            state == BandSessionState.IDLE ||
+            state == BandSessionState.DISCONNECTING ||
+            state == BandSessionState.INCOMPATIBLE ||
+            state == BandSessionState.REJECTED ||
+            state == BandSessionState.SECURITY_FAILURE ||
+            state == BandSessionState.FIRMWARE_FAILURE
+        ) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.DISCONNECT,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_STATE,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_STATE)
+        }
+        if (hasPendingPersistence) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.DISCONNECT,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.BUSY,
+                ),
+            )
+            fail(BandFailureCategory.BUSY)
+        }
+        if (
+            activeOperation?.operationClass == BandOperationClass.FIRMWARE
+        ) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    BandDiagnosticKind.DISCONNECT,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_STATE,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_STATE)
+        }
+
+        val cancelledKinds = activeTerminalDiagnosticKinds()
+        state = BandSessionState.DISCONNECTING
+        generation += 1
+        val idleGeneration = generation
+        clearOperationTracking()
+        clearLiveTracking()
+        activeConnectionToken = null
+        identity = null
+        capabilityReport = null
+        diagnostics.record(
+            BandDiagnosticEvent(
+                BandDiagnosticKind.DISCONNECT,
+                BandDiagnosticOutcome.BEGAN,
+            ),
+        )
+        state = BandSessionState.IDLE
+        diagnostics.record(
+            cancelledKinds.map {
+                BandDiagnosticEvent(
+                    it,
+                    BandDiagnosticOutcome.CANCELLED,
+                )
+            } + BandDiagnosticEvent(
+                BandDiagnosticKind.DISCONNECT,
+                BandDiagnosticOutcome.COMPLETED,
+            ),
+        )
+        return idleGeneration
     }
 
     @Synchronized
@@ -1805,6 +1896,8 @@ class BandSessionMachine(
             BandSessionState.NEGOTIATING_CAPABILITIES ->
                 BandDiagnosticKind.CAPABILITY
             BandSessionState.RECOVERING -> BandDiagnosticKind.RECONNECT
+            BandSessionState.DISCONNECTING ->
+                BandDiagnosticKind.DISCONNECT
             else -> null
         }
         if (phaseKind != null && phaseKind !in kinds) {
@@ -1877,7 +1970,6 @@ class BandSessionMachine(
 
     private fun prepareDurableState(sourceIdentity: String) {
         if (
-            durableSourceIdentity == null &&
             !restoredHistoryCheckpointConsumed &&
             restoredHistoryCheckpoint?.sourceIdentity == sourceIdentity
         ) {
@@ -1907,7 +1999,6 @@ class BandSessionMachine(
             acknowledgedHistoryCursor = null
             lastDurableHistoryComplete = null
             durableSourceIdentity = sourceIdentity
-            restoredHistoryCheckpointConsumed = true
         }
     }
 

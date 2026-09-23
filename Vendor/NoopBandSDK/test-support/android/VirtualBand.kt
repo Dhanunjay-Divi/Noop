@@ -225,6 +225,7 @@ object BandConformanceRunner {
         "capability_unknown_fail_closed",
         "history_interrupted_resume",
         "history_checkpoint_restored",
+        "history_checkpoint_survives_source_mismatch",
         "firmware_eligibility_specific",
         "unnegotiated_stream_rejected",
         "firmware_blocked_during_live",
@@ -246,6 +247,7 @@ object BandConformanceRunner {
         "diagnostics_bounded",
         "fractional_steps_rejected",
         "live_callback_session_bound",
+        "graceful_disconnect_to_idle",
         "close_active_phase_terminal",
         "closed_session_terminal",
     )
@@ -269,6 +271,8 @@ object BandConformanceRunner {
         "capability_unknown_fail_closed" -> capabilityUnknownFailsClosed()
         "history_interrupted_resume" -> historyInterruptedResume()
         "history_checkpoint_restored" -> historyCheckpointRestored()
+        "history_checkpoint_survives_source_mismatch" ->
+            historyCheckpointSurvivesSourceMismatch()
         "firmware_eligibility_specific" -> firmwareEligibilitySpecific()
         "unnegotiated_stream_rejected" -> unnegotiatedStreamRejected()
         "firmware_blocked_during_live" -> firmwareBlockedDuringLive()
@@ -297,6 +301,7 @@ object BandConformanceRunner {
         "fractional_steps_rejected" -> fractionalStepsRejected()
         "diagnostics_bounded" -> diagnosticsBounded()
         "live_callback_session_bound" -> liveCallbackSessionBound()
+        "graceful_disconnect_to_idle" -> gracefulDisconnectToIdle()
         "close_active_phase_terminal" -> closeActivePhaseTerminal()
         "closed_session_terminal" -> closedSessionTerminal()
         else -> fail(BandFailureCategory.INVALID_INPUT)
@@ -1171,6 +1176,86 @@ object BandConformanceRunner {
             events,
             session.snapshot(),
             acceptedSamples = acceptance.acceptedSamples.size,
+        )
+    }
+
+    private fun historyCheckpointSurvivesSourceMismatch(): BandConformanceResult {
+        val checkpoint = BandHistoryCheckpoint(
+            sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor = "cursor-2",
+            lastHistoryComplete = false,
+            durableSampleIdentities =
+                VirtualBandFixtures.historyChunk.batches
+                    .flatMap(BandSampleBatch::samples)
+                    .map(BandSample::identity)
+                    .toSet(),
+        )
+        val session = BandSessionMachine(restoredHistoryCheckpoint = checkpoint)
+        val alternateIdentity = VirtualBandFixtures.identity.copy(
+            sourceIdentity = "alternate-source",
+            hardwareRevision = "alternate-hw-1",
+            firmwareVersion = "alternate-fw-1",
+        )
+        val alternateCapabilities = VirtualBandFixtures.capabilities.copy(
+            hardwareRevision = alternateIdentity.hardwareRevision,
+            firmwareVersion = alternateIdentity.firmwareVersion,
+        )
+
+        var generation = session.beginScan()
+        var connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        session.completeConnectionForConformance(
+            alternateIdentity,
+            connectionToken,
+            generation,
+        )
+        session.acceptCapabilities(
+            alternateCapabilities,
+            connectionToken,
+            generation,
+        )
+        val events = mutableListOf("alternate_source_ready")
+        if (
+            session.snapshot().acknowledgedHistoryCursor != null ||
+            session.snapshot().durableSampleCount != 0
+        ) {
+            fail(BandFailureCategory.INTERNAL_FAILURE)
+        }
+
+        session.disconnect(
+            BandDisconnectReason.COLLECTOR_HANDOFF,
+            generation,
+        )
+        events += "alternate_source_disconnected"
+
+        generation = session.beginScan()
+        connectionToken =
+            session.selectCandidate(VirtualBandFixtures.candidate, generation)
+        session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            connectionToken,
+            generation,
+        )
+        session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            connectionToken,
+            generation,
+        )
+        val snapshot = session.snapshot()
+        if (
+            snapshot.acknowledgedHistoryCursor == "cursor-2" &&
+            snapshot.durableSampleCount ==
+            checkpoint.durableSampleIdentities.size
+        ) {
+            events += "checkpoint_restored"
+        } else {
+            fail(BandFailureCategory.INTERNAL_FAILURE)
+        }
+        return result(
+            "history_checkpoint_survives_source_mismatch",
+            events,
+            snapshot,
+            acceptedSamples = snapshot.durableSampleCount,
         )
     }
 
@@ -2643,6 +2728,74 @@ object BandConformanceRunner {
             } else {
                 BandFailureCategory.INTERNAL_FAILURE.wireValue
             },
+        )
+    }
+
+    private fun gracefulDisconnectToIdle(): BandConformanceResult {
+        val diagnostics = BandDiagnosticsRecorder()
+        val (session, generation) = readySession(diagnostics = diagnostics)
+        session.beginLive()
+        session.beginOperation(BandOperationClass.HISTORY)
+        val events = mutableListOf("live_and_history_started")
+        val beforeDisconnect = diagnostics.snapshot().size
+        val idleGeneration = session.disconnect(
+            BandDisconnectReason.COLLECTOR_HANDOFF,
+            generation,
+        )
+        val disconnectEvents = diagnostics.snapshot().drop(beforeDisconnect)
+        if (
+            BandDiagnosticEvent(
+                BandDiagnosticKind.HISTORY,
+                BandDiagnosticOutcome.CANCELLED,
+            ) in disconnectEvents
+        ) {
+            events += "history_cancelled"
+        }
+        if (
+            BandDiagnosticEvent(
+                BandDiagnosticKind.LIVE,
+                BandDiagnosticOutcome.CANCELLED,
+            ) in disconnectEvents
+        ) {
+            events += "live_cancelled"
+        }
+        if (
+            BandDiagnosticEvent(
+                BandDiagnosticKind.DISCONNECT,
+                BandDiagnosticOutcome.BEGAN,
+            ) in disconnectEvents &&
+            BandDiagnosticEvent(
+                BandDiagnosticKind.DISCONNECT,
+                BandDiagnosticOutcome.COMPLETED,
+            ) in disconnectEvents
+        ) {
+            events += "disconnect_completed"
+        }
+
+        var failure: BandFailureCategory? = null
+        try {
+            session.disconnect(
+                BandDisconnectReason.USER_PAUSED,
+                generation,
+            )
+        } catch (error: BandException) {
+            failure = error.category
+            events += "stale_callback_rejected"
+        }
+
+        val scanGeneration = session.beginScan()
+        session.cancelScan(scanGeneration)
+        if (
+            scanGeneration == idleGeneration + 1 &&
+            session.snapshot().state == BandSessionState.IDLE
+        ) {
+            events += "session_reusable"
+        }
+        return result(
+            "graceful_disconnect_to_idle",
+            events,
+            session.snapshot(),
+            failure = failure,
         )
     }
 

@@ -11,6 +11,7 @@ enum class BandDiagnosticKind {
     LIVE,
     HISTORY,
     RECONNECT,
+    DISCONNECT,
     FIRMWARE,
     PRESSURE,
 }

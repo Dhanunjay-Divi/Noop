@@ -73,6 +73,12 @@ public enum BandConnectionPhase: String, Codable, Sendable {
     case authentication
 }
 
+public enum BandDisconnectReason: String, Codable, Sendable {
+    case userPaused
+    case collectorHandoff
+    case transportReplaced
+}
+
 public enum BandFailureCategory: String, Codable, Error, Sendable {
     case unavailable
     case permission

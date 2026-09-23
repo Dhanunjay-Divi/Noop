@@ -9,6 +9,7 @@ public enum BandDiagnosticKind: String, Codable, Sendable {
     case live
     case history
     case reconnect
+    case disconnect
     case firmware
     case pressure
 }

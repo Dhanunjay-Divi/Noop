@@ -273,6 +273,7 @@ public enum BandConformanceRunner {
         "capability_unknown_fail_closed",
         "history_interrupted_resume",
         "history_checkpoint_restored",
+        "history_checkpoint_survives_source_mismatch",
         "firmware_eligibility_specific",
         "unnegotiated_stream_rejected",
         "firmware_blocked_during_live",
@@ -294,6 +295,7 @@ public enum BandConformanceRunner {
         "diagnostics_bounded",
         "fractional_steps_rejected",
         "live_callback_session_bound",
+        "graceful_disconnect_to_idle",
         "close_active_phase_terminal",
         "closed_session_terminal",
     ]
@@ -330,6 +332,8 @@ public enum BandConformanceRunner {
             return try await historyInterruptedResume()
         case "history_checkpoint_restored":
             return try await historyCheckpointRestored()
+        case "history_checkpoint_survives_source_mismatch":
+            return try await historyCheckpointSurvivesSourceMismatch()
         case "firmware_eligibility_specific":
             return try await firmwareEligibilitySpecific()
         case "unnegotiated_stream_rejected":
@@ -372,6 +376,8 @@ public enum BandConformanceRunner {
             return await diagnosticsBounded()
         case "live_callback_session_bound":
             return try await liveCallbackSessionBound()
+        case "graceful_disconnect_to_idle":
+            return try await gracefulDisconnectToIdle()
         case "close_active_phase_terminal":
             return try await closeActivePhaseTerminal()
         case "closed_session_terminal":
@@ -1315,6 +1321,100 @@ public enum BandConformanceRunner {
             events: events,
             snapshot: await session.snapshot(),
             acceptedSamples: acceptance.acceptedSamples.count
+        )
+    }
+
+    private static func historyCheckpointSurvivesSourceMismatch()
+        async throws -> BandConformanceResult
+    {
+        let checkpoint = BandHistoryCheckpoint(
+            sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
+            acknowledgedCursor: "cursor-2",
+            lastHistoryComplete: false,
+            durableSampleIdentities: Set(
+                VirtualBandFixtures.historyChunk.batches
+                    .flatMap(\.samples)
+                    .map(\.identity)
+            )
+        )
+        let session = BandSessionMachine(historyCheckpoint: checkpoint)
+        let alternateIdentity = BandIdentity(
+            sourceIdentity: "alternate-source",
+            hardwareRevision: "alternate-hw-1",
+            firmwareVersion: "alternate-fw-1",
+            protocolVersion:
+                BandCapabilityReport.supportedProtocolVersion,
+            wrapperRevision: "alternate-wrapper-1"
+        )
+        let baseCapabilities = VirtualBandFixtures.capabilities
+        let alternateCapabilities = BandCapabilityReport(
+            schemaVersion: baseCapabilities.schemaVersion,
+            protocolVersion: baseCapabilities.protocolVersion,
+            hardwareRevision: alternateIdentity.hardwareRevision,
+            firmwareVersion: alternateIdentity.firmwareVersion,
+            historyDays: baseCapabilities.historyDays,
+            capabilities: baseCapabilities.capabilities,
+            liveStreams: baseCapabilities.liveStreams,
+            historyStreams: baseCapabilities.historyStreams
+        )
+
+        var generation = try await session.beginScan()
+        var connectionToken = try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
+        try await session.completeConnectionForConformance(
+            alternateIdentity,
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        try await session.acceptCapabilities(
+            alternateCapabilities,
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        var events = ["alternate_source_ready"]
+        let alternateSnapshot = await session.snapshot()
+        guard alternateSnapshot.acknowledgedHistoryCursor == nil,
+              alternateSnapshot.durableSampleCount == 0
+        else {
+            throw BandFailureCategory.internalFailure
+        }
+
+        _ = try await session.disconnect(
+            reason: .collectorHandoff,
+            callbackGeneration: generation
+        )
+        events.append("alternate_source_disconnected")
+
+        generation = try await session.beginScan()
+        connectionToken = try await session.selectCandidate(
+            VirtualBandFixtures.candidate,
+            callbackGeneration: generation
+        )
+        try await session.completeConnectionForConformance(
+            VirtualBandFixtures.identity,
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        try await session.acceptCapabilities(
+            VirtualBandFixtures.capabilities,
+            token: connectionToken,
+            callbackGeneration: generation
+        )
+        let snapshot = await session.snapshot()
+        guard snapshot.acknowledgedHistoryCursor == "cursor-2",
+              snapshot.durableSampleCount
+                == checkpoint.durableSampleIdentities.count
+        else {
+            throw BandFailureCategory.internalFailure
+        }
+        events.append("checkpoint_restored")
+        return result(
+            scenario: "history_checkpoint_survives_source_mismatch",
+            events: events,
+            snapshot: snapshot,
+            acceptedSamples: snapshot.durableSampleCount
         )
     }
 
@@ -2837,6 +2937,70 @@ public enum BandConformanceRunner {
                     ? BandFailureCategory.invalidInput
                     : BandFailureCategory.internalFailure
             ).rawValue
+        )
+    }
+
+    private static func gracefulDisconnectToIdle()
+        async throws -> BandConformanceResult
+    {
+        let diagnostics = BandDiagnosticsRecorder()
+        let (session, generation) =
+            try await readySession(diagnostics: diagnostics)
+        _ = try await session.beginLive()
+        _ = try await session.beginOperation(.history)
+        var events = ["live_and_history_started"]
+        let beforeDisconnect = await diagnostics.snapshot().count
+        let idleGeneration = try await session.disconnect(
+            reason: .collectorHandoff,
+            callbackGeneration: generation
+        )
+        let disconnectEvents = Array(
+            (await diagnostics.snapshot()).dropFirst(beforeDisconnect)
+        )
+        if disconnectEvents.contains(
+            BandDiagnosticEvent(kind: .history, outcome: .cancelled)
+        ) {
+            events.append("history_cancelled")
+        }
+        if disconnectEvents.contains(
+            BandDiagnosticEvent(kind: .live, outcome: .cancelled)
+        ) {
+            events.append("live_cancelled")
+        }
+        if disconnectEvents.contains(
+            BandDiagnosticEvent(kind: .disconnect, outcome: .began)
+        ),
+           disconnectEvents.contains(
+               BandDiagnosticEvent(kind: .disconnect, outcome: .completed)
+           )
+        {
+            events.append("disconnect_completed")
+        }
+
+        var failure: BandFailureCategory?
+        do {
+            _ = try await session.disconnect(
+                reason: .userPaused,
+                callbackGeneration: generation
+            )
+        } catch let error as BandFailureCategory {
+            failure = error
+            events.append("stale_callback_rejected")
+        }
+
+        let scanGeneration = try await session.beginScan()
+        try await session.cancelScan(callbackGeneration: scanGeneration)
+        let reusableSnapshot = await session.snapshot()
+        if scanGeneration == idleGeneration + 1,
+           reusableSnapshot.state == .idle
+        {
+            events.append("session_reusable")
+        }
+        return result(
+            scenario: "graceful_disconnect_to_idle",
+            events: events,
+            snapshot: reusableSnapshot,
+            failure: failure
         )
     }
 
