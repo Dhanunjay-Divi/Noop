@@ -15,12 +15,12 @@
 - Final SDK PR `#21` app repin implementation commit:
   `5da77db5d929df7cbce73d7e64a8eab935cc0103`
 - Final SDK PR `#22`, `#23`, and `#24` app repin implementation commit:
-  `<pending local commit>`
+  `0a8b3a7a17848ca5c2ee15228ef6e2726813c44c`
 - Pre-remediation PR `#17` evidence commit:
   `78eba788b337c3472d32f8bd789965f84ef67b8a`
 - Record commit or PR: PR `#17`; SDK upstream merge
-  `f20f4ed552328a64a8a598aaac72befa1d481262`, pending application commit, and
-  prior exact head `fed31b0f164675b0d1f6ef5a7724262afb23f0af`. All ten required hosted
+  `f20f4ed552328a64a8a598aaac72befa1d481262`, app implementation
+  `0a8b3a7a17848ca5c2ee15228ef6e2726813c44c`, and prior exact head `fed31b0f164675b0d1f6ef5a7724262afb23f0af`. All ten required hosted
   contexts passed on that prior head. The PR `#24` app repin passes the local
   platform, policy, and independent-review gates; commit, push, and replacement
   exact-SHA hosted verification remain.

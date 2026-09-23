@@ -114,7 +114,7 @@ local evidence are:
 
 - upstream SDK source: `NoopBandSDK` PR `#24` protected merge
   `f20f4ed552328a64a8a598aaac72befa1d481262`
-- application implementation: `<pending local commit>`
+- application implementation: `0a8b3a7a17848ca5c2ee15228ef6e2726813c44c`
 - pull request: `#17`; prior exact head:
   `fed31b0f164675b0d1f6ef5a7724262afb23f0af`
 - local verification: artifact verifier 9/9, vendored Swift 15/15 across 42
