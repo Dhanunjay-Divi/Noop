@@ -112,24 +112,24 @@ open gates.
 For the active SDK app-integration branch, the recorded inputs and current
 local evidence are:
 
-- upstream SDK source: `NoopBandSDK` PR `#29` protected merge
-  `38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`
-- application candidate: the consolidated SDK PR `#29` source and evidence
+- upstream SDK source: `NoopBandSDK` PR `#30` protected merge
+  `b027cbd9702936d4903f3293ca605650cdf5c413`
+- application candidate: the consolidated SDK PR `#30` source and evidence
   replacement carried by this branch
 - pull request: `#17`; only its final exact candidate head can authorize merge
-- exact current local verification: artifact verifier 9/9, vendored Swift
-  16/16 across 50 automated scenarios plus app-repository regressions, macOS
-  app boundary 10/10, Android Full and Demo integration 15/15 each, both
-  Android instrumentation source graphs, and the unsigned Release
-  iOS/Watch/Watch-complications/widget graph pass. The Release graph has zero
-  source warnings/errors and embeds all three extension products. The complete
-  repository policy wall passes 318 tests with one intentional skip, nine
-  release controls, all ten required contexts, trusted-main self-verification,
-  calibration, terminology, distribution provenance, private-data and
-  health-claims guards, complete localization, all 84 operations records, the
-  exact artifact gate, and diff hygiene.
+- exact current local verification: upstream Swift 94/94, Kotlin/JVM tests
+  plus `installDist`, 50/50 conformance, and the 68-file SDK repository gate
+  pass. The app artifact verifier and its 9-test adversarial suite, vendored
+  Swift package 16/16, real macOS app boundary 10/10, Android Full and Demo
+  integration 15/15 each, both Android instrumentation source graphs, and the
+  unsigned Release iPhone/Watch/complication/widget graph pass. Account and
+  ownership onboarding passes 13/13 on Apple and 14/14 in each Android
+  variant. The complete repository wall passes 318 tests with one intentional
+  skip, plus every direct release, trust, calibration, terminology,
+  provenance, privacy, claims, localization, operations, artifact, shell, and
+  diff gate.
 - required contexts: prior exact heads do not authorize this replacement. The
-  final PR `#29` source and documentation candidate must pass all ten exact-SHA
+  final PR `#30` source and documentation candidate must pass all ten exact-SHA
   hosted contexts before protected integration.
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`

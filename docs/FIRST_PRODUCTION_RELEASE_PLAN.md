@@ -325,7 +325,7 @@ v3 and makes report equivalence deterministic across Swift and Kotlin,
 including exact per-stream semantics, UTF-8 byte semantics, and explicit
 live-operation allowlists.
 Current protected `main` is
-`38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`. The app integration candidate
+`b027cbd9702936d4903f3293ca605650cdf5c413`. The app integration candidate
 consumes the deterministic export from that protected revision through a
 digest-pinned, supplier-artifact-free boundary. The repository is temporarily
 public as of 2026-09-22; D-056 still requires private visibility before

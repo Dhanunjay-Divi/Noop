@@ -712,6 +712,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_INPUT)
         }
 
+        val liveWasActive = liveActive
         invalidateAuthenticatedSession(
             if (category == BandFailureCategory.SECURITY_FAILURE) {
                 BandSessionState.SECURITY_FAILURE
@@ -720,11 +721,24 @@ class BandSessionMachine(
             },
         )
         diagnostics.record(
-            BandDiagnosticEvent(
-                BandDiagnosticKind.AUTHENTICATION,
-                BandDiagnosticOutcome.REJECTED,
-                failureCategory = category,
-            ),
+            buildList {
+                if (liveWasActive) {
+                    add(
+                        BandDiagnosticEvent(
+                            BandDiagnosticKind.LIVE,
+                            BandDiagnosticOutcome.INTERRUPTED,
+                            failureCategory = category,
+                        ),
+                    )
+                }
+                add(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.AUTHENTICATION,
+                        BandDiagnosticOutcome.REJECTED,
+                        failureCategory = category,
+                    ),
+                )
+            },
         )
     }
 

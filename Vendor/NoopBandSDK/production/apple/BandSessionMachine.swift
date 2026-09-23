@@ -623,6 +623,24 @@ public actor BandSessionMachine {
                 countBucket: BandCountBucket(count: report.capabilities.count)
             )
         )
+        let capabilityProgressRemainsCurrent =
+            state == .ready || state == .liveCollecting
+                || activeOperation != nil
+        guard generation == token.generation,
+              activeConnectionToken == token,
+              self.identity == identity,
+              capabilityReport == report,
+              capabilityProgressRemainsCurrent
+        else {
+            await diagnostics.record(
+                BandDiagnosticEvent(
+                    kind: .capability,
+                    outcome: .stale,
+                    failureCategory: .staleCallback
+                )
+            )
+            throw BandFailureCategory.staleCallback
+        }
     }
 
     public func cancelCapabilities(
@@ -762,17 +780,33 @@ public actor BandSessionMachine {
             throw BandFailureCategory.invalidInput
         }
 
+        let liveWasActive = liveActive
         invalidateAuthenticatedSession(
             nextState: category == .securityFailure
                 ? .securityFailure
                 : .rejected
         )
         await diagnostics.record(
-            BandDiagnosticEvent(
-                kind: .authentication,
-                outcome: .rejected,
-                failureCategory: category
-            )
+            (liveWasActive
+                ? [
+                    BandDiagnosticEvent(
+                        kind: .live,
+                        outcome: .interrupted,
+                        failureCategory: category
+                    ),
+                    BandDiagnosticEvent(
+                        kind: .authentication,
+                        outcome: .rejected,
+                        failureCategory: category
+                    ),
+                ]
+                : [
+                    BandDiagnosticEvent(
+                        kind: .authentication,
+                        outcome: .rejected,
+                        failureCategory: category
+                    ),
+                ])
         )
     }
 

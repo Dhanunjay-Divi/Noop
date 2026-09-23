@@ -5,7 +5,7 @@
     "customer": 814,
     "fixture": 5596,
     "generated": 21,
-    "historical": 3181,
+    "historical": 3184,
     "import": 871,
     "persisted": 669
   },
@@ -36093,17 +36093,18 @@
     {
       "category": "historical",
       "lineNumbers": [
-        117,
-        165,
-        186,
-        330,
-        462
+        116,
+        164,
+        185,
+        329,
+        461,
+        524
       ],
-      "occurrenceCount": 5,
+      "occurrenceCount": 6,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "e7c9c52106d6c40907d1f650db0aff5b9dff30e47524b160e2823e92dde9edd1",
+      "sha256": "cfea4fc60bcefe256b828df479e75bd2d6e2df06f77058f01842c307e47bf32c",
       "tokenCounts": {
-        "whoop": 2,
+        "whoop": 3,
         "whoopstore": 3
       }
     },
@@ -36417,23 +36418,25 @@
     {
       "category": "historical",
       "lineNumbers": [
-        38,
-        49,
-        70,
-        256,
-        354,
-        737,
+        39,
+        50,
+        71,
+        257,
+        355,
         738,
-        749,
-        952,
-        968
+        739,
+        750,
+        948,
+        964,
+        978,
+        1009
       ],
-      "occurrenceCount": 10,
+      "occurrenceCount": 12,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
-      "sha256": "bd3215257952c06c736a423b662bd56c5373885475772a104f2f092170e4d7b6",
+      "sha256": "abd35e8a68d9a7e39e102073d0076688547b90dccee1c1e5a7f3d7e5b4351215",
       "tokenCounts": {
-        "whoop": 9,
-        "whoop-default": 1
+        "whoop": 10,
+        "whoop-default": 2
       }
     },
     {
@@ -38685,7 +38688,7 @@
       }
     }
   ],
-  "occurrenceCount": 17874,
+  "occurrenceCount": 17877,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }
