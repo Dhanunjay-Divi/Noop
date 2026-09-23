@@ -5,7 +5,7 @@
     "customer": 814,
     "fixture": 5596,
     "generated": 21,
-    "historical": 3180,
+    "historical": 3181,
     "import": 871,
     "persisted": 669
   },
@@ -35281,10 +35281,10 @@
         181,
         181,
         181,
-        642,
-        649,
-        649,
-        650
+        643,
+        650,
+        650,
+        651
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -35922,14 +35922,14 @@
         565,
         594,
         596,
-        1056,
-        1056,
-        1122,
-        1143,
-        1178,
-        1239,
-        1239,
-        1275
+        1059,
+        1059,
+        1125,
+        1146,
+        1181,
+        1242,
+        1242,
+        1278
       ],
       "occurrenceCount": 33,
       "path": "docs/handoff/NOOP-SDK-WRAPPER-INTEGRATION.md",
@@ -36093,11 +36093,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        112,
-        160,
-        181,
-        325,
-        457
+        117,
+        165,
+        186,
+        330,
+        462
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36417,21 +36417,22 @@
     {
       "category": "historical",
       "lineNumbers": [
-        35,
-        46,
-        67,
-        253,
-        351,
-        734,
-        735,
-        746,
-        946
+        38,
+        49,
+        70,
+        256,
+        354,
+        737,
+        738,
+        749,
+        952,
+        968
       ],
-      "occurrenceCount": 9,
+      "occurrenceCount": 10,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
-      "sha256": "5153bd0d8cdf7b9807dece9840f95d097ce354f5f60a00f2ce3e6272c3b8b3c6",
+      "sha256": "bd3215257952c06c736a423b662bd56c5373885475772a104f2f092170e4d7b6",
       "tokenCounts": {
-        "whoop": 8,
+        "whoop": 9,
         "whoop-default": 1
       }
     },
@@ -38684,7 +38685,7 @@
       }
     }
   ],
-  "occurrenceCount": 17873,
+  "occurrenceCount": 17874,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

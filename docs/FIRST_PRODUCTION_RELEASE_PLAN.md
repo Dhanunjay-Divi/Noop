@@ -320,9 +320,10 @@ mutate the session before the outer collection snapshot is validated.
 PR `#28` completes the supplier-neutral lifecycle chronology, bounded
 diagnostic compatibility, Swift actor-reentrancy, firmware disconnect
 classification, and JVM source/binary compatibility closeout.
-PR `#29` makes capability-report equivalence deterministic across Swift and
-Kotlin, including exact UTF-8 byte semantics and explicit live-operation
-allowlists.
+PR `#29` advances the accepted supplier-neutral capability contract to schema
+v3 and makes report equivalence deterministic across Swift and Kotlin,
+including exact per-stream semantics, UTF-8 byte semantics, and explicit
+live-operation allowlists.
 Current protected `main` is
 `38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`. The app integration candidate
 consumes the deterministic export from that protected revision through a

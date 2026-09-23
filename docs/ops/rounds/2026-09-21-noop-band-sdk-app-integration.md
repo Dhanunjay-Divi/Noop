@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `SDK PR #29 local pre-push walls green; exact-head hosted checks pending`
+- State: `PR #17 e12b71fb pushed; final documentation review remediation pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
@@ -22,10 +22,13 @@
   `#17` closeout candidate.
 - Pre-remediation PR `#17` evidence commit:
   `78eba788b337c3472d32f8bd789965f84ef67b8a`
+- Final runtime and SDK-repin candidate:
+  `e12b71fb55d620a642ef340c4503b4b15970091c`
 - Record commit or PR: app PR `#17`; SDK PR `#29` upstream merge
   `38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`. The final app source,
-  documentation, replacement exact-SHA hosted verification, applicable thread
-  resolution, and protected integration remain.
+  runtime verification, and source review are complete. A narrow
+  documentation-only replacement, replacement exact-SHA hosted verification,
+  applicable thread resolution, and protected integration remain.
 
 ## Objective
 
@@ -794,11 +797,14 @@ Success means:
 - Branch and remote state: PR `#17` is open from the dedicated branch.
   SDK PR `#29` is merged at
   `38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`. The consolidated SDK source
-  and documentation replacement are carried by its final app candidate.
-  Remote head `a54be2ae` passed every applicable hosted context except the
-  now-corrected Recovery chart interaction case. The local remediation still
-  requires one exact commit/push, replacement hosted checks, matching review,
-  applicable thread resolution, and protected integration.
+  and app integration are carried by candidate `e12b71fb`. That exact head
+  reached 30 successful hosted checks with four intentional skips and both
+  Apple jobs still running before final review found two documentation-only
+  mismatches: D-056 named a superseded SDK revision and the supplier handoff
+  called schema v2 current although the accepted contract is v3. Runtime
+  source is unchanged. The narrow documentation replacement, replacement
+  hosted checks, matching review, applicable thread resolution, and protected
+  integration remain.
 - Repository visibility verified on 2026-09-22:
   `Dhanunjay-Divi/Noop` and `Dhanunjay-Divi/NoopBandSDK` both report `PUBLIC`
   with default branch `main`. D-056 still requires the SDK repository to be
@@ -833,8 +839,8 @@ Success means:
 
 ## Next round
 
-1. Commit and push the Recovery chart interaction remediation without changing
-   the validated SDK runtime contract.
+1. Commit and push the narrow D-056 and capability-schema documentation
+   correction without changing the validated SDK runtime contract.
 2. Require every exact-SHA protected context and matching review on that
    candidate, then resolve only threads proven fixed by matching evidence.
 3. Merge normally, verify protected `main`, and remove exact round-owned logs,
@@ -932,12 +938,12 @@ Success means:
 - The complete exact-current repository wall passes 318 tests with one
   intentional Safety smoke skip, nine release controls, all ten required
   contexts, trusted-main self-verification, calibration parity, a reviewed
-  terminology inventory with 17,873 occurrences across 1,588 groups and zero
+  terminology inventory with 17,874 occurrences across 1,588 groups and zero
   forbidden mappings, distribution provenance, private-data and health-claims
   guards, complete localization, all 84 operations records, the exact
   artifact verifier and its 9-test adversarial suite, and diff hygiene. The
   reviewed inventory SHA-256 is
-  `8987d82ed8cef6f94851c4f5c021afa44bb9e9c133fe0a0c67c6bc2df6a840d8`.
+  `8aefcbcdf6f9c10b36ebe8a6146cdec3f8b4299738f3297872b71967d9555cf8`.
 - The first repository-wall command selected Xcode's bundled Python 3.9 from
   a login shell. It executed 302 tests and then reported two import errors for
   Python 3.11+ standard-library APIs. Repeating the unchanged wall with the
@@ -947,3 +953,17 @@ Success means:
   factory remains disabled; no simulator/build result proves supplier BLE,
   background execution, disconnected history, haptics, battery, or
   physiological accuracy.
+
+## September 23 final exact-head documentation review
+
+- PR `#17` candidate `e12b71fb55d620a642ef340c4503b4b15970091c`
+  reached 30 successful hosted checks with four intentional skips while its
+  macOS and iOS jobs were still running.
+- Exact-head automated review found no new runtime defect. It identified two
+  durable-record mismatches: D-056 still named a superseded SDK revision, and
+  the supplier handoff described schema v2 as current although the integrated
+  validators and JSON contract require schema v3.
+- The correction updates D-056 to SDK PR `#29` merge `38cf7de3`, documents
+  schema v3 lane semantics and live-operation concurrency, and aligns the
+  release plan/checklist. Runtime source, WHOOP routing, supplier-default-off
+  behavior, and all physical gates are unchanged.

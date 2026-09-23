@@ -297,7 +297,7 @@ position without changing its ID. This inbox intentionally starts empty.
   per-band operation queue; implement an explicit durable collector-handoff
   protocol before allowing another supported phone to collect.
 - [ ] SDK-010 [ENG] Complete the canonical versioned protocol and capability
-  schema. Supplier-neutral capability schema v2 is implemented; exact
+  schema. Supplier-neutral capability schema v3 is implemented; exact
   supplier-approved protocol, firmware, command, and calibration truth remains
   gated on the dossier and physical acceptance.
 - [ ] SDK-020 [ENG] Create synthetic golden, malformed, replay, duplicate, and

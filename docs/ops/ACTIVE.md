@@ -30,8 +30,13 @@ Last updated: **2026-09-23**
   complication, and widget products. The complete repository wall passes 318
   tests with one intentional skip plus every direct release, trust,
   calibration, terminology, provenance, privacy, claims, localization,
-  operations, artifact, and diff gate. Hosted exact-head checks remain
-  pending.
+  operations, artifact, and diff gate. PR `#17` exact remote head
+  `e12b71fb55d620a642ef340c4503b4b15970091c` reached 30 successful hosted
+  checks with four intentional skips and both Apple jobs still running before
+  final review identified two documentation-only contract mismatches. The
+  runtime candidate remains unchanged; a narrow documentation replacement,
+  replacement exact-head checks, protected integration, and protected-main
+  verification remain pending.
   Historical PR `#27` app evidence remains: the artifact verifier and its
   9-test adversarial suite passed; the vendored Swift package passed 16/16
   across all 46 scenarios plus the app-repository actor-suspension regression;
@@ -501,9 +506,11 @@ Resume from:
   calibration, distribution/private-data/health-claim guards, all 84
   operations records, complete supported-language catalog coverage,
   shell/workflow lint, Python compilation, and diff hygiene. The terminology
-  snapshot records 17,873 occurrences across 1,588 groups with zero forbidden
-  mappings and digest `8987d82ed8cef6f94851c4f5c021afa44bb9e9c133fe0a0c67c6bc2df6a840d8`.
-  One consolidated commit/push and exact-head hosted verification remain.
+  snapshot records 17,874 occurrences across 1,588 groups with zero forbidden
+  mappings and digest `8aefcbcdf6f9c10b36ebe8a6146cdec3f8b4299738f3297872b71967d9555cf8`.
+  Candidate `e12b71fb` is pushed. Final review found stale D-056 and capability
+  schema wording only; the narrow documentation correction and replacement
+  exact-head hosted verification remain.
 - SDK PR `#29` is now consumed at
   `38cf7de3b1c92dd30dad343af2adfa2cb61dea2e`. Two clean exports are
   byte-identical with manifest SHA-256
@@ -511,4 +518,6 @@ Resume from:
   The vendored tree is byte-identical to the clean export. Exact artifact,
   Swift, macOS boundary, Android Full/Demo, Android instrumentation-source,
   and iOS/Watch/widget verification pass. The complete repository wall also
-  passes; one consolidated push and hosted exact-head verification remain.
+  passes. Candidate `e12b71fb` is pushed; the final documentation-only
+  correction, replacement hosted exact-head verification, protected
+  integration, and protected-main verification remain.

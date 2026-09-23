@@ -776,11 +776,14 @@ The first accepted session for each hardware/firmware pair persists:
 - timestamp, quality, and calibration semantics; and
 - incompatibility or degradation state.
 
-Capability schema v2 treats live and stored-history support as independent.
-A stream advertised only in `historyStreams` does not authorize live delivery,
-and a stream advertised only in `liveStreams` does not authorize history
-offload. Schema v1 reports fail closed at this boundary; they are not silently
-expanded into both lanes.
+Capability schema v3 treats live and stored-history support as independent,
+binds every lane/stream pair to its negotiated unit, cadence, quality,
+timestamp, parser, and calibration semantics, and declares which bounded
+operation classes may run while live collection is active. A stream advertised
+only in `historyStreams` does not authorize live delivery, and a stream
+advertised only in `liveStreams` does not authorize history offload. Schema v1
+and v2 reports are superseded and fail closed at this boundary; they are not
+silently expanded or upgraded.
 
 When circular history has overwritten data, an overflow chunk carries both the
 retained device-time range and the first lost device-time range. Those ranges
