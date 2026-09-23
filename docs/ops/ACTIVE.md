@@ -17,25 +17,30 @@ Last updated: **2026-09-23**
   exports from that exact merge were byte-identical. The ten-file export
   manifest SHA-256 is
   `9dfb7a97036b05218d7aee08db3a855920d626cfef7ef33a21f0c5f190787a3f`;
-  the app-owned Swift wrapper SHA-256 is
-  `2a7c74944a381684d6a75fcedc615542bd10035a192c3e8b1caa5eaca39aa95c`.
+  the SDK artifact test-wrapper SHA-256 is
+  `c604c471f003068586d50a1964db112aa26b14ea1416750eb919244ebf253722`.
   PR `#25` requires exact connection and live-operation tokens, returns fresh
   reconnect authority, and preserves Swift actor authority across diagnostic
   suspension. Upstream Swift passes 69/69, Kotlin/JVM plus `installDist`
   passes, shared conformance passes 45/45, and the 61-file repository gate
   passes. The app repin is locally verified: the exact artifact verifier and
-  its 9-test adversarial suite pass; the vendored Swift package passes 15/15
-  across all 45 scenarios; the real macOS boundary passes 10/10; the Android
+  its 9-test adversarial suite pass; the vendored Swift package passes 16/16
+  across all 45 scenarios plus the app-repository actor-suspension regression;
+  the real macOS boundary passes 10/10; the Android
   Full boundary passes and Demo plus Full/Demo instrumentation sources compile;
   and the unsigned Release iPhone graph embeds and validates Watch,
   complications, and widgets. The complete Tools wall passes 318/318 with one
   intentional skip; required-CI verifies ten contexts and trusted-main
   self-verification passes. The terminology inventory remains semantically
   unchanged at 17,872 occurrences across 1,588 groups with zero forbidden
-  mappings. Generated SwiftPM and 8.3 GiB of round-owned Apple DerivedData were
-  removed after evidence capture. Commit, one consolidated push, replacement
-  exact-SHA hosted checks, protected merge/main verification, and supplier
-  physical-device validation remain.
+  mappings. Independent exact-diff review found no P0/P1; all three P2
+  test/evidence findings are corrected locally. Generated SwiftPM and 8.3 GiB
+  of round-owned Apple DerivedData were removed after evidence capture. The
+  implementation is committed locally at
+  `1be4062c054b210187f4c48f2ab99dd59873923e`. Final review/evidence changes
+  are verified locally. One consolidated push, replacement exact-SHA hosted
+  checks, protected merge/main verification, and supplier physical-device
+  validation remain.
 - Current state: `NoopBandSDK` PR `#24` is merged normally at
   `f20f4ed552328a64a8a598aaac72befa1d481262`. Two independent app-source
   exports from that exact merge are byte-identical. The app's exact ten-file

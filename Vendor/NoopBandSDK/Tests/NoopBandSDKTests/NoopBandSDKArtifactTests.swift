@@ -1,5 +1,6 @@
 import XCTest
 @_exported import NoopBandSDK
+@testable import NoopBandSDK
 
 final class NoopBandSDKArtifactTests: XCTestCase {
     private struct ConformanceContract: Decodable {
@@ -213,6 +214,38 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         } catch let error as BandFailureCategory {
             XCTAssertEqual(error, .staleCallback)
         }
+    }
+
+    func testReconnectTokenSurvivesLiveStartDuringDiagnostics() async throws {
+        let diagnostics = BandDiagnosticsRecorder(capacity: 64)
+        let (session, generation, _) = try await readySession(
+            diagnostics: diagnostics
+        )
+        let reconnectGeneration = try await session.interruptForReconnect(
+            callbackGeneration: generation
+        )
+        await diagnostics.requestNextRecordSuspensionForTesting()
+
+        let resumeTask = Task {
+            try await session.resumeAfterReconnect(
+                callbackGeneration: reconnectGeneration
+            )
+        }
+        await diagnostics.waitForRecordSuspensionForTesting()
+        _ = try await session.beginLive()
+        let liveSnapshot = await session.snapshot()
+        XCTAssertEqual(liveSnapshot.state, .liveCollecting)
+
+        await diagnostics.resumeSuspendedRecordForTesting()
+        let reconnectToken = try await resumeTask.value
+        try await session.failEstablishedSession(
+            .authentication,
+            token: reconnectToken,
+            callbackGeneration: reconnectGeneration
+        )
+        let rejected = await session.snapshot()
+        XCTAssertEqual(rejected.state, .rejected)
+        XCTAssertFalse(rejected.liveActive)
     }
 
     func testDiscoveryGenerationAndTerminalPathsRemainRetryable() async throws {

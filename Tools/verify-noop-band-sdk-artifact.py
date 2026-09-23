@@ -21,7 +21,7 @@ EXPORT_DIRECTORIES = ("contract", "production", "test-support")
 EXPECTED_INTEGRATION_FILES = {
     "Package.swift": "16fdef516135df5e4df8dd6c260e910e41ca3a6091e9151ba058e8ce2da95053",
     "Tests/NoopBandSDKTests/NoopBandSDKArtifactTests.swift": (
-        "2a7c74944a381684d6a75fcedc615542bd10035a192c3e8b1caa5eaca39aa95c"
+        "c604c471f003068586d50a1964db112aa26b14ea1416750eb919244ebf253722"
     ),
 }
 EXPECTED_TOP_LEVEL_ENTRIES = {

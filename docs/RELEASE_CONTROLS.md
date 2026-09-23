@@ -114,19 +114,23 @@ local evidence are:
 
 - upstream SDK source: `NoopBandSDK` PR `#25` protected merge
   `650c89e45ca2ab28e14e76e447a7026479e42b4e`
-- application implementation: `<pending local PR 25 repin commit>`
+- application implementation:
+  `1be4062c054b210187f4c48f2ab99dd59873923e`
 - pull request: `#17`; prior exact head:
   `fed31b0f164675b0d1f6ef5a7724262afb23f0af`
-- local verification: artifact verifier 9/9, vendored Swift 15/15 across 45
-  automated scenarios, macOS boundary 10/10, Android boundary, Android
+- local verification: artifact verifier 9/9, vendored Swift 16/16 across 45
+  automated scenarios plus the Swift actor-suspension regression, macOS
+  boundary 10/10, Android boundary, Android
   Demo and both instrumentation source graphs, and unsigned Release
   iOS/Watch/Watch-complications/widget graph all pass. The reviewed terminology
   snapshot, complete 318-test Tools wall, exact 204-test release matrix, and
-  direct policy gates also pass. Independent exact-diff review found no runtime
-  or release-control defect; its only P2 was stale status wording corrected in
-  these authoritative records.
+  direct policy gates also pass. Independent exact-diff review found no P0/P1.
+  Its three P2 findings were corrected by adding the app-repository Swift
+  suspension regression, distinguishing PR `#24` historical evidence from the
+  current candidate, and labeling the exact test-wrapper digest accurately.
 - required contexts: all ten stable contexts completed successfully on the
-  prior exact head on 2026-09-22; the uncommitted PR `#25` repin has no
+  prior exact head on 2026-09-22; the locally committed, unpushed PR `#25`
+  repin has no
   replacement candidate SHA or hosted evidence
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`
