@@ -50,14 +50,15 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         report: BandCapabilityReport? = nil
     ) async throws -> (BandSessionMachine, UInt64) {
         let session = NoopBandSDKBoundary.makeSession(diagnostics: diagnostics)
-        let generation = try await session.beginScan()
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
         let connectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "synthetic-candidate",
                 compatible: true,
                 identifyEligible: true
             ),
-            callbackGeneration: generation
+            callbackGeneration: scanToken
         )
         let identity = BandIdentity(
             sourceIdentity: "synthetic-source",
@@ -92,11 +93,11 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testPinnedAppBoundaryCreatesNeutralSession() async throws {
         XCTAssertEqual(
             NoopBandSDKBoundary.pinnedSourceRevision,
-            "a9d3f1a2a55b5436bf1b65b0299a27667241afa4"
+            "f20f4ed552328a64a8a598aaac72befa1d481262"
         )
         let session = NoopBandSDKBoundary.makeSession()
-        let generation = try await session.beginScan()
-        XCTAssertEqual(generation, 1)
+        let scanToken = try await session.beginScan()
+        XCTAssertEqual(scanToken.generation, 1)
         let snapshot = await session.snapshot()
         XCTAssertEqual(snapshot.state, .scanning)
     }
@@ -113,14 +114,15 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             diagnostics: diagnostics,
             historyCheckpoint: checkpoint
         )
-        let generation = try await session.beginScan()
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
         let connectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "synthetic-candidate",
                 compatible: true,
                 identifyEligible: true
             ),
-            callbackGeneration: generation
+            callbackGeneration: scanToken
         )
         let identity = BandIdentity(
             sourceIdentity: checkpoint.sourceIdentity,
@@ -179,14 +181,15 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     func testOperationFailureAdvancesGenerationAndRecordsBoundedCategory() async throws {
         let diagnostics = BandDiagnosticsRecorder()
         let session = NoopBandSDKBoundary.makeSession(diagnostics: diagnostics)
-        let generation = try await session.beginScan()
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
         let connectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "synthetic-candidate",
                 compatible: true,
                 identifyEligible: true
             ),
-            callbackGeneration: generation
+            callbackGeneration: scanToken
         )
         let identity = BandIdentity(
             sourceIdentity: "synthetic-source",
@@ -517,7 +520,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         let (historySession, historyGeneration) =
             try await readyHistorySession(report: historyOnly)
         do {
-            try await historySession.beginLive()
+            _ = try await historySession.beginLive()
             XCTFail("A history-only stream must not authorize live delivery")
         } catch let failure as BandFailureCategory {
             XCTAssertEqual(failure, .unsupported)
@@ -567,19 +570,12 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             callbackGeneration: liveGeneration
         )
         try await liveSession.stopLive()
-        let unsupportedHistory =
-            try await liveSession.beginOperation(.history)
         do {
-            _ = try await liveSession.stageHistoryChunk(
-                historyChunk(),
-                token: unsupportedHistory,
-                callbackGeneration: liveGeneration
-            )
-            XCTFail("A live-only stream must not authorize history delivery")
+            _ = try await liveSession.beginOperation(.history)
+            XCTFail("A live-only stream must not authorize history collection")
         } catch let failure as BandFailureCategory {
             XCTAssertEqual(failure, .unsupported)
         }
-        try await liveSession.cancelOperation(unsupportedHistory)
     }
 
     func testOverflowRangesSurviveThePublicDurableReceiptBoundary()

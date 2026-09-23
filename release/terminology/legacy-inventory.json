@@ -15751,8 +15751,8 @@
       "category": "historical",
       "lineNumbers": [
         4,
-        628,
-        679
+        624,
+        675
       ],
       "occurrenceCount": 3,
       "path": "StrandTests/NoopBandSDKIntegrationTests.swift",
@@ -15764,8 +15764,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        672,
-        703
+        668,
+        699
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/NoopBandSDKIntegrationTests.swift",
@@ -35281,10 +35281,10 @@
         181,
         181,
         181,
-        614,
-        621,
-        621,
-        622
+        625,
+        632,
+        632,
+        633
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -35467,8 +35467,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        250,
-        251
+        251,
+        252
       ],
       "occurrenceCount": 2,
       "path": "docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md",
@@ -35696,8 +35696,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        322,
-        325
+        324,
+        327
       ],
       "occurrenceCount": 2,
       "path": "docs/RELEASE_CONTROLS.md",
@@ -36093,11 +36093,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        57,
-        105,
-        126,
-        270,
-        390
+        65,
+        113,
+        134,
+        278,
+        398
       ],
       "occurrenceCount": 5,
       "path": "docs/ops/ACTIVE.md",
@@ -36417,18 +36417,18 @@
     {
       "category": "historical",
       "lineNumbers": [
-        31,
-        42,
-        63,
-        153,
-        251,
-        513,
-        514,
-        525
+        33,
+        44,
+        65,
+        155,
+        253,
+        611,
+        612,
+        623
       ],
       "occurrenceCount": 8,
       "path": "docs/ops/rounds/2026-09-21-noop-band-sdk-app-integration.md",
-      "sha256": "fe0e3a38948e2d8045878dc8794c153ddfbe06acf2c98213d3cb6f46e72ca5e2",
+      "sha256": "d6997cdc31c50f8c022f1e263225c6bc9c2499189567ebd48a48021db00bab85",
       "tokenCounts": {
         "whoop": 7,
         "whoop-default": 1
@@ -36464,7 +36464,7 @@
       ],
       "occurrenceCount": 7,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "e0c5bdbc58157284457e7b28f39267ee6528c648d4fb7ce3c486658953e9753c",
+      "sha256": "fd99d8bb03910ce0355069f97e1187db08c7f3674f41fbccc0c3e4751d0e4098",
       "tokenCounts": {
         "whoop": 4,
         "whoopstore": 3

@@ -192,6 +192,32 @@ public struct BandPairingCandidate: Equatable, Sendable {
     }
 }
 
+public struct BandScanToken:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
+    let sessionNonce: UUID
+    public let generation: UInt64
+
+    init(sessionNonce: UUID, generation: UInt64) {
+        self.sessionNonce = sessionNonce
+        self.generation = generation
+    }
+
+    public var description: String { "BandScanToken" }
+    public var debugDescription: String { "BandScanToken" }
+    public var customMirror: Mirror {
+        Mirror(
+            self,
+            children: ["redacted": "BandScanToken"],
+            displayStyle: .struct
+        )
+    }
+}
+
 public struct BandConnectionToken: Equatable, Sendable {
     let sessionNonce: UUID
     let generation: UInt64

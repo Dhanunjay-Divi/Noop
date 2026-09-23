@@ -30,6 +30,7 @@ class BandSessionMachine(
     private var nextLiveReceiptSequence = 0L
     private var nextHistoryReceiptSequence = 0L
     private var activeOperation: BandOperationToken? = null
+    private var activeScanToken: BandScanToken? = null
     private var activeConnectionToken: BandConnectionToken? = null
     private var activeLiveToken: BandLiveToken? = null
     private var liveActive = false
@@ -70,7 +71,7 @@ class BandSessionMachine(
     }
 
     @Synchronized
-    fun beginScan(): Long {
+    fun beginScan(): BandScanToken {
         ensureNotClosed()
         if (hasPendingPersistence) {
             diagnostics.record(
@@ -102,16 +103,21 @@ class BandSessionMachine(
                 BandDiagnosticOutcome.BEGAN,
             ),
         )
-        return generation
+        val token = BandScanToken(
+            sessionNonce = sessionNonce,
+            generation = generation,
+        )
+        activeScanToken = token
+        return token
     }
 
     @Synchronized
     fun selectCandidate(
         candidate: BandPairingCandidate,
-        callbackGeneration: Long,
+        callbackGeneration: BandScanToken,
     ): BandConnectionToken {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateScanToken(
             callbackGeneration,
             BandDiagnosticKind.DISCOVERY,
         )
@@ -148,6 +154,7 @@ class BandSessionMachine(
             sequence = nextConnectionSequence,
             candidateHandle = candidate.handle,
         )
+        activeScanToken = null
         activeConnectionToken = token
         state = BandSessionState.CANDIDATE_SELECTED
         diagnostics.record(
@@ -161,9 +168,9 @@ class BandSessionMachine(
     }
 
     @Synchronized
-    fun cancelScan(callbackGeneration: Long) {
+    fun cancelScan(callbackGeneration: BandScanToken) {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateScanToken(
             callbackGeneration,
             BandDiagnosticKind.DISCOVERY,
         )
@@ -178,6 +185,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_STATE)
         }
         generation += 1
+        activeScanToken = null
         activeConnectionToken = null
         state = BandSessionState.IDLE
         diagnostics.record(
@@ -191,10 +199,10 @@ class BandSessionMachine(
     @Synchronized
     fun failScan(
         category: BandFailureCategory,
-        callbackGeneration: Long,
+        callbackGeneration: BandScanToken,
     ) {
         ensureNotClosed()
-        validateCallbackGeneration(
+        validateScanToken(
             callbackGeneration,
             BandDiagnosticKind.DISCOVERY,
         )
@@ -219,6 +227,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_INPUT)
         }
         generation += 1
+        activeScanToken = null
         activeConnectionToken = null
         state = BandSessionState.IDLE
         diagnostics.record(
@@ -969,7 +978,10 @@ class BandSessionMachine(
         }
         if (
             operationClass == BandOperationClass.HISTORY &&
-            (capabilityReport?.historyDays ?: 0) <= 0
+            (
+                (capabilityReport?.historyDays ?: 0) <= 0 ||
+                    capabilityReport?.historyStreams.isNullOrEmpty()
+            )
         ) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -1713,6 +1725,26 @@ class BandSessionMachine(
         diagnosticKind: BandDiagnosticKind,
     ) {
         if (callbackGeneration != generation) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    diagnosticKind,
+                    BandDiagnosticOutcome.STALE,
+                    failureCategory = BandFailureCategory.STALE_CALLBACK,
+                ),
+            )
+            fail(BandFailureCategory.STALE_CALLBACK)
+        }
+    }
+
+    private fun validateScanToken(
+        token: BandScanToken,
+        diagnosticKind: BandDiagnosticKind,
+    ) {
+        if (
+            token.sessionNonce != sessionNonce ||
+            token.generation != generation ||
+            token !== activeScanToken
+        ) {
             diagnostics.record(
                 BandDiagnosticEvent(
                     diagnosticKind,

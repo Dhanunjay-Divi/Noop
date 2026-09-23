@@ -112,19 +112,21 @@ open gates.
 For the active SDK app-integration branch, the recorded inputs and current
 local evidence are:
 
-- upstream SDK source: `NoopBandSDK` PR `#21` protected merge
-  `a9d3f1a2a55b5436bf1b65b0299a27667241afa4`
-- application implementation:
-  `5da77db5d929df7cbce73d7e64a8eab935cc0103`
+- upstream SDK source: `NoopBandSDK` PR `#24` protected merge
+  `f20f4ed552328a64a8a598aaac72befa1d481262`
+- application implementation: `<pending local commit>`
 - pull request: `#17`; prior exact head:
-  `78eba788b337c3472d32f8bd789965f84ef67b8a`
-- local verification: artifact verifier 9/9, vendored Swift 15/15 across 40
-  automated scenarios, macOS boundary 10/10, Android boundary 12/12, Android
+  `fed31b0f164675b0d1f6ef5a7724262afb23f0af`
+- local verification: artifact verifier 9/9, vendored Swift 15/15 across 42
+  automated scenarios, macOS boundary 10/10, Android boundary 13/13, Android
   Demo and both instrumentation source graphs, and unsigned Release
-  iOS/Watch/widget graph all pass; the complete Tools wall passes 318/318 with
-  one intentional skip and the exact release matrix passes 204/204
+  iOS/Watch/Watch-complications/widget graph all pass. The reviewed terminology
+  snapshot, complete 318-test Tools wall, exact 204-test release matrix, and
+  direct policy gates also pass. Independent exact-diff review found no runtime
+  or release-control defect; its only P2 was stale status wording corrected in
+  these authoritative records.
 - required contexts: all ten stable contexts completed successfully on the
-  prior exact head on 2026-09-22; the uncommitted PR `#21` repin has no
+  prior exact head on 2026-09-22; the uncommitted PR `#24` repin has no
   replacement candidate SHA or hosted evidence
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`

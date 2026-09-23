@@ -295,8 +295,19 @@ input still fails capability negotiation when negotiation is active.
 PR `#21` preserves a restored checkpoint across an intervening source and
 adds generation-fenced graceful disconnect with bounded cancellation evidence
 for active live and history operations.
+PR `#22` binds discovery callbacks to an opaque scan-session token, bounds
+hostile Kotlin set traversal by iterator steps, and rejects history operations
+unless retention and at least one history stream were negotiated.
+PR `#23` closes the Kotlin source-integration authority gap by retaining the
+exact scan token issued by `beginScan` and requiring reference identity for
+every scan callback, even when app and SDK sources compile in one Gradle
+module.
+PR `#24` makes Swift consume the active scan token before
+candidate-selection diagnostics suspend. Delayed select, cancel, and failure
+callbacks therefore fail with the same `staleCallback` category as Kotlin
+while the accepted connection remains usable.
 Current protected `main` is
-`a9d3f1a2a55b5436bf1b65b0299a27667241afa4`. The app integration candidate
+`f20f4ed552328a64a8a598aaac72befa1d481262`. The app integration candidate
 consumes the deterministic export from that protected revision through a
 digest-pinned, supplier-artifact-free boundary. The repository is temporarily
 public as of 2026-09-22; D-056 still requires private visibility before

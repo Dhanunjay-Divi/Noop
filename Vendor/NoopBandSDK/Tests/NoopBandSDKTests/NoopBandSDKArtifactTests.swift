@@ -68,14 +68,15 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder()
     ) async throws -> (BandSessionMachine, UInt64, BandConnectionToken) {
         let session = BandSessionMachine(diagnostics: diagnostics)
-        let generation = try await session.beginScan()
+        let scanToken = try await session.beginScan()
+        let generation = scanToken.generation
         let connectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "synthetic-candidate",
                 compatible: true,
                 identifyEligible: true
             ),
-            callbackGeneration: generation
+            callbackGeneration: scanToken
         )
         try await completeConnection(
             session,
@@ -217,17 +218,18 @@ final class NoopBandSDKArtifactTests: XCTestCase {
     func testDiscoveryGenerationAndTerminalPathsRemainRetryable() async throws {
         let diagnostics = BandDiagnosticsRecorder()
         let session = BandSessionMachine(diagnostics: diagnostics)
-        let firstGeneration = try await session.beginScan()
+        let firstScanToken = try await session.beginScan()
+        let firstGeneration = firstScanToken.generation
 
         try await session.failScan(
             .timeout,
-            callbackGeneration: firstGeneration
+            callbackGeneration: firstScanToken
         )
         var snapshot = await session.snapshot()
         XCTAssertEqual(snapshot.state, .idle)
         XCTAssertEqual(snapshot.generation, firstGeneration + 1)
 
-        let retryGeneration = try await session.beginScan()
+        let retryScanToken = try await session.beginScan()
         do {
             _ = try await session.selectCandidate(
                 BandPairingCandidate(
@@ -235,7 +237,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                     compatible: true,
                     identifyEligible: true
                 ),
-                callbackGeneration: firstGeneration
+                callbackGeneration: firstScanToken
             )
             XCTFail("A candidate from an earlier scan must be rejected")
         } catch let error as BandFailureCategory {
@@ -250,15 +252,15 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                 compatible: true,
                 identifyEligible: true
             ),
-            callbackGeneration: retryGeneration
+            callbackGeneration: retryScanToken
         )
         snapshot = await session.snapshot()
         XCTAssertEqual(snapshot.state, .candidateSelected)
 
         let cancelled = BandSessionMachine(diagnostics: diagnostics)
-        let cancelledGeneration = try await cancelled.beginScan()
+        let cancelledScanToken = try await cancelled.beginScan()
         try await cancelled.cancelScan(
-            callbackGeneration: cancelledGeneration
+            callbackGeneration: cancelledScanToken
         )
         snapshot = await cancelled.snapshot()
         XCTAssertEqual(snapshot.state, .idle)
@@ -526,14 +528,15 @@ final class NoopBandSDKArtifactTests: XCTestCase {
             XCTAssertEqual(error, .invalidState)
         }
 
-        let postFirmwareGeneration = try await session.beginScan()
+        let postFirmwareScanToken = try await session.beginScan()
+        let postFirmwareGeneration = postFirmwareScanToken.generation
         let postFirmwareConnectionToken = try await session.selectCandidate(
             BandPairingCandidate(
                 handle: "post-firmware-candidate",
                 compatible: true,
                 identifyEligible: true
             ),
-            callbackGeneration: postFirmwareGeneration
+            callbackGeneration: postFirmwareScanToken
         )
         let updatedIdentity = BandIdentity(
             sourceIdentity: identity.sourceIdentity,
@@ -711,7 +714,8 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         _ = try await session.interruptForReconnect(
             callbackGeneration: generation
         )
-        let scanGeneration = try await session.beginScan()
+        let recoveryScanToken = try await session.beginScan()
+        let scanGeneration = recoveryScanToken.generation
         do {
             try await session.resumeAfterReconnect(
                 callbackGeneration: scanGeneration
@@ -731,7 +735,7 @@ final class NoopBandSDKArtifactTests: XCTestCase {
                 compatible: true,
                 identifyEligible: true
             ),
-            callbackGeneration: scanGeneration
+            callbackGeneration: recoveryScanToken
         )
         try await completeConnection(
             session,

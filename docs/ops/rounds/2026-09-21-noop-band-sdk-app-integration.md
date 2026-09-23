@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `implementation 5da77db5 and final local policy wall green; evidence commit and push pending`
+- State: `SDK PR 24 app repin local gates and independent review green; commit and push pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
@@ -14,14 +14,16 @@
   `9dd4698c647bb44286a895abad23084d6ea57431`
 - Final SDK PR `#21` app repin implementation commit:
   `5da77db5d929df7cbce73d7e64a8eab935cc0103`
+- Final SDK PR `#22`, `#23`, and `#24` app repin implementation commit:
+  `<pending local commit>`
 - Pre-remediation PR `#17` evidence commit:
   `78eba788b337c3472d32f8bd789965f84ef67b8a`
 - Record commit or PR: PR `#17`; SDK upstream merge
-  `a9d3f1a2a55b5436bf1b65b0299a27667241afa4`, application implementation
-  `5da77db5d929df7cbce73d7e64a8eab935cc0103`, and pre-remediation exact head
-  `78eba788b337c3472d32f8bd789965f84ef67b8a`. All ten required hosted contexts
-  passed on that prior head. The PR `#21` app repin is locally verified and
-  requires a final evidence commit plus replacement exact-SHA verification.
+  `f20f4ed552328a64a8a598aaac72befa1d481262`, pending application commit, and
+  prior exact head `fed31b0f164675b0d1f6ef5a7724262afb23f0af`. All ten required hosted
+  contexts passed on that prior head. The PR `#24` app repin passes the local
+  platform, policy, and independent-review gates; commit, push, and replacement
+  exact-SHA hosted verification remain.
 
 ## Objective
 
@@ -360,6 +362,99 @@ Success means:
   instrumentation sources compile; and the real macOS app target passes 10/10.
   The unsigned Release iOS simulator graph builds with `NOOPWatch.app` and
   `NOOPWidgets.appex` embedded.
+- SDK PR `#22` merged normally at
+  `1883ad33e840b1aa8b257f4f601f299f883678ca` after final independent review.
+  It binds discovery callbacks to an opaque session-and-generation token,
+  bounds hostile Kotlin set traversal by iterator steps, and rejects history
+  operations unless retention and at least one history stream were
+  negotiated. Upstream verification passed Swift 62/62, Kotlin/JVM tests plus
+  `installDist`, shared conformance 41/41, the clean 58-file repository gate,
+  JSON/diff/secret checks, and a corrected-diff review with no remaining P0-P2
+  findings.
+- Exported SDK `1883ad33` twice as complete source trees. Both 58-file exports
+  contain no Git metadata and produce identical archive SHA-256
+  `5eb3e30db3282907ba26432254d3bd2053349f645fe28549097ade3efb72ed8f`.
+  The app's exact ten-file source export has manifest SHA-256
+  `7299684795367f8e20c488777626ff5988abae72d2264d8ac081878d909ae973`;
+  its app-owned Swift wrapper is independently pinned at
+  `b24cb6b607710f867d96a3ea5d3c794b3d7517073b995acadfe750153d24d815`.
+- Repinned app PR `#17` to SDK `1883ad33`. The artifact verifier and adversarial
+  suite pass 9/9; the vendored Swift package passes 15/15 across all 41
+  automated scenarios; Android Full integration passes 12/12; Android Demo and
+  Full/Demo instrumentation sources compile; and the real macOS app target
+  passes 10/10. The unsigned Release iOS simulator graph builds with
+  `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex`
+  embedded and validated. All heavy builds ran sequentially through the
+  bounded runner. The 3.2 GiB macOS DerivedData, 5.1 GiB iOS DerivedData, and
+  generated vendored SwiftPM caches were exact-deleted after evidence capture,
+  restoring 22 GiB free disk; the artifact verifier passes after cleanup.
+- Reviewed and repinned the current terminology inventory after the SDK and
+  operations changes. It retains 17,872 occurrences across 1,588
+  path/category groups, byte-identical category totals and active allowlist,
+  and zero forbidden mappings; only eight historical/persisted line-position
+  records changed. The current complete Tools wall passes 318/318 with one
+  intentional skip, and the exact protected release matrix passes 204/204.
+  Direct release controls, all ten required contexts, trusted self-check,
+  artifact verification, calibration parity, terminology, distribution
+  provenance, private-data, health-claims, localization, operations records,
+  shell syntax/ShellCheck, Actionlint, Python compilation, and diff hygiene all
+  pass.
+- SDK PR `#23` merged normally at
+  `1b4c614e180a58130c3d1c5967841affe754242d`. The correction retains the exact
+  Kotlin scan token issued by `beginScan`, requires reference identity for
+  every scan callback in addition to nonce and generation, and clears the
+  retained authority after selection or a terminal scan path. This closes the
+  same-module authority gap created by compiling the source-only SDK directly
+  into the Android app module.
+- Upstream PR `#23` verification passed Swift 62/62, complete Kotlin/JVM tests
+  plus `installDist`, shared conformance 41/41, the clean 59-file repository
+  gate, and diff hygiene.
+- Exported the exact PR `#23` app-source artifact twice. The two ten-file
+  source exports are byte-identical and have manifest SHA-256
+  `539ec7ab2c5906ea64ab98bb1be0f5ceb70f5ffbf9e0911b5b91cbf0b56e7bc7`.
+  The app-owned Swift wrapper remains independently pinned at
+  `b24cb6b607710f867d96a3ea5d3c794b3d7517073b995acadfe750153d24d815`.
+- Repinned app PR `#17` to SDK `1b4c614e`. The artifact verifier and
+  adversarial suite pass 9/9; the vendored Swift package passes 15/15 across
+  all 41 automated scenarios; Android Full integration passes 13/13, including
+  a direct same-module forged-token rejection while the issued token remains
+  usable; Android Demo and Full/Demo instrumentation sources compile; and the
+  real macOS app target passes 10/10. The unsigned Release iOS simulator graph
+  builds with `NOOPWatch.app`, `NOOPWatchComplications.appex`, and
+  `NOOPWidgets.appex` embedded and validated. Heavy builds ran sequentially
+  through the bounded runner. The vendored SwiftPM cache was exact-deleted and
+  the artifact verifier passes again; isolated Apple DerivedData cleanup
+  remains pending after the final evidence refresh.
+- SDK PR `#24` merged normally at
+  `f20f4ed552328a64a8a598aaac72befa1d481262` after corrected-diff review.
+  Apple now consumes the exact issued scan token before the candidate-selection
+  diagnostics suspension. A deterministic actor test pauses at that suspension
+  boundary, proves late selection, cancellation, and failure callbacks are
+  already stale before the original selection returns, then proves the issued
+  connection token remains usable. Upstream verification passed Swift 64/64,
+  Kotlin/JVM 71/71 plus `installDist`, shared conformance 42/42, the clean
+  60-file repository gate, JSON/diff hygiene, and final review with no remaining
+  P0-P2 finding. The first focused compile exposed a test-only nonexistent
+  `.connection` diagnostic category; correcting it to the real `.timeout`
+  category made the focused and complete suites pass without changing runtime
+  behavior.
+- Exported the exact SDK PR `#24` app-source artifact twice from independent
+  clean exports. The ten source/contract files are byte-identical, contain no
+  Git metadata or supplier payloads, and have manifest SHA-256
+  `4801fd6ecbece36df653d91e0d0d975f2fea4c1f7d59f81c69a8b08d90f1b9cf`.
+  The app-owned Swift wrapper is independently pinned at
+  `31705f1ceb14f0d6eac686083b7012ff685403b0e01435c472e5a8fce3ca7943`.
+- Repinned app PR `#17` to SDK `f20f4ed`. The artifact verifier and adversarial
+  suite pass 9/9; the vendored Swift package passes 15/15 across all 42
+  automated scenarios without compiler warnings; Android Full integration
+  passes 13/13 and Demo plus Full/Demo instrumentation sources compile; and the
+  real macOS app target passes 10/10. The unsigned Release iOS simulator graph
+  builds with zero compiler warnings/errors and embeds `NOOPWatch.app`,
+  `NOOPWatchComplications.appex`, and `NOOPWidgets.appex`. Heavy platform
+  builds ran sequentially through the bounded runner. The 3.2 GiB macOS
+  DerivedData, 5.1 GiB iOS DerivedData, and generated vendored SwiftPM caches
+  were exact-deleted after evidence capture, restoring approximately 22 GiB
+  free disk; artifact verification remains green after cleanup.
 - Committed the source-only app repin at
   `5da77db5d929df7cbce73d7e64a8eab935cc0103`. The reviewed terminology
   inventory records 17,872 occurrences across 1,588 groups with zero forbidden
@@ -509,16 +604,19 @@ Success means:
 | Protected SDK history observability | PR `#9` merged normally at `55fdd891`; Swift 33/33, Kotlin 36/36 plus distribution, 33 shared scenarios, and the 44-file repository gate passed | Invalid history tokens fail closed with bounded typed diagnostics on both SDK implementations | Supplier API compatibility or physical behavior |
 | Prior PR `#19` independent clean exports | Two exact-merge exports were byte-identical; manifest SHA-256 `ed338ff50e026ce2f9326ef6b1aa854766c33f7f886177da21c776f6196719fc`, aggregate eleven-file export-tree SHA-256 `ed08f2caf393649d9af106e8c8dd4878aab544e3e166231806da91634b0082fa`, and app wrapper digest `6fbf791315521028e9cafd2407f21bfe559912631ef5c716f77dbf35b3f92ce3` | The prior vendored artifact was deterministic and traceable to SDK PR `#19` merge `823930fa` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Prior PR `#20` independent clean exports | Two exact-merge exports were byte-identical; manifest SHA-256 `150c3d918b23a27fb49da701e0021f718fba6b2384943fa736cade08ac4b5c53`, aggregate eleven-file export-tree SHA-256 `6f7707d3c45089ac2b3be3a0bce9991bb0a03cb12d168f4b27523934d44e4ef7`, and unchanged app wrapper digest `6fbf791315521028e9cafd2407f21bfe559912631ef5c716f77dbf35b3f92ce3` | The prior vendored artifact was deterministic and traceable to SDK PR `#20` merge `9bc2eedc` | Legal rights or supplier provenance beyond the absent-artifact declaration |
-| Current PR `#21` independent clean exports | Two exact-merge source trees are byte-identical; manifest SHA-256 `72e9a93f35f01ad9aa8d1975ec4a1beb76d96cf068e27553a08c0ceef01cc571`, eleven regular files, no symlinks, and unchanged app wrapper digest `6fbf791315521028e9cafd2407f21bfe559912631ef5c716f77dbf35b3f92ce3` | The current vendored artifact is deterministic and traceable to SDK PR `#21` merge `a9d3f1a2` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Prior PR `#21` independent clean exports | Two exact-merge source trees are byte-identical; manifest SHA-256 `72e9a93f35f01ad9aa8d1975ec4a1beb76d96cf068e27553a08c0ceef01cc571`, eleven regular files, no symlinks, and app wrapper digest `6fbf791315521028e9cafd2407f21bfe559912631ef5c716f77dbf35b3f92ce3` | The prior vendored artifact was deterministic and traceable to SDK PR `#21` merge `a9d3f1a2` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Prior PR `#22` independent clean exports | Two complete 58-file source exports contain no Git metadata and have identical archive SHA-256 `5eb3e30db3282907ba26432254d3bd2053349f645fe28549097ade3efb72ed8f`; the exact app export manifest SHA-256 is `7299684795367f8e20c488777626ff5988abae72d2264d8ac081878d909ae973`, with app wrapper digest `b24cb6b607710f867d96a3ea5d3c794b3d7517073b995acadfe750153d24d815` | The prior vendored artifact was deterministic and traceable to SDK PR `#22` merge `1883ad33` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Prior PR `#23` independent app exports | Two exact-merge ten-file app-source exports are byte-identical; manifest SHA-256 is `539ec7ab2c5906ea64ab98bb1be0f5ceb70f5ffbf9e0911b5b91cbf0b56e7bc7`, with app wrapper digest `b24cb6b607710f867d96a3ea5d3c794b3d7517073b995acadfe750153d24d815` | The prior vendored artifact was deterministic and traceable to SDK PR `#23` merge `1b4c614e` | Legal rights or supplier provenance beyond the absent-artifact declaration |
+| Current PR `#24` independent app exports | Two independent exact-merge ten-file app-source exports are byte-identical; manifest SHA-256 is `4801fd6ecbece36df653d91e0d0d975f2fea4c1f7d59f81c69a8b08d90f1b9cf`, app wrapper digest is `31705f1ceb14f0d6eac686083b7012ff685403b0e01435c472e5a8fce3ca7943`, supplier payloads are absent, and both normalized file-digest lists match | The current vendored artifact is deterministic and traceable to SDK PR `#24` merge `f20f4ed` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Prior protected SDK app repin | SDK Swift 55/55, Kotlin 63/63 plus distribution, shared conformance 38/38, and clean repository gate 56/56 passed before PR `#20` merged. The 9-test app verifier suite, vendored Swift 15/15, macOS app boundary 10/10, and Android Full app boundary 12/12 pass; Demo plus Full and Demo instrumentation sources compile. | Ordered conformance publication and the ready-session late-callback correction were consumed while WHOOP remained the default comparison transport and the first-party factory remained disabled | Supplier transport invocation or any physical-device behavior |
-| Current protected SDK app repin | SDK Swift 60/60, Kotlin 66/66 plus distribution, shared conformance 40/40, and clean repository gate 57/57 passed before PR `#21` merged. The app verifier passes 9/9, vendored Swift passes 15/15 across 40 automated scenarios, macOS app boundary passes 10/10, Android Full app boundary passes 12/12, and Demo plus both instrumentation sources compile. | Restored-checkpoint and graceful-disconnect hardening are consumed while WHOOP remains the default comparison transport and the first-party factory remains disabled | Supplier transport invocation or any physical-device behavior |
+| Current protected SDK app repin | SDK Swift 64/64, Kotlin/JVM 71/71 plus `installDist`, shared conformance 42/42, and the clean 60-file repository gate passed before PR `#24` merged. The app verifier passes 9/9, vendored Swift passes 15/15 across 42 automated scenarios, macOS app boundary passes 10/10, Android Full app boundary passes 13/13, and Demo plus both instrumentation sources compile. | Exact scan authority is consumed before the Apple selection suspension and exact issued-token identity protects Kotlin callbacks in the app's same compilation module, while WHOOP remains the default comparison transport and the first-party factory remains disabled | Supplier transport invocation or any physical-device behavior |
 | Artifact verifier plus unit tests | Exact ten-file export passed; all 9 verifier tests passed, including one positive case and eight adversarial cases covering symlink roots and ancestors, content drift, unexpected files, supplier payloads, and an unmanifested Git mode-160000 entry; no supplier artifacts found | Source, manifest, package wrapper, exact tracked-file layout, complete path/tree symlink policy, Git-index regular-file policy, and no-binary policy are pinned | Physical compatibility |
 | Independent app review remediation | A real temporary-Git protected-base test rejects both source tampering and an unmanifested gitlink. Apple passes 10/10 and Android passes 11/11 after adding same-session stop/restart live-token replay regressions; the current token still persists and closes normally. | Candidate-controlled filesystem shape cannot hide a tracked gitlink, and a prior live operation cannot authorize a restarted collection within the same authenticated session | Supplier callback behavior, BLE transport timing, or physical persistence |
 | Protected-base artifact authority | 70 focused release/trust tests pass; a copied artifact with a one-line source mutation is rejected by the protected verifier; non-owner `unittest` and standard-library shadow paths are rejected; the complete Tools wall passes 315 tests with one intentional skip | Future non-owner candidates cannot satisfy the SDK artifact gate by shadowing Python's test runner or by relying only on candidate-controlled tests | Owner authorization, hosted exact-SHA execution, supplier rights, or physical compatibility |
-| Exact Swift package workflow order | The vendored package completed 15/15 tests and checked all 40 automated exported scenarios; the exact artifact verifier then passed after generated package output was removed | SwiftPM agrees with the shared contract without leaving generated files inside the verified source tree | App lifecycle, BLE, background, or hardware behavior |
-| Android Full app boundary | `NoopBandSdkIntegrationTest` passed 12/12 under `testFullDebugUnitTest`, including all 40 automated shared scenarios, pending live-persistence fencing, same-session live-token replay rejection, malformed delayed capability rejection without ready-state loss, restored-checkpoint source mismatch, graceful disconnect, independent live/history stream authorization, overflow range receipt propagation, mutable stream-set snapshotting, retained-history bounds, terminal firmware failure, and all four invalid-history-token combinations | Full-variant app source and capability schema v2 compile and pass through the public application boundary | Instrumentation runtime, OEM background, BLE, or physical behavior |
-| Android Demo and instrumentation compile | `compileDemoDebugKotlin`, `compileFullDebugAndroidTestKotlin`, and `compileDemoDebugAndroidTestKotlin` passed against the PR `#21` export at `a9d3f1a2` | Both Android source graphs consume capability schema v2 successfully | Runtime rendering, managed-device execution, or physical behavior |
-| Current iOS, Watch, and widget graph | The unsigned Release `NOOPiOS` simulator graph built successfully under the bounded runner against SDK `a9d3f1a2`. Xcode embedded and validated `NOOP.app/Watch/NOOPWatch.app` and `NOOP.app/PlugIns/NOOPWidgets.appex`. | The current PR `#21` SDK repin compiles across the iPhone, Watch, complication, and widget graph | Signed-device runtime, BLE, background execution, notification delivery, or physical behavior |
+| Exact Swift package workflow order | The vendored package completed 15/15 tests and checked all 42 automated exported scenarios without compiler warnings; the exact artifact verifier then passed after generated package output was removed | SwiftPM agrees with the shared contract without leaving generated files inside the verified source tree | App lifecycle, BLE, background, or hardware behavior |
+| Android Full app boundary | `NoopBandSdkIntegrationTest` passed 13/13 under `testFullDebugUnitTest`, including all 42 automated shared scenarios, direct same-module forged scan-token rejection with continued issued-token usability, early unsupported-history rejection, pending live-persistence fencing, same-session live-token replay rejection, malformed delayed capability rejection without ready-state loss, restored-checkpoint source mismatch, graceful disconnect, independent live/history stream authorization, overflow range receipt propagation, mutable stream-set snapshotting, retained-history bounds, terminal firmware failure, and all four invalid-history-token combinations | Full-variant app source and capability schema v2 compile and pass through the public application boundary | Instrumentation runtime, OEM background, BLE, or physical behavior |
+| Android Demo and instrumentation compile | `compileDemoDebugKotlin`, `compileFullDebugAndroidTestKotlin`, and `compileDemoDebugAndroidTestKotlin` passed against the PR `#24` export at `f20f4ed` | Both Android source graphs consume capability schema v2 successfully | Runtime rendering, managed-device execution, or physical behavior |
+| Current iOS, Watch, and widget graph | The unsigned Release `NOOPiOS` simulator graph built successfully with zero compiler warnings/errors under the bounded runner against SDK `f20f4ed`. Xcode embedded and validated `NOOP.app/Watch/NOOPWatch.app`, its `NOOPWatchComplications.appex`, and `NOOP.app/PlugIns/NOOPWidgets.appex`. | The current PR `#24` SDK repin compiles across the iPhone, Watch, complication, and widget graph | Signed-device runtime, BLE, background execution, notification delivery, or physical behavior |
 | Android memory classification | One combined Full+Demo invocation let the two Compose compilers overlap and exhausted a 3 GiB Kotlin heap; separate no-daemon, no-parallel, two-worker commands passed | The failure was an avoidable verification command shape, not a source failure; variant walls must stay sequential | Every future machine configuration |
 | Hosted production-shell diagnosis | PR `#17` run `35643099439` started 120 API 35 tests; 116 passed, two App Report cases timed out before their explanation sheets appeared, and the retained result protobuf contained real test cases | The red required context was a real cross-test state leak, not a zero-test infrastructure event or SDK behavior failure | The local correction until rerun on the protected exact SHA |
 | Feedback cleanup instrumentation regression | Full instrumentation source compiled, then six continuity cases followed by all eight AppShell cases passed 14/14 on `pixel2Api35` in 1m42s | Terminal WorkInfo alone cannot release teardown; actual worker/probe unwind and a stable no-new-generation snapshot are required before deleting the exact record, and the report sheets still open afterward | The complete hosted production-shell wall or physical Android behavior |
@@ -533,7 +631,8 @@ Success means:
 | Exact-head hosted resource classification | PR `#17` head `fbbb3b50` passed every hosted context except Review Sample. Run `35681052415` attempt 1 job `106598021250` and attempt 2 job `106602308597` each completed APK preparation, entered the emulator task, then stopped with bounded `resource-memory`; retained evidence has no test-result records. | The two failures are reproducible hosted-runner resource stops, not hidden assertions or product failures | A passing Review Sample execution on the replacement profile |
 | Review Sample resource-profile correction | Both Review Sample commands now use `-Xmx1536m` and `--max-workers=1`, matching the hosted-green production shell. Focused workflow/retry tests pass 66/66, Actionlint passes, and the complete bounded Tools wall passes 312/312 with one intentional skip. | Required workflow structure, fail-closed classification, memory envelope, and repository controls agree locally | Hosted exact-SHA execution of the corrected Review Sample job |
 | Hosted iOS app-report transition correction | Exact head `fe800e8e` passed every hosted context except the iOS production shell, whose only failing case retained the review page's scroll offset after entering the queued phase. The corrected exact case passes 1/1 in 16.098 seconds on a fresh iPhone 17e simulator and 1/1 in 15.841 seconds after the iOS 17 callback correction. The complete unsigned iOS graph then builds with zero source warnings and embeds Watch/widgets. | The queued status, cancellation control, and sheet dismissal are visibly reachable after a long review-page scroll; the correction compiles in the real iOS UI-test graph without a deprecated source API | Replacement exact-SHA hosted execution, physical shake behavior, or production feedback delivery |
-| Final local trust wall | The reviewed terminology snapshot is repinned with unchanged semantic totals and zero forbidden mappings. Focused artifact, required-CI, terminology, and trust tests pass 78/78; the exact-current complete Tools wall passes 318/318 with one intentional skip; and the exact release-workflow matrix passes 204/204. The pinned-Python direct wall passes 9/9 release controls, ten required contexts, trusted self-check, exact artifact verification, calibration, terminology, legal/distribution/private-data, health claims, localization, operations validation, shell/workflow lint, Python compilation, and diff hygiene. | The SDK repin, verifier hardening, same-session token regressions, and reviewed evidence satisfy the repository-controlled release, privacy, claims, metric, localization, and artifact contracts | Hosted exact-SHA enforcement, physical accessibility, or protected integration |
+| Current local trust wall | The reviewed PR `#24` terminology snapshot retains 17,872 occurrences across 1,588 groups, unchanged category totals and active allowlist, and zero forbidden mappings. The complete Tools wall passes 318/318 with one intentional skip; the exact release-workflow matrix passes 204/204; and the direct wall passes 9/9 release controls, all ten required contexts, trusted self-check, exact artifact verification, calibration parity for 12 metrics/3 revisions/13 thresholds/16 guards, legal/distribution/private-data, eight health-claims tests plus a 1,299-file scan, localization, 83 operations records, shell/workflow lint, Python compilation, and diff hygiene. | The current PR `#24` candidate satisfies the repository-controlled release, privacy, claims, metric, localization, artifact, and process-cleanup contracts locally; independent exact-diff review is green | Hosted exact-SHA enforcement, physical accessibility, or protected integration |
+| Final policy rerun classification | The first complete wall failed only three fail-closed trust checks because the newly reviewed terminology inventory had not yet been repinned in `RELEASE_SOURCE_DIGESTS`. The final post-review snapshot SHA-256 is `f5969d93f3d074dedd764e6eb8034827254bd3ff7799fcf105440514abeeeacf`; repinning the reviewed snapshot made the focused trust matrix and unchanged complete wall pass. One manual trusted-self invocation omitted the required `--root .` argument and exited on CLI usage; the correctly shaped invocation passed. | The protected evidence ratchet rejects an updated snapshot until its exact digest is reviewed, and the final commands execute rather than silently skip | Hosted exact-SHA execution or physical behavior |
 
 ## Physical device and deployment
 
@@ -569,14 +668,13 @@ Success means:
   repin, verifier hardening, callback correction, and reviewed evidence
   `e6a932f5accd8c2fc01b1778b52c3d7c0d1b932f`.
 - Branch and remote state: PR `#17` is open from the dedicated branch. Remote
-  head `78eba788b337c3472d32f8bd789965f84ef67b8a` passed all ten required
-  hosted contexts. Its exact-head review opened one release-control
-  documentation P2 and four SDK implementation findings. SDK PR `#21` is
-  merged at `a9d3f1a2a55b5436bf1b65b0299a27667241afa4`; the app repin is committed
-  at `5da77db5d929df7cbce73d7e64a8eab935cc0103` and the current release-control
-  alignment is locally green. A final evidence commit, replacement candidate
-  SHA, exact-SHA checks, matching review, and applicable thread resolution
-  remain.
+  head `fed31b0f164675b0d1f6ef5a7724262afb23f0af` passed all ten required
+  hosted contexts. Its exact-head review findings were corrected upstream and
+  merged through SDK PR `#24` at
+  `f20f4ed552328a64a8a598aaac72befa1d481262`. The app repin is locally
+  modified and current platform, policy, and independent-review evidence is
+  green. Final commit, replacement candidate SHA, exact-SHA checks, matching
+  hosted review, and applicable thread resolution remain.
 - Repository visibility verified on 2026-09-22:
   `Dhanunjay-Divi/Noop` and `Dhanunjay-Divi/NoopBandSDK` both report `PUBLIC`
   with default branch `main`. D-056 still requires the SDK repository to be
@@ -599,20 +697,19 @@ Success means:
   proves teardown remains blocked until actual unwind. The final
   protected-base release-control correction passes 78 focused tests, the
   complete 318-test Tools wall with one intentional skip, and the exact
-  204-test release matrix on the prior PR `#20` candidate. The PR `#21` repin
-  passes its artifact, Swift, macOS, Android, iOS/Watch/widget, 318-test Tools,
-  204-test release-matrix, terminology, and direct local policy gates.
-  Pre-remediation PR `#17` head `78eba788` passed all ten required hosted
-  contexts, but that does not prove implementation `5da77db5` or the pending
-  evidence commit.
+  204-test release matrix. The PR `#24` repin passes its artifact, Swift,
+  macOS, Android, iOS/Watch/complications/widget, terminology, complete Tools,
+  release-matrix, direct policy gates, and independent exact-diff review.
+  Commit/push and replacement exact-SHA hosted verification remain.
+  Prior PR `#17` head `fed31b0f` passed all ten required hosted
+  contexts, but that does not prove the uncommitted PR `#24` repin.
 - A source-only adapter seam cannot establish that a supplier band is
   compatible or flashable.
 
 ## Next round
 
-1. Regenerate and review the terminology inventory after this exact evidence
-   update, rerun the focused and complete release-control walls, and create the
-   final evidence commit.
+1. Resolve any independent exact-diff finding and create the final evidence
+   commit without changing the validated runtime contract.
 2. Push implementation and evidence commits together once.
 3. Require every exact-SHA protected context and matching review on that
    candidate, then resolve only threads proven fixed by matching evidence.

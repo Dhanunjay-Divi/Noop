@@ -12,12 +12,13 @@ Last updated: **2026-09-23**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: `NoopBandSDK` PR `#21` is merged normally at
-  `a9d3f1a2a55b5436bf1b65b0299a27667241afa4`. Two independent exact-merge exports
-  are byte-identical; the ten-file export manifest SHA-256 is
-  `72e9a93f35f01ad9aa8d1975ec4a1beb76d96cf068e27553a08c0ceef01cc571`.
+- Current state: `NoopBandSDK` PR `#24` is merged normally at
+  `f20f4ed552328a64a8a598aaac72befa1d481262`. Two independent app-source
+  exports from that exact merge are byte-identical. The app's exact ten-file
+  source export has manifest SHA-256
+  `4801fd6ecbece36df653d91e0d0d975f2fea4c1f7d59f81c69a8b08d90f1b9cf`.
   The app-owned Swift wrapper SHA-256 is
-  `6fbf791315521028e9cafd2407f21bfe559912631ef5c716f77dbf35b3f92ce3`.
+  `31705f1ceb14f0d6eac686083b7012ff685403b0e01435c472e5a8fce3ca7943`.
   Export-manifest schema `1` remains unchanged; the negotiated capability
   contract is schema `2`. It separates `liveStreams` from `historyStreams`,
   binds retained and first-lost overflow ranges through acceptance and durable
@@ -30,30 +31,37 @@ Last updated: **2026-09-23**
   without moving a ready Kotlin session to `INCOMPATIBLE`. PR `#21` preserves
   a restored history checkpoint across an intervening source, adds a
   generation-fenced graceful disconnect to idle, and cancels active live and
-  history work through bounded typed diagnostics. Upstream verification passed
-  Swift 60/60, Kotlin 66/66 plus `installDist`, shared conformance 40/40, and
-  the clean 57-file repository gate.
-  The app is now repinned locally to `a9d3f1a2`. The exact artifact verifier
+  history work through bounded typed diagnostics. PR `#22` binds discovery
+  callbacks to an opaque scan-session token, bounds hostile Kotlin set
+  traversal by iterator steps, and rejects history operations unless both
+  retention and a history stream were negotiated. PR `#23` closes the
+  same-module Kotlin authority gap by retaining the exact issued scan token and
+  requiring reference identity for scan callbacks. PR `#24` makes Swift consume
+  the active scan token before candidate-selection diagnostics suspend, so
+  late select, cancel, and failure callbacks match Kotlin's `staleCallback`
+  contract without invalidating the accepted connection. Upstream verification
+  passed Swift 64/64, Kotlin/JVM 71/71 plus `installDist`, shared conformance
+  42/42, and the clean 60-file repository gate.
+  The app is now repinned locally to `f20f4ed5`. The exact artifact verifier
   and its adversarial suite pass 9/9, the vendored Swift package passes 15/15
-  across all 40 automated scenarios, the real macOS app boundary passes 10/10,
-  and Android Full integration passes 12/12 after correcting its stale
-  38-scenario assertion. Android Demo plus Full and Demo instrumentation
-  sources compile. The unsigned Release iOS simulator graph builds and embeds
-  validated Watch and widget products. Heavy commands ran sequentially through
-  the bounded runner, and their isolated DerivedData and generated SwiftPM
-  caches were removed after evidence capture.
-  PR `#17` remote head `78eba788b337c3472d32f8bd789965f84ef67b8a`
+  across all 42 automated scenarios, the real macOS app boundary passes 10/10,
+  and Android Full integration passes 13/13, including a direct app-module
+  forged-token rejection while the issued token remains usable. Android Demo
+  plus Full and Demo instrumentation sources compile. The unsigned Release iOS
+  simulator graph builds and embeds validated Watch, Watch complications, and
+  widget products. Heavy commands ran sequentially through the bounded runner.
+  The generated vendored SwiftPM caches and 3.2 GiB/5.1 GiB isolated Apple
+  DerivedData were exact-deleted after evidence capture, restoring 22 GiB free
+  disk; the exact artifact verifier passes again.
+  PR `#17` remote head `fed31b0f164675b0d1f6ef5a7724262afb23f0af`
   remains the prior exact head with all ten required hosted contexts green.
-  The PR `#21` app repin implementation is committed locally at
-  `5da77db5d929df7cbce73d7e64a8eab935cc0103`. The reviewed terminology snapshot
-  records 17,872 occurrences across 1,588 groups with zero forbidden mappings
-  and a byte-identical active allowlist. The complete Tools wall passes 318/318
-  with one intentional skip, the exact protected release matrix passes
-  204/204, and direct release, trust, required-CI, calibration, claims,
-  localization, legal, private-data, operations, shell, action, Python, and
-  diff gates pass. A final evidence commit, one consolidated push, replacement
-  exact-SHA hosted checks, review resolution, protected merge/main
-  verification, and final cleanup remain.
+  The PR `#24` app repin is locally modified but not yet committed or pushed.
+  The reviewed terminology snapshot, complete 318-test Tools wall, exact
+  204-test release matrix, direct policy gates, and independent exact-diff
+  review are complete. The review's only P2 was stale status wording corrected
+  in the authoritative records. Final post-correction verification, commit,
+  one consolidated push, replacement exact-SHA hosted checks, protected
+  merge/main verification, and final cleanup remain.
   WHOOP remains the default independent test transport and the first-party
   source factory remains disabled. No supplier binary, firmware, real adapter,
   flasher, physical BLE evidence, background evidence, battery evidence,

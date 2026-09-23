@@ -198,6 +198,13 @@ data class BandPairingCandidate(
     }
 }
 
+class BandScanToken internal constructor(
+    internal val sessionNonce: UUID,
+    val generation: Long,
+) {
+    override fun toString(): String = "BandScanToken"
+}
+
 class BandConnectionToken internal constructor(
     internal val sessionNonce: UUID,
     internal val generation: Long,
@@ -505,12 +512,14 @@ private fun <T> Set<T>.boundedSnapshot(maximumSize: Int): Set<T> {
         fail(BandFailureCategory.INVALID_INPUT)
     }
     val snapshot = LinkedHashSet<T>(expectedSize)
+    var iteratorSteps = 0
     try {
         val iterator = iterator()
         while (iterator.hasNext()) {
-            if (snapshot.size == maximumSize) {
+            if (iteratorSteps >= maximumSize) {
                 fail(BandFailureCategory.INVALID_INPUT)
             }
+            iteratorSteps += 1
             snapshot += iterator.next()
         }
     } catch (error: BandException) {

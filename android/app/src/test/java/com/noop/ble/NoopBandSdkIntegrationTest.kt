@@ -21,6 +21,7 @@ import com.noop.bandsdk.BandSample
 import com.noop.bandsdk.BandSampleBatch
 import com.noop.bandsdk.BandSampleIdentity
 import com.noop.bandsdk.BandSampleQuality
+import com.noop.bandsdk.BandScanToken
 import com.noop.bandsdk.BandSessionMachine
 import com.noop.bandsdk.BandSessionState
 import com.noop.bandsdk.BandStreamKind
@@ -58,12 +59,38 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun appBoundaryCreatesPinnedNeutralSession() {
         assertEquals(
-            "a9d3f1a2a55b5436bf1b65b0299a27667241afa4",
+            "f20f4ed552328a64a8a598aaac72befa1d481262",
             NoopBandSdkBoundary.PINNED_SOURCE_REVISION,
         )
         val session = NoopBandSdkBoundary.newSession()
-        assertEquals(1L, session.beginScan())
+        assertEquals(1L, session.beginScan().generation)
         assertEquals(BandSessionState.SCANNING, session.snapshot().state)
+    }
+
+    @Test
+    fun appModuleCannotForgeScanCallbackAuthority() {
+        val session = NoopBandSdkBoundary.newSession()
+        val issuedToken = session.beginScan()
+        val forgedToken = BandScanToken(
+            sessionNonce = issuedToken.sessionNonce,
+            generation = issuedToken.generation,
+        )
+        val candidate = BandPairingCandidate(
+            handle = "synthetic-candidate",
+            compatible = true,
+            identifyEligible = true,
+        )
+
+        val forgedFailure = try {
+            session.selectCandidate(candidate, forgedToken)
+            null
+        } catch (error: BandException) {
+            error.category
+        }
+
+        assertEquals(BandFailureCategory.STALE_CALLBACK, forgedFailure)
+        session.selectCandidate(candidate, issuedToken)
+        assertEquals(BandSessionState.CANDIDATE_SELECTED, session.snapshot().state)
     }
 
     @Test
@@ -79,14 +106,15 @@ class NoopBandSdkIntegrationTest {
             diagnostics = diagnostics,
             historyCheckpoint = checkpoint,
         )
-        val generation = session.beginScan()
+        val scanToken = session.beginScan()
+        val generation = scanToken.generation
         val connectionToken = session.selectCandidate(
             BandPairingCandidate(
                 handle = "synthetic-candidate",
                 compatible = true,
                 identifyEligible = true,
             ),
-            generation,
+            scanToken,
         )
         val identity = BandIdentity(
             sourceIdentity = checkpoint.sourceIdentity,
@@ -140,14 +168,15 @@ class NoopBandSdkIntegrationTest {
     fun operationFailureAdvancesGenerationAndRecordsBoundedCategory() {
         val diagnostics = BandDiagnosticsRecorder()
         val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
-        val generation = session.beginScan()
+        val scanToken = session.beginScan()
+        val generation = scanToken.generation
         val connectionToken = session.selectCandidate(
             BandPairingCandidate(
                 handle = "synthetic-candidate",
                 compatible = true,
                 identifyEligible = true,
             ),
-            generation,
+            scanToken,
         )
         val identity = BandIdentity(
             sourceIdentity = "synthetic-source",
@@ -373,26 +402,13 @@ class NoopBandSdkIntegrationTest {
         )
         liveSession.stopLive()
 
-        val unsupportedHistoryToken =
-            liveSession.beginOperation(BandOperationClass.HISTORY)
         val historyFailure = try {
-            liveSession.stageHistoryChunk(
-                heartRateHistoryChunk(
-                    chunkIdentity = "live-only-chunk",
-                    nextCursor = "live-only-cursor",
-                    acknowledgementToken = "live-only-ack",
-                    sequence = 31,
-                    deviceTimeMilliseconds = 31_000,
-                ),
-                unsupportedHistoryToken,
-                liveGeneration,
-            )
+            liveSession.beginOperation(BandOperationClass.HISTORY)
             null
         } catch (error: BandException) {
             error.category
         }
         assertEquals(BandFailureCategory.UNSUPPORTED, historyFailure)
-        liveSession.cancelOperation(unsupportedHistoryToken)
     }
 
     @Test
@@ -637,14 +653,15 @@ class NoopBandSdkIntegrationTest {
     @Test
     fun capabilityAuthorizationUsesImmutableIdempotentSnapshot() {
         val session = NoopBandSdkBoundary.newSession()
-        val generation = session.beginScan()
+        val scanToken = session.beginScan()
+        val generation = scanToken.generation
         val connectionToken = session.selectCandidate(
             BandPairingCandidate(
                 handle = "synthetic-candidate",
                 compatible = true,
                 identifyEligible = true,
             ),
-            generation,
+            scanToken,
         )
         val identity = BandIdentity(
             sourceIdentity = "synthetic-source",
@@ -692,14 +709,15 @@ class NoopBandSdkIntegrationTest {
         malformedCapabilities.forEach { capabilities ->
             val diagnostics = BandDiagnosticsRecorder()
             val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
-            val generation = session.beginScan()
+            val scanToken = session.beginScan()
+            val generation = scanToken.generation
             val connectionToken = session.selectCandidate(
                 BandPairingCandidate(
                     handle = "synthetic-candidate",
                     compatible = true,
                     identifyEligible = true,
                 ),
-                generation,
+                scanToken,
             )
             val identity = BandIdentity(
                 sourceIdentity = "synthetic-source",
@@ -761,7 +779,7 @@ class NoopBandSdkIntegrationTest {
             .map { scenarios.getJSONObject(it) }
             .filter { it.getBoolean("automated") }
 
-        assertEquals(40, automated.size)
+        assertEquals(42, automated.size)
         assertEquals(
             automated.map { it.getString("id") },
             BandConformanceRunner.automatedScenarios,
@@ -817,14 +835,15 @@ class NoopBandSdkIntegrationTest {
             setOf(BandStreamKind.HEART_RATE),
     ): Pair<BandSessionMachine, Long> {
         val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
-        val generation = session.beginScan()
+        val scanToken = session.beginScan()
+        val generation = scanToken.generation
         val connectionToken = session.selectCandidate(
             BandPairingCandidate(
                 handle = "synthetic-candidate",
                 compatible = true,
                 identifyEligible = true,
             ),
-            generation,
+            scanToken,
         )
         val identity = BandIdentity(
             sourceIdentity = "synthetic-source",
@@ -905,14 +924,15 @@ class NoopBandSdkIntegrationTest {
         diagnostics: BandDiagnosticsRecorder = BandDiagnosticsRecorder(),
     ): Pair<BandSessionMachine, Long> {
         val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
-        val generation = session.beginScan()
+        val scanToken = session.beginScan()
+        val generation = scanToken.generation
         val connectionToken = session.selectCandidate(
             BandPairingCandidate(
                 handle = "synthetic-candidate",
                 compatible = true,
                 identifyEligible = true,
             ),
-            generation,
+            scanToken,
         )
         val identity = BandIdentity(
             sourceIdentity = "synthetic-source",
