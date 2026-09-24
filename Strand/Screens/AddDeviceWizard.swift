@@ -44,6 +44,7 @@ struct AddDeviceWizard: View {
         case miBand        // Xiaomi Mi Band (Huami; no-auth live HR path, honest message if auth needed)
         case garmin        // Garmin watch (standard Broadcast HR path + an enable hint)
         case oura          // Oura ring (factory-reset-and-adopt: NOOP installs its own key, becomes owner)
+        case veepoo        // Optional device-only supplier adapter, default-off
         var id: Self { self }
 
         var isWhoop: Bool { self == .whoop4 || self == .whoop5mg }
@@ -58,7 +59,7 @@ struct AddDeviceWizard: View {
         /// True for the EXPERIMENTAL tier (shown under a clearly-labelled "Experimental" heading).
         var isExperimental: Bool {
             switch self {
-            case .amazfit, .miBand, .garmin, .oura: return true
+            case .amazfit, .miBand, .garmin, .oura, .veepoo: return true
             default:                                return false
             }
         }
@@ -72,6 +73,7 @@ struct AddDeviceWizard: View {
             case .miBand:  return .miBand
             case .garmin:  return .garmin
             case .oura:    return .oura
+            case .veepoo:  return nil
             default:       return nil
             }
         }
@@ -145,6 +147,8 @@ struct AddDeviceWizard: View {
     /// its `@Published discovered` / `scanning` / `needsPairing` while scanning. The chosen ring is adopted
     /// for real on `finishAdd`, where the registered `PairedDevice` carries the ring generation.
     @State private var ouraScanner: OuraLiveSource?
+    @State private var veepooSession: VeepooBandPairingSession?
+    @State private var veepooCommitted = false
 
     /// - Parameter startAt: DEBUG-only deep-link into a specific (type, step) so a seeded simulator build
     ///   can screenshot one wizard step deterministically (e.g. the Oura onboarding gate) without tapping
@@ -199,7 +203,10 @@ struct AddDeviceWizard: View {
         .background(StrandPalette.surfaceBase)
         // Stop whichever scan is live whenever the sheet goes away (belt-and-braces alongside the
         // per-transition stops below) so neither central keeps scanning after dismiss.
-        .onDisappear { stopAllScans() }
+        .onDisappear {
+            stopAllScans()
+            if !veepooCommitted { veepooSession?.cancel() }
+        }
         // After adding, offer to make the new device active (generic non-Oura paths only).
         .alert("Make this your active device?",
                isPresented: $askMakeActive) {
@@ -336,6 +343,16 @@ struct AddDeviceWizard: View {
             typeRow(.oura, icon: "circle.circle",
                     title: String(localized: "Oura ring"),
                     subtitle: String(localized: "Take over your ring locally. Beta. This replaces the Oura app."))
+            if VeepooBandAdapterFactory.productionEnabled {
+                typeRow(
+                    .veepoo,
+                    icon: "waveform.path.ecg.rectangle",
+                    title: String(localized: "Compatible supplier band"),
+                    subtitle: String(
+                        localized: "Uses the printed band identifier and four-digit device password. Experimental."
+                    )
+                )
+            }
             typeRow(.amazfit, icon: "waveform.path.ecg.rectangle",
                     title: "Amazfit / Zepp",
                     subtitle: String(localized: "Incl. Helio. Live heart rate where the band exposes it. Help us test."))
@@ -492,6 +509,13 @@ struct AddDeviceWizard: View {
             ]
         case .garmin:
             return GarminBroadcast.broadcastHint
+        case .veepoo:
+            return [
+                String(localized: "Wake the band and close other apps currently connected to it."),
+                String(localized: "Choose one discovered candidate, then enter the identifier printed on that physical band."),
+                String(localized: "Only after the printed identifier matches will NOOP ask for the four-digit device password."),
+                String(localized: "The supplier password authorizes this Bluetooth transport only. It does not prove band ownership."),
+            ]
         case .oura:
             // The factory-reset-and-adopt checklist, shown only AFTER the irreversible-consent gate. NOOP
             // installs its own key on a reset ring and becomes its sole owner (clean-room facts, see
@@ -1028,6 +1052,7 @@ struct AddDeviceWizard: View {
         case .miBand:            return "waveform.path.ecg"
         case .garmin:            return "applewatch"
         case .oura:              return "circle.circle"
+        case .veepoo:            return "waveform.path.ecg.rectangle"
         }
     }
 
@@ -1070,6 +1095,12 @@ struct AddDeviceWizard: View {
                 } onRescan: {
                     startScan(for: type)
                 }
+            } else if type == .veepoo, let veepooSession {
+                VeepooPairingFace(
+                    session: veepooSession,
+                    nameDraft: $nameDraft,
+                    onAdd: finishVeepooAdd
+                )
             } else if let hrScanner {
                 // Heart-rate strap AND Garmin (Broadcast HR is the standard 0x180D path).
                 HRPickList(scanner: hrScanner) { strap in
@@ -1123,7 +1154,7 @@ struct AddDeviceWizard: View {
         case .hrStrap, .garmin:    pickedHuami = nil; pickedMachine = nil; pickedOura = nil
         case .gymEquipment:        pickedStrap = nil; pickedHuami = nil; pickedOura = nil
         case .amazfit, .miBand:    pickedStrap = nil; pickedMachine = nil; pickedOura = nil
-        case .oura:                pickedStrap = nil; pickedMachine = nil; pickedHuami = nil
+        case .oura, .veepoo:       pickedStrap = nil; pickedMachine = nil; pickedHuami = nil
         default:                   pickedStrap = nil; pickedMachine = nil; pickedHuami = nil; pickedOura = nil
         }
     }
@@ -1253,6 +1284,11 @@ struct AddDeviceWizard: View {
         case .gymEquipment:      ensureFTMSScanner().scan()
         case .amazfit, .miBand:  ensureHuamiScanner().scan()
         case .oura:              ensureOuraScanner().scan()
+        case .veepoo:
+            let session =
+                VeepooBandPairingSession.makeForApprovedLocalDeviceBuild()
+            veepooSession = session
+            session?.start()
         // Heart-rate strap AND Garmin both use the standard 0x180D scanner (Garmin Broadcast HR).
         case .hrStrap, .garmin:  ensureHRScanner().scan()
         }
@@ -1303,6 +1339,7 @@ struct AddDeviceWizard: View {
         ftmsScanner?.stopScan()
         huamiScanner?.stopScan()
         ouraScanner?.stop()
+        if !veepooCommitted { veepooSession?.cancel() }
     }
 
     /// Build the right `PairedDevice` for the chosen path, register it, optionally activate, then close.
@@ -1432,6 +1469,18 @@ struct AddDeviceWizard: View {
         onClose()
     }
 
+    private func finishVeepooAdd() {
+        guard let device = veepooSession?.makePairedDevice(
+            nickname: nameDraft
+        ) else {
+            return
+        }
+        veepooCommitted = true
+        model.registerDevice(device, makeActive: true)
+        veepooSession?.cancel()
+        onClose()
+    }
+
     /// Map the protocol package's per-gen `OuraMetric` set onto the app's `Metric` set for registration.
     /// Gen3+ all expose the same dictionary, so this is currently uniform, but it is gen-filtered so a
     /// future gen-specific gate is a one-line change (per OURA_PROTOCOL.md s7.2). SpO2 registers as the
@@ -1461,6 +1510,7 @@ struct AddDeviceWizard: View {
         case .miBand:       return "Xiaomi Mi Band"
         case .garmin:       return String(localized: "Garmin watch")
         case .oura:         return String(localized: "Oura ring")
+        case .veepoo:       return String(localized: "Compatible supplier band")
         }
     }
 
@@ -1707,6 +1757,223 @@ private struct OuraPickList: View {
                     }
                 }
             }
+        }
+    }
+}
+
+private struct VeepooPairingFace: View {
+    @ObservedObject var session: VeepooBandPairingSession
+    @Binding var nameDraft: String
+    let onAdd: () -> Void
+
+    @State private var printedIdentifier = ""
+    @State private var password = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            experimentalNotice
+            switch session.phase {
+            case .idle, .scanning:
+                candidateList
+            case .confirmPrintedIdentifier:
+                printedIdentifierEntry
+            case .connecting:
+                progress("Connecting to the selected band")
+            case .password:
+                passwordEntry
+            case .checkingBattery:
+                progress("Checking battery capability")
+            case .checkingLiveHeartRate:
+                progress("Checking live heart rate")
+            case .ready:
+                ready
+            case .failed:
+                failure
+            }
+        }
+    }
+
+    private var experimentalNotice: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Experimental supplier connection")
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.statusWarning)
+            Text(
+                "The printed identifier selects the physical band. The four-digit supplier password authorizes only this Bluetooth connection and does not prove ownership."
+            )
+            .font(StrandFont.footnote)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(
+            StrandPalette.statusWarning.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+    }
+
+    @ViewBuilder
+    private var candidateList: some View {
+        if session.candidates.isEmpty {
+            SearchingCard()
+        } else {
+            Text("Choose the physical band you are setting up.")
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+            ForEach(Array(session.candidates.enumerated()), id: \.element.id) {
+                index, candidate in
+                Button {
+                    printedIdentifier = ""
+                    session.select(candidate)
+                } label: {
+                    HStack {
+                        Image(systemName: "waveform.path.ecg.rectangle")
+                            .foregroundStyle(StrandPalette.accent)
+                        Text("Compatible band \(index + 1)")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    .padding(14)
+                    .background(
+                        StrandPalette.surfaceInset,
+                        in: RoundedRectangle(cornerRadius: 8)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Select compatible band \(index + 1)")
+            }
+        }
+    }
+
+    private var printedIdentifierEntry: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Confirm the printed band identifier")
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text(
+                "Enter the identifier printed on the selected physical band. NOOP will not reveal the scanned identifier or continue on a mismatch."
+            )
+            .font(StrandFont.subhead)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            TextField("Printed identifier", text: $printedIdentifier)
+                .textFieldStyle(.roundedBorder)
+                #if os(iOS)
+                .textInputAutocapitalization(.characters)
+                #endif
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("noop.veepoo.printed-identifier")
+            if session.lastFailure == .identifierMismatch {
+                Text("That printed identifier did not match the selected band.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                session.confirmPrintedIdentifier(printedIdentifier)
+            } label: {
+                Label("Confirm identifier", systemImage: "checkmark.shield")
+                    .font(StrandFont.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StrandPalette.accent)
+            .disabled(printedIdentifier.isEmpty)
+        }
+    }
+
+    private var passwordEntry: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Enter the device password")
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text(
+                "Use the band's four-digit supplier password. This is transport authentication only, not ownership confirmation."
+            )
+            .font(StrandFont.subhead)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            SecureField("Four digits", text: $password)
+                .textFieldStyle(.roundedBorder)
+                #if os(iOS)
+                .keyboardType(.numberPad)
+                #endif
+                .accessibilityIdentifier("noop.veepoo.password")
+            if session.lastFailure == .credentialRejected
+                || session.lastFailure == .invalidCredential
+            {
+                Text("The band rejected that transport password.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                let value = password
+                password = ""
+                session.submitPassword(value)
+            } label: {
+                Label("Verify password", systemImage: "key.fill")
+                    .font(StrandFont.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StrandPalette.accent)
+            .disabled(!VeepooBandAdapterCore.isValidPassword(password))
+        }
+    }
+
+    private var ready: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Battery and live heart rate confirmed")
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text(
+                "Live heart rate uses the phone receipt time for display freshness only. This supplier stream is not added to durable health history or formulas."
+            )
+            .font(StrandFont.subhead)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            Text("Name").strandOverline()
+            TextField("Compatible band", text: $nameDraft)
+                .textFieldStyle(.roundedBorder)
+            Button(action: onAdd) {
+                Label("Add as active band", systemImage: "checkmark.circle.fill")
+                    .font(StrandFont.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StrandPalette.accent)
+        }
+    }
+
+    private var failure: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("The supplier connection could not be verified.")
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.statusWarning)
+            Button {
+                printedIdentifier = ""
+                password = ""
+                session.start()
+            } label: {
+                Label("Try again", systemImage: "arrow.clockwise")
+                    .font(StrandFont.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StrandPalette.accent)
+        }
+    }
+
+    private func progress(_ title: String) -> some View {
+        HStack(spacing: 12) {
+            ProgressView().tint(StrandPalette.accent)
+            Text(title)
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textSecondary)
         }
     }
 }

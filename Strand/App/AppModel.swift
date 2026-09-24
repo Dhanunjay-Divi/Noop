@@ -1058,7 +1058,11 @@ final class AppModel: ObservableObject {
             // path. Timestamp matches BLEManager.log()'s "HH:mm:ss" so the lines read consistently.
             straplog: { [weak self] line in
                 self?.live.append(log: "[\(AppModel.logTimeFormatter.string(from: Date()))] \(line)")
-            })
+            },
+            noopBandSourceFactory: VeepooBandSourceFactory.productionFactory(
+                registry: registry,
+                live: live
+            ))
         coordinator.start()
         self.sourceCoordinator = coordinator
         // #814 READ SPINE (HIGH-1): drive the read side off the registry's `activeDeviceId` for the WHOLE
@@ -1946,6 +1950,9 @@ final class AppModel: ObservableObject {
     /// ambiguous and must never be allowed to mean "release the active WHOOP." Historical data is not
     /// touched — this only stops the live owner for the row the user explicitly removed.
     func prepareForDeviceRemoval(_ device: PairedDevice) {
+        if device.sourceKind == .veepoo {
+            VeepooCredentialStore.shared.clear(deviceID: device.id)
+        }
         switch SourceCoordinator.removalAction(for: device) {
         case .archiveOnly:
             break

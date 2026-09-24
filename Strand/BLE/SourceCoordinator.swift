@@ -76,7 +76,7 @@ final class SourceCoordinator: ObservableObject {
     private let straplog: (String) -> Void
     /// Default-off app seam for the supplier-neutral NOOP Band SDK adapter. Every production
     /// composition root leaves this nil until a reviewed supplier transport exists. Tests inject a
-    /// source to prove lifecycle ownership without registering a fake device kind or changing WHOOP.
+    /// source to prove lifecycle ownership without changing WHOOP.
     private let noopBandSourceFactory: ((String) -> (any LiveHRSource)?)?
 
     // MARK: - State
@@ -278,16 +278,20 @@ final class SourceCoordinator: ObservableObject {
 
         guard activeStrapId != id else { return }   // already streaming this strap → no churn
 
+        // Build the isolated source for this device's registered kind (the ONE place that maps a kind to a
+        // concrete driver), then bring it up. `.liveAppleWatch` never reaches here — it's short-circuited
+        // above — so `makeSource` only ever sees a real BLE source kind.
+        guard let source = makeSource(for: id) else {
+            // An optional supplier source must fail closed before disturbing a
+            // working WHOOP or another live source.
+            return
+        }
+
         // Leaving WHOOP for the first non-WHOOP source: pause WHOOP's BLE via its existing teardown.
         if !onStrap { stopWhoop() }
 
         // Switching source→source: stop the previous non-WHOOP source before starting the new one.
         tearDownNonWhoopSource(clearMonitoringExpectation: false)
-
-        // Build the isolated source for this device's registered kind (the ONE place that maps a kind to a
-        // concrete driver), then bring it up. `.liveAppleWatch` never reaches here — it's short-circuited
-        // above — so `makeSource` only ever sees a real BLE source kind.
-        let source = makeSource(for: id)
         // CONNECT to the active strap's known peripheral, don't just scan. scan() only discovered + listed
         // it but never connected, so a Polar etc. showed as "found" yet never streamed (#421). connect()
         // reaches the cached peripheral by identifier (or scans-then-connects if not yet cached); a bare
@@ -310,9 +314,9 @@ final class SourceCoordinator: ObservableObject {
     /// nothing else in the coordinator changes. Each arm keeps its own bespoke construction (persist / log /
     /// onBattery closures, plus Oura's ringGen / authKey / adoptIntent). Returns the source WITHOUT
     /// connecting — the caller (`switchToStrap`) does the connect-by-identifier-else-scan bring-up.
-    private func makeSource(for id: String) -> any LiveHRSource {
-        if let source = noopBandSourceFactory?(id) {
-            return source
+    private func makeSource(for id: String) -> (any LiveHRSource)? {
+        if sourceKind(for: id) == .veepoo {
+            return noopBandSourceFactory?(id)
         }
         switch sourceKind(for: id) {
         case .ftms:  return makeFTMSSource(id: id)

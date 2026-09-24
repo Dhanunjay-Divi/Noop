@@ -726,7 +726,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 brand: "NOOP",
                 model: "Synthetic",
                 peripheralId: nil,
-                sourceKind: .liveBLE,
+                sourceKind: .veepoo,
                 capabilities: [.hr],
                 status: .paired,
                 addedAt: 1,
@@ -792,6 +792,47 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
 
         coordinator.activeDeviceChanged(to: "my-whoop")
         XCTAssertEqual(factoryCalls, 0)
+        XCTAssertEqual(starts, 0)
+        XCTAssertEqual(stops, 0)
+    }
+
+    @MainActor
+    func testUnavailableSupplierFactoryDoesNotPauseWhoop() async throws {
+        let store = try await WhoopStore.inMemory()
+        let registry = DeviceRegistry(
+            store: DeviceRegistryStore(dbQueue: store.registryWriter)
+        )
+        registry.reload()
+        registry.add(
+            PairedDevice(
+                id: "veepoo-unavailable",
+                brand: "Veepoo-compatible",
+                model: "Compatible supplier band",
+                peripheralId: UUID().uuidString,
+                sourceKind: .veepoo,
+                capabilities: [.hr],
+                status: .paired,
+                addedAt: 1,
+                lastSeenAt: 1
+            )
+        )
+
+        var starts = 0
+        var stops = 0
+        let coordinator = SourceCoordinator(
+            registry: registry,
+            live: LiveState(),
+            storeHandle: { nil },
+            startWhoop: { starts += 1 },
+            stopWhoop: { stops += 1 },
+            setWhoopPreferredPeripheral: { _ in },
+            setWhoopActiveDeviceId: { _ in },
+            connectedPeripheralUUID:
+                Empty<String?, Never>().eraseToAnyPublisher(),
+            noopBandSourceFactory: { _ in nil }
+        )
+
+        coordinator.activeDeviceChanged(to: "veepoo-unavailable")
         XCTAssertEqual(starts, 0)
         XCTAssertEqual(stops, 0)
     }

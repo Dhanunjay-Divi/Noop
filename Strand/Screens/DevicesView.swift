@@ -829,6 +829,9 @@ private struct DeviceCard: View {
         if device.sourceKind == .huami { return "waveform.path.ecg.rectangle" }
         if device.sourceKind == .liveAppleWatch { return "applewatch" }
         if device.sourceKind == .oura { return "circle.circle" }
+        if device.sourceKind == .veepoo {
+            return "waveform.path.ecg.rectangle"
+        }
         return SourceCoordinator.isWhoop(device) ? "applewatch.side.right" : "heart.circle"
     }
 
@@ -931,6 +934,13 @@ struct DeviceCapabilityProfile {
                 captures: String(localized: "Heart rate (live, best-effort)"),
                 powers: String(localized: "Powers the live console + Effort. No Recovery or Sleep Score"),
                 footnote: String(localized: "Experimental: live heart rate where the band exposes it. Some bands need a pairing we can't do yet. NOOP will say so honestly and never show a made-up number. No sleep, recovery, skin temp, SpO₂ or steps."))
+        }
+        if d.sourceKind == .veepoo {
+            return DeviceCapabilityProfile(
+                displayModel: String(localized: "Compatible supplier band (experimental)"),
+                captures: String(localized: "Heart rate (live display) · Battery"),
+                powers: String(localized: "Powers the current live display only"),
+                footnote: String(localized: "Experimental iPhone-only transport. Live heart rate is not stored or used for Effort, Recovery, Sleep, HRV, or other health formulas."))
         }
         // EXPERIMENTAL locally-adopted Oura ring (gen 3/4/5). The gen is carried on `model` ("Oura Ring
         // 3/4/5") and recovered with OuraRingGen.from(model:). NOOP reads the ring's OWN raw signals + open

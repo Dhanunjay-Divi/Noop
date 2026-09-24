@@ -52,7 +52,23 @@ struct LiveView: View {
     private var ringStreaming: Bool { live.connected && live.streamingLiveHR }
     /// Standard HR, FTMS, and Huami transports do not expose Oura's streaming flag. Their first accepted
     /// packet is the honest proof of a live stream; `connected` prevents cached HR from surviving a drop.
-    private var genericHRStreaming: Bool { live.connected && !live.bonded && live.heartRate != nil }
+    private var genericHRStreaming: Bool {
+        live.connected && !live.bonded && live.heartRate != nil
+    }
+    private var activeSourceKind: SourceKind? {
+        guard let registry = model.deviceRegistry,
+              let activeID = registry.activeDeviceId
+        else {
+            return nil
+        }
+        return registry.devices.first(where: { $0.id == activeID })?.sourceKind
+    }
+    private var supplierSourceActive: Bool { activeSourceKind == .veepoo }
+    private var supplierDisplayStreaming: Bool {
+        supplierSourceActive
+            && live.connected
+            && live.displayOnlyHeartRate != nil
+    }
     /// Any source that can honestly drive foreground live HR and manual workout capture. WHOOP-only
     /// commands remain gated by `activeConnection` so a generic strap never exposes unsupported controls.
     private var liveHRConnection: Bool { activeConnection || ringStreaming || genericHRStreaming }
@@ -102,7 +118,9 @@ struct LiveView: View {
                             .foregroundStyle(StrandPalette.statusWarning)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    liveTrackingCard
+                    if !supplierSourceActive {
+                        liveTrackingCard
+                    }
                     // Can't-connect-at-all guidance: the strap wiped its bond (firmware update / WHOOP app
                     // re-bond), so connects loop on "Peer removed pairing information". Show the re-pair steps
                     // right here instead of silently retrying. (5/MG firmware reset, 2026-06)
@@ -111,7 +129,7 @@ struct LiveView: View {
                     // also appears in Settings). A 5/MG strap still bonded to the WHOOP app refuses pairing
                     // with "Encryption is insufficient" - this tells the user to free it and re-pair.
                     if let hint = live.pairingHint { pairingHintBanner(hint) }
-                    if liveTrackingOptedIn {
+                    if liveTrackingOptedIn || supplierDisplayStreaming {
                         bodyConsole
                         // Low-bandwidth fallback note (#80): the radio couldn't sustain the WHOOP 4 R10/R11 raw
                         // realtime burst, so live HR is riding the standard BLE Heart-Rate profile instead.
@@ -1133,8 +1151,9 @@ private struct LiveHeartReadout: View {
     @EnvironmentObject private var live: LiveState
     let hrMax: Int
 
-    /// Smoothed, spike-filtered live HR from AppModel (median over a short window).
-    private var displayHR: Int? { model.bpm }
+    /// Accepted sources prefer the smoothed value. Supplier HR remains on LiveState's
+    /// separate display-only lane and never feeds AppModel smoothing or formulas.
+    private var displayHR: Int? { model.bpm ?? live.displayOnlyHeartRate }
     private var activeConnection: Bool { live.connected && live.bonded }
 
     /// The live HR zone for the focal readout's colour world (presentation only). 0 = below Zone 1.
@@ -1354,7 +1373,7 @@ private struct LiveSignalTrustRail: View {
     @EnvironmentObject private var live: LiveState
     let activeConnection: Bool
 
-    private var displayHR: Int? { model.bpm }
+    private var displayHR: Int? { model.bpm ?? live.displayOnlyHeartRate }
     /// Oura ring actively streaming live HR — trusted stream without a WHOOP bond (see LiveView.ringStreaming).
     private var ringStreaming: Bool { live.connected && live.streamingLiveHR }
     /// #218: a live link for the wear stat = a WHOOP bond OR an Oura HR stream. Oura streams only while worn
