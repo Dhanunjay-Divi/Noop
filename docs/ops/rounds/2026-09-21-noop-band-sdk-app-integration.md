@@ -1251,3 +1251,36 @@ Success means:
 - A narrow follow-up commit/push, replacement exact-head hosted checks, normal
   protected integration, protected-main verification, and exact round-owned
   cleanup remain.
+
+## September 24 hosted Apple exact-head repair
+
+- App PR `#17` head
+  `77a9e776fb03a1e1911e870e471c4231bc1b5864` completed the Android matrix and
+  every non-Apple required context, but hosted Apple run `35951950571` exposed
+  one stale iOS UI contract. `testTodayKeepsTheCompleteMetricCatalogVisible`
+  still required all ten available metrics to render on Today even though the
+  finalized cross-platform behavior deliberately keeps Today focused on the
+  user-selected three-to-five metrics and routes the complete catalog through
+  `Open all metric history`.
+- The iOS journey now injects the deterministic fresh-install selection,
+  verifies that only Recovery, Effort, and Sleep render in the focused grid,
+  verifies that unpinned metrics do not leak back into Today, and proves that
+  the full-history action opens Explore. A stable accessibility identifier was
+  added to that action, while the section-level identifier that overrode all
+  child identifiers was removed; product selection, metric computation,
+  persistence, and navigation behavior are otherwise unchanged.
+- The exact corrected journey passes 1/1 with zero failures in 15.491 seconds
+  on a disposable iPhone 17 Pro simulator using the installed iOS 26.5
+  runtime. The first local execution usefully failed because the inherited
+  section identifier masked every child identifier; removing that collision
+  made the same user path deterministic without adding hidden test-only UI.
+  This is simulator evidence only.
+- The terminology inventory remains unchanged at 17,883 occurrences across
+  1,589 groups with zero forbidden mappings. All nine release controls, ten
+  required-context definitions, all 84 operations records, the exact
+  ten-file source-only SDK artifact, and protected-self trust verification
+  pass after deleting only Xcode's regenerated zero-byte vendor `.swiftpm`
+  cache.
+- A narrow follow-up commit/push, replacement exact-head hosted checks, normal
+  protected integration, protected-main verification, and exact round-owned
+  cleanup remain.

@@ -997,49 +997,49 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "key-metrics-accessible-color-boundaries")
     }
 
-    func testTodayKeepsTheCompleteMetricCatalogVisible() {
+    func testTodayKeepsPinnedMetricsAndFullHistoryReachable() {
         let app = XCUIApplication()
         app.launchArguments = [
+            "-today.keyMetrics", "charge,effort,rest",
             "--demo-seed",
             "--demo-tab", "today",
             "--demo-key-metrics",
         ]
         app.launch()
 
-        let metricIDs = [
-            "charge", "effort", "rest", "hrv", "restingHr",
+        let pinnedMetricIDs = ["charge", "effort", "rest"]
+        let unpinnedMetricIDs = [
+            "hrv", "restingHr",
             "bloodOxygen", "respiratory", "steps", "weight", "calories",
         ]
         let scroll = app.scrollViews["noop.today.scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 20))
-        let readinessTile = app.descendants(matching: .any)["noop.today.key-metric.charge"]
-        for _ in 0..<12 where !readinessTile.exists {
+        let history = app.buttons["noop.today.key-metrics.open-history"]
+        for _ in 0..<12 where !history.isHittable {
             scroll.swipeUp()
         }
-        XCTAssertTrue(
-            readinessTile.waitForExistence(timeout: 15),
-            "The demo Key Metrics section must finish loading before catalog traversal."
-        )
-        let calendar = app.buttons["noop.today.calendar"]
-        for _ in 0..<12 where !calendar.isHittable {
-            scroll.swipeDown()
-        }
-        XCTAssertTrue(calendar.isHittable, "Today must return to the top before catalog traversal.")
 
-        var missing = Set(metricIDs)
-        for _ in 0..<16 {
-            let visible = missing.filter { id in
-                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists
-            }
-            missing.subtract(visible)
-            if missing.isEmpty { break }
-            scroll.swipeUp()
+        for id in pinnedMetricIDs {
+            XCTAssertTrue(
+                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists,
+                "Pinned Today metric \(id) must remain visible."
+            )
         }
+        for id in unpinnedMetricIDs {
+            XCTAssertFalse(
+                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists,
+                "Unpinned metric \(id) must stay out of the focused Today grid."
+            )
+        }
+        XCTAssertTrue(history.isHittable, "The full metric history action must remain reachable.")
+        keepScreenshot(app, name: "today-pinned-key-metrics")
+
+        history.tap()
         XCTAssertTrue(
-            missing.isEmpty,
-            "Every Today metric must remain reachable; missing: \(missing.sorted().joined(separator: ", "))."
+            app.staticTexts["Explore"].waitForExistence(timeout: 10),
+            "The Today history action must open the complete metric explorer."
         )
-        keepScreenshot(app, name: "today-complete-key-metric-catalog")
+        keepScreenshot(app, name: "today-full-metric-history")
     }
 
     func testHydrationAndSleepScreensExposeReminderControls() {
