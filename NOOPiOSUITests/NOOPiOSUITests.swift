@@ -328,14 +328,44 @@ final class NOOPiOSUITests: XCTestCase {
             ]
         )
 
-        XCTAssertTrue(app.navigationBars["App report"].waitForExistence(timeout: 20))
-        app.buttons["Build report"].tap()
-        XCTAssertTrue(app.staticTexts["Report ready"].waitForExistence(timeout: 20))
-        app.buttons["Send feedback"].tap()
-        XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 10))
+        guard app.navigationBars["App report"].waitForExistence(timeout: 20) else {
+            XCTFail("The app report sheet did not open.")
+            return
+        }
+        let buildReport = app.buttons["noop.app-report.build"]
+        guard buildReport.waitForExistence(timeout: 10),
+              scrollToHittable(buildReport, in: app) else {
+            XCTFail("The build-report action was not available.")
+            return
+        }
+        buildReport.tap()
 
-        app.buttons["Cancel feedback"].tap()
-        XCTAssertTrue(app.staticTexts["Canceled"].waitForExistence(timeout: 10))
+        let sendFeedback = app.buttons["noop.app-report.send"]
+        guard sendFeedback.waitForExistence(timeout: 60),
+              scrollToHittable(sendFeedback, in: app) else {
+            XCTFail("The report did not reach its review state.")
+            return
+        }
+        sendFeedback.tap()
+
+        guard app.descendants(matching: .any)["noop.app-report.delivery"]
+            .waitForExistence(timeout: 60),
+              app.staticTexts["Queued"].waitForExistence(timeout: 30) else {
+            XCTFail("The report did not reach its queued delivery state.")
+            return
+        }
+
+        let cancelFeedback = app.buttons["noop.app-report.cancel-feedback"]
+        guard cancelFeedback.waitForExistence(timeout: 10),
+              scrollToHittable(cancelFeedback, in: app) else {
+            XCTFail("The queued report did not expose its cancellation action.")
+            return
+        }
+        cancelFeedback.tap()
+        guard app.staticTexts["Canceled"].waitForExistence(timeout: 30) else {
+            XCTFail("The queued report did not reach its canceled state.")
+            return
+        }
         XCTAssertTrue(
             app.staticTexts.matching(
                 NSPredicate(

@@ -405,6 +405,39 @@ firmware, background operation, and physiological accuracy remain unproven.
   replacement exact-SHA hosted checks, protected merge, protected-main
   verification, and exact round-owned cleanup remain.
 
+## Hosted iOS feedback UI synchronization follow-up
+
+- Exact correction head
+  `9d5ebf0751b4bc697c4a64c7ad6a7f4491c6e090` passed every hosted context
+  except the iOS production-shell job. The same cancellation test reported
+  three failures, but the first failure was now the 20-second `Report ready`
+  label wait, before the cancellation boundary.
+- Hosted evidence showed that the report eventually reached review, but the
+  test attempted an off-screen label-based Send action. The final hierarchy
+  still exposed `noop.app-report.send` and no cancel action. Because
+  `sendFeedback()` moves to `queued` synchronously before enqueueing, remaining
+  in review proves the action did not execute; cancellation was not reached.
+- Correction: Build and Cancel now expose stable accessibility identifiers.
+  The test waits for the existing Send and delivery identifiers, scrolls each
+  action until it is genuinely hittable, uses bounded waits suitable for the
+  hosted simulator, and returns after a failed prerequisite so one readiness
+  defect cannot cascade into misleading cancellation failures.
+- Production report assembly, upload, cancellation, network, archive cleanup,
+  diagnostics, and Release behavior are unchanged. The identifiers add
+  accessibility and test metadata only.
+- Focused local production-shell verification passed 1/1 with zero failures in
+  25.994 seconds. The cancellation, consent/review, and screen-snapshot report
+  tests then passed together 3/3 with zero failures in 62.214 seconds using the
+  same built app and simulator. Xcode spent an additional 600 seconds timing
+  out while collecting post-test simulator diagnostics, but returned success;
+  the three test cases had already completed successfully.
+- Resource gate: the obsolete 5.6 GiB supplier qualification DerivedData and
+  one obsolete 7 MiB job log were exact-deleted after confirming no active
+  handles. The current focused DerivedData and bounded logs remain pending
+  final exact deletion after protected integration.
+- Follow-up commit/push, replacement exact-SHA hosted checks, protected merge,
+  protected-main verification, and final round-owned cleanup remain.
+
 ## Privacy check
 
 - [x] No credentials, personal names, email addresses, raw health exports,

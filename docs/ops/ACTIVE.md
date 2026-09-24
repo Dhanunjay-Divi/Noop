@@ -47,10 +47,18 @@ Last updated: **2026-09-24**
   the production authenticated remote-deletion path even though the synthetic
   report has no remote binding. A DEBUG-only correction now terminally cancels
   that held fixture through the existing outbox cleanup path; Release behavior
-  is unchanged. The exact focused UI regression passes twice locally with zero
-  failures. Correction commit/push, replacement exact-SHA hosted checks,
-  normal protected merge, protected-main verification, and exact round-owned
-  cleanup remain.
+  is unchanged. Exact head
+  `9d5ebf0751b4bc697c4a64c7ad6a7f4491c6e090` then passed every hosted
+  context except the same iOS production-shell test, but the replacement
+  failure occurred before cancellation: the hosted simulator took longer than
+  the test's label wait to expose the review action, and an off-screen tap did
+  not execute. Stable Build/Send/Cancel identifiers, explicit hittability
+  scrolling, bounded phase waits, and fail-fast prerequisites now synchronize
+  the regression without changing report or Release behavior. The corrected
+  focused test passes locally in 25.994 seconds; all three app-report UI tests
+  pass together 3/3 in 62.214 seconds. Follow-up commit/push, replacement
+  exact-SHA hosted checks, normal protected merge, protected-main
+  verification, and final round-owned cleanup remain.
   Supplier redistribution, signing/store review, physical BLE, background
   collection, history retention, haptics, battery, firmware, egress, provider
   delivery, production load, and physiological accuracy remain external or

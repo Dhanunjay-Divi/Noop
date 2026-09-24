@@ -788,6 +788,7 @@ struct ShakeDiagnosticReportSheet: View {
                     controller.build(live: live, repo: repo)
                 }
                 .disabled(controller.isScreenshotCaptureInProgress)
+                .accessibilityIdentifier("noop.app-report.build")
                 NoopButton(
                     "app_report_cancel",
                     systemImage: "xmark",
@@ -1033,6 +1034,7 @@ struct ShakeDiagnosticReportSheet: View {
                 ) {
                     controller.cancelFeedback()
                 }
+                .accessibilityIdentifier("noop.app-report.cancel-feedback")
             case .sent, .cancelled:
                 NoopButton(
                     "app_report_close",
@@ -1052,6 +1054,7 @@ struct ShakeDiagnosticReportSheet: View {
                 ) {
                     controller.cancelFeedback()
                 }
+                .accessibilityIdentifier("noop.app-report.cancel-feedback")
             case .cancelling:
                 NoopButton(
                     "app_report_canceling_title",
