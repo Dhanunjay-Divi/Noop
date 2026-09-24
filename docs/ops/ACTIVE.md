@@ -542,3 +542,16 @@ Resume from:
   84 operations records, the exact 10-file SDK artifact and its 9 adversarial
   tests, the reviewed terminology ratchet, and diff hygiene. The branch is
   ready for its single replacement commit and hosted exact-head run.
+
+## September 24 iOS supplier trust-root follow-up
+
+- Isolated branch `codex/pr17-apple-supplier-runtime-review-20260924` starts
+  from `60df38a2ad3e1a825198909336e75c415459b310`.
+- The local iOS supplier verifier now requires a tracked owner-only manifest
+  for the exact Pod inputs and generated FMDB/MJExtension framework hashes and
+  inventories. The embed script re-verifies that contract before copying.
+- Focused evidence is green: 29/29 verifier/trust-control tests, direct local
+  iPhoneOS bundle verification, Python and shell syntax, scoped diff hygiene,
+  and 91/91 operations records. No app runtime file is part of the trust-root
+  commit, no push occurred, and signed-device, physical BLE, supplier rights,
+  and reproducible rebuild evidence remain external gates.

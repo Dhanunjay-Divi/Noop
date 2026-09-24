@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+repository_root="${SRCROOT:?}"
+"$repository_root/Tools/local/configure-veepoo-ios-sdk.py" --build-check
+
 destination_root="${TARGET_BUILD_DIR:?}/${FRAMEWORKS_FOLDER_PATH:?}"
 mkdir -p "$destination_root"
 

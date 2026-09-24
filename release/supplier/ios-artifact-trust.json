@@ -1,0 +1,41 @@
+{
+  "buildInputs": {
+    "files": [
+      {
+        "path": "Demo/VeepooBleSDKDemo/Podfile",
+        "sha256": "e4cbb9aad39995b49b26d0c9c620cf54d48374ce13b2265321b510c2d70c9227"
+      },
+      {
+        "path": "Demo/VeepooBleSDKDemo/Podfile.lock",
+        "sha256": "5b3d84bdf572038b972f3d793c628256f36e055141e577d68a6a5db2599d3e13"
+      }
+    ],
+    "trees": [
+      {
+        "bytes": 393993,
+        "fileCount": 81,
+        "inventorySha256": "c0f0a36aa48d8566546196d5329a3e52bbfdef1cc5dc4041f82bd9d5115b57f9",
+        "path": "Demo/VeepooBleSDKDemo/Pods"
+      }
+    ]
+  },
+  "generatedFrameworks": [
+    {
+      "binarySha256": "c22b46589e8bf9b7198146226366a421963d682945d0dc80c69f6d4d1fa95aae",
+      "bytes": 263465,
+      "fileCount": 10,
+      "inventorySha256": "71ff4640f71c21ebb03d3ef644dabbb00fba676f50af805b8973a98fedf9b92b",
+      "name": "FMDB",
+      "path": "Demo/VeepooBleSDKDemo/build/Debug-iphoneos/FMDB/FMDB.framework"
+    },
+    {
+      "binarySha256": "fadb76572cb8d507751cacbd4b37f742d291c2b6cff8ff5fb7149b8560ce9d3d",
+      "bytes": 197388,
+      "fileCount": 15,
+      "inventorySha256": "39c50fdfce9d83c5276c875a526b9e96019b7d0e25efda9c7b108548851afae8",
+      "name": "MJExtension",
+      "path": "Demo/VeepooBleSDKDemo/build/Debug-iphoneos/MJExtension/MJExtension.framework"
+    }
+  ],
+  "schemaVersion": 1
+}

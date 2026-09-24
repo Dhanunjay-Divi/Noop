@@ -1,5 +1,6 @@
 // Generated only after Tools/local/configure-veepoo-ios-sdk.py verifies the
-// approved local artifact. Do not copy VeepooBleSDK.framework into this repo.
+// protected iOS supplier manifest and local bundle. Do not copy supplier
+// frameworks into this repo.
 // The values themselves are qualified so simulator builds retain the empty,
 // default-off settings from Config/NOOPiOS.xcconfig.
 NOOP_VEEPOO_SDK_ENABLED[sdk=iphoneos*] = YES

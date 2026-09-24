@@ -166,6 +166,45 @@ must not be dismissed merely to satisfy conversation resolution. Supplier
 identity mapping, physical BLE, signed-device behavior, redistribution rights,
 firmware, background operation, and physiological accuracy remain unproven.
 
+## iOS supplier trust-root follow-up
+
+- State: `completed locally; no push authorized`
+- Isolated branch:
+  `codex/pr17-apple-supplier-runtime-review-20260924`
+- Exact base:
+  `60df38a2ad3e1a825198909336e75c415459b310`
+- Confirmed findings: generated FMDB and MJExtension device frameworks are
+  accepted without reviewed hashes or inventories, and the iOS supplier
+  verifier, embed script, and verifier tests are absent from the owner-only
+  protected-path set.
+- Write scope: iOS supplier local tools, their focused Python tests, tracked
+  supplier trust data/configuration, and this existing operations handoff
+  only. App runtime source is excluded.
+- External boundary: the supplier SDK, Pods checkout, and generated frameworks
+  remain owner-supplied local inputs outside Git. This follow-up may bind an
+  exact reviewed snapshot but cannot establish redistribution rights,
+  provenance beyond that snapshot, signing, or physical-device behavior.
+- Delivered: a tracked strict iOS trust manifest pins the exact Podfile,
+  lockfile, complete Pods tree, and complete generated FMDB and MJExtension
+  framework inventories and executable hashes. The verifier rejects path,
+  digest, inventory, symlink, metadata, or architecture drift before config
+  generation and again immediately before embedding.
+- Owner-only authority: the iOS manifest, tracked example config, configure
+  script, embed script, and focused verifier test are protected release-control
+  paths. The reviewed digest for the protected-path verifier is repinned in the
+  required-CI gate.
+- Focused evidence: 29/29 tests passed in
+  `Tools.tests.test_veepoo_ios_sdk_wiring` and
+  `Tools.tests.test_trusted_release_controls`; the direct local verifier
+  matched the reviewed iPhoneOS arm64 bundle; Python compilation, shell syntax,
+  scoped diff hygiene, and all 91 operations records passed.
+- Concurrency note: unrelated Apple runtime and XCTest edits appeared during
+  the round. They were neither inspected nor staged and are excluded from this
+  follow-up commit.
+- Observability decision: no runtime boundary changed. The local verifier
+  emits bounded categorical failures without artifact contents, credentials,
+  device identifiers, or health data; no app diagnostic event is warranted.
+
 ## Next round
 
 1. Classify every unresolved thread against exact current code and tests.
