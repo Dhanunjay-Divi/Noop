@@ -86,6 +86,11 @@ secrets.*
 Config/LaunchGateSecrets.xcconfig
 Config/StrengthMediaSecrets.xcconfig
 Config/ManagedCloudSecrets.xcconfig
+# Restricted supplier SDK wiring is local to an approved physical-device build.
+# The verifier writes only this ignored config; the vendor framework must stay
+# at its approved path outside the repository.
+Config/VeepooLocalSDK.xcconfig
+VeepooBleSDK.framework/
 android/local.properties
 android/keystore.properties
 android/noop-release.jks

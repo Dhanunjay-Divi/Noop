@@ -1,0 +1,8 @@
+// Generated only after Tools/local/configure-veepoo-ios-sdk.py verifies the
+// approved local artifact. Do not copy VeepooBleSDK.framework into this repo.
+// The values themselves are qualified so simulator builds retain the empty,
+// default-off settings from Config/NOOPiOS.xcconfig.
+NOOP_VEEPOO_SDK_ENABLED[sdk=iphoneos*] = YES
+NOOP_VEEPOO_FRAMEWORK_DIR[sdk=iphoneos*] = /Users/divii/Downloads/SDK/iOS_Ble_SDK-master/iOS_sdk_source/Framework/2.2.XX.15
+NOOP_VEEPOO_LINK_FLAGS[sdk=iphoneos*] = -ObjC -framework VeepooBleSDK
+NOOP_VEEPOO_SWIFT_CONDITION[sdk=iphoneos*] = NOOP_SUPPLIER_VEEPOO

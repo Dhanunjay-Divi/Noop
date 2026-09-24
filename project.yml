@@ -444,6 +444,13 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_EMIT_LOC_STRINGS: YES
+        # Restricted supplier SDK values remain empty unless the ignored
+        # Config/VeepooLocalSDK.xcconfig is generated locally. Qualifying all
+        # consumers by iphoneos keeps simulator, Mac, Watch, widgets, and CI
+        # independent of the arm64 device-only framework.
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]": "$(inherited) $(NOOP_VEEPOO_FRAMEWORK_DIR)"
+        "OTHER_LDFLAGS[sdk=iphoneos*]": "$(inherited) $(NOOP_VEEPOO_LINK_FLAGS)"
+        "SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphoneos*]": "$(inherited) $(NOOP_VEEPOO_SWIFT_CONDITION)"
       configs:
         Debug:
           NOOP_APP_ATTEST_ENVIRONMENT: development
@@ -462,6 +469,12 @@ targets:
       - name: Validate Release Launch Gate
         script: |
           "$SRCROOT/Tools/validate-launch-gate-config.sh"
+        basedOnDependencyAnalysis: false
+      - name: Verify Optional Veepoo iPhoneOS SDK
+        script: |
+          if [ "${PLATFORM_NAME:-}" = "iphoneos" ] && [ "${NOOP_VEEPOO_SDK_ENABLED:-NO}" = "YES" ]; then
+            "$SRCROOT/Tools/local/configure-veepoo-ios-sdk.py" --build-check
+          fi
         basedOnDependencyAnalysis: false
     dependencies:
       - package: WhoopProtocol

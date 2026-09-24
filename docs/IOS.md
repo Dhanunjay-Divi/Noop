@@ -75,6 +75,11 @@ Run `xcodegen generate`, then build the **`NOOPiOS`** scheme in Xcode. The
 historical design notes later in this document explain how the native iOS target
 was reconciled with the shared Apple implementation.
 
+The restricted owner-supplied Veepoo framework is optional, default-off, and
+available only to approved local physical-iPhone builds. Follow
+[`IOS_RESTRICTED_VEEPOO_SDK.md`](IOS_RESTRICTED_VEEPOO_SDK.md); never copy the
+vendor framework into this repository.
+
 > 🛠️ **Signing it under your own Apple ID** (thanks @gingerbeardman for the original recipe). Apple
 > requires a bundle id and app group unique to *your* developer account — otherwise the build collides
 > with any other NOOP install already on your device (an AltStore/SideStore sideload, or someone
