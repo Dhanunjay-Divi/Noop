@@ -259,9 +259,17 @@ class VeepooBandSourceTest {
             VeepooCapabilities(liveHeartRate = true, battery = true),
         )
 
-        assertEquals(BandSessionState.READY, harness.session.snapshot().state)
+        assertEquals(BandSessionState.EXECUTING_COMMAND, harness.session.snapshot().state)
         assertEquals(VeepooAdapterState.READING_BATTERY, harness.source.state.value)
         assertEquals("battery", harness.bridge.operations.last())
+
+        harness.bridge.callback.onBattery(
+            reconnectAttempt,
+            VeepooBatteryReading(percent = 79, observedAtMilliseconds = 2_000),
+        )
+        assertEquals(BandSessionState.READY, harness.session.snapshot().state)
+        assertEquals(VeepooAdapterState.LIVE_DISPLAY_ONLY, harness.source.state.value)
+        assertEquals("live", harness.bridge.operations.last())
     }
 
     @Test
