@@ -244,7 +244,13 @@ class AndroidSupplierGradleContractTest(unittest.TestCase):
         self.assertIn('rootProject.file("noop-supplier-sdk.properties")', source)
         self.assertIn("val supplierSdkEnabled", source)
         self.assertIn('add("fullImplementation", files(supplierArtifactFiles))', source)
-        self.assertIn('maybeCreate("full").java.srcDir("src/veepoo/java")', source)
+        self.assertIn('maybeCreate("full").apply {', source)
+        self.assertIn('java.srcDir("src/veepoo/java")', source)
+        self.assertIn('manifest.srcFile("src/veepoo/AndroidManifest.xml")', source)
+        self.assertIn(
+            'maybeCreate("testFull").java.srcDir("src/veepooTest/java")',
+            source,
+        )
         self.assertIn('"VEEPOO_ADAPTER_AVAILABLE", "false"', source)
         self.assertIn('name.contains("Full")', source)
         self.assertIn("packagesSupplierRelease", source)

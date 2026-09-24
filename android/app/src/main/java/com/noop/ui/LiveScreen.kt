@@ -722,8 +722,8 @@ private fun SupplierBandLiveScreen(
     onManageDevices: () -> Unit,
 ) {
     ScreenScaffold(
-        title = "Live",
-        subtitle = "NOOP Band",
+        title = uiString(R.string.nav_live),
+        subtitle = uiString(R.string.timeline_my_whoop),
     ) {
         Column(
             modifier = Modifier
@@ -740,7 +740,7 @@ private fun SupplierBandLiveScreen(
             ) {
                 Column {
                     Text(
-                        "Heart rate",
+                        uiString(R.string.widget_heart_rate),
                         style = NoopType.footnote,
                         color = Palette.textSecondary,
                     )
@@ -758,19 +758,26 @@ private fun SupplierBandLiveScreen(
                 )
             }
             Text(
-                display.batteryPercent?.let { "Battery $it%" } ?: when (display.adapterState) {
-                    com.noop.ble.veepoo.VeepooAdapterState.CONNECTING -> "Connecting"
-                    com.noop.ble.veepoo.VeepooAdapterState.AUTHENTICATING -> "Authenticating"
-                    com.noop.ble.veepoo.VeepooAdapterState.READING_BATTERY -> "Reading battery"
-                    com.noop.ble.veepoo.VeepooAdapterState.RECONNECTING -> "Reconnecting"
-                    com.noop.ble.veepoo.VeepooAdapterState.FAILED -> "Connection unavailable"
-                    else -> "Waiting for live data"
+                display.batteryPercent?.let {
+                    uiString(R.string.l10n_devices_screen_battery_clamped_2494c8c9, it)
+                } ?: when (display.adapterState) {
+                    com.noop.ble.veepoo.VeepooAdapterState.CONNECTING ->
+                        uiString(R.string.appwide_onboarding_device_wizard_supplier_android_connecting)
+                    com.noop.ble.veepoo.VeepooAdapterState.AUTHENTICATING ->
+                        uiString(R.string.appwide_onboarding_device_wizard_supplier_android_authenticating)
+                    com.noop.ble.veepoo.VeepooAdapterState.READING_BATTERY ->
+                        uiString(R.string.appwide_onboarding_device_wizard_supplier_android_reading_battery)
+                    com.noop.ble.veepoo.VeepooAdapterState.RECONNECTING ->
+                        uiString(R.string.appwide_health_live_hr_reconnecting)
+                    com.noop.ble.veepoo.VeepooAdapterState.FAILED ->
+                        uiString(R.string.appwide_onboarding_device_wizard_supplier_connection_failed)
+                    else -> uiString(R.string.appwide_health_live_hr_waiting)
                 },
                 style = NoopType.body,
                 color = Palette.textSecondary,
             )
             Text(
-                "This heart-rate reading uses phone receipt time for display only. It is not saved, scored, or used by formulas.",
+                uiString(R.string.appwide_onboarding_device_wizard_supplier_ready_body),
                 style = NoopType.footnote,
                 color = Palette.statusWarning,
             )
@@ -779,7 +786,7 @@ private fun SupplierBandLiveScreen(
             onClick = onManageDevices,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Manage devices")
+            Text(uiString(R.string.l10n_live_screen_manage_devices_e5c277ff))
         }
     }
 }

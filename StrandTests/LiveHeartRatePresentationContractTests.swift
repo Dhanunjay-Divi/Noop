@@ -50,7 +50,8 @@ final class LiveHeartRatePresentationContractTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(source.contains("live.heartRateSample?.receivedAt"))
+        XCTAssertTrue(source.contains("live.displayedHeartRate"))
+        XCTAssertTrue(source.contains("live.displayedHeartRateReceivedAt"))
         XCTAssertTrue(source.contains("LiveHeartRateSurfacePolicy.isLive"))
         XCTAssertTrue(source.contains("ViewThatFits(in: .horizontal)"))
         XCTAssertTrue(source.contains("case reconnecting"))
