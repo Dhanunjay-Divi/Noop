@@ -1213,6 +1213,41 @@ Success means:
   normal merge, protected-main verification, and exact round-owned cleanup.
   Signed installation and every supplier/physical behavior remain separate
   device or external gates.
-- The final reviewed terminology snapshot records 17,883 occurrences across
-  1,589 groups with zero forbidden mappings. Its protected SHA-256 is
+- The pre-hosted-repair reviewed terminology snapshot records 17,883
+  occurrences across 1,589 groups with zero forbidden mappings. Its protected
+  SHA-256 was
   `194d2a4bd735f25df861b9a95a4f805ae4a50c22f59ebd7d1f20e09273ec3423`.
+
+## September 24 hosted Android exact-head repair
+
+- App PR `#17` head
+  `f127a60598ca2c0d436c17aee1ac50cc4b5f474f` exposed three bounded Android
+  test-contract failures in hosted run `35949074902`. The product APK built;
+  the failures were five feedback-outbox process-recreation tests whose fixed
+  September 9 clock was replaced by the wall clock on recovery and had crossed
+  the retention boundary by September 24, one localization policy expression
+  that did not yet admit the new full-history key, and one production-shell
+  journey that still expected HRV on the deliberately selected-only Today
+  surface. A sixth outbox process-recreation test used the same split-clock
+  pattern and was corrected preventatively even though it had not failed in
+  the hosted run.
+- Feedback process-recreation tests now reuse the same injected deterministic
+  clock for staging and recovery. The localization policy explicitly admits
+  `key_metrics_open_history`. The production-shell journey uses Recovery, one
+  of the three supported fresh-install selections, while retaining its
+  original detail-navigation and Today-reselection assertions. Product
+  retention, localization catalogs, selected-metric behavior, and runtime
+  routing are unchanged.
+- The focused regression wall passes. The complete local Android wall then
+  passes 4,997 unit tests with seven intentional skips and zero failures or
+  errors, lint, Android-test Kotlin compilation, and Full APK assembly across
+  70 tasks in 3m22s. The Full instrumentation APK also assembles successfully.
+- The corrected production-shell journey passes 1/1 in 3.298 seconds on the
+  existing ARM64 API 35 emulator. Both APKs installed successfully, the
+  emulator used a bounded lifetime, and it was terminated immediately after
+  the result. This is simulator evidence only; the required hosted x86_64
+  production-shell context and all physical-device behavior remain separate
+  gates.
+- A narrow follow-up commit/push, replacement exact-head hosted checks, normal
+  protected integration, protected-main verification, and exact round-owned
+  cleanup remain.

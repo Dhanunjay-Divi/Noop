@@ -474,6 +474,27 @@ Resume from:
    supplier artifacts, firmware project, rights/SBOM/security evidence, and
    representative physical units are available.
 
+## September 24 exact-head Android correction
+
+- PR `#17` head `f127a605` built the hosted Android product but exposed stale
+  tests: feedback process-recreation switched from its injected September 9
+  clock to the wall clock and crossed retention on September 24; the
+  localization allowlist omitted the new full-history key; and the
+  production-shell journey still searched for unselected HRV on the
+  selected-only Today surface.
+- The tests now preserve the injected clock across recovery, admit the exact
+  history key, and navigate through selected Recovery. The complete local
+  Android wall passes 4,997 tests with seven intentional skips, lint,
+  Android-test compilation, Full APK assembly, and the corrected API 35
+  production-shell journey 1/1 in 3.298 seconds. The bounded emulator was
+  terminated after the result.
+- The terminology inventory is repinned after these durable records and the
+  repository controls pass. Next: push one narrow exact-head replacement,
+  require all ten protected contexts, merge normally, verify protected `main`,
+  and clean exact round-owned outputs. Physical BLE, supplier compatibility,
+  background collection, history retention, haptics, battery, firmware,
+  signed install, and physiological accuracy remain device or external gates.
+
 ## September 23 historical local evidence
 
 - The Recovery chart correction now uses an expiry deadline rather than

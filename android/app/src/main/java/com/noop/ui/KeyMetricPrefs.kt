@@ -19,12 +19,13 @@ import com.noop.R
 //
 // The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to five in
 // their preferred order. A fresh install starts with NOOP's three core daily signals — Recovery, Effort,
-// and Sleep — while every other metric follows them in the complete catalog. Persistence is display-only.
+// and Sleep — while every other metric remains available in the editor and full history.
+// Persistence is display-only.
 //
 // Stored as a single comma-joined string of metric keys in SharedPreferences ("today.keyMetrics"), the
 // same mechanism every other Android preference uses. Mirrors the macOS KeyMetricPrefs.swift +
 // @AppStorage("today.keyMetrics"). Unknown keys are dropped on read so a removed tile can't crash, and
-// any known key missing from the saved list is treated as unpinned (the editor still re-lists it).
+// any known key missing from the saved list is treated as unpinned and remains available in the editor.
 
 /**
  * One of the Today screen's Key-Metric tiles. The [raw] is the stable persisted identifier — keep it
