@@ -12,50 +12,24 @@ Last updated: **2026-09-24**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current integration state: implementation commit
-  `ddb0315f76d7551916ef8b6bf54de5a2a5653d07` closes the final local
-  verification gaps after the optional/default-off Apple and Android supplier
-  adapters, local-only build wiring, quarantined Android provider, lifecycle
-  compensation/fallback corrections, and source-aware first-run setup were
-  integrated. `NoopBandSDK` PR `#33` remains pinned at
-  `b02808372b7c537f22058c7ebc75d92c750373be`; the checked-in ten-file
-  source-only export has manifest SHA-256
-  `6beca829f3b2a367cf7046544e8d06dc74ae9f905e1eefe4bb58ccf41615fd34`,
-  and supplier artifacts remain absent from Git. WHOOP remains the default
-  comparison transport and ordinary builds exclude supplier source and
-  dependencies when ignored local configuration is absent.
-  Exact-current local evidence is green: Android Full and Demo each execute
-  5,031 tests with 7 intentional skips plus compile, lint, APK, and
-  instrumentation-source gates across 137 tasks; macOS executes 2,248 tests
-  with 1 intentional skip; the unsigned iPhone, widget, Watch app, and Watch
-  complication graph builds without compiler warnings or errors; the
-  repository tool wall passes 348 tests with 1 skip; the fresh synthetic
-  PostgreSQL wall collects 816 tests and passes 815 with 1 opt-in provider
-  skip; and formatting, validation, and 20/20 GCP plan-only tests pass.
-  Direct release controls, all ten required contexts, trusted self-verification,
-  calibration parity, distribution provenance, private-data, health-claims,
-  terminology, exact SDK artifact, i18n delta, operations-record, and diff
-  gates also pass. The terminology ratchet records 18,089 classified
-  occurrences across 1,613 groups with zero forbidden mappings.
-  PR `#17` now points to exact candidate
-  `8f0b66aabe39e9d4ff2fbb11bdbf2b94b28dbe0d`. Every applicable hosted
-  context except iOS passed. The iOS job `107576076643` in run
-  `35982041099` found two stale onboarding assertions after the shared
-  source-aware device wizard replaced the retired direct scan page, plus
-  XCTest's simulator-only second-opposite-gesture idle timeout. The local
-  correction adds stable neutral device-row identifiers, updates the tests to
-  the current choose-device flow and current accessibility-sized guidance,
-  and limits only the simulator liveness smoke to one timed gesture while
-  retaining the five-iteration Apple scroll metric on real devices. The three
-  corrected cases pass three consecutive runs with zero failures, and the
-  complete current iOS production shell passes 39 tests with one intentional
-  skip and zero failures. The replacement commit, exact-SHA hosted checks,
-  normal protected merge, protected-main verification, and final exact
-  cleanup remain. Supplier
-  redistribution, signing/store review, physical BLE, background collection,
-  history retention, haptics, battery, firmware, egress, provider delivery,
-  production load, and physiological accuracy remain external or physical
-  gates.
+- Current integration state: PR `#17` is at exact candidate
+  `f65366fcabca93a1a78c6d7f7c11e38e11d2189d`. The supplier-enabled Android
+  Full APK and unsigned generic iPhoneOS app both compile and package from the
+  owner-supplied local SDK while WHOOP remains available. Supplier binaries
+  remain ignored and absent from Git. The Apple app embeds the verified
+  ABParTool, FMDB, GRDFUSDK, JLDialUnit, MJExtension, and ZipZap runtime
+  frameworks; Android verifies and packages the seven pinned AARs. Focused
+  Apple supplier tests pass 39/39, the SDK wiring tests pass 18/18, the
+  operations validator passes all 91 records, and the complete release-control
+  matrix passes 204/204 after exact generated-cache cleanup. The reviewed
+  terminology ratchet records 18,121 classified occurrences across 1,614
+  groups with zero forbidden mappings. All PR review threads are resolved.
+  Replacement exact-SHA hosted checks are running; normal protected merge,
+  protected-main verification, and exact round-owned cleanup remain.
+  Supplier redistribution, signing/store review, physical BLE, background
+  collection, history retention, haptics, battery, firmware, egress, provider
+  delivery, production load, and physiological accuracy remain external or
+  physical gates.
 - Historical checkpoint: `NoopBandSDK` PR `#24` merged normally at
   `f20f4ed552328a64a8a598aaac72befa1d481262`. Two independent app-source
   exports from that exact merge are byte-identical. The app's exact ten-file

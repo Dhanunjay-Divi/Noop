@@ -36593,18 +36593,18 @@
     {
       "category": "historical",
       "lineNumbers": [
-        24,
-        111,
-        159,
-        180,
-        324,
-        456,
-        561,
-        565
+        18,
+        85,
+        133,
+        154,
+        298,
+        430,
+        535,
+        539
       ],
       "occurrenceCount": 8,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "3ba5ed5a8e4d791b1e632ff567bd70fb25795d525ebd6a281d4f74ec24a7da58",
+      "sha256": "81ca818191cf793de61e9683a2dba27b6b37c02f15fbec86a3b053b0bf4b0812",
       "tokenCounts": {
         "whoop": 5,
         "whoopstore": 3
