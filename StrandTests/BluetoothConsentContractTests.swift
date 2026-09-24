@@ -88,6 +88,10 @@ final class BluetoothConsentContractTests: XCTestCase {
         XCTAssertTrue(scanStep.contains("selectionScope: requiresClaimEligibleBand"))
         XCTAssertTrue(scanStep.contains("completedDeviceSetupSource"))
         XCTAssertTrue(scanStep.contains("requiresClaimEligibleBand: requiresClaimEligibleBand"))
+        XCTAssertTrue(scanStep.contains("supplierUsable:"))
+        XCTAssertTrue(
+            scanStep.contains("VeepooBandSourceFactory.hasUsableRegistration")
+        )
         XCTAssertTrue(scanStep.contains("\"onboarding.device_setup\""))
         XCTAssertTrue(
             scanStep.contains(

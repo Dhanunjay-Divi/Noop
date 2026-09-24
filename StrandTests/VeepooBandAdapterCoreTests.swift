@@ -1,6 +1,7 @@
 import Combine
 import XCTest
 @testable import Strand
+import WhoopStore
 
 final class VeepooBandAdapterCoreTests: XCTestCase {
     @MainActor
@@ -440,12 +441,82 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         )
         adapter.emit(.heartRate(.init(bpm: 72, receivedAt: Date())))
         XCTAssertEqual(live.displayOnlyHeartRate, 72)
+        XCTAssertTrue(live.connected)
 
         adapter.emit(.liveStopped)
 
         XCTAssertNil(live.displayOnlyHeartRate)
         XCTAssertNil(live.displayOnlyHeartRateReceivedAt)
+        XCTAssertFalse(live.connected)
         source.stop()
+    }
+
+    @MainActor
+    func testSourcePublishesNonStreamingStateWhenLiveStreamFails() {
+        let live = LiveState()
+        let adapter = FakeAdapter()
+        let source = VeepooBandSource(
+            live: live,
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {}
+        )
+        adapter.emit(.heartRate(.init(bpm: 72, receivedAt: Date())))
+        XCTAssertTrue(live.connected)
+
+        adapter.emit(.failed(stage: .live, failure: .notWorn))
+
+        XCTAssertNil(live.displayOnlyHeartRate)
+        XCTAssertNil(live.displayOnlyHeartRateReceivedAt)
+        XCTAssertFalse(live.connected)
+        source.stop()
+    }
+
+    @MainActor
+    func testSupplierRegistrationUsabilityRequiresRuntimeAndCredential() {
+        let credentials = FakeCredentials()
+        let device = PairedDevice(
+            id: "supplier-band",
+            brand: "Supplier",
+            model: "Test",
+            peripheralId: UUID().uuidString,
+            sourceKind: .veepoo,
+            capabilities: [.hr],
+            status: .active,
+            addedAt: 1,
+            lastSeenAt: 1
+        )
+
+        XCTAssertFalse(
+            VeepooBandSourceFactory.hasUsableRegistration(
+                for: device,
+                credentials: credentials,
+                adapterAvailable: true
+            )
+        )
+        credentials.values[device.id] = "2468"
+        XCTAssertTrue(
+            VeepooBandSourceFactory.hasUsableRegistration(
+                for: device,
+                credentials: credentials,
+                adapterAvailable: true
+            )
+        )
+        XCTAssertFalse(
+            VeepooBandSourceFactory.hasUsableRegistration(
+                for: device,
+                credentials: credentials,
+                adapterAvailable: false
+            )
+        )
+        credentials.values[device.id] = "12x4"
+        XCTAssertFalse(
+            VeepooBandSourceFactory.hasUsableRegistration(
+                for: device,
+                credentials: credentials,
+                adapterAvailable: true
+            )
+        )
     }
 
     @MainActor

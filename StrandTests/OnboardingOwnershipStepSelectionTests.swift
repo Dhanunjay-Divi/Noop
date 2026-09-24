@@ -186,7 +186,7 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
             OnboardingWizard.completedDeviceSetupSource(
                 in: [seed, imported, activityFile],
                 requiresClaimEligibleBand: true,
-                supplierAvailable: false
+                supplierUsable: { _ in false }
             )
         )
     }
@@ -204,20 +204,20 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
             OnboardingWizard.completedDeviceSetupSource(
                 in: [genericStrap],
                 requiresClaimEligibleBand: true,
-                supplierAvailable: false
+                supplierUsable: { _ in false }
             )
         )
         XCTAssertEqual(
             OnboardingWizard.completedDeviceSetupSource(
                 in: [genericStrap],
                 requiresClaimEligibleBand: false,
-                supplierAvailable: false
+                supplierUsable: { _ in false }
             ),
             .liveBLE
         )
     }
 
-    func testSupplierRegistryCommitCompletesConfiguredBandSetup() {
+    func testSupplierRegistryCommitRequiresUsableRuntimeRegistration() {
         let supplier = pairedDevice(
             id: "supplier-band",
             brand: "Supplier",
@@ -230,7 +230,7 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
             OnboardingWizard.completedDeviceSetupSource(
                 in: [supplier],
                 requiresClaimEligibleBand: true,
-                supplierAvailable: true
+                supplierUsable: { $0.id == supplier.id }
             ),
             .veepoo
         )
@@ -238,7 +238,14 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
             OnboardingWizard.completedDeviceSetupSource(
                 in: [supplier],
                 requiresClaimEligibleBand: true,
-                supplierAvailable: false
+                supplierUsable: { _ in false }
+            )
+        )
+        XCTAssertNil(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [supplier],
+                requiresClaimEligibleBand: false,
+                supplierUsable: { _ in false }
             )
         )
     }
@@ -256,7 +263,7 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
             OnboardingWizard.completedDeviceSetupSource(
                 in: [whoop],
                 requiresClaimEligibleBand: true,
-                supplierAvailable: false
+                supplierUsable: { _ in false }
             ),
             .liveBLE
         )
@@ -282,7 +289,7 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
             OnboardingWizard.completedDeviceSetupSource(
                 in: [mismatched, blankIdentity],
                 requiresClaimEligibleBand: true,
-                supplierAvailable: true
+                supplierUsable: { _ in true }
             )
         )
     }

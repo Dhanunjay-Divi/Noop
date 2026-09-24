@@ -60,7 +60,15 @@ struct LiveView: View {
         let activeID = registry.activeDeviceId
         return registry.devices.first(where: { $0.id == activeID })?.sourceKind
     }
-    private var supplierSourceActive: Bool { activeSourceKind == .veepoo }
+    static func shouldShowWhoopControls(
+        activeSourceKind: SourceKind?
+    ) -> Bool {
+        activeSourceKind != .veepoo
+    }
+    private var showsWhoopControls: Bool {
+        Self.shouldShowWhoopControls(activeSourceKind: activeSourceKind)
+    }
+    private var supplierSourceActive: Bool { !showsWhoopControls }
     private var supplierDisplayStreaming: Bool {
         supplierSourceActive
             && live.connected
@@ -101,46 +109,56 @@ struct LiveView: View {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 if live.connected {
                     consoleHeader
-                    if live.backfilling {
-                        SyncingHistoryNote(
-                            chunks: live.syncChunksThisSession,
-                            rows: live.historySyncProgress.rowsPersisted,
-                            newestDataUnix: live.historySyncProgress.newestDataUnix,
-                            startedAt: live.historySyncStartedAt,
-                            lastDurableProgressAt: live.historySyncLastDurableProgressAt
-                        )
-                    } else if let syncError = live.lastSyncError {
-                        Text(syncError)
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.statusWarning)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if !supplierSourceActive {
+                    if showsWhoopControls {
+                        if live.backfilling {
+                            SyncingHistoryNote(
+                                chunks: live.syncChunksThisSession,
+                                rows: live.historySyncProgress.rowsPersisted,
+                                newestDataUnix: live.historySyncProgress.newestDataUnix,
+                                startedAt: live.historySyncStartedAt,
+                                lastDurableProgressAt: live.historySyncLastDurableProgressAt
+                            )
+                        } else if let syncError = live.lastSyncError {
+                            Text(syncError)
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.statusWarning)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         liveTrackingCard
+                        // Can't-connect-at-all guidance: the strap wiped its bond (firmware update / WHOOP app
+                        // re-bond), so connects loop on "Peer removed pairing information". Show the re-pair steps
+                        // right here instead of silently retrying. (5/MG firmware reset, 2026-06)
+                        if let guide = live.reconnectGuide { reconnectGuideBanner(guide) }
+                        // Bond-refused guidance, shown right here on Live where people actually connect (it
+                        // also appears in Settings). A 5/MG strap still bonded to the WHOOP app refuses pairing
+                        // with "Encryption is insufficient" - this tells the user to free it and re-pair.
+                        if let hint = live.pairingHint { pairingHintBanner(hint) }
                     }
-                    // Can't-connect-at-all guidance: the strap wiped its bond (firmware update / WHOOP app
-                    // re-bond), so connects loop on "Peer removed pairing information". Show the re-pair steps
-                    // right here instead of silently retrying. (5/MG firmware reset, 2026-06)
-                    if let guide = live.reconnectGuide { reconnectGuideBanner(guide) }
-                    // Bond-refused guidance, shown right here on Live where people actually connect (it
-                    // also appears in Settings). A 5/MG strap still bonded to the WHOOP app refuses pairing
-                    // with "Encryption is insufficient" - this tells the user to free it and re-pair.
-                    if let hint = live.pairingHint { pairingHintBanner(hint) }
                     if liveTrackingOptedIn || supplierDisplayStreaming {
                         bodyConsole
                         // Low-bandwidth fallback note (#80): the radio couldn't sustain the WHOOP 4 R10/R11 raw
                         // realtime burst, so live HR is riding the standard BLE Heart-Rate profile instead.
-                        if Self.shouldShowStandardHRNote(live.standardHRMode) {
+                        if showsWhoopControls,
+                           Self.shouldShowStandardHRNote(live.standardHRMode) {
                             standardHRNote(live.standardHRMode ?? "")
                         }
                         signalTrustRail
                     }
-                    sessionConsole
-                    if !activeConnection { modelPicker }
-                    controls
+                    if showsWhoopControls {
+                        sessionConsole
+                        if !activeConnection { modelPicker }
+                        controls
+                    }
                     manageDevicesRow
                     // Diagnostics remain available while a stream exists, but no longer dominate the
                     // disconnected first impression. Test Centre remains the durable diagnostics home.
+                    LiveLogCard()
+                } else if supplierSourceActive {
+                    // Supplier transport is owned by SourceCoordinator, not BLEManager. Keep the
+                    // disconnected surface read-only and route reconnect/switch/remove work through
+                    // Devices instead of exposing WHOOP scan or disconnect commands.
+                    consoleHeader
+                    manageDevicesRow
                     LiveLogCard()
                 } else {
                     // Offline is a device state, not an empty diagnostics console. Give the band room to

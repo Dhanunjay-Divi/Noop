@@ -280,13 +280,13 @@ final class VeepooBandSource: LiveHRSource {
                 return
             }
             if stage == .live {
-                clearDisplayHeartRate()
+                publishNonStreamingDisplayState()
             }
             if stage == .connection || stage == .disconnect {
                 scheduleReconnect()
             }
         case .liveStopped:
-            clearDisplayHeartRate()
+            publishNonStreamingDisplayState()
         case .state, .authenticated, .liveStarted:
             break
         }
@@ -357,10 +357,27 @@ final class VeepooBandSource: LiveHRSource {
         displayFreshnessTask = nil
         live.clearDisplayOnlyHeartRate()
     }
+
+    private func publishNonStreamingDisplayState() {
+        clearDisplayHeartRate()
+        live.connected = false
+    }
 }
 
 @MainActor
 enum VeepooBandSourceFactory {
+    static func hasUsableRegistration(
+        for device: PairedDevice,
+        credentials: any VeepooCredentialAccess,
+        adapterAvailable: Bool = VeepooBandAdapterFactory.productionEnabled
+    ) -> Bool {
+        usablePassword(
+            for: device,
+            credentials: credentials,
+            adapterAvailable: adapterAvailable
+        ) != nil
+    }
+
     static func productionFactory(
         registry: DeviceRegistry,
         live: LiveState,
@@ -370,9 +387,11 @@ enum VeepooBandSourceFactory {
         let credentials = credentials ?? VeepooCredentialStore.shared
         return { deviceID in
             guard let row = registry.devices.first(where: { $0.id == deviceID }),
-                  row.sourceKind == .veepoo,
-                  row.peripheralId.flatMap(UUID.init(uuidString:)) != nil,
-                  let password = credentials.load(deviceID: deviceID),
+                  let password = usablePassword(
+                    for: row,
+                    credentials: credentials,
+                    adapterAvailable: true
+                  ),
                   let adapter =
                     VeepooBandAdapterFactory.makeForApprovedLocalDeviceBuild()
             else {
@@ -402,6 +421,22 @@ enum VeepooBandSourceFactory {
                 }
             )
         }
+    }
+
+    private static func usablePassword(
+        for device: PairedDevice,
+        credentials: any VeepooCredentialAccess,
+        adapterAvailable: Bool
+    ) -> String? {
+        guard adapterAvailable,
+              device.sourceKind == .veepoo,
+              device.peripheralId.flatMap(UUID.init(uuidString:)) != nil,
+              let password = credentials.load(deviceID: device.id),
+              VeepooBandAdapterCore.isValidPassword(password)
+        else {
+            return nil
+        }
+        return password
     }
 }
 

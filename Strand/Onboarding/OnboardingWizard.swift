@@ -434,7 +434,7 @@ public struct OnboardingWizard: View {
     static func completedDeviceSetupSource(
         in devices: [PairedDevice],
         requiresClaimEligibleBand: Bool,
-        supplierAvailable: Bool
+        supplierUsable: (PairedDevice) -> Bool
     ) -> SourceKind? {
         for device in devices {
             guard device.status == .active || device.status == .paired else {
@@ -449,7 +449,9 @@ public struct OnboardingWizard: View {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 guard peripheralID?.isEmpty == false else { continue }
             }
-            if device.sourceKind == .veepoo && !supplierAvailable {
+            let isUsableSupplier =
+                device.sourceKind == .veepoo && supplierUsable(device)
+            if device.sourceKind == .veepoo && !isUsableSupplier {
                 continue
             }
             if requiresClaimEligibleBand {
@@ -461,9 +463,7 @@ public struct OnboardingWizard: View {
                     device.sourceKind == .historyBLE
                 let isEligibleWhoop =
                     SourceCoordinator.isWhoop(device) && isWhoopTransport
-                let isEligibleSupplier =
-                    supplierAvailable && device.sourceKind == .veepoo
-                guard isEligibleWhoop || isEligibleSupplier else {
+                guard isEligibleWhoop || isUsableSupplier else {
                     continue
                 }
             }
@@ -1318,10 +1318,16 @@ private struct ScanStep: View {
     }
 
     private func refreshSetupSource(recordOutcome: Bool) {
+        let credentials = VeepooCredentialStore.shared
         let source = OnboardingWizard.completedDeviceSetupSource(
             in: model.deviceRegistry?.devices ?? [],
             requiresClaimEligibleBand: requiresClaimEligibleBand,
-            supplierAvailable: VeepooBandAdapterFactory.productionEnabled
+            supplierUsable: {
+                VeepooBandSourceFactory.hasUsableRegistration(
+                    for: $0,
+                    credentials: credentials
+                )
+            }
         )
         onSetupSource(source)
         guard recordOutcome else { return }
