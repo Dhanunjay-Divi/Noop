@@ -18,8 +18,8 @@ import UIKit
 //  3 Expectations      - what scores need and what NOOP does not claim
 //  4 Bluetooth priming - explain BEFORE the OS prompt
 //  5 Wear & wake       - put your strap on, make sure it is charged
-//  6 Scan              - radar sweep; auto-scans, Scan retries via model.scan()
-//  7 Bonding           - celebration when live.bonded
+//  6 Device setup      - opens the shared source-aware AddDeviceWizard
+//  7 Setup complete    - celebration after a real registry source or WHOOP bond
 //  8 Ownership         - always visible; configured builds require claim before profile
 //  9 Profile           - age / sex / weight / height bound to ProfileStore
 // 10 Import (optional) - wearable / Apple Health history
@@ -172,6 +172,7 @@ public struct OnboardingWizard: View {
     @State private var glow = false
     @State private var profileEditing = false
     @State private var bandBonded = false
+    @State private var registrySetupSource: SourceKind?
     /// Notification permission is never bundled into a generic Continue tap. This explicit, default-off
     /// choice is explained on the Notifications step and only then passed to the scheduler.
     @State private var dailyReviewOptIn = DailyReviewNotifications.isEnabled
@@ -201,7 +202,13 @@ public struct OnboardingWizard: View {
                     case .expectations: ExpectationsStep()
                     case .bluetooth:  BluetoothStep()
                     case .wear:       WearStep()
-                    case .scan:       ScanStep(advance: advance)
+                    case .scan:
+                        ScanStep(
+                            setupComplete: deviceSetupComplete,
+                            canContinueWithoutBand: !ownershipConfigured,
+                            requiresClaimEligibleBand: ownershipConfigured,
+                            onSetupSource: handleDeviceSetupSource
+                        )
                     case .bonded:     BondedStep()
                     case .ownership:
                         #if os(iOS)
@@ -279,6 +286,13 @@ public struct OnboardingWizard: View {
     private func handleBondState(_ bonded: Bool) {
         bandBonded = bonded
         if bonded && step == .scan {
+            move(to: .bonded, direction: "automatic")
+        }
+    }
+
+    private func handleDeviceSetupSource(_ source: SourceKind?) {
+        registrySetupSource = source
+        if source != nil && step == .scan {
             move(to: .bonded, direction: "automatic")
         }
     }
@@ -380,7 +394,7 @@ public struct OnboardingWizard: View {
         case .scan:
             return Self.scanCTATitle(
                 ownershipConfigured: ownershipConfigured,
-                bandBonded: bandBonded
+                deviceSetupComplete: deviceSetupComplete
             )
         case .bonded:     return String(localized: "Continue")
         case .ownership:
@@ -409,12 +423,57 @@ public struct OnboardingWizard: View {
 
     static func scanCTATitle(
         ownershipConfigured: Bool,
-        bandBonded: Bool
+        deviceSetupComplete: Bool
     ) -> String {
-        if !ownershipConfigured && !bandBonded {
+        if !ownershipConfigured && !deviceSetupComplete {
             return String(localized: "appwide.onboarding.continue_without_band")
         }
         return String(localized: "Continue")
+    }
+
+    static func completedDeviceSetupSource(
+        in devices: [PairedDevice],
+        requiresClaimEligibleBand: Bool,
+        supplierAvailable: Bool
+    ) -> SourceKind? {
+        for device in devices {
+            guard device.status == .active || device.status == .paired else {
+                continue
+            }
+            guard !device.isImportSource,
+                  device.sourceKind != .activityFile else {
+                continue
+            }
+            if device.id == "my-whoop" {
+                let peripheralID = device.peripheralId?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard peripheralID?.isEmpty == false else { continue }
+            }
+            if device.sourceKind == .veepoo && !supplierAvailable {
+                continue
+            }
+            if requiresClaimEligibleBand {
+                let peripheralID = device.peripheralId?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard peripheralID?.isEmpty == false else { continue }
+                let isWhoopTransport =
+                    device.sourceKind == .liveBLE ||
+                    device.sourceKind == .historyBLE
+                let isEligibleWhoop =
+                    SourceCoordinator.isWhoop(device) && isWhoopTransport
+                let isEligibleSupplier =
+                    supplierAvailable && device.sourceKind == .veepoo
+                guard isEligibleWhoop || isEligibleSupplier else {
+                    continue
+                }
+            }
+            return device.sourceKind
+        }
+        return nil
+    }
+
+    private var deviceSetupComplete: Bool {
+        bandBonded || registrySetupSource != nil
     }
 
     private var primaryActionEnabled: Bool {
@@ -425,7 +484,7 @@ public struct OnboardingWizard: View {
                 reconciliationComplete: ownershipReconciliationComplete
             )
         }
-        if step == .scan && ownershipRequired { return bandBonded }
+        if step == .scan && ownershipRequired { return deviceSetupComplete }
         if step == .plan {
             return !planSubmissionBusy && postClaimOwnershipReady
         }
@@ -455,7 +514,7 @@ public struct OnboardingWizard: View {
     /// its own: only "Enable & Continue" calls the scheduler, which requests the OS permission if needed.
     /// Denial does not block onboarding and the same control remains available under Automations.
     private func advance() {
-        if step == .scan && !bandBonded && !ownershipConfigured {
+        if step == .scan && !deviceSetupComplete && !ownershipConfigured {
             move(to: .ownership, direction: "forward")
             return
         }
@@ -535,9 +594,13 @@ public struct OnboardingWizard: View {
     }
 
     private func back() {
-        let index = currentStepIndex
-        guard activeSteps.indices.contains(index - 1) else { return }
-        move(to: activeSteps[index - 1], direction: "back")
+        var target = currentStepIndex - 1
+        guard activeSteps.indices.contains(target) else { return }
+        if activeSteps[target] == .bonded && !deviceSetupComplete {
+            target -= 1
+        }
+        guard activeSteps.indices.contains(target) else { return }
+        move(to: activeSteps[target], direction: "back")
     }
 
     private var activeSteps: [Step] {
@@ -1146,141 +1209,147 @@ private struct WearStep: View {
     }
 }
 
-// MARK: - Step 5 · Scan (radar sweep + reassurance)
+// MARK: - Step 5 · Source-aware device setup
 
 private struct ScanStep: View {
-    let advance: () -> Void
+    let setupComplete: Bool
+    let canContinueWithoutBand: Bool
+    let requiresClaimEligibleBand: Bool
+    let onSetupSource: (SourceKind?) -> Void
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var live: LiveState
 
-    @State private var scanning = false
-    @State private var showHelp = false
+    @State private var showAddDeviceWizard = false
 
     var body: some View {
-        StepShell(title: String(localized: "Find Noop Band"),
-                  subtitle: live.bonded
-                      ? String(localized: "Bonded. You're set.")
-                      : String(localized: "Keep your Noop Band nearby, then tap Scan. Hardware detection is automatic.")) {
+        StepShell(
+            title: String(
+                localized: "appwide.onboarding.device_setup_title"
+            ),
+            subtitle: setupBody
+        ) {
             VStack(spacing: 24) {
-                RadarSweep(active: scanning && !live.bonded, bonded: live.bonded)
-                    .frame(width: 220, height: 220)
-
-                statusLine
-
-                if !live.bonded {
-                    VStack(spacing: 6) {
-                        Label("Noop Band", systemImage: "applewatch.side.right")
-                            .font(StrandFont.headline)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                        Text("NOOP detects compatible band hardware automatically.")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textTertiary)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Noop Band. Hardware detection is automatic.")
-                    .accessibilityIdentifier("noop.onboarding.band")
-
-                    Button(action: { startScan() }) {
-                        Label(scanning ? "Scanning…" : "Scan", systemImage: "dot.radiowaves.left.and.right")
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .disabled(scanning)
-                    .accessibilityIdentifier("noop.onboarding.scan")
-
-                    DisclosureToggle(open: $showHelp, label: String(localized: "Don't see it?"))
-
-                    if showHelp { reassurance }
-
-                    Text("No Noop Band? You can still continue. Add another heart-rate strap, watch, ring, or gym machine under Devices, or connect an import under Data Sources at any time.")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 360)
-                        .accessibilityIdentifier("noop.onboarding.scan-footnote")
+                ZStack {
+                    Circle()
+                        .fill(StrandPalette.accent.opacity(0.14))
+                        .frame(width: 148, height: 148)
+                    Image(
+                        systemName: setupComplete
+                            ? "checkmark.circle.fill"
+                            : "dot.radiowaves.left.and.right"
+                    )
+                    .font(.system(size: 58, weight: .semibold))
+                    .foregroundStyle(
+                        setupComplete
+                            ? StrandPalette.statusPositive
+                            : StrandPalette.accent
+                    )
                 }
-            }
-        }
-        .onDisappear { scanning = false }
-    }
+                .accessibilityHidden(true)
 
-    private var statusLine: some View {
-        Group {
-            if live.bonded {
-                StatePill("Connected", tone: .positive)
-            } else if live.connected {
-                StatePill("Connecting…", tone: .warning, pulsing: true)
-            } else if scanning {
-                StatePill("Searching", tone: .accent, pulsing: true)
-            } else {
-                StatePill("Ready to scan", tone: .neutral, showsDot: false)
-            }
-        }
-    }
-
-    private func startScan() {
-        scanning = true
-        showHelp = false
-        // The transport starts with the last observed family and automatically rotates after a short
-        // miss, so setup does not ask users for protocol-generation knowledge.
-        model.scan()
-        // Surface the reassurance card if we haven't bonded after a calm beat.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12) {
-            if !live.bonded {
-                scanning = false
-                withAnimation(StrandMotion.gentle) { showHelp = true }
-            }
-        }
-    }
-
-    // The calm, never-alarmist "can't find it" card.
-    private var reassurance: some View {
-        StrandCard {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Image(systemName: "info.circle.fill")
-                        .foregroundStyle(StrandPalette.statusWarning)
-                    Text("Don't see it? That's normal.")
-                        .font(StrandFont.headline)
-                        .foregroundStyle(StrandPalette.textPrimary)
+                if setupComplete {
+                    StatePill(
+                        "appwide.onboarding.device_ready_title",
+                        tone: .positive
+                    )
                 }
 
-                Text("A Noop Band may not appear in your \(Platform.deviceNoun)'s Bluetooth settings. NOOP finds its private band signal directly, so start pairing here.")
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Divider().overlay(StrandPalette.hairline)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Checkline(text: String(localized: "It's charged and worn. The sensor needs skin contact to wake."))
-                    Checkline(text: String(localized: "It isn't held by another band app. Close that app first because the band supports one active host."))
-                    Checkline(text: String(localized: "It's within about a metre of \(Platform.deviceNounPhrase)."))
-                }
-
-                Button(action: retry) {
-                    Label("Try again", systemImage: "arrow.clockwise")
+                Button(action: openDeviceWizard) {
+                    Label(
+                        String(
+                            localized:
+                                "appwide.onboarding.device_setup_action"
+                        ),
+                        systemImage: "plus.circle"
+                    )
                 }
                 .buttonStyle(SecondaryButtonStyle())
-                .padding(.top, 2)
+                .accessibilityLabel(
+                    String(
+                        localized:
+                            "appwide.onboarding.device_setup_action"
+                    )
+                )
+                .accessibilityHint(
+                    setupBody
+                )
+                .accessibilityIdentifier("noop.onboarding.choose-device")
+
+                if canContinueWithoutBand && !setupComplete {
+                    Text(
+                        String(
+                            localized:
+                                "appwide.onboarding.continue_without_band"
+                        )
+                    )
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(
+                        "noop.onboarding.continue-without-band-note"
+                    )
+                }
             }
         }
-        .frame(maxWidth: 480)
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
+        .sheet(
+            isPresented: $showAddDeviceWizard,
+            onDismiss: { refreshSetupSource(recordOutcome: true) }
+        ) {
+            AddDeviceWizard(
+                live: live,
+                onClose: { showAddDeviceWizard = false },
+                selectionScope: requiresClaimEligibleBand
+                    ? .claimEligibleBands
+                    : .allDevices
+            )
+        }
+        .onAppear {
+            refreshSetupSource(recordOutcome: false)
+        }
     }
 
-    private func retry() {
-        withAnimation(StrandMotion.gentle) { showHelp = false }
-        startScan()
+    private func openDeviceWizard() {
+        AppDiagnosticsRecorder.shared.record(
+            "onboarding.device_setup",
+            fields: ["outcome": "opened"]
+        )
+        showAddDeviceWizard = true
+    }
+
+    private func refreshSetupSource(recordOutcome: Bool) {
+        let source = OnboardingWizard.completedDeviceSetupSource(
+            in: model.deviceRegistry?.devices ?? [],
+            requiresClaimEligibleBand: requiresClaimEligibleBand,
+            supplierAvailable: VeepooBandAdapterFactory.productionEnabled
+        )
+        onSetupSource(source)
+        guard recordOutcome else { return }
+
+        var fields = [
+            "outcome": source == nil ? "dismissed" : "completed",
+        ]
+        if let source {
+            fields["source"] = source.rawValue
+        }
+        AppDiagnosticsRecorder.shared.record(
+            "onboarding.device_setup",
+            fields: fields
+        )
+    }
+
+    private var setupBody: String {
+        String(
+            localized: requiresClaimEligibleBand
+                ? "appwide.onboarding.claim_band_setup_body"
+                : "appwide.onboarding.device_setup_body"
+        )
     }
 }
 
-// MARK: - Step 6 · Bonding celebration
+// MARK: - Step 6 · Device-setup celebration
 
 private struct BondedStep: View {
-    @EnvironmentObject private var live: LiveState
     @State private var bloom = false
     var body: some View {
         StepShell {
@@ -1293,8 +1362,12 @@ private struct BondedStep: View {
                         .blur(radius: 70)
                         .opacity(bloom ? 0.5 : 0.0)
                         .blendMode(.plusLighter)
-                    // A ring materialises — a taste of the signature component.
-                    RecoveryRing(score: 100, supporting: nil, diameter: 200, lineWidth: 14, showsLabel: false)
+                    Circle()
+                        .stroke(
+                            StrandPalette.statusPositive.opacity(0.34),
+                            lineWidth: 14
+                        )
+                        .frame(width: 200, height: 200)
                         .scaleEffect(bloom ? 1 : 0.7)
                         .opacity(bloom ? 1 : 0)
                     Image(systemName: "checkmark")
@@ -1304,27 +1377,34 @@ private struct BondedStep: View {
                         .opacity(bloom ? 1 : 0)
                 }
                 .frame(height: 210)
+                .accessibilityHidden(true)
 
                 VStack(spacing: 8) {
-                    Text("You're connected.")
+                    Text(
+                        String(
+                            localized:
+                                "appwide.onboarding.device_ready_title"
+                        )
+                    )
                         .font(StrandFont.title1)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text(batteryLine)
+                    Text(
+                        String(
+                            localized:
+                                "appwide.onboarding.device_ready_body"
+                        )
+                    )
                         .font(StrandFont.body)
                         .foregroundStyle(StrandPalette.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .opacity(bloom ? 1 : 0)
+                .accessibilityElement(children: .combine)
                 Spacer()
             }
         }
         .onAppear { withAnimation(StrandMotion.hero) { bloom = true } }
-    }
-
-    private var batteryLine: String {
-        if let pct = live.batteryPct {
-            return String(localized: "Noop Band is paired · \(Int(pct))% battery.")
-        }
-        return String(localized: "Noop Band is paired and ready to stream.")
     }
 }
 
@@ -2317,100 +2397,6 @@ private struct StepShell<Content: View>: View {
     }
 }
 
-// MARK: - Radar sweep
-
-private struct RadarSweep: View {
-    var active: Bool
-    var bonded: Bool
-    @State private var angle: Double = 0
-    @State private var ping = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        GeometryReader { geo in
-            let size = min(geo.size.width, geo.size.height)
-            ZStack {
-                // Concentric rings.
-                ForEach(1...3, id: \.self) { i in
-                    Circle()
-                        .stroke(StrandPalette.hairline.opacity(0.7), lineWidth: 1)
-                        .frame(width: size * Double(i) / 3, height: size * Double(i) / 3)
-                }
-                // Cross hairs.
-                Path { p in
-                    p.move(to: CGPoint(x: size / 2, y: 0)); p.addLine(to: CGPoint(x: size / 2, y: size))
-                    p.move(to: CGPoint(x: 0, y: size / 2)); p.addLine(to: CGPoint(x: size, y: size / 2))
-                }
-                .stroke(StrandPalette.hairline.opacity(0.5), lineWidth: 1)
-
-                // The sweeping wedge.
-                if active {
-                    sweepWedge(size: size)
-                        .rotationEffect(.degrees(angle))
-                }
-
-                // Center node — accent while searching, mint when bonded.
-                Circle()
-                    .fill(bonded ? StrandPalette.recovery100 : StrandPalette.accent)
-                    .frame(width: 14, height: 14)
-                    .shadow(color: (bonded ? StrandPalette.recovery100 : StrandPalette.accent).opacity(0.8),
-                            radius: ping ? 10 : 4)
-
-                // A discovered "blip" once bonded.
-                if bonded {
-                    Circle()
-                        .fill(StrandPalette.statusPositive)
-                        .frame(width: 12, height: 12)
-                        .shadow(color: StrandPalette.statusPositive.opacity(0.9), radius: 8)
-                        .position(x: size * 0.70, y: size * 0.36)
-                        .transition(.scale.combined(with: .opacity))
-                }
-            }
-            .frame(width: size, height: size)
-        }
-        .onAppear {
-            if active { startSweep() }
-            ping = true
-        }
-        .onChangeCompat(of: active) { isActive in
-            if isActive { startSweep() }
-        }
-        .animation(StrandMotion.breathe(reduced: reduceMotion), value: ping)
-    }
-
-    private func sweepWedge(size: CGFloat) -> some View {
-        let radius = size / 2
-        return AngularGradient(
-            gradient: Gradient(colors: [StrandPalette.accent.opacity(0.0),
-                                        StrandPalette.accent.opacity(0.45)]),
-            center: .center,
-            startAngle: .degrees(-50),
-            endAngle: .degrees(0)
-        )
-        .mask(
-            Path { p in
-                let c = CGPoint(x: radius, y: radius)
-                p.move(to: c)
-                p.addArc(center: c, radius: radius,
-                         startAngle: .degrees(-50), endAngle: .degrees(0), clockwise: false)
-                p.closeSubpath()
-            }
-        )
-        .frame(width: size, height: size)
-        .blendMode(.plusLighter)
-    }
-
-    private func startSweep() {
-        // Reduce Motion: keep the wedge still (the static rings/crosshairs/blip
-        // still convey "searching" / "found") instead of spinning forever.
-        guard !reduceMotion else { return }
-        angle = 0
-        withAnimation(.linear(duration: 2.4).repeatForever(autoreverses: false)) {
-            angle = 360
-        }
-    }
-}
-
 // MARK: - The bottom "thread" progress
 
 private struct ThreadProgress: View {
@@ -2508,24 +2494,6 @@ private struct FieldRow: View {
                 .font(StrandFont.bodyNumber)
                 .foregroundStyle(StrandPalette.textPrimary)
         }
-    }
-}
-
-private struct DisclosureToggle: View {
-    @Binding var open: Bool
-    let label: String
-    var body: some View {
-        Button {
-            withAnimation(StrandMotion.gentle) { open.toggle() }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: open ? "chevron.up" : "chevron.down")
-                Text(label)
-            }
-            .font(StrandFont.subhead)
-            .foregroundStyle(StrandPalette.accent)
-        }
-        .buttonStyle(.plain)
     }
 }
 

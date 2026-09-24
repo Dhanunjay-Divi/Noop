@@ -23,6 +23,7 @@ import OuraProtocol
 struct AddDeviceWizard: View {
     @EnvironmentObject var model: AppModel
     let onClose: () -> Void
+    let selectionScope: SelectionScope
     /// Captured explicitly instead of resolving the environment during scanner construction. The wizard
     /// keeps no discovery source alive until a user-initiated Scan action calls one of the `ensure*Scanner`
     /// helpers below; merely presenting this sheet must not create a `CBCentralManager` or prompt for
@@ -75,6 +76,20 @@ struct AddDeviceWizard: View {
             case .oura:    return .oura
             case .veepoo:  return nil
             default:       return nil
+            }
+        }
+    }
+
+    enum SelectionScope {
+        case allDevices
+        case claimEligibleBands
+
+        fileprivate func allows(_ type: DeviceType) -> Bool {
+            switch self {
+            case .allDevices:
+                return true
+            case .claimEligibleBands:
+                return type.isWhoop || type == .veepoo
             }
         }
     }
@@ -155,8 +170,10 @@ struct AddDeviceWizard: View {
     ///   through. nil in production: the wizard starts on the type list. Pre-seeds the `@State` so the first
     ///   render is already on that step.
     init(live: LiveState, onClose: @escaping () -> Void,
+         selectionScope: SelectionScope = .allDevices,
          startAt: (type: DeviceType, step: Step)? = nil) {
         self.onClose = onClose
+        self.selectionScope = selectionScope
         self.scannerLive = live
         if let startAt {
             _type = State(initialValue: startAt.type)
@@ -298,10 +315,20 @@ struct AddDeviceWizard: View {
             }
         }
         switch step {
-        case .type:    return "Add a device"
-        case .prep:    return LocalizedStringKey(type.map(typeTitle) ?? String(localized: "Add a device"))
-        case .pick:    return "Pick your device"
-        case .confirm: return "Name & confirm"
+        case .type:
+            return "appwide.onboarding.device_wizard.add_title"
+        case .prep:
+            return LocalizedStringKey(
+                type.map(typeTitle)
+                    ?? String(
+                        localized:
+                            "appwide.onboarding.device_wizard.add_title"
+                    )
+            )
+        case .pick:
+            return "appwide.onboarding.device_wizard.pick_title"
+        case .confirm:
+            return "appwide.onboarding.device_wizard.confirm_title"
         }
     }
 
@@ -315,9 +342,12 @@ struct AddDeviceWizard: View {
             }
         }
         switch step {
-        case .type:    return "What are you adding?"
-        case .prep:    return "Get it ready, then scan."
-        case .pick:    return "Tap the one that's yours."
+        case .type:
+            return "appwide.onboarding.device_wizard.add_body"
+        case .prep:
+            return "appwide.onboarding.device_wizard.prep_body"
+        case .pick:
+            return "appwide.onboarding.device_wizard.pick_body"
         case .confirm: return nil
         }
     }
@@ -328,21 +358,26 @@ struct AddDeviceWizard: View {
         VStack(alignment: .leading, spacing: 10) {
             typeRow(.whoop4, icon: "applewatch.side.right",
                     title: "Noop Band",
-                    subtitle: String(localized: "Automatically detects compatible band hardware"))
-            typeRow(.hrStrap, icon: "heart.circle",
-                    title: String(localized: "Heart-rate strap"),
-                    subtitle: String(localized: "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast"))
-            typeRow(.gymEquipment, icon: "figure.run.treadmill",
-                    title: String(localized: "Gym equipment"),
-                    subtitle: String(localized: "Treadmill, indoor bike, rower or cross-trainer (Bluetooth FTMS)"))
+                    subtitle: String(
+                        localized:
+                            "appwide.onboarding.device_wizard.whoop_subtitle"
+                    ))
+            if selectionScope == .allDevices {
+                typeRow(.hrStrap, icon: "heart.circle",
+                        title: String(localized: "Heart-rate strap"),
+                        subtitle: String(localized: "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast"))
+                typeRow(.gymEquipment, icon: "figure.run.treadmill",
+                        title: String(localized: "Gym equipment"),
+                        subtitle: String(localized: "Treadmill, indoor bike, rower or cross-trainer (Bluetooth FTMS)"))
 
-            // EXPERIMENTAL tier — clearly labelled, opt-in, best-effort. Each is honest about what it can
-            // actually read; none fabricates data.
-            Text("Experimental").strandOverline().padding(.top, 8)
-            experimentalTierNote
-            typeRow(.oura, icon: "circle.circle",
-                    title: String(localized: "Oura ring"),
-                    subtitle: String(localized: "Take over your ring locally. Beta. This replaces the Oura app."))
+                // EXPERIMENTAL tier — clearly labelled, opt-in, best-effort. Each is honest about what it can
+                // actually read; none fabricates data.
+                Text("Experimental").strandOverline().padding(.top, 8)
+                experimentalTierNote
+                typeRow(.oura, icon: "circle.circle",
+                        title: String(localized: "Oura ring"),
+                        subtitle: String(localized: "Take over your ring locally. Beta. This replaces the Oura app."))
+            }
             if VeepooBandAdapterFactory.productionEnabled {
                 typeRow(
                     .veepoo,
@@ -353,37 +388,25 @@ struct AddDeviceWizard: View {
                     )
                 )
             }
-            typeRow(.amazfit, icon: "waveform.path.ecg.rectangle",
-                    title: "Amazfit / Zepp",
-                    subtitle: String(localized: "Incl. Helio. Live heart rate where the band exposes it. Help us test."))
-            typeRow(.miBand, icon: "waveform.path.ecg",
-                    title: "Xiaomi Mi Band",
-                    subtitle: String(localized: "Live heart rate on bands that don't need pairing. Help us test."))
-            typeRow(.garmin, icon: "applewatch",
-                    title: String(localized: "Garmin watch"),
-                    subtitle: String(localized: "Uses the watch's Broadcast Heart Rate. We'll show you how."))
+            if selectionScope == .allDevices {
+                typeRow(.amazfit, icon: "waveform.path.ecg.rectangle",
+                        title: "Amazfit / Zepp",
+                        subtitle: String(localized: "Incl. Helio. Live heart rate where the band exposes it. Help us test."))
+                typeRow(.miBand, icon: "waveform.path.ecg",
+                        title: "Xiaomi Mi Band",
+                        subtitle: String(localized: "Live heart rate on bands that don't need pairing. Help us test."))
+                typeRow(.garmin, icon: "applewatch",
+                        title: String(localized: "Garmin watch"),
+                        subtitle: String(localized: "Uses the watch's Broadcast Heart Rate. We'll show you how."))
 
-            whoopFirstNote
+                whoopFirstNote
+            }
         }
     }
 
     private func typeRow(_ t: DeviceType, icon: String, title: String, subtitle: String) -> some View {
         Button {
-            type = t
-            nameDraft = ""
-            // The Oura factory-reset-and-adopt gate is destructive, so every fresh entry into the Oura flow
-            // re-requires the irreversible-consent tick and clears any stale Advanced-key / adopt state, and
-            // enters the Oura sub-flow at its gate rather than the generic prep step.
-            if t == .oura {
-                ouraConsented = false
-                ouraAdvancedKeyMode = false
-                ouraKeyDraft = ""
-                ouraConfirmAdopt = false
-                pickedOura = nil
-                ouraStep = .gate
-            } else {
-                step = .prep
-            }
+            selectType(t)
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: icon)
@@ -409,6 +432,25 @@ struct AddDeviceWizard: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title). \(subtitle)")
+    }
+
+    private func selectType(_ selectedType: DeviceType) {
+        guard selectionScope.allows(selectedType) else { return }
+        type = selectedType
+        nameDraft = ""
+        // The Oura factory-reset-and-adopt gate is destructive, so every fresh entry into the Oura flow
+        // re-requires the irreversible-consent tick and clears any stale Advanced-key / adopt state, and
+        // enters the Oura sub-flow at its gate rather than the generic prep step.
+        if selectedType == .oura {
+            ouraConsented = false
+            ouraAdvancedKeyMode = false
+            ouraKeyDraft = ""
+            ouraConfirmAdopt = false
+            pickedOura = nil
+            ouraStep = .gate
+        } else {
+            step = .prep
+        }
     }
 
     // MARK: Step 2 — type-specific prep + guidance
@@ -479,9 +521,18 @@ struct AddDeviceWizard: View {
         switch t {
         case .whoop4, .whoop5mg:
             return [
-                String(localized: "Put your Noop Band on your wrist and make sure it is awake."),
-                String(localized: "Close any other app currently connected to the band."),
-                String(localized: "NOOP detects the compatible hardware generation automatically."),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.whoop_prep_wear"
+                ),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.whoop_prep_close"
+                ),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.whoop_prep_detect"
+                ),
             ]
         case .hrStrap:
             return [
@@ -1557,11 +1608,15 @@ struct AddDeviceWizard: View {
                 .foregroundStyle(StrandPalette.statusWarning)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Your band uses one active app at a time.")
+                Text(
+                    "appwide.onboarding.device_wizard.whoop_one_phone_title"
+                )
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Close any other band app first, or pairing may fail.")
+                Text(
+                    "appwide.onboarding.device_wizard.whoop_one_phone_body"
+                )
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1573,7 +1628,6 @@ struct AddDeviceWizard: View {
         .background(StrandPalette.statusWarning.opacity(0.10),
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Heads-up. Your band uses one active app at a time. Close any other band app first, or pairing may fail.")
     }
 
     private var whoopFirstNote: some View {
@@ -1614,7 +1668,10 @@ private struct WhoopPickList: View {
             } else {
                 ForEach(found, id: \.uuid) { strap in
                     DiscoveredRow(name: "Noop Band",
-                                  subtitle: String(localized: "Compatible band"),
+                                  subtitle: String(
+                                    localized:
+                                        "appwide.onboarding.device_wizard.compatible_band"
+                                  ),
                                   rssi: strap.rssi) {
                         onSelect(strap)
                     }
@@ -2016,7 +2073,9 @@ private struct SearchingCard: View {
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             if whoopHint {
-                Text("Not showing up? Another band app may still be holding the connection. Force-quit it, then tap Rescan.")
+                Text(
+                    "appwide.onboarding.device_wizard.whoop_search_hint"
+                )
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)

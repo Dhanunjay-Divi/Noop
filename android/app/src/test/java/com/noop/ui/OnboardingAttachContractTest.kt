@@ -30,6 +30,63 @@ class OnboardingAttachContractTest {
         assertTrue(onboarding.contains("l10n_onboarding_screen_import_whoop_export"))
     }
 
+    @Test fun onboardingDelegatesPairingToTheSourceAwareWizard() {
+        val userDir = checkNotNull(System.getProperty("user.dir"))
+        val onboarding = source(userDir, "OnboardingScreen.kt").readText()
+        val addDevice = source(userDir, "AddDeviceWizard.kt").readText()
+        val connectStep = onboarding
+            .substringAfter("private fun ConnectStep(")
+            .substringBefore(
+                "// A short celebration after a real device source is saved.",
+            )
+
+        assertTrue(onboarding.contains("AddDeviceWizard("))
+        assertTrue(onboarding.contains("onboardingCompletedDeviceSetupSource("))
+        assertTrue(onboarding.contains("AddDeviceSelectionScope.ClaimEligibleBands"))
+        assertTrue(onboarding.contains("SourceCoordinator.isWhoop(device)"))
+        assertTrue(onboarding.contains("\"onboarding.device_setup\""))
+        assertTrue(connectStep.contains("appwide_onboarding_device_setup_action"))
+        assertFalse(connectStep.contains("viewModel.connect("))
+        assertFalse(connectStep.contains("rememberRequestScan"))
+        assertTrue(
+            Regex("""runCatching\s*\{\s*viewModel\.pairedDevices\(\)""")
+                .findAll(onboarding)
+                .count() == 1,
+        )
+        assertTrue(
+            onboarding.split("refreshDeviceSetupSource(").size - 1 >= 3,
+        )
+        assertTrue(onboarding.contains("\"read_failed\""))
+        assertTrue(
+            addDevice.contains(
+                "selectionScope: AddDeviceSelectionScope =\n" +
+                    "        AddDeviceSelectionScope.AllDevices",
+            ),
+        )
+        assertTrue(addDevice.contains("type.isWhoop || type == DeviceType.SupplierBand"))
+        assertTrue(addDevice.contains("fun launchDurableRegistration("))
+        assertTrue(addDevice.contains("withContext(NonCancellable) { mutation() }"))
+        assertTrue(addDevice.contains("\"device.registration\""))
+        assertFalse(addDevice.contains("supplierCommitFailed"))
+        assertTrue(
+            addDevice.contains(
+                "appwide_onboarding_device_wizard_whoop_subtitle",
+            ),
+        )
+        assertTrue(
+            addDevice.contains(
+                "appwide_onboarding_device_wizard_whoop_one_phone_body",
+            ),
+        )
+        assertTrue(
+            addDevice.contains(
+                "viewModel.registerDevice(device, makeActive = makeActive)\n" +
+                    "                true",
+            ),
+        )
+        assertTrue(addDevice.contains("onSuccess = onClose"))
+    }
+
     @Test fun dailyRhythmMapsEverydayToolsWithoutEnablingThem() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val onboarding = source(userDir, "OnboardingScreen.kt").readText()

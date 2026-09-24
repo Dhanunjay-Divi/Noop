@@ -1,5 +1,6 @@
 import XCTest
 @testable import Strand
+import WhoopStore
 
 final class OnboardingOwnershipStepSelectionTests: XCTestCase {
     func testConfiguredOwnershipIncludesAccountStepWithoutConstructingRuntimeService() {
@@ -141,23 +142,148 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
         XCTAssertEqual(
             OnboardingWizard.scanCTATitle(
                 ownershipConfigured: false,
-                bandBonded: false
+                deviceSetupComplete: false
             ),
             String(localized: "appwide.onboarding.continue_without_band")
         )
         XCTAssertEqual(
             OnboardingWizard.scanCTATitle(
                 ownershipConfigured: true,
-                bandBonded: false
+                deviceSetupComplete: false
             ),
             String(localized: "Continue")
         )
         XCTAssertEqual(
             OnboardingWizard.scanCTATitle(
                 ownershipConfigured: false,
-                bandBonded: true
+                deviceSetupComplete: true
             ),
             String(localized: "Continue")
+        )
+    }
+
+    func testUntouchedSeedAndImportsDoNotCompleteDeviceSetup() {
+        let seed = pairedDevice(
+            id: "my-whoop",
+            peripheralID: nil,
+            sourceKind: .liveBLE,
+            status: .active
+        )
+        let imported = pairedDevice(
+            id: "wearable-import",
+            peripheralID: nil,
+            sourceKind: .fileImport,
+            status: .paired
+        )
+        let activityFile = pairedDevice(
+            id: "activity-file",
+            peripheralID: nil,
+            sourceKind: .activityFile,
+            status: .paired
+        )
+
+        XCTAssertNil(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [seed, imported, activityFile],
+                requiresClaimEligibleBand: true,
+                supplierAvailable: false
+            )
+        )
+    }
+
+    func testGenericLiveBLEOnlyCompletesOptionalDeviceSetup() {
+        let genericStrap = pairedDevice(
+            id: "polar-h10",
+            brand: "Polar",
+            peripheralID: "opaque-peripheral",
+            sourceKind: .liveBLE,
+            status: .active
+        )
+
+        XCTAssertNil(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [genericStrap],
+                requiresClaimEligibleBand: true,
+                supplierAvailable: false
+            )
+        )
+        XCTAssertEqual(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [genericStrap],
+                requiresClaimEligibleBand: false,
+                supplierAvailable: false
+            ),
+            .liveBLE
+        )
+    }
+
+    func testSupplierRegistryCommitCompletesConfiguredBandSetup() {
+        let supplier = pairedDevice(
+            id: "supplier-band",
+            brand: "Supplier",
+            peripheralID: "opaque-peripheral",
+            sourceKind: .veepoo,
+            status: .active
+        )
+
+        XCTAssertEqual(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [supplier],
+                requiresClaimEligibleBand: true,
+                supplierAvailable: true
+            ),
+            .veepoo
+        )
+        XCTAssertNil(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [supplier],
+                requiresClaimEligibleBand: true,
+                supplierAvailable: false
+            )
+        )
+    }
+
+    func testCanonicalWhoopRowCompletesConfiguredBandSetup() {
+        let whoop = pairedDevice(
+            id: "whoop-test-band",
+            brand: "WHOOP",
+            peripheralID: "opaque-peripheral",
+            sourceKind: .liveBLE,
+            status: .active
+        )
+
+        XCTAssertEqual(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [whoop],
+                requiresClaimEligibleBand: true,
+                supplierAvailable: false
+            ),
+            .liveBLE
+        )
+    }
+
+    func testConfiguredSetupRejectsMismatchedWhoopMetadataAndBlankIdentity() {
+        let mismatched = pairedDevice(
+            id: "not-a-band",
+            brand: "WHOOP",
+            peripheralID: "opaque-peripheral",
+            sourceKind: .ftms,
+            status: .active
+        )
+        let blankIdentity = pairedDevice(
+            id: "whoop-test-band",
+            brand: "WHOOP",
+            peripheralID: " ",
+            sourceKind: .liveBLE,
+            status: .paired
+        )
+
+        XCTAssertNil(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [mismatched, blankIdentity],
+                requiresClaimEligibleBand: true,
+                supplierAvailable: true
+            )
         )
     }
 
@@ -199,6 +325,26 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
                 ownershipConfigured: false
             ),
             .welcome
+        )
+    }
+
+    private func pairedDevice(
+        id: String,
+        brand: String = "Test",
+        peripheralID: String?,
+        sourceKind: SourceKind,
+        status: DeviceStatus
+    ) -> PairedDevice {
+        PairedDevice(
+            id: id,
+            brand: brand,
+            model: "Test",
+            peripheralId: peripheralID,
+            sourceKind: sourceKind,
+            capabilities: [.hr],
+            status: status,
+            addedAt: 1,
+            lastSeenAt: 1
         )
     }
 }

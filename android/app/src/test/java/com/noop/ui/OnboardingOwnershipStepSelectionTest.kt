@@ -1,6 +1,9 @@
 package com.noop.ui
 
 import com.noop.R
+import com.noop.data.DeviceStatus
+import com.noop.data.PairedDeviceRow
+import com.noop.data.SourceKind
 import com.noop.ownership.OwnershipPhase
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -190,19 +193,149 @@ class OnboardingOwnershipStepSelectionTest {
         assertTrue(
             onboardingContinuesWithoutBand(
                 ownershipConfigured = false,
-                bonded = false,
+                deviceSetupComplete = false,
             ),
         )
         assertTrue(
             !onboardingContinuesWithoutBand(
                 ownershipConfigured = true,
-                bonded = false,
+                deviceSetupComplete = false,
             ),
         )
         assertTrue(
             !onboardingContinuesWithoutBand(
                 ownershipConfigured = false,
-                bonded = true,
+                deviceSetupComplete = true,
+            ),
+        )
+    }
+
+    @Test
+    fun untouchedSeedAndImportsDoNotCompleteDeviceSetup() {
+        val seed = pairedDevice(
+            id = "my-whoop",
+            peripheralId = null,
+            sourceKind = SourceKind.liveBLE,
+            status = DeviceStatus.active,
+        )
+        val imported = pairedDevice(
+            id = "wearable-import",
+            peripheralId = null,
+            sourceKind = SourceKind.fileImport,
+            status = DeviceStatus.paired,
+        )
+        val activityFile = pairedDevice(
+            id = "activity-file",
+            peripheralId = null,
+            sourceKind = SourceKind.activityFile,
+            status = DeviceStatus.paired,
+        )
+
+        assertNull(
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(seed, imported, activityFile),
+                requiresClaimEligibleBand = true,
+                supplierAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun genericLiveBleOnlyCompletesOptionalDeviceSetup() {
+        val genericStrap = pairedDevice(
+            id = "polar-h10",
+            brand = "Polar",
+            peripheralId = "opaque-peripheral",
+            sourceKind = SourceKind.liveBLE,
+            status = DeviceStatus.active,
+        )
+
+        assertNull(
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(genericStrap),
+                requiresClaimEligibleBand = true,
+                supplierAvailable = false,
+            ),
+        )
+        assertEquals(
+            SourceKind.liveBLE,
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(genericStrap),
+                requiresClaimEligibleBand = false,
+                supplierAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun supplierRegistryCommitCompletesConfiguredBandSetup() {
+        val supplier = pairedDevice(
+            id = "supplier-band",
+            brand = "Supplier",
+            peripheralId = "opaque-peripheral",
+            sourceKind = SourceKind.veepoo,
+            status = DeviceStatus.active,
+        )
+
+        assertEquals(
+            SourceKind.veepoo,
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(supplier),
+                requiresClaimEligibleBand = true,
+                supplierAvailable = true,
+            ),
+        )
+        assertNull(
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(supplier),
+                requiresClaimEligibleBand = true,
+                supplierAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun canonicalWhoopRowCompletesConfiguredBandSetup() {
+        val whoop = pairedDevice(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            peripheralId = "opaque-peripheral",
+            sourceKind = SourceKind.liveBLE,
+            status = DeviceStatus.active,
+        )
+
+        assertEquals(
+            SourceKind.liveBLE,
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(whoop),
+                requiresClaimEligibleBand = true,
+                supplierAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun configuredSetupRejectsMismatchedWhoopMetadataAndBlankIdentity() {
+        val mismatched = pairedDevice(
+            id = "not-a-band",
+            brand = "WHOOP",
+            peripheralId = "opaque-peripheral",
+            sourceKind = SourceKind.ftms,
+            status = DeviceStatus.active,
+        )
+        val blankIdentity = pairedDevice(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            peripheralId = " ",
+            sourceKind = SourceKind.liveBLE,
+            status = DeviceStatus.paired,
+        )
+
+        assertNull(
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(mismatched, blankIdentity),
+                requiresClaimEligibleBand = true,
+                supplierAvailable = true,
             ),
         )
     }
@@ -255,4 +388,23 @@ class OnboardingOwnershipStepSelectionTest {
             restoredOnboardingPageIndex(storedPage = "not-a-page", pages = pages),
         )
     }
+
+    private fun pairedDevice(
+        id: String,
+        brand: String = "Test",
+        peripheralId: String?,
+        sourceKind: SourceKind,
+        status: DeviceStatus,
+    ): PairedDeviceRow = PairedDeviceRow(
+        id = id,
+        brand = brand,
+        model = "Test",
+        nickname = null,
+        peripheralId = peripheralId,
+        sourceKind = sourceKind.name,
+        capabilities = "hr",
+        status = status.name,
+        addedAt = 1,
+        lastSeenAt = 1,
+    )
 }

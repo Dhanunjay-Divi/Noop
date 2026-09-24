@@ -75,6 +75,41 @@ final class BluetoothConsentContractTests: XCTestCase {
         XCTAssertEqual(occurrences(of: "let scanner = OuraLiveSource(", in: source), 1)
     }
 
+    func testOnboardingDelegatesPairingToTheSourceAwareWizard() throws {
+        let source = try text("Strand/Onboarding/OnboardingWizard.swift")
+        let addDevice = try text("Strand/Screens/AddDeviceWizard.swift")
+        let scanStep = try slice(
+            source,
+            from: "private struct ScanStep: View",
+            to: "// MARK: - Step 6 · Device-setup celebration"
+        )
+
+        XCTAssertTrue(scanStep.contains("AddDeviceWizard("))
+        XCTAssertTrue(scanStep.contains("selectionScope: requiresClaimEligibleBand"))
+        XCTAssertTrue(scanStep.contains("completedDeviceSetupSource"))
+        XCTAssertTrue(scanStep.contains("requiresClaimEligibleBand: requiresClaimEligibleBand"))
+        XCTAssertTrue(scanStep.contains("\"onboarding.device_setup\""))
+        XCTAssertTrue(
+            scanStep.contains(
+                ".accessibilityIdentifier(\"noop.onboarding.choose-device\")"
+            )
+        )
+        XCTAssertFalse(scanStep.contains("model.scan()"))
+        XCTAssertFalse(scanStep.contains("RadarSweep"))
+        XCTAssertTrue(addDevice.contains("selectionScope: SelectionScope = .allDevices"))
+        XCTAssertTrue(addDevice.contains("type.isWhoop || type == .veepoo"))
+        XCTAssertTrue(
+            addDevice.contains(
+                "appwide.onboarding.device_wizard.whoop_subtitle"
+            )
+        )
+        XCTAssertTrue(
+            addDevice.contains(
+                "appwide.onboarding.device_wizard.whoop_one_phone_body"
+            )
+        )
+    }
+
     private func text(_ relativePath: String) throws -> String {
         let here = URL(fileURLWithPath: #filePath)
         let root = here.deletingLastPathComponent().deletingLastPathComponent()

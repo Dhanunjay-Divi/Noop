@@ -69,7 +69,9 @@ import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
 import com.noop.data.WhoopLiveCapabilities
 import com.noop.oura.OuraRingGen
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // MARK: - Add a device - guided, branching wizard (MW-4)
 //
@@ -87,7 +89,7 @@ import kotlinx.coroutines.launch
 // never touches the BLE client directly - only the AppViewModel pass-throughs. WHOOP-FIRST: WHOOP is the
 // primary band; the type list shows it first and a footer reiterates it. Renders cleanly with nothing
 // nearby (the type picker, every prep step, and the searching/empty pick state all need no hardware).
-// Faithful Kotlin twin of Strand/Screens/AddDeviceWizard.swift. US English throughout.
+// Faithful Kotlin twin of Strand/Screens/AddDeviceWizard.swift.
 
 /** What the user is adding. Drives the prep copy AND which scan/register path runs. */
 private enum class DeviceType {
@@ -132,7 +134,18 @@ private enum class DeviceType {
             Garmin -> "Garmin watch"
             Oura -> "Oura ring"
             SupplierBand -> "Supplier band preview"
-        }
+    }
+}
+
+enum class AddDeviceSelectionScope {
+    AllDevices,
+    ClaimEligibleBands,
+}
+
+private fun AddDeviceSelectionScope.allows(type: DeviceType): Boolean = when (this) {
+    AddDeviceSelectionScope.AllDevices -> true
+    AddDeviceSelectionScope.ClaimEligibleBands ->
+        type.isWhoop || type == DeviceType.SupplierBand
 }
 
 private enum class WizardStep { Type, Prep, Pick, Confirm }
@@ -157,6 +170,8 @@ fun AddDeviceWizard(
      *  instead (import a file)" link and every honest Oura failure offer this, so the destructive takeover
      *  is never the only door. Defaults to a plain close so existing call sites keep compiling. */
     onUseFileImport: () -> Unit = onClose,
+    selectionScope: AddDeviceSelectionScope =
+        AddDeviceSelectionScope.AllDevices,
 ) {
     val scope = rememberCoroutineScope()
 
@@ -190,7 +205,8 @@ fun AddDeviceWizard(
     var supplierPrintedId by remember { mutableStateOf("") }
     var supplierPassword by remember { mutableStateOf("") }
     var supplierNickname by remember { mutableStateOf("NOOP Band") }
-    var supplierCommitFailed by remember { mutableStateOf(false) }
+    var registrationBusy by remember { mutableStateOf(false) }
+    var registrationFailed by remember { mutableStateOf(false) }
     val supplierCandidates by viewModel.supplierBandCandidates.collectAsStateWithLifecycle()
     val supplierPairingState by viewModel.supplierBandPairingState.collectAsStateWithLifecycle()
 
@@ -224,6 +240,35 @@ fun AddDeviceWizard(
         huamiScanner.stopScan()
         ouraScanner.stop()
         viewModel.cancelSupplierBandPairing()
+    }
+
+    fun launchDurableRegistration(
+        mutation: suspend () -> Boolean,
+        onSuccess: () -> Unit,
+    ) {
+        if (registrationBusy) return
+        registrationBusy = true
+        registrationFailed = false
+        scope.launch {
+            val succeeded = runCatching {
+                withContext(NonCancellable) { mutation() }
+            }.getOrDefault(false)
+            registrationBusy = false
+            com.noop.AppDiagnosticsRecorder.record(
+                "device.registration",
+                fields = mapOf(
+                    "outcome" to if (succeeded) "completed" else "failed",
+                ),
+            )
+            if (succeeded) {
+                onSuccess()
+            } else {
+                registrationFailed = true
+                if (type == DeviceType.Oura && ouraStep == OuraStep.Adopting) {
+                    ouraStep = OuraStep.Failed
+                }
+            }
+        }
     }
 
     // Belt-and-braces: stop whichever scan is live whenever the wizard leaves composition.
@@ -371,8 +416,13 @@ fun AddDeviceWizard(
             else -> null
         }
         if (device == null) { onClose(); return }
-        scope.launch { viewModel.registerDevice(device, makeActive = makeActive) }
-        onClose()
+        launchDurableRegistration(
+            mutation = {
+                viewModel.registerDevice(device, makeActive = makeActive)
+                true
+            },
+            onSuccess = onClose,
+        )
     }
 
     /**
@@ -429,8 +479,15 @@ fun AddDeviceWizard(
         )
         // The takeover always makes the ring active (it is the user's new live source); no make-active
         // prompt - the destructive gate already committed to "this is now your device".
-        scope.launch { viewModel.registerDevice(device, makeActive = true) }
-        if (closeAfter) onClose()
+        launchDurableRegistration(
+            mutation = {
+                viewModel.registerDevice(device, makeActive = true)
+                true
+            },
+            onSuccess = {
+                if (closeAfter) onClose()
+            },
+        )
     }
 
     // The live adopt-failure reason (the source's needs-pairing message). Collected here so the honest
@@ -439,7 +496,12 @@ fun AddDeviceWizard(
     val adoptNeedsPairing by viewModel.ouraNeedsPairing.collectAsStateWithLifecycle()
 
     AlertDialog(
-        onDismissRequest = { stopAllScans(); onClose() },
+        onDismissRequest = {
+            if (!registrationBusy) {
+                stopAllScans()
+                onClose()
+            }
+        },
         containerColor = Palette.surfaceOverlay,
         title = {
             // The Oura type drives its own titled step machine; otherwise the generic step titles apply.
@@ -450,7 +512,7 @@ fun AddDeviceWizard(
             // step hides back so the user can't interrupt the key install mid-flight.
             val showBack = if (isOura) ouraStep != OuraStep.Adopting else step != WizardStep.Type
             Row(verticalAlignment = Alignment.Top) {
-                if (showBack) {
+                if (showBack && !registrationBusy) {
                     IconButton(onClick = { goBack() }, modifier = Modifier.size(28.dp)) {
                         Icon(
                             Icons.AutoMirrored.Filled.KeyboardArrowLeft,
@@ -467,7 +529,14 @@ fun AddDeviceWizard(
                         Text(it, style = NoopType.caption, color = Palette.textTertiary)
                     }
                 }
-                IconButton(onClick = { stopAllScans(); onClose() }, modifier = Modifier.size(28.dp)) {
+                IconButton(
+                    onClick = {
+                        stopAllScans()
+                        onClose()
+                    },
+                    enabled = !registrationBusy,
+                    modifier = Modifier.size(28.dp),
+                ) {
                     Icon(Icons.Filled.Close, contentDescription = uiString(R.string.l10n_add_device_wizard_close_bbfa773e), tint = Palette.textTertiary, modifier = Modifier.size(20.dp))
                 }
             }
@@ -526,14 +595,21 @@ fun AddDeviceWizard(
                 when (step) {
                     WizardStep.Type -> TypeStep(
                         supplierAvailable = viewModel.supplierBandAvailable,
+                        selectionScope = selectionScope,
                         onPick = { t ->
-                        type = t; nameDraft = ""
-                        // Oura enters its own step machine at the gate, not the generic prep step.
-                        if (t == DeviceType.Oura) {
-                            ouraStep = OuraStep.Gate; ouraConsent = false; ouraAdvanced = false; ouraKeyDraft = ""
-                        } else {
-                            step = WizardStep.Prep
-                        }
+                            if (selectionScope.allows(t)) {
+                                type = t
+                                nameDraft = ""
+                                // Oura enters its own step machine at the gate, not the generic prep step.
+                                if (t == DeviceType.Oura) {
+                                    ouraStep = OuraStep.Gate
+                                    ouraConsent = false
+                                    ouraAdvanced = false
+                                    ouraKeyDraft = ""
+                                } else {
+                                    step = WizardStep.Prep
+                                }
+                            }
                         },
                     )
                     WizardStep.Prep -> type?.let { t ->
@@ -579,7 +655,6 @@ fun AddDeviceWizard(
                                     if (viewModel.selectSupplierBandCandidate(candidate.handle)) {
                                         supplierPrintedId = ""
                                         supplierPassword = ""
-                                        supplierCommitFailed = false
                                         step = WizardStep.Confirm
                                     }
                                 },
@@ -608,9 +683,7 @@ fun AddDeviceWizard(
                             onPassword = { supplierPassword = it.filter(Char::isDigit).take(4) },
                             nickname = supplierNickname,
                             onNickname = { supplierNickname = it },
-                            commitFailed = supplierCommitFailed,
                             onAuthenticate = {
-                                supplierCommitFailed = false
                                 val submitted = viewModel.submitSupplierBandPairing(
                                     supplierPrintedId,
                                     supplierPassword,
@@ -621,10 +694,14 @@ fun AddDeviceWizard(
                                 }
                             },
                             onCommit = {
-                                scope.launch {
-                                    val committed = viewModel.commitSupplierBandPairing(supplierNickname)
-                                    if (committed) onClose() else supplierCommitFailed = true
-                                }
+                                launchDurableRegistration(
+                                    mutation = {
+                                        viewModel.commitSupplierBandPairing(
+                                            supplierNickname,
+                                        )
+                                    },
+                                    onSuccess = onClose,
+                                )
                             },
                         )
                     } else {
@@ -634,11 +711,44 @@ fun AddDeviceWizard(
                             rssi = confirmRssi,
                             name = nameDraft,
                             onName = { nameDraft = it },
-                            onAdd = { askMakeActive = true },
+                            onAdd = {
+                                if (!registrationBusy) askMakeActive = true
+                            },
                         )
                     }
                 }
             }
+                if (registrationBusy) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Palette.accent,
+                            strokeWidth = 2.dp,
+                        )
+                        Text(
+                            stringResource(
+                                R.string.appwide_device_registration_saving,
+                            ),
+                            style = NoopType.footnote,
+                            color = Palette.textSecondary,
+                        )
+                    }
+                } else if (registrationFailed) {
+                    Text(
+                        stringResource(
+                            R.string.appwide_device_registration_failed,
+                        ),
+                        modifier = Modifier.padding(top = 14.dp),
+                        style = NoopType.footnote,
+                        color = Palette.statusCritical,
+                    )
+                }
             }
         },
         confirmButton = {},
@@ -648,7 +758,12 @@ fun AddDeviceWizard(
     // After adding, offer to make the new device active.
     if (askMakeActive) {
         AlertDialog(
-            onDismissRequest = { askMakeActive = false; finishAdd(makeActive = false) },
+            onDismissRequest = {
+                if (!registrationBusy) {
+                    askMakeActive = false
+                    finishAdd(makeActive = false)
+                }
+            },
             containerColor = Palette.surfaceOverlay,
             title = { Text(uiString(R.string.l10n_add_device_wizard_make_this_your_active_device_b425485c), style = NoopType.title2, color = Palette.textPrimary) },
             text = {
@@ -660,12 +775,24 @@ fun AddDeviceWizard(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { askMakeActive = false; finishAdd(makeActive = true) }) {
+                TextButton(
+                    onClick = {
+                        askMakeActive = false
+                        finishAdd(makeActive = true)
+                    },
+                    enabled = !registrationBusy,
+                ) {
                     Text(uiString(R.string.l10n_add_device_wizard_make_active_75690bb8), style = NoopType.body, color = Palette.accent)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { askMakeActive = false; finishAdd(makeActive = false) }) {
+                TextButton(
+                    onClick = {
+                        askMakeActive = false
+                        finishAdd(makeActive = false)
+                    },
+                    enabled = !registrationBusy,
+                ) {
                     Text(uiString(R.string.l10n_add_device_wizard_not_now_e4571490), style = NoopType.body, color = Palette.textSecondary)
                 }
             },
@@ -676,7 +803,9 @@ fun AddDeviceWizard(
     // moves to the honest Adopting progress, then registers the ring. Mirrors the macOS adopt confirm.
     if (ouraConfirmAdopt) {
         AlertDialog(
-            onDismissRequest = { ouraConfirmAdopt = false },
+            onDismissRequest = {
+                if (!registrationBusy) ouraConfirmAdopt = false
+            },
             containerColor = Palette.surfaceOverlay,
             title = { Text(uiString(R.string.l10n_add_device_wizard_take_over_this_ring_cc79ef5e), style = NoopType.title2, color = Palette.textPrimary) },
             text = {
@@ -687,19 +816,25 @@ fun AddDeviceWizard(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    ouraConfirmAdopt = false
-                    ouraStep = OuraStep.Adopting
-                    // The honest key-install handshake runs in the live [OuraLiveSource] once the ring is
-                    // active. Register it now (active) but DO NOT close: stay on Adopting so the observed
-                    // adoptPhase / needs-pairing drives it to success (close) or a REACHABLE honest Failed.
-                    finishAddOura(closeAfter = false)
-                }) {
+                TextButton(
+                    onClick = {
+                        ouraConfirmAdopt = false
+                        ouraStep = OuraStep.Adopting
+                        // The honest key-install handshake runs in the live [OuraLiveSource] once the ring is
+                        // active. Register it now (active) but DO NOT close: stay on Adopting so the observed
+                        // adoptPhase / needs-pairing drives it to success (close) or a REACHABLE honest Failed.
+                        finishAddOura(closeAfter = false)
+                    },
+                    enabled = !registrationBusy,
+                ) {
                     Text(uiString(R.string.l10n_add_device_wizard_take_over_2c7f5505), style = NoopType.body, color = Palette.statusCritical)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { ouraConfirmAdopt = false }) {
+                TextButton(
+                    onClick = { ouraConfirmAdopt = false },
+                    enabled = !registrationBusy,
+                ) {
                     Text(uiString(R.string.l10n_add_device_wizard_cancel_77dfd213), style = NoopType.body, color = Palette.textSecondary)
                 }
             },
@@ -725,16 +860,23 @@ fun AddDeviceWizard(
 }
 
 private fun headerTitle(step: WizardStep, type: DeviceType?): String = when (step) {
-    WizardStep.Type -> "Add a device"
-    WizardStep.Prep -> type?.title ?: "Add a device"
-    WizardStep.Pick -> "Pick your device"
-    WizardStep.Confirm -> "Name & confirm"
+    WizardStep.Type ->
+        uiString(R.string.appwide_onboarding_device_wizard_add_title)
+    WizardStep.Prep ->
+        type?.title ?: uiString(R.string.appwide_onboarding_device_wizard_add_title)
+    WizardStep.Pick ->
+        uiString(R.string.appwide_onboarding_device_wizard_pick_title)
+    WizardStep.Confirm ->
+        uiString(R.string.appwide_onboarding_device_wizard_confirm_title)
 }
 
 private fun headerSubtitle(step: WizardStep): String? = when (step) {
-    WizardStep.Type -> "What are you adding?"
-    WizardStep.Prep -> "Get it ready, then scan."
-    WizardStep.Pick -> "Tap the one that's yours."
+    WizardStep.Type ->
+        uiString(R.string.appwide_onboarding_device_wizard_add_body)
+    WizardStep.Prep ->
+        uiString(R.string.appwide_onboarding_device_wizard_prep_body)
+    WizardStep.Pick ->
+        uiString(R.string.appwide_onboarding_device_wizard_pick_body)
     WizardStep.Confirm -> null
 }
 
@@ -763,34 +905,41 @@ private fun ouraHeaderSubtitle(step: OuraStep, advanced: Boolean): String? = whe
 @Composable
 private fun TypeStep(
     supplierAvailable: Boolean,
+    selectionScope: AddDeviceSelectionScope,
     onPick: (DeviceType) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        TypeRow(Icons.Filled.Watch, DeviceType.Whoop4.title, "Automatically detects compatible band hardware") {
+        TypeRow(
+            Icons.Filled.Watch,
+            DeviceType.Whoop4.title,
+            uiString(R.string.appwide_onboarding_device_wizard_whoop_subtitle),
+        ) {
             onPick(DeviceType.Whoop4)
         }
-        TypeRow(Icons.Filled.FavoriteBorder, DeviceType.HrStrap.title, "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast") {
-            onPick(DeviceType.HrStrap)
-        }
-        TypeRow(Icons.AutoMirrored.Filled.DirectionsRun, DeviceType.GymEquipment.title, "Treadmill, indoor bike, rower or cross-trainer (Bluetooth FTMS)") {
-            onPick(DeviceType.GymEquipment)
-        }
+        if (selectionScope == AddDeviceSelectionScope.AllDevices) {
+            TypeRow(Icons.Filled.FavoriteBorder, DeviceType.HrStrap.title, "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast") {
+                onPick(DeviceType.HrStrap)
+            }
+            TypeRow(Icons.AutoMirrored.Filled.DirectionsRun, DeviceType.GymEquipment.title, "Treadmill, indoor bike, rower or cross-trainer (Bluetooth FTMS)") {
+                onPick(DeviceType.GymEquipment)
+            }
 
-        // EXPERIMENTAL tier - clearly labelled, opt-in, best-effort. Each is honest about what it can
-        // actually read; none fabricates data.
-        Overline("Experimental", modifier = Modifier.padding(top = 8.dp))
-        ExperimentalTierNote()
-        TypeRow(Icons.Filled.Circle, DeviceType.Oura.title, "Take over your ring locally. Beta. This replaces the Oura app.") {
-            onPick(DeviceType.Oura)
-        }
-        TypeRow(Icons.Filled.GraphicEq, DeviceType.Amazfit.title, "Incl. Helio. Live heart rate where the band exposes it. Help us test.") {
-            onPick(DeviceType.Amazfit)
-        }
-        TypeRow(Icons.Filled.GraphicEq, DeviceType.MiBand.title, "Live heart rate on bands that don't need pairing. Help us test.") {
-            onPick(DeviceType.MiBand)
-        }
-        TypeRow(Icons.Filled.Watch, DeviceType.Garmin.title, "Uses the watch's Broadcast Heart Rate. We'll show you how.") {
-            onPick(DeviceType.Garmin)
+            // EXPERIMENTAL tier - clearly labelled, opt-in, best-effort. Each is honest about what it can
+            // actually read; none fabricates data.
+            Overline("Experimental", modifier = Modifier.padding(top = 8.dp))
+            ExperimentalTierNote()
+            TypeRow(Icons.Filled.Circle, DeviceType.Oura.title, "Take over your ring locally. Beta. This replaces the Oura app.") {
+                onPick(DeviceType.Oura)
+            }
+            TypeRow(Icons.Filled.GraphicEq, DeviceType.Amazfit.title, "Incl. Helio. Live heart rate where the band exposes it. Help us test.") {
+                onPick(DeviceType.Amazfit)
+            }
+            TypeRow(Icons.Filled.GraphicEq, DeviceType.MiBand.title, "Live heart rate on bands that don't need pairing. Help us test.") {
+                onPick(DeviceType.MiBand)
+            }
+            TypeRow(Icons.Filled.Watch, DeviceType.Garmin.title, "Uses the watch's Broadcast Heart Rate. We'll show you how.") {
+                onPick(DeviceType.Garmin)
+            }
         }
         if (supplierAvailable) {
             TypeRow(
@@ -802,7 +951,9 @@ private fun TypeStep(
             }
         }
 
-        WhoopFirstNote()
+        if (selectionScope == AddDeviceSelectionScope.AllDevices) {
+            WhoopFirstNote()
+        }
     }
 }
 
@@ -902,8 +1053,9 @@ private fun OnePhoneWarningCard() {
                 color = Palette.statusWarning,
             )
             Text(
-                "Noop Band uses one active app connection at a time. Close any other band app before " +
-                    "pairing. You can switch apps later by pairing the band again.",
+                uiString(
+                    R.string.appwide_onboarding_device_wizard_whoop_one_phone_body,
+                ),
                 style = NoopType.footnote,
                 color = Palette.statusWarning,
             )
@@ -972,12 +1124,12 @@ private fun PrepStep(type: DeviceType, onScan: () -> Unit) {
     }
 }
 
-/** Type-specific "get it ready" guidance - the point of the branching wizard. US English copy. */
+/** Type-specific "get it ready" guidance - the point of the branching wizard. */
 private fun prepInstructions(type: DeviceType): List<String> = when (type) {
     DeviceType.Whoop4, DeviceType.Whoop5MG -> listOf(
-        "Put your Noop Band on your wrist and make sure it is awake.",
-        "Close any other app currently connected to the band.",
-        "NOOP detects compatible band hardware automatically.",
+        uiString(R.string.appwide_onboarding_device_wizard_whoop_prep_wear),
+        uiString(R.string.appwide_onboarding_device_wizard_whoop_prep_close),
+        uiString(R.string.appwide_onboarding_device_wizard_whoop_prep_detect),
     )
     DeviceType.HrStrap -> listOf(
         "Wake your strap. Put it on, or dampen the contacts.",
@@ -1052,7 +1204,6 @@ private fun SupplierBandConfirmStep(
     onPassword: (String) -> Unit,
     nickname: String,
     onNickname: (String) -> Unit,
-    commitFailed: Boolean,
     onAuthenticate: () -> Unit,
     onCommit: () -> Unit,
 ) {
@@ -1115,13 +1266,6 @@ private fun SupplierBandConfirmStep(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (commitFailed) {
-            Text(
-                "The verified band could not be saved. No credential was retained.",
-                style = NoopType.footnote,
-                color = Palette.statusCritical,
-            )
-        }
         TextButton(
             onClick = if (ready) onCommit else onAuthenticate,
             enabled = if (ready) {
@@ -1166,7 +1310,9 @@ private fun WhoopPickStep(
         found.sortedByDescending { it.rssi }.forEach { strap ->
             DiscoveredRow(
                 name = WhoopModel.CUSTOMER_NAME,
-                subtitle = "Compatible band",
+                subtitle = uiString(
+                    R.string.appwide_onboarding_device_wizard_compatible_band,
+                ),
                 rssi = strap.rssi,
                 onTap = { onSelect(strap) },
             )
@@ -1779,13 +1925,25 @@ private fun PickList(
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             StatePill(
-                if (searching) "Searching…" else "Idle",
+                if (searching) {
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_searching,
+                    )
+                } else {
+                    uiString(R.string.appwide_onboarding_device_wizard_idle)
+                },
                 tone = if (searching) StrandTone.Accent else StrandTone.Neutral,
                 pulsing = searching,
             )
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onRescan) {
-                Text(uiString(R.string.l10n_add_device_wizard_rescan_84661f6a), style = NoopType.subhead, color = Palette.accent)
+                Text(
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_rescan,
+                    ),
+                    style = NoopType.subhead,
+                    color = Palette.accent,
+                )
             }
         }
         if (isEmpty) {
@@ -1868,7 +2026,9 @@ private fun ConfirmStep(
             }
         }
 
-        Overline("Name")
+        Overline(
+            uiString(R.string.appwide_onboarding_device_wizard_name),
+        )
         OutlinedTextField(
             value = name,
             onValueChange = onName,

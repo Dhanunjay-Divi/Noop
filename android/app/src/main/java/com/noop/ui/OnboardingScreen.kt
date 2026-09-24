@@ -76,7 +76,6 @@ import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -108,8 +107,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.noop.ble.WhoopModel
+import com.noop.ble.SourceCoordinator
+import com.noop.data.DeviceStatus
 import com.noop.data.ImportSummary
+import com.noop.data.PairedDeviceRow
+import com.noop.data.SourceKind
 import com.noop.ingest.AppleHealthImporter
 import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.HealthConnectReconciler
@@ -185,6 +187,10 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     // Onboarding can compose while Activity attachment is still wiring its lifecycle owner.
     // These are cheap hot StateFlows, so avoid the lifecycle-owner-dependent collector here.
     val live by viewModel.live.collectAsState()
+    var registrySetupSource by remember { mutableStateOf<SourceKind?>(null) }
+    var registrySetupReadFailed by remember { mutableStateOf(false) }
+    var showAddDeviceWizard by rememberSaveable { mutableStateOf(false) }
+    val deviceSetupComplete = live.bonded || registrySetupSource != null
 
     fun moveTo(target: Int, direction: String) {
         if (!pages.indices.contains(target)) return
@@ -215,12 +221,54 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
         pageIndex = destination
     }
 
-    // The bonded celebration only makes sense once a strap is actually bonded. Auto-advance to it
-    // the moment that happens on the Connect step (mirrors macOS's scan → celebration), and skip
-    // it in both directions when nothing is bonded so it never shows a false "You're connected".
+    suspend fun refreshDeviceSetupSource(recordOutcome: Boolean) {
+        val devicesResult = runCatching { viewModel.pairedDevices() }
+        if (devicesResult.isFailure) {
+            registrySetupSource = null
+            registrySetupReadFailed = true
+            com.noop.AppDiagnosticsRecorder.record(
+                "onboarding.device_setup",
+                fields = mapOf("outcome" to "read_failed"),
+            )
+            return
+        }
+
+        registrySetupReadFailed = false
+        val source = onboardingCompletedDeviceSetupSource(
+            devicesResult.getOrThrow(),
+            requiresClaimEligibleBand = ownershipConfigured,
+            supplierAvailable = viewModel.supplierBandAvailable,
+        )
+        registrySetupSource = source
+        if (recordOutcome) {
+            val fields = mutableMapOf(
+                "outcome" to if (source == null) "dismissed" else "completed",
+            )
+            source?.let { fields["source"] = it.name }
+            com.noop.AppDiagnosticsRecorder.record(
+                "onboarding.device_setup",
+                fields = fields,
+            )
+        }
+        if (
+            source != null &&
+            pages.getOrNull(pageIndex) == OnboardingPage.Connect
+        ) {
+            moveTo(pageIndex + 1, "automatic")
+        }
+    }
+
+    // Preserve the existing WHOOP live-bond edge while also accepting a source that the shared device
+    // wizard committed to the registry. The registry path is what lets the optional supplier source
+    // complete setup without pretending it uses WHOOP's LiveState.bonded flag.
     LaunchedEffect(live.bonded) {
         if (live.bonded && page == OnboardingPage.Connect) {
             moveTo(pageIndex + 1, "automatic")
+        }
+    }
+    LaunchedEffect(page) {
+        if (page == OnboardingPage.Connect) {
+            refreshDeviceSetupSource(recordOutcome = false)
         }
     }
     LaunchedEffect(
@@ -339,9 +387,9 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                 if (!granted) { bleAdvanceLauncher.launch(blePerms); return }
             }
             OnboardingPage.Connect -> {
-                // No strap bonded in offline exploration mode: skip the false celebration but
+                // No source completed in offline exploration mode: skip the setup celebration but
                 // still show the informational account step before Profile.
-                if (!live.bonded) {
+                if (!deviceSetupComplete) {
                     if (ownershipConfigured) return
                     moveTo(pages.indexOf(OnboardingPage.Ownership), "forward")
                     return
@@ -389,8 +437,14 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
             ) {
                 val goBack = {
                     var target = pageIndex - 1
-                    // Skip the bonded celebration going back when nothing is bonded.
-                    if (target >= 0 && pages[target] == OnboardingPage.Bonded && !live.bonded) target--
+                    // Skip the setup celebration going back when no source completed setup.
+                    if (
+                        target >= 0 &&
+                        pages[target] == OnboardingPage.Bonded &&
+                        !deviceSetupComplete
+                    ) {
+                        target--
+                    }
                     if (target >= 0) moveTo(target, "back")
                 }
                 OnboardingTopBar(
@@ -437,8 +491,28 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                             OnboardingPage.Expectations -> ExpectationsStep()
                             OnboardingPage.Bluetooth -> BluetoothStep(accountCopy)
                             OnboardingPage.Wear -> WearStep()
-                            OnboardingPage.Connect -> ConnectStep(viewModel)
-                            OnboardingPage.Bonded -> BondedStep(viewModel)
+                            OnboardingPage.Connect -> ConnectStep(
+                                setupComplete = deviceSetupComplete,
+                                setupReadFailed = registrySetupReadFailed,
+                                canContinueWithoutBand = !ownershipConfigured,
+                                requiresClaimEligibleBand =
+                                    ownershipConfigured,
+                                onChooseDevice = {
+                                    com.noop.AppDiagnosticsRecorder.record(
+                                        "onboarding.device_setup",
+                                        fields = mapOf("outcome" to "opened"),
+                                    )
+                                    showAddDeviceWizard = true
+                                },
+                                onRetrySetupRead = {
+                                    scope.launch {
+                                        refreshDeviceSetupSource(
+                                            recordOutcome = false,
+                                        )
+                                    }
+                                },
+                            )
+                            OnboardingPage.Bonded -> BondedStep()
                             OnboardingPage.Ownership -> OwnershipAvailabilityStep()
                             OnboardingPage.Profile -> ProfileStep()
                             OnboardingPage.Import -> ImportStep(viewModel)
@@ -473,7 +547,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                         ownershipState.phase == OwnershipPhase.COMPLETE
                 val primaryEnabled = when (page) {
                     OnboardingPage.Connect ->
-                        !ownershipConfigured || live.bonded
+                        !ownershipConfigured || deviceSetupComplete
                     OnboardingPage.Ownership ->
                         ownershipStepCanContinue(
                             ownershipConfigured = ownershipConfigured,
@@ -502,7 +576,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                         page == OnboardingPage.Connect &&
                             onboardingContinuesWithoutBand(
                                 ownershipConfigured = ownershipConfigured,
-                                bonded = live.bonded,
+                                deviceSetupComplete = deviceSetupComplete,
                             ) ->
                             stringResource(
                                 R.string.appwide_onboarding_continue_without_band,
@@ -524,6 +598,27 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
             }
         }
     }
+
+    if (showAddDeviceWizard) {
+        AddDeviceWizard(
+            viewModel = viewModel,
+            selectionScope = if (ownershipConfigured) {
+                AddDeviceSelectionScope.ClaimEligibleBands
+            } else {
+                AddDeviceSelectionScope.AllDevices
+            },
+            onUseFileImport = {
+                showAddDeviceWizard = false
+                moveTo(pages.indexOf(OnboardingPage.Import), "forward")
+            },
+            onClose = {
+                showAddDeviceWizard = false
+                scope.launch {
+                    refreshDeviceSetupSource(recordOutcome = true)
+                }
+            },
+        )
+    }
 }
 
 internal fun onboardingPages(
@@ -532,8 +627,51 @@ internal fun onboardingPages(
 
 internal fun onboardingContinuesWithoutBand(
     ownershipConfigured: Boolean,
-    bonded: Boolean,
-): Boolean = !ownershipConfigured && !bonded
+    deviceSetupComplete: Boolean,
+): Boolean = !ownershipConfigured && !deviceSetupComplete
+
+internal fun onboardingCompletedDeviceSetupSource(
+    devices: List<PairedDeviceRow>,
+    requiresClaimEligibleBand: Boolean,
+    supplierAvailable: Boolean,
+): SourceKind? {
+    for (device in devices) {
+        if (
+            device.status != DeviceStatus.active.name &&
+            device.status != DeviceStatus.paired.name
+        ) {
+            continue
+        }
+        val source = SourceKind.entries.firstOrNull {
+            it.name == device.sourceKind
+        } ?: continue
+        if (
+            source == SourceKind.cloudImport ||
+            source == SourceKind.fileImport ||
+            source == SourceKind.activityFile
+        ) {
+            continue
+        }
+        if (device.id == "my-whoop" && device.peripheralId.isNullOrBlank()) {
+            continue
+        }
+        if (source == SourceKind.veepoo && !supplierAvailable) {
+            continue
+        }
+        if (requiresClaimEligibleBand) {
+            if (device.peripheralId.isNullOrBlank()) continue
+            val isWhoopTransport =
+                source == SourceKind.liveBLE || source == SourceKind.historyBLE
+            val isEligibleWhoop =
+                SourceCoordinator.isWhoop(device) && isWhoopTransport
+            val isEligibleSupplier =
+                supplierAvailable && source == SourceKind.veepoo
+            if (!isEligibleWhoop && !isEligibleSupplier) continue
+        }
+        return source
+    }
+    return null
+}
 
 internal enum class OnboardingAccountMode {
     CONFIGURED,
@@ -1205,135 +1343,104 @@ private fun WearStep() {
 }
 
 @Composable
-private fun ConnectStep(viewModel: AppViewModel) {
-    val context = LocalContext.current
-    val live by viewModel.live.collectAsState()
-
-    val blePerms = remember { blePermissions() }
-    // The Scan button goes through the same shared gate as Live/Settings (requests the permission
-    // if missing, then connects). Onboarding connects without promoting the foreground service —
-    // OnboardingScreen promotes it on completion. See AppViewModel.connect(promoteService).
-    val requestConnect = rememberRequestScan { viewModel.connect(promoteService = false) }
-    var autoConnectStarted by rememberSaveable { mutableStateOf(false) }
-
-    val bleGranted = blePerms.all {
-        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-    }
-
-    LaunchedEffect(Unit) {
-        if (!autoConnectStarted && !live.bonded && !live.connected && !live.scanning) {
-            autoConnectStarted = true
-            // Only auto-scan if permission is already in hand (granted on the Bluetooth step). We
-            // never raise the OS prompt here — that would land on top of this step's own content.
-            if (bleGranted) viewModel.connect(promoteService = false)
-        }
-    }
-
-    StepShell(
-        title = uiString(R.string.l10n_onboarding_screen_find_your_strap_fe460461),
-        subtitle = when {
-            live.bonded -> "Bonded. You can keep going."
-            bleGranted -> "NOOP starts looking as soon as this step appears. You can keep going while it bonds."
-            else -> "Allow Bluetooth and tap Scan to find Noop Band, or keep going and connect later."
+private fun ConnectStep(
+    setupComplete: Boolean,
+    setupReadFailed: Boolean,
+    canContinueWithoutBand: Boolean,
+    requiresClaimEligibleBand: Boolean,
+    onChooseDevice: () -> Unit,
+    onRetrySetupRead: () -> Unit,
+) {
+    val title = stringResource(R.string.appwide_onboarding_device_setup_title)
+    val body = stringResource(
+        if (requiresClaimEligibleBand) {
+            R.string.appwide_onboarding_claim_band_setup_body
+        } else {
+            R.string.appwide_onboarding_device_setup_body
         },
+    )
+    val action = stringResource(R.string.appwide_onboarding_device_setup_action)
+    StepShell(
+        title = title,
+        subtitle = body,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             IconBadge(
-                icon = if (live.bonded) Icons.Filled.CheckCircle else Icons.Filled.Bluetooth,
-                tint = if (live.bonded) Palette.statusPositive else Palette.accent,
+                icon = if (setupComplete) {
+                    Icons.Filled.CheckCircle
+                } else {
+                    Icons.Filled.AddCircle
+                },
+                tint = if (setupComplete) {
+                    Palette.statusPositive
+                } else {
+                    Palette.accent
+                },
                 size = 92,
             )
 
-            val (label, tone, pulsing) = when {
-                live.encryptedBond -> Triple("Bonded · streaming", StrandTone.Positive, true)
-                live.bonded -> Triple("Live HR · not fully paired", StrandTone.Warning, true)
-                live.connected -> Triple("Connected · pairing", StrandTone.Warning, true)
-                live.scanning -> Triple("Searching", StrandTone.Accent, true)
-                else -> Triple("Ready to scan", StrandTone.Neutral, false)
-            }
-            StatePill(label, tone = tone, pulsing = pulsing, showsDot = true)
-
-            live.statusNote?.let {
-                Text(
-                    CustomerFacingBrand.text(it),
-                    style = NoopType.footnote,
-                    color = Palette.textSecondary,
-                    textAlign = TextAlign.Center,
+            if (setupComplete) {
+                StatePill(
+                    stringResource(
+                        R.string.appwide_onboarding_device_ready_title,
+                    ),
+                    tone = StrandTone.Positive,
+                    pulsing = false,
+                    showsDot = true,
                 )
             }
 
-            if (!live.bonded) {
-                NoopCard(padding = 16.dp) {
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.Watch,
-                                contentDescription = null,
-                                tint = Palette.accent,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    WhoopModel.CUSTOMER_NAME,
-                                    style = NoopType.subhead,
-                                    color = Palette.textPrimary,
-                                )
-                                Text(
-                                    "Compatible hardware is detected automatically.",
-                                    style = NoopType.footnote,
-                                    color = Palette.textTertiary,
-                                )
-                            }
-                        }
+            Button(
+                onClick = onChooseDevice,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Palette.accent,
+                    contentColor = Palette.surfaceBase,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = action },
+            ) {
+                Icon(
+                    Icons.Filled.AddCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(action, style = NoopType.body)
+            }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                            Button(
-                                onClick = { requestConnect() },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Palette.accent,
-                                    contentColor = Palette.surfaceBase,
-                                ),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Icon(Icons.Filled.Bluetooth, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(if (live.connected || live.scanning) "Re-scan" else "Scan again", style = NoopType.body)
-                            }
-                            OutlinedButton(
-                                onClick = { viewModel.disconnect() },
-                                enabled = live.connected || live.scanning,
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.statusCritical),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(uiString(R.string.l10n_onboarding_screen_stop_9e253470), style = NoopType.body)
-                            }
-                        }
-                    }
+            if (setupReadFailed) {
+                Text(
+                    stringResource(
+                        R.string.appwide_onboarding_device_setup_read_failed,
+                    ),
+                    style = NoopType.footnote,
+                    color = Palette.statusWarning,
+                    textAlign = TextAlign.Center,
+                )
+                Button(
+                    onClick = onRetrySetupRead,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Palette.surfaceRaised,
+                        contentColor = Palette.textPrimary,
+                    ),
+                ) {
+                    Text(
+                        stringResource(R.string.appwide_trends_retry),
+                        style = NoopType.body,
+                    )
                 }
             }
 
-            InfoCard(
-                icon = Icons.Filled.Lock,
-                tint = Palette.statusPositive,
-                title = uiString(R.string.l10n_onboarding_screen_this_can_run_while_you_finish_cd7ef783),
-                message = uiString(R.string.appwide_ui_audit_onboarding_background_pairing),
-            )
-
-            // WHOOP is NOOP's primary band, so onboarding leads with it — but it isn't required.
-            // Make that obvious so a non-WHOOP user doesn't feel stuck on this step (#415-adjacent):
-            // they can continue now and pair a heart-rate strap or import data afterwards.
-            if (!live.bonded) {
+            if (canContinueWithoutBand && !setupComplete) {
                 Text(
-                    "No Noop Band? You can still continue. Pair another heart-rate strap, watch, ring, " +
-                        "or gym machine under Devices, or import a wearable export, Apple Health, Oura, Fitbit, Garmin " +
-                        "and more under Data Sources. You can do either any time.",
+                    stringResource(
+                        R.string.appwide_onboarding_continue_without_band,
+                    ),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                     textAlign = TextAlign.Center,
@@ -1343,11 +1450,10 @@ private fun ConnectStep(viewModel: AppViewModel) {
     }
 }
 
-// A short celebration once the strap bonds — the Connect step auto-advances here on bond, and
-// the nav skips it entirely when nothing is bonded (mirrors the macOS scan → bonded moment).
+// A short celebration after a real device source is saved. This intentionally avoids claiming a
+// current physical connection because supplier setup completion is registry-backed, not live.bonded.
 @Composable
-private fun BondedStep(viewModel: AppViewModel) {
-    val live by viewModel.live.collectAsState()
+private fun BondedStep() {
     StepShell {
         Column(
             modifier = Modifier
@@ -1356,26 +1462,25 @@ private fun BondedStep(viewModel: AppViewModel) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                RecoveryRing(score = 100.0, diameter = 200.dp, lineWidth = 14.dp, showsLabel = false)
-                Icon(
-                    Icons.Filled.Check,
-                    contentDescription = null,
-                    tint = Palette.statusPositive,
-                    modifier = Modifier.size(54.dp),
-                )
-            }
+            IconBadge(
+                icon = Icons.Filled.Check,
+                tint = Palette.statusPositive,
+                size = 160,
+            )
             Spacer(Modifier.height(24.dp))
             Text(
-                uiString(R.string.l10n_onboarding_screen_you_re_connected_7e06aee0),
+                stringResource(
+                    R.string.appwide_onboarding_device_ready_title,
+                ),
                 style = NoopType.title1,
                 color = Palette.textPrimary,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                live.batteryPct?.let { "Noop Band is paired · ${it.toInt()}% battery." }
-                    ?: "Noop Band is paired and ready to stream.",
+                stringResource(
+                    R.string.appwide_onboarding_device_ready_body,
+                ),
                 style = NoopType.body,
                 color = Palette.textSecondary,
                 textAlign = TextAlign.Center,
