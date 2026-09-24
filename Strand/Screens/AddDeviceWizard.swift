@@ -78,6 +78,19 @@ struct AddDeviceWizard: View {
             default:       return nil
             }
         }
+
+        var accessibilityID: String {
+            switch self {
+            case .hrStrap:           return "heart-rate-strap"
+            case .gymEquipment:      return "gym-equipment"
+            case .amazfit:           return "amazfit"
+            case .miBand:            return "mi-band"
+            case .garmin:            return "garmin"
+            case .oura:              return "oura"
+            case .veepoo:            return "supplier-band"
+            default:                 return "noop-band"
+            }
+        }
     }
 
     enum SelectionScope {
@@ -436,6 +449,7 @@ struct AddDeviceWizard: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title). \(subtitle)")
+        .accessibilityIdentifier("noop.device-wizard.type.\(t.accessibilityID)")
     }
 
     private func selectType(_ selectedType: DeviceType) {

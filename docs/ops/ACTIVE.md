@@ -37,10 +37,21 @@ Last updated: **2026-09-24**
   terminology, exact SDK artifact, i18n delta, operations-record, and diff
   gates also pass. The terminology ratchet records 18,089 classified
   occurrences across 1,613 groups with zero forbidden mappings.
-  PR `#17` still points to upstream
-  `5978bda7760d6f8378d0c5439ab1788f8e0aa24e`; the final implementation and
-  closeout documentation require one consolidated push, exact-SHA hosted
-  checks, normal protected merge, and protected-main verification. Supplier
+  PR `#17` now points to exact candidate
+  `8f0b66aabe39e9d4ff2fbb11bdbf2b94b28dbe0d`. Every applicable hosted
+  context except iOS passed. The iOS job `107576076643` in run
+  `35982041099` found two stale onboarding assertions after the shared
+  source-aware device wizard replaced the retired direct scan page, plus
+  XCTest's simulator-only second-opposite-gesture idle timeout. The local
+  correction adds stable neutral device-row identifiers, updates the tests to
+  the current choose-device flow and current accessibility-sized guidance,
+  and limits only the simulator liveness smoke to one timed gesture while
+  retaining the five-iteration Apple scroll metric on real devices. The three
+  corrected cases pass three consecutive runs with zero failures, and the
+  complete current iOS production shell passes 39 tests with one intentional
+  skip and zero failures. The replacement commit, exact-SHA hosted checks,
+  normal protected merge, protected-main verification, and final exact
+  cleanup remain. Supplier
   redistribution, signing/store review, physical BLE, background collection,
   history retention, haptics, battery, firmware, egress, provider delivery,
   production load, and physiological accuracy remain external or physical

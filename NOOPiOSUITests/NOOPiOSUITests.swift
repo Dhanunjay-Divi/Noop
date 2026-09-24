@@ -787,58 +787,70 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "terms-readable-primary-action")
     }
 
-    func testOnboardingPairingUsesGenericNoopBandAndAutomaticDetection() {
+    func testOnboardingDeviceSetupLeadsWithGenericNoopBand() {
         let app = launchDemoScreen(
             "onboarding",
-            extraArguments: ["--demo-onboarding-step", "5"]
+            extraArguments: ["--demo-onboarding-page", "scan"]
         )
 
-        let band = app.staticTexts["noop.onboarding.band"]
-        XCTAssertTrue(band.waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["noop.onboarding.scan"].exists)
+        let chooseDevice = app.buttons["noop.onboarding.choose-device"]
+        let legacyModelLabels = ["WHOOP 4.0", "WHOOP 5.0 / MG"]
+        XCTAssertTrue(chooseDevice.waitForExistence(timeout: 20))
+        XCTAssertEqual(chooseDevice.label, "Choose band or device")
         XCTAssertFalse(app.staticTexts["Which strap are you pairing?"].exists)
-        XCTAssertFalse(app.staticTexts["WHOOP 4.0"].exists)
-        XCTAssertFalse(app.staticTexts["WHOOP 5.0 / MG"].exists)
-        keepScreenshot(app, name: "onboarding-noop-band")
+        for label in legacyModelLabels {
+            XCTAssertFalse(app.staticTexts[label].exists)
+        }
+        chooseDevice.tap()
+
+        let noopBand = app.buttons["noop.device-wizard.type.noop-band"]
+        XCTAssertTrue(noopBand.waitForExistence(timeout: 10))
+        XCTAssertTrue(noopBand.label.hasPrefix("Noop Band."))
+        for label in legacyModelLabels {
+            XCTAssertFalse(app.staticTexts[label].exists)
+        }
+        keepScreenshot(app, name: "onboarding-source-aware-noop-band")
     }
 
-    func testOnboardingScanEndpointClearsFooterAtAccessibilitySize() {
+    func testOnboardingDeviceSetupClearsFooterAtAccessibilitySize() {
         let app = launchDemoScreen(
             "onboarding",
-            extraArguments: ["--demo-onboarding-step", "5"],
+            extraArguments: ["--demo-onboarding-page", "scan"],
             preferredContentSize: PreferredContentSize.accessibilityLarge
         )
         let primaryAction = app.buttons["noop.onboarding.primary"]
         let footer = app.descendants(matching: .any)["noop.onboarding.footer"]
-        let scanHelp = app.buttons["Don't see it?"]
-        let scanFootnote = app.staticTexts["noop.onboarding.scan-footnote"]
+        let chooseDevice = app.buttons["noop.onboarding.choose-device"]
+        let continueWithoutBand = app.staticTexts[
+            "noop.onboarding.continue-without-band-note"
+        ]
         XCTAssertTrue(primaryAction.waitForExistence(timeout: 20))
         XCTAssertTrue(footer.waitForExistence(timeout: 5))
-        XCTAssertTrue(scanHelp.waitForExistence(timeout: 5))
-        XCTAssertTrue(scanFootnote.waitForExistence(timeout: 5))
+        XCTAssertTrue(chooseDevice.waitForExistence(timeout: 5))
+        XCTAssertTrue(continueWithoutBand.waitForExistence(timeout: 5))
         XCTAssertFalse(
-            scanHelp.isHittable && scanHelp.frame.intersects(footer.frame),
-            "Visible Scan help must not be exposed underneath the fixed onboarding footer."
+            chooseDevice.isHittable && chooseDevice.frame.intersects(footer.frame),
+            "Visible device setup must not be exposed underneath the fixed onboarding footer."
         )
 
         for _ in 0..<8
-            where !scanFootnote.isHittable
-                || scanFootnote.frame.maxY + 12 > footer.frame.minY {
+            where !continueWithoutBand.isHittable
+                || continueWithoutBand.frame.maxY + 12 > footer.frame.minY {
             app.swipeUp()
         }
 
         XCTAssertTrue(
-            scanFootnote.isHittable,
-            "The final Scan guidance must be reachable above the fixed onboarding footer."
+            continueWithoutBand.isHittable,
+            "The final device-setup guidance must be reachable above the fixed onboarding footer."
         )
         XCTAssertLessThanOrEqual(
-            scanFootnote.frame.maxY + 12,
+            continueWithoutBand.frame.maxY + 12,
             footer.frame.minY,
-            "The fixed onboarding footer must not cover the Scan step's final guidance."
+            "The fixed onboarding footer must not cover the device-setup guidance."
         )
-        XCTAssertFalse(scanFootnote.frame.intersects(footer.frame))
-        XCTAssertFalse(scanFootnote.frame.intersects(primaryAction.frame))
-        keepScreenshot(app, name: "se-accessibility-onboarding-clear-footer")
+        XCTAssertFalse(continueWithoutBand.frame.intersects(footer.frame))
+        XCTAssertFalse(continueWithoutBand.frame.intersects(primaryAction.frame))
+        keepScreenshot(app, name: "se-accessibility-device-setup-clear-footer")
     }
 
     func testOnboardingDailyRhythmKeepsAutomationsReachableAboveFooter() {
@@ -1314,19 +1326,19 @@ final class NOOPiOSUITests: XCTestCase {
         // scrolling signpost payload and can starve XCTest's event-loop observer across repeated gestures.
         // XCTest also invokes a measurement closure for an uncounted calibration pass even when
         // iterationCount is one, so wrapping this interaction in `measure` silently performs more than the
-        // requested round trip and can wedge the observer. Execute exactly one timed round trip instead.
-        // Re-query before each event because interruption handling can invalidate a cached XCUIElement.
+        // requested gesture and can wedge the observer. A second opposite-direction gesture can trigger the
+        // same simulator-only 60-second idle-observer timeout after both events were delivered. Execute one
+        // timed upward gesture instead; the dedicated compaction test owns bidirectional navigation.
         // The dedicated compaction test owns navigation semantics; production's bounded CADisplayLink
         // monitor records 50 ms and 150 ms hitches, and real devices retain five iterations of Apple's
         // scrolling/deceleration metric below.
         let startedAt = ProcessInfo.processInfo.systemUptime
         app.scrollViews[scrollIdentifier].swipeUp()
-        app.scrollViews[scrollIdentifier].swipeDown()
-        let smokeRoundTrip = ProcessInfo.processInfo.systemUptime - startedAt
+        let smokeGesture = ProcessInfo.processInfo.systemUptime - startedAt
         XCTAssertLessThan(
-            smokeRoundTrip,
+            smokeGesture,
             15,
-            "A simulator Today scroll round trip must not stall."
+            "A simulator Today scroll gesture must not stall."
         )
         #else
         let options = XCTMeasureOptions()

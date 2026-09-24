@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `local verification complete; exact-SHA hosted checks and protected merge pending`
+- State: `hosted iOS correction locally verified; replacement exact-SHA checks and protected merge pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `5978bda7760d6f8378d0c5439ab1788f8e0aa24e`
@@ -11,6 +11,9 @@
 - Record commit or PR: application pull request `#17`; the closeout record is
   carried by the documentation commit immediately after the implementation
   commit
+- First hosted candidate:
+  `8f0b66aabe39e9d4ff2fbb11bdbf2b94b28dbe0d`; every applicable hosted
+  context except the iOS app job passed
 - Supplier binaries: local and ignored only; absent from Git
 - Physical-device claims: unchanged and unproven
 
@@ -101,6 +104,16 @@ test transport until physical supplier validation passes.
   PostgreSQL server wall, and the unchanged GCP plan-only contracts. No
   supplier binary, credential, public traffic, live health-data transfer, or
   physical-device result was introduced.
+- The first exact-SHA hosted candidate exposed two stale iOS onboarding UI
+  assertions after source-aware setup replaced the retired direct scan page,
+  plus XCTest's known simulator-only event-loop idle timeout after a second
+  opposite-direction scroll gesture. The production UI was not changed to
+  satisfy obsolete assertions: the shared device wizard now exposes stable
+  neutral accessibility identifiers, the tests follow the current
+  choose-device flow and current large-text guidance, and the simulator
+  performance smoke performs one bounded gesture. Real-device performance
+  coverage still retains five iterations of Apple's scrolling/deceleration
+  metric.
 
 ## Data, privacy, and medical truth
 
@@ -161,6 +174,9 @@ test transport until physical supplier validation passes.
 | Exact SDK artifact verifier | 10 source files verified at upstream revision `b02808372b7c537f22058c7ebc75d92c750373be`; supplier artifacts absent | The checked-in neutral boundary is the approved source-only export and contains no supplier payload | Supplier redistribution rights, local ignored binaries, or runtime behavior |
 | Fresh synthetic PostgreSQL server wall | 816 tests collected; 815 passed, 1 explicitly opt-in provider skip, 0 failures; Ruff, format, and dependency checks passed | Current account, managed-history, Friends, Safety, formula, migration, retention, deletion, retry, and isolation contracts pass against two extension-free disposable databases | Production Cloud SQL, load, provider delivery, real identities/data, or elapsed operations |
 | GCP plan-only wall | Formatting and validation passed; 20 OpenTofu tests passed, 0 failed | Default-off ownership, feedback lifecycle, pinned database credentials, and workload separation remain coherent without apply | Deployed IAM/secrets, drift, public traffic, or production runtime behavior |
+| First exact-SHA hosted candidate `8f0b66aa` | Android, macOS, Swift packages, policy, trust, i18n, server applicability, and every other applicable context passed; iOS job `107576076643` in run `35982041099` failed 7 assertions across 3 UI tests, so `apple-ci-required` failed and PR `#17` remained blocked | The failure scope was confined to two obsolete onboarding expectations and the simulator's second-gesture idle observer | A green replacement SHA or protected merge |
+| Corrected iOS focused repetitions | Three consecutive 3-test runs passed with 0 failures; the functional suites completed in 32.17 s, 30.14 s, and 35.89 s; Today scroll completed in 10.99 s, 10.81 s, and 10.97 s | Current source-aware onboarding, accessibility-sized footer clearance, and one-gesture simulator liveness are deterministic locally | Hosted macOS 26 behavior or physical-device scrolling |
+| Corrected complete iOS production shell | 39 tests executed, 1 intentional skip, 0 failures in 662.15 s; XCTest reported `TEST SUCCEEDED` | The complete current iPhone simulator UI shell passes together after the hosted correction | Signed installation, physical-device performance, BLE, background suspension, or App Store behavior |
 
 ## Resource cleanup
 
@@ -174,9 +190,10 @@ test transport until physical supplier validation passes.
 - The final server wall used two extension-free synthetic databases and a
   round-owned Python 3.12 environment. Both databases and the 116 MiB
   environment were deleted after the 816-case result was captured.
-- The 243 MiB OpenTofu provider directory and the two final current-head Apple
-  DerivedData directories remain only until the hosted candidate is durable;
-  the final closeout removes them explicitly.
+- The 243 MiB OpenTofu provider directory, the two final current-head Apple
+  DerivedData directories, and the focused/full hosted-repair DerivedData
+  remain only until the replacement candidate is durable; the final closeout
+  removes them explicitly after checking active handles.
 
 ## Physical device and deployment
 
@@ -202,10 +219,11 @@ test transport until physical supplier validation passes.
   corrections through `43cadcc37`; Android provider `59a7c1aa0`; source-aware
   onboarding `6ce43f0fe`; final verification correction
   `ddb0315f76d7551916ef8b6bf54de5a2a5653d07`.
-- Branch and remote state: final implementation and documentation are local on
-  `codex/noop-band-sdk-app-integration-20260921`; PR `#17` still points to
-  `5978bda7760d6f8378d0c5439ab1788f8e0aa24e` until the one consolidated push.
-  No deployment or release occurred.
+- Branch and remote state: PR `#17` points to
+  `8f0b66aabe39e9d4ff2fbb11bdbf2b94b28dbe0d`. It is open and mergeable but
+  correctly blocked because the first hosted iOS app job and
+  `apple-ci-required` failed. The narrow correction and this updated evidence
+  are local until the replacement push. No deployment or release occurred.
 - Repository visibility verified: previously verified public on 2026-09-23;
   not reverified by this documentation-only repair.
 - Version/build impact: no application version change.
@@ -228,20 +246,23 @@ Supplier redistribution rights, complete dependency notices/SBOM, signing,
 store review, firmware, physical discovery, printed-ID truth, possession proof,
 password behavior, battery accuracy, live HR accuracy, disconnect/reconnect,
 background execution, on-band retention, haptics, OTA, egress, and battery-life
-evidence remain open. Hosted exact-SHA checks and protected integration also
-remain until the final push completes. No local software, localization,
-policy, server, or plan-only verification gap remains in this round.
+evidence remain open. Replacement exact-SHA checks and protected integration
+also remain until the correction is pushed and passes. No known local
+software, localization, policy, server, simulator, or plan-only verification
+gap remains in this round.
 
 ## Next round
 
-1. Commit this closeout record and push the two final local commits once to PR
-   `#17`.
-2. Require every protected exact-SHA context, resolve any current review
+1. Run the final repository operations, policy, trust, localization, claims,
+   terminology, and diff gates against the correction tree.
+2. Commit and push the narrow iOS hosted correction plus this evidence update
+   to PR `#17`.
+3. Require every protected exact-SHA context, resolve any current review
    threads without bypassing checks, and merge normally.
-3. Verify protected `main`, re-run its trust/required-context checks, and remove
+4. Verify protected `main`, re-run its trust/required-context checks, and remove
    the remaining exact round-owned DerivedData, OpenTofu provider cache, and
    temporary logs.
-4. Begin the signed physical-device round only after supplier
+5. Begin the signed physical-device round only after supplier
    rights/SBOM/security inputs and representative iPhone, Android, WHOOP, and
    supplier devices are available.
 
