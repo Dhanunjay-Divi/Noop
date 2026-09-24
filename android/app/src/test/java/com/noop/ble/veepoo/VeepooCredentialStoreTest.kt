@@ -11,8 +11,8 @@ class VeepooCredentialStoreTest {
     private class MemoryBackend : VeepooCredentialBackend {
         val values = mutableMapOf<String, Any>()
         override fun contains(key: String): Boolean = key in values
-        override fun readInt(key: String): Int? = values[key] as? Int
-        override fun writeInt(key: String, value: Int): Boolean {
+        override fun readString(key: String): String? = values[key] as? String
+        override fun writeString(key: String, value: String): Boolean {
             values[key] = value
             return true
         }
@@ -24,9 +24,15 @@ class VeepooCredentialStoreTest {
 
     @Test
     fun encryptedStoreEncodingPreservesLeadingZeroes() {
-        val store = VeepooCredentialStore(MemoryBackend())
-        assertTrue(store.save("supplier-1", "0007".toCharArray()))
-        assertArrayEquals("0007".toCharArray(), store.load("supplier-1"))
+        val backend = MemoryBackend()
+        val store = VeepooCredentialStore(backend)
+        val binding = requireNotNull(VeepooRevisionBinding.from("hw-1", "fw-1"))
+        assertTrue(store.save("supplier-1", "0007".toCharArray(), binding))
+        val loaded = requireNotNull(store.load("supplier-1"))
+        assertArrayEquals("0007".toCharArray(), loaded.password)
+        assertEquals(binding, loaded.revisionBinding)
+        loaded.close()
+        assertTrue(loaded.password.all { it == '\u0000' })
         assertTrue(store.clear("supplier-1"))
         assertNull(store.load("supplier-1"))
     }
@@ -34,9 +40,32 @@ class VeepooCredentialStoreTest {
     @Test
     fun invalidPasswordsAreRejected() {
         val store = VeepooCredentialStore(MemoryBackend())
-        assertFalse(store.save("supplier-1", "123".toCharArray()))
-        assertFalse(store.save("supplier-1", "12x4".toCharArray()))
-        assertFalse(store.save("", "1234".toCharArray()))
+        val binding = requireNotNull(VeepooRevisionBinding.from("hw-1", "fw-1"))
+        assertFalse(store.save("supplier-1", "123".toCharArray(), binding))
+        assertFalse(store.save("supplier-1", "12x4".toCharArray(), binding))
+        assertFalse(store.save("", "1234".toCharArray(), binding))
+    }
+
+    @Test
+    fun legacyPasswordWithoutRevisionBindingIsDeletedAndRejected() {
+        val backend = MemoryBackend().apply {
+            values["transport_password_supplier-1"] = 7
+        }
+        val store = VeepooCredentialStore(backend)
+
+        assertNull(store.load("supplier-1"))
+        assertFalse("legacy credential must be removed", backend.values.isNotEmpty())
+    }
+
+    @Test
+    fun malformedRecordWithoutRevisionBindingIsDeletedAndRejected() {
+        val backend = MemoryBackend().apply {
+            values["transport_password_supplier-1"] = "v1|0007|"
+        }
+        val store = VeepooCredentialStore(backend)
+
+        assertNull(store.load("supplier-1"))
+        assertFalse("incomplete credential must be removed", backend.values.isNotEmpty())
     }
 
     @Test

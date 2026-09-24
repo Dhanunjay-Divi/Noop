@@ -402,6 +402,85 @@ class DeviceRegistryTest {
     }
 
     @Test
+    fun supplierArchiveFallbackSkipsEveryImportOnlySource() = runBlocking {
+        val dao = seededDao().apply {
+            devices["my-whoop"] = devices.getValue("my-whoop")
+                .copy(status = DeviceStatus.archived.name)
+            listOf(
+                "cloud" to SourceKind.cloudImport,
+                "file" to SourceKind.fileImport,
+                "activity" to SourceKind.activityFile,
+            ).forEachIndexed { index, (id, kind) ->
+                devices[id] = PairedDeviceRow(
+                    id = id,
+                    brand = "Import",
+                    model = kind.name,
+                    nickname = null,
+                    sourceKind = kind.name,
+                    capabilities = "hr",
+                    status = DeviceStatus.paired.name,
+                    addedAt = 110L + index,
+                    lastSeenAt = 110L + index,
+                )
+            }
+            devices["polar-1"] = PairedDeviceRow(
+                id = "polar-1",
+                brand = "Polar",
+                model = "H10",
+                nickname = null,
+                sourceKind = SourceKind.liveBLE.name,
+                capabilities = "hr",
+                status = DeviceStatus.paired.name,
+                addedAt = 150,
+                lastSeenAt = 150,
+            )
+            devices["supplier-1"] = PairedDeviceRow(
+                id = "supplier-1",
+                brand = "NOOP",
+                model = "Supplier band",
+                nickname = null,
+                peripheralId = "AA:BB:CC:DD:EE:10",
+                sourceKind = SourceKind.veepoo.name,
+                capabilities = "hr",
+                status = DeviceStatus.active.name,
+                addedAt = 200,
+                lastSeenAt = 200,
+            )
+        }
+        val reg = registryWith(dao)
+
+        val outcome = reg.archiveSupplierAndSelectFallback("supplier-1", now = 999)
+
+        assertEquals("polar-1", outcome?.activeDeviceId)
+        assertEquals("polar-1", reg.activeDeviceId())
+        assertTrue(
+            listOf("cloud", "file", "activity").all {
+                dao.devices.getValue(it).status == DeviceStatus.paired.name
+            },
+        )
+    }
+
+    @Test
+    fun activatableLiveTransportPredicateFailsClosedForImportsAndUnknownKinds() {
+        assertTrue(SourceKind.liveBLE.isActivatableLiveTransport)
+        assertTrue(SourceKind.historyBLE.isActivatableLiveTransport)
+        assertTrue(SourceKind.ftms.isActivatableLiveTransport)
+        assertTrue(SourceKind.huami.isActivatableLiveTransport)
+        assertTrue(SourceKind.oura.isActivatableLiveTransport)
+        assertTrue(SourceKind.veepoo.isActivatableLiveTransport)
+        assertFalse(SourceKind.cloudImport.isActivatableLiveTransport)
+        assertFalse(SourceKind.fileImport.isActivatableLiveTransport)
+        assertFalse(SourceKind.activityFile.isActivatableLiveTransport)
+
+        val unknown = seededDao().devices.getValue("my-whoop").copy(
+            id = "unknown",
+            brand = "Import",
+            sourceKind = "future-import",
+        )
+        assertFalse(unknown.isActivatableLiveTransport)
+    }
+
+    @Test
     fun activeDeviceSwitchCarriesTheCompleteMeasuredHistoryRange() = runBlocking {
         val dao = seededDao().apply {
             ownershipInputRange = AnalysisAffectedRange(101L, 909L)

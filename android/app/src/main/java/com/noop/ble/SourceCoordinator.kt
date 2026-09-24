@@ -8,6 +8,7 @@ import com.noop.data.SourceKind
 import com.noop.data.StreamBatch
 import com.noop.data.WhoopRepository
 import com.noop.data.DeviceStatus
+import com.noop.data.isActivatableLiveTransport
 import com.noop.ble.veepoo.VeepooAdapterState
 import com.noop.ble.veepoo.AppVeepooSupplierLifecycleDiagnosticSink
 import com.noop.ble.veepoo.VeepooBandSource
@@ -55,7 +56,9 @@ internal class VeepooPairingAdoption(
         )
         return try {
             val saved = runCatching {
-                provisioning.saveCredential { credentials.save(deviceId, it) }
+                provisioning.saveCredential { password, revisionBinding ->
+                    credentials.save(deviceId, password, revisionBinding)
+                }
             }.getOrDefault(false)
             if (!saved) {
                 diagnostics.recordSafely(
@@ -191,6 +194,8 @@ class SourceCoordinator(
     private val noopBandSourceFactory: ((String, PairedDeviceRow?) -> LiveHrSource?)? = null,
     /** Optional supplier bridge. Null in normal builds; reflection loads it only in explicitly wired builds. */
     private val veepooBridgeProvider: VeepooBridgeProvider? = null,
+    /** Plain-JVM seam for pairing lifecycle tests. Production always leaves this null. */
+    private val veepooPairingSourceFactory: ((String) -> VeepooManagedSource)? = null,
     private val veepooCredentials: VeepooCredentialAccess? = null,
     private val veepooLifecycleDiagnostics: VeepooSupplierLifecycleDiagnosticSink =
         AppVeepooSupplierLifecycleDiagnosticSink,
@@ -233,7 +238,10 @@ class SourceCoordinator(
     private val _ouraWearState = MutableStateFlow<OuraWearState?>(null)
     val ouraWearState: StateFlow<OuraWearState?> = _ouraWearState.asStateFlow()
 
-    val veepooAvailable: Boolean get() = veepooBridgeProvider != null && veepooCredentials != null
+    val veepooAvailable: Boolean
+        get() =
+            (veepooBridgeProvider != null || veepooPairingSourceFactory != null) &&
+                veepooCredentials != null
     private val _veepooCandidates = MutableStateFlow<List<VeepooCandidateRow>>(emptyList())
     val veepooCandidates: StateFlow<List<VeepooCandidateRow>> = _veepooCandidates.asStateFlow()
     private val _veepooDisplay = MutableStateFlow(VeepooDisplayState())
@@ -244,10 +252,18 @@ class SourceCoordinator(
     /** Collects the active Oura source's adoptPhase / needsPairing into the mirrors above; cancelled and
      *  nulled on teardown so a forgotten ring never leaks a stale outcome. */
     private var ouraStateJob: kotlinx.coroutines.Job? = null
-    private var veepooStateJob: kotlinx.coroutines.Job? = null
+    private var veepooActiveDisplayJob: kotlinx.coroutines.Job? = null
+    private var veepooPairingStateJob: kotlinx.coroutines.Job? = null
     private var veepooPairingSource: VeepooManagedSource? = null
     private var veepooPairingDeviceId: String? = null
-    private var veepooPairingPausedWhoop = false
+    private sealed interface PausedTransport {
+        val deviceId: String
+
+        data class Whoop(override val deviceId: String) : PausedTransport
+        data class Strap(override val deviceId: String) : PausedTransport
+    }
+
+    private var veepooPairingPausedTransport: PausedTransport? = null
 
     /** The single non-WHOOP source currently live — a generic HR strap, FTMS machine, Huami band, or Oura
      *  ring — held behind the [LiveHrSource] interface. null while WHOOP is active or nothing else is
@@ -304,30 +320,29 @@ class SourceCoordinator(
 
     fun beginVeepooPairing(): Boolean {
         if (!veepooAvailable) return false
-        val provider = veepooBridgeProvider ?: return false
         cancelVeepooPairing()
         val deviceId = "supplier-${UUID.randomUUID()}"
-        val source = runCatching {
-            VeepooBandSource(
-                deviceId = deviceId,
-                bridge = provider.create(requireNotNull(context)),
-            )
-        }.getOrNull() ?: return false
+        val source = veepooPairingSourceFactory?.invoke(deviceId) ?: run {
+            val provider = veepooBridgeProvider ?: return false
+            runCatching {
+                VeepooBandSource(
+                    deviceId = deviceId,
+                    bridge = provider.create(requireNotNull(context)),
+                )
+            }.getOrNull() ?: return false
+        }
         veepooPairingSource = source
         veepooPairingDeviceId = deviceId
-        mirrorVeepoo(source, pairing = true)
+        mirrorVeepooPairing(source)
         source.scan()
         return true
     }
 
     fun selectVeepooCandidate(handle: VeepooCandidateHandle): Boolean {
         val source = veepooPairingSource ?: return false
-        if (!veepooPairingPausedWhoop) {
-            stopWhoop()
-            veepooPairingPausedWhoop = true
-        }
+        if (!pauseActiveTransportForPairing()) return false
         val selected = source.selectCandidate(handle)
-        if (!selected) restoreWhoopAfterPairing()
+        if (!selected) restorePausedTransportAfterPairing()
         return selected
     }
 
@@ -374,9 +389,10 @@ class SourceCoordinator(
         runCatching { source.stop() }
         veepooPairingSource = null
         veepooPairingDeviceId = null
-        veepooStateJob?.cancel()
-        veepooStateJob = null
+        veepooPairingStateJob?.cancel()
+        veepooPairingStateJob = null
         _veepooCandidates.value = emptyList()
+        _veepooPairingState.value = VeepooAdapterState.IDLE
         runCatching { onDurableActiveDeviceChanged(deviceId) }
         reconcileLock.withLock {
             lastSeenId = null
@@ -460,7 +476,13 @@ class SourceCoordinator(
             val archiveOutcome = registry.archiveSupplierAndSelectFallback(id)
             if (archiveOutcome == null) {
                 val restored = retainedCredential?.let {
-                    runCatching { credentialStore.save(id, it) }.getOrDefault(false)
+                    runCatching {
+                        credentialStore.save(
+                            deviceId = id,
+                            password = it.password,
+                            revisionBinding = it.revisionBinding,
+                        )
+                    }.getOrDefault(false)
                 } ?: true
                 if (!restored) {
                     veepooLifecycleDiagnostics.recordSafely(
@@ -498,7 +520,7 @@ class SourceCoordinator(
             )
             true
         } finally {
-            retainedCredential?.fill('\u0000')
+            retainedCredential?.close()
         }
     }
 
@@ -506,12 +528,11 @@ class SourceCoordinator(
         runCatching { veepooPairingSource?.stop() }
         veepooPairingSource = null
         veepooPairingDeviceId = null
-        veepooStateJob?.cancel()
-        veepooStateJob = null
+        veepooPairingStateJob?.cancel()
+        veepooPairingStateJob = null
         _veepooCandidates.value = emptyList()
         _veepooPairingState.value = VeepooAdapterState.IDLE
-        if (activeSource !is VeepooManagedSource) _veepooDisplay.value = VeepooDisplayState()
-        restoreWhoopAfterPairing()
+        restorePausedTransportAfterPairing()
     }
 
     internal fun onVeepooAuthenticationRejected(id: String) {
@@ -615,7 +636,17 @@ class SourceCoordinator(
         // app. We log the exception into the EXPORTABLE strap log too, so the next shared log reveals
         // the exact underlying throw, and reset lastSeenId so the user can retry after switching away.
         try {
-            if (isWhoop(id, devices)) switchToWhoop(id, devices) else switchToStrap(id, devices)
+            val row = devices.firstOrNull { it.id == id }
+            when {
+                isWhoop(id, devices) &&
+                    (row == null || row.isActivatableLiveTransport) ->
+                    switchToWhoop(id, devices)
+                row?.isActivatableLiveTransport == true -> switchToStrap(id, devices)
+                else -> {
+                    lastSeenId = null
+                    straplog("SourceCoordinator: selected source is not a live transport")
+                }
+            }
         } catch (t: Throwable) {
             lastSeenId = null
             if (devices.firstOrNull { it.id == id }?.sourceKind == SourceKind.veepoo.name) {
@@ -637,16 +668,17 @@ class SourceCoordinator(
      *   • A DIFFERENT WHOOP → drop the current link, re-point (preferred address + deviceId), reconnect.
      */
     private fun switchToWhoop(id: String, devices: List<PairedDeviceRow>) {
-        // Already streaming this exact WHOOP with no strap in between → nothing to do.
-        if (!onStrap && activeWhoopId == id) {
-            if (veepooPairingPausedWhoop) {
-                veepooPairingPausedWhoop = false
-                startWhoop()
-            }
+        val peripheralId = devices.firstOrNull { it.id == id }?.peripheralId
+        val pausedWhoop = veepooPairingPausedTransport as? PausedTransport.Whoop
+        if (!onStrap && pausedWhoop?.deviceId == id) {
+            veepooPairingPausedTransport = null
+            pointWhoop(id, peripheralId)
+            startWhoop()
             return
         }
 
-        val peripheralId = devices.firstOrNull { it.id == id }?.peripheralId
+        // Already streaming this exact WHOOP with no strap in between → nothing to do.
+        if (!onStrap && activeWhoopId == id) return
 
         when {
             onStrap -> {
@@ -654,7 +686,7 @@ class SourceCoordinator(
                 tearDownNonWhoopSource()
                 activeStrapId = null
                 onStrap = false
-                veepooPairingPausedWhoop = false
+                veepooPairingPausedTransport = null
                 pointWhoop(id, peripheralId)
                 startWhoop()
             }
@@ -663,23 +695,20 @@ class SourceCoordinator(
                 // existing WHOOP flow - kicked off elsewhere on launch - uses it. For the seeded "my-whoop"
                 // (peripheralId null, id "my-whoop") this is setWhoopPreferredAddress(null) and NO
                 // setActiveDeviceId / NO scan / NO disconnect: byte-for-byte today's behaviour.
+                veepooPairingPausedTransport = null
                 pointWhoop(id, peripheralId)
-                if (veepooPairingPausedWhoop) {
-                    veepooPairingPausedWhoop = false
-                    startWhoop()
-                }
             }
             peripheralId != null && peripheralId.equals(connectedWhoopAddress, ignoreCase = true) -> {
                 // WHOOP → the SAME physical strap (make-active on the row we're already connected to, e.g. the
                 // pick-same-strap Add flow): adopt IN PLACE. A stop/start churn here would drop the #74-kept
                 // live link and force a scan reconnect (wrong-family default + OS-bond status=133). Just
                 // re-point the targeting so samples land under this id; the connection is untouched.
-                veepooPairingPausedWhoop = false
+                veepooPairingPausedTransport = null
                 pointWhoop(id, peripheralId)
             }
             else -> {
                 // WHOOP → a DIFFERENT WHOOP: drop the current link, re-point, and reconnect.
-                veepooPairingPausedWhoop = false
+                veepooPairingPausedTransport = null
                 stopWhoop()
                 pointWhoop(id, peripheralId)
                 startWhoop()
@@ -709,7 +738,9 @@ class SourceCoordinator(
     private suspend fun switchToStrap(id: String, devices: List<PairedDeviceRow>) {
         if (activeStrapId == id && activeSource != null) return
         val row = devices.firstOrNull { it.id == id }
-        val supplier = row?.sourceKind == SourceKind.veepoo.name
+            ?.takeIf { it.isActivatableLiveTransport }
+            ?: error("Selected source is not an activatable live transport")
+        val supplier = row.sourceKind == SourceKind.veepoo.name
         val previousTransportDeviceId = currentTransportDeviceId(excluding = id)
 
         // Construct the supplier source before disturbing the source that is already running. A missing
@@ -728,18 +759,20 @@ class SourceCoordinator(
             return
         }
 
-        if (!onStrap && !veepooPairingPausedWhoop) stopWhoop()
-        veepooPairingPausedWhoop = false
+        val whoopAlreadyPaused =
+            veepooPairingPausedTransport is PausedTransport.Whoop
+        if (!onStrap && !whoopAlreadyPaused) stopWhoop()
+        veepooPairingPausedTransport = null
         tearDownNonWhoopSource()
 
-        val address = row?.peripheralId
+        val address = row.peripheralId
 
         // Publish ownership before connect so a synchronous provider callback still observes the source it
         // belongs to. A failed connect tears this assignment down and restores the prior transport.
         activeSource = source
         activeStrapId = id
         onStrap = true
-        if (source is VeepooManagedSource) mirrorVeepoo(source, pairing = false)
+        if (source is VeepooManagedSource) mirrorVeepooActiveDisplay(source)
 
         // CONNECT to the active strap's known BLE address, don't just scan. A bare scan discovers + lists
         // the strap but never connects - so a Polar H10 etc. showed up as "found" yet never streamed
@@ -760,10 +793,10 @@ class SourceCoordinator(
     }
 
     private fun currentTransportDeviceId(excluding: String? = null): String? {
-        val current = if (onStrap) {
+        val current = veepooPairingPausedTransport?.deviceId ?: if (onStrap) {
             activeStrapId
         } else {
-            activeWhoopId?.takeUnless { veepooPairingPausedWhoop }
+            activeWhoopId
         }
         return current?.takeUnless { it == excluding }
     }
@@ -856,17 +889,18 @@ class SourceCoordinator(
                 val credentials = requireNotNull(veepooCredentials) {
                     "Supplier credential store is unavailable"
                 }
-                val password = credentials.load(id)
+                val credential = credentials.load(id)
                     ?: error("Supplier transport credential is unavailable")
                 try {
                     VeepooBandSource(
                         deviceId = id,
                         bridge = provider.create(ctx),
-                        initialReconnectPassword = password,
+                        initialReconnectPassword = credential.password,
+                        initialReconnectRevisionBinding = credential.revisionBinding,
                         onReconnectCredentialRejected = { onVeepooAuthenticationRejected(id) },
                     )
                 } finally {
-                    password.fill('\u0000')
+                    credential.close()
                 }
             }
             else -> {
@@ -981,12 +1015,9 @@ class SourceCoordinator(
     private fun tearDownNonWhoopSource() {
         activeSource?.stop()
         activeSource = null
-        veepooStateJob?.cancel()
-        veepooStateJob = null
-        if (veepooPairingSource == null) {
-            _veepooDisplay.value = VeepooDisplayState()
-            _veepooPairingState.value = VeepooAdapterState.IDLE
-        }
+        veepooActiveDisplayJob?.cancel()
+        veepooActiveDisplayJob = null
+        _veepooDisplay.value = VeepooDisplayState()
         // Stop mirroring the (now torn-down) Oura source and clear the mirrors so a stale adopt outcome /
         // needs-pairing message never outlives the source or drives a later wizard transition.
         ouraStateJob?.cancel(); ouraStateJob = null
@@ -999,16 +1030,22 @@ class SourceCoordinator(
         _sensorMetrics.value = StandardHrSource.SensorMetrics()
     }
 
-    private fun mirrorVeepoo(source: VeepooManagedSource, pairing: Boolean) {
-        veepooStateJob?.cancel()
-        veepooStateJob = scope.launch {
-            launch {
-                source.display.collect { _veepooDisplay.value = it }
-            }
+    private fun mirrorVeepooActiveDisplay(source: VeepooManagedSource) {
+        veepooActiveDisplayJob?.cancel()
+        veepooActiveDisplayJob = scope.launch {
+            source.display.collect { _veepooDisplay.value = it }
+        }
+    }
+
+    private fun mirrorVeepooPairing(source: VeepooManagedSource) {
+        veepooPairingStateJob?.cancel()
+        veepooPairingStateJob = scope.launch {
             launch {
                 source.state.collect {
                     _veepooPairingState.value = it
-                    if (pairing && it == VeepooAdapterState.FAILED) restoreWhoopAfterPairing()
+                    if (it == VeepooAdapterState.FAILED) {
+                        restorePausedTransportAfterPairing()
+                    }
                 }
             }
             launch {
@@ -1017,10 +1054,36 @@ class SourceCoordinator(
         }
     }
 
-    private fun restoreWhoopAfterPairing() {
-        if (!veepooPairingPausedWhoop) return
-        veepooPairingPausedWhoop = false
-        startWhoop()
+    private fun pauseActiveTransportForPairing(): Boolean {
+        if (veepooPairingPausedTransport != null) return true
+        return if (onStrap) {
+            val id = activeStrapId ?: return false
+            if (activeSource == null) return false
+            veepooPairingPausedTransport = PausedTransport.Strap(id)
+            tearDownNonWhoopSource()
+            activeStrapId = null
+            // Keep onStrap true: WHOOP is already paused, so restoring this source must not stop it again.
+            true
+        } else {
+            val id = activeWhoopId ?: WhoopBleClient.DEFAULT_DEVICE_ID
+            veepooPairingPausedTransport = PausedTransport.Whoop(id)
+            stopWhoop()
+            true
+        }
+    }
+
+    private fun restorePausedTransportAfterPairing() {
+        val paused = veepooPairingPausedTransport ?: return
+        veepooPairingPausedTransport = null
+        when (paused) {
+            is PausedTransport.Whoop -> startWhoop()
+            is PausedTransport.Strap -> scope.launch {
+                reconcileLock.withLock {
+                    lastSeenId = null
+                    reconcile(paused.deviceId)
+                }
+            }
+        }
     }
 
     companion object {

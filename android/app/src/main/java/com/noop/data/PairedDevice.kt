@@ -79,6 +79,26 @@ enum class DeviceStatus { active, paired, archived }
 // day only when nothing else has data (a strap-less day). Additive: only the activity-file importer writes it.
 enum class SourceKind { liveBLE, historyBLE, cloudImport, fileImport, ftms, huami, oura, veepoo, activityFile }
 
+val SourceKind.isActivatableLiveTransport: Boolean
+    get() = when (this) {
+        SourceKind.liveBLE,
+        SourceKind.historyBLE,
+        SourceKind.ftms,
+        SourceKind.huami,
+        SourceKind.oura,
+        SourceKind.veepoo,
+        -> true
+        SourceKind.cloudImport,
+        SourceKind.fileImport,
+        SourceKind.activityFile,
+        -> false
+    }
+
+val PairedDeviceRow.isActivatableLiveTransport: Boolean
+    get() = SourceKind.entries
+        .firstOrNull { it.name == sourceKind }
+        ?.isActivatableLiveTransport == true
+
 /** A canonical metric a source can provide — drives capability-aware UI + the day-owner resolver.
  *  Stored as the enum name (Swift `Metric` rawValue) inside the comma-joined `capabilities` string. */
 enum class Metric { hr, hrv, spo2, skinTemp, steps, sleep, strainLoad }

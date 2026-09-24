@@ -8,9 +8,16 @@ import com.noop.data.AnalysisAffectedRange
 import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
 import com.noop.ble.veepoo.VeepooAttemptToken
+import com.noop.ble.veepoo.VeepooAdapterState
 import com.noop.ble.veepoo.VeepooBinding
+import com.noop.ble.veepoo.VeepooCandidateHandle
+import com.noop.ble.veepoo.VeepooCandidateRow
 import com.noop.ble.veepoo.VeepooCredentialAccess
+import com.noop.ble.veepoo.VeepooDisplayState
+import com.noop.ble.veepoo.VeepooManagedSource
 import com.noop.ble.veepoo.VeepooProvisioningCommit
+import com.noop.ble.veepoo.VeepooRevisionBinding
+import com.noop.ble.veepoo.VeepooStoredCredential
 import com.noop.ble.veepoo.VeepooSupplierLifecycleDiagnosticSink
 import com.noop.ble.veepoo.VeepooSupplierLifecycleEvent
 import com.noop.ble.veepoo.VeepooSupplierLifecycleFailure
@@ -19,6 +26,9 @@ import com.noop.ble.veepoo.VeepooSupplierLifecycleStage
 import com.noop.ble.veepoo.VeepooSupplierLifecycleTrigger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -62,6 +72,61 @@ class SourceCoordinatorAdoptionTest {
         override fun stop() {
             stops += 1
             lifecycleOperations?.add("source.stop")
+        }
+    }
+
+    private class FakeVeepooManagedSource(
+        private val lifecycleOperations: MutableList<String>? = null,
+    ) : VeepooManagedSource {
+        private val mutableState = MutableStateFlow(VeepooAdapterState.IDLE)
+        override val state: StateFlow<VeepooAdapterState> = mutableState.asStateFlow()
+        private val mutableCandidates = MutableStateFlow<List<VeepooCandidateRow>>(emptyList())
+        override val candidates: StateFlow<List<VeepooCandidateRow>> =
+            mutableCandidates.asStateFlow()
+        private val mutableDisplay = MutableStateFlow(VeepooDisplayState())
+        override val display: StateFlow<VeepooDisplayState> = mutableDisplay.asStateFlow()
+        val handle = VeepooCandidateHandle("candidate")
+        var selectionSucceeds = true
+        var scans = 0
+        var stops = 0
+
+        override fun scan() {
+            scans += 1
+            lifecycleOperations?.add("supplier.scan")
+            mutableState.value = VeepooAdapterState.CANDIDATES_FOUND
+            mutableCandidates.value = listOf(VeepooCandidateRow(handle, 1))
+        }
+
+        override fun connect(address: String) {
+            lifecycleOperations?.add("supplier.connect")
+            mutableState.value = VeepooAdapterState.CONNECTING
+        }
+
+        override fun stop() {
+            stops += 1
+            lifecycleOperations?.add("supplier.stop")
+            mutableState.value = VeepooAdapterState.STOPPED
+        }
+
+        override fun selectCandidate(handle: VeepooCandidateHandle): Boolean {
+            if (handle !== this.handle || !selectionSucceeds) return false
+            mutableState.value = VeepooAdapterState.CONNECTING
+            return true
+        }
+
+        override fun submitPairing(
+            printedId: CharArray,
+            transportPassword: CharArray,
+        ): Boolean = false
+
+        override fun takeProvisioningCommit(): VeepooProvisioningCommit? = null
+
+        fun failPairing() {
+            mutableState.value = VeepooAdapterState.FAILED
+        }
+
+        fun publishDisplay(value: VeepooDisplayState) {
+            mutableDisplay.value = value
         }
     }
 
@@ -184,20 +249,31 @@ class SourceCoordinatorAdoptionTest {
     private class FakeCredentials(
         private val lifecycleOperations: MutableList<String>? = null,
     ) : VeepooCredentialAccess {
-        val values = mutableMapOf<String, String>()
+        data class Value(
+            val password: String,
+            val revisionBinding: VeepooRevisionBinding,
+        )
+
+        val values = mutableMapOf<String, Value>()
         var saveSucceeds = true
         var clearSucceeds = true
 
-        override fun save(deviceId: String, password: CharArray): Boolean {
+        override fun save(
+            deviceId: String,
+            password: CharArray,
+            revisionBinding: VeepooRevisionBinding,
+        ): Boolean {
             lifecycleOperations?.add("credential.save")
             if (!saveSucceeds) return false
-            values[deviceId] = password.concatToString()
+            values[deviceId] = Value(password.concatToString(), revisionBinding)
             return true
         }
 
-        override fun load(deviceId: String): CharArray? {
+        override fun load(deviceId: String): VeepooStoredCredential? {
             lifecycleOperations?.add("credential.load")
-            return values[deviceId]?.toCharArray()
+            return values[deviceId]?.let {
+                VeepooStoredCredential(it.password.toCharArray(), it.revisionBinding)
+            }
         }
 
         override fun clear(deviceId: String): Boolean {
@@ -205,6 +281,15 @@ class SourceCoordinatorAdoptionTest {
             if (!clearSucceeds) return false
             values.remove(deviceId)
             return true
+        }
+
+        fun seed(deviceId: String, password: String = "2468") {
+            values[deviceId] = Value(
+                password = password,
+                revisionBinding = requireNotNull(
+                    VeepooRevisionBinding.from("hw-1", "fw-1"),
+                ),
+            )
         }
     }
 
@@ -230,6 +315,23 @@ class SourceCoordinatorAdoptionTest {
         addedAt = 200,
         lastSeenAt = 200,
         peripheralId = "AA:BB:CC:DD:EE:10",
+    )
+
+    private fun liveTransportRow(
+        id: String,
+        sourceKind: SourceKind,
+        status: DeviceStatus = DeviceStatus.active,
+    ) = PairedDeviceRow(
+        id = id,
+        brand = if (sourceKind == SourceKind.veepoo) "NOOP" else "Test",
+        model = sourceKind.name,
+        nickname = null,
+        sourceKind = sourceKind.name,
+        capabilities = "hr",
+        status = status.name,
+        addedAt = 200,
+        lastSeenAt = 200,
+        peripheralId = null,
     )
 
     private fun coordinatorOver(dao: FakeRegistryDao, log: (String) -> Unit = {}): SourceCoordinator =
@@ -629,9 +731,7 @@ class SourceCoordinatorAdoptionTest {
             devices["supplier-band"] = supplierRow()
         }
         val source = FakeNoopBandSource()
-        val credentials = FakeCredentials().apply {
-            values["supplier-band"] = "2468"
-        }
+        val credentials = FakeCredentials().apply { seed("supplier-band") }
         val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
         val projected = mutableListOf<String>()
         var starts = 0
@@ -676,9 +776,7 @@ class SourceCoordinatorAdoptionTest {
             devices["supplier-band"] = supplierRow()
         }
         val source = FakeNoopBandSource(operations)
-        val credentials = FakeCredentials(operations).apply {
-            values["supplier-band"] = "2468"
-        }
+        val credentials = FakeCredentials(operations).apply { seed("supplier-band") }
         val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
         val projected = mutableListOf<String>()
         var starts = 0
@@ -727,9 +825,7 @@ class SourceCoordinatorAdoptionTest {
             failArchiveFor = "supplier-band"
         }
         val sources = mutableListOf<FakeNoopBandSource>()
-        val credentials = FakeCredentials(operations).apply {
-            values["supplier-band"] = "2468"
-        }
+        val credentials = FakeCredentials(operations).apply { seed("supplier-band") }
         val coordinator = SourceCoordinator(
             context = null,
             registry = registryWith(dao),
@@ -754,10 +850,141 @@ class SourceCoordinatorAdoptionTest {
 
         assertFalse(archived)
         assertEquals("supplier-band", dao.activeDeviceId())
-        assertEquals("2468", credentials.values["supplier-band"])
+        assertEquals("2468", credentials.values["supplier-band"]?.password)
         assertEquals(2, sources.size)
         assertEquals(1, sources.last().connections.size)
         assertTrue(operations.indexOf("credential.clear") < operations.indexOf("registry.archive"))
         assertTrue(operations.indexOf("registry.archive") < operations.indexOf("credential.save"))
+    }
+
+    @Test
+    fun pairingCancellationRestoresTheExactPausedTransport() = runBlocking {
+        assertPairingTerminalRestoresEachTransport(failPairing = false)
+    }
+
+    @Test
+    fun pairingFailureRestoresTheExactPausedTransport() = runBlocking {
+        assertPairingTerminalRestoresEachTransport(failPairing = true)
+    }
+
+    private suspend fun assertPairingTerminalRestoresEachTransport(
+        failPairing: Boolean,
+    ) {
+        val cases = listOf(
+            "WHOOP" to null,
+            "standard HR" to SourceKind.liveBLE,
+            "Oura" to SourceKind.oura,
+            "active supplier" to SourceKind.veepoo,
+        )
+        cases.forEachIndexed { index, (label, sourceKind) ->
+            val id = "transport-$index"
+            val dao = FakeRegistryDao().apply {
+                devices["my-whoop"] = whoopRow("my-whoop", null).copy(
+                    status = if (sourceKind == null) {
+                        DeviceStatus.active.name
+                    } else {
+                        DeviceStatus.paired.name
+                    },
+                )
+                if (sourceKind != null) {
+                    devices[id] = liveTransportRow(id, sourceKind)
+                }
+            }
+            val sources = mutableListOf<FakeNoopBandSource>()
+            val pairing = FakeVeepooManagedSource()
+            var whoopStarts = 0
+            var whoopStops = 0
+            val coordinator = SourceCoordinator(
+                context = null,
+                registry = registryWith(dao),
+                repository = null,
+                liveSink = { _, _ -> },
+                startWhoop = { whoopStarts += 1 },
+                stopWhoop = { whoopStops += 1 },
+                scope = CoroutineScope(Dispatchers.Unconfined),
+                noopBandSourceFactory = { requestedId, _ ->
+                    if (requestedId != id) {
+                        null
+                    } else {
+                        FakeNoopBandSource().also(sources::add)
+                    }
+                },
+                veepooPairingSourceFactory = { pairing },
+                veepooCredentials = FakeCredentials(),
+            )
+            coordinator.start()
+            val stopsBeforePairing = whoopStops
+
+            assertTrue("$label pairing should start", coordinator.beginVeepooPairing())
+            assertTrue(
+                "$label candidate should be selected",
+                coordinator.selectVeepooCandidate(pairing.handle),
+            )
+            if (sourceKind == null) {
+                assertEquals("$label must be paused once", stopsBeforePairing + 1, whoopStops)
+            } else {
+                assertEquals("$label active source must stop once", 1, sources.single().stops)
+                assertEquals("$label must not pause WHOOP again", stopsBeforePairing, whoopStops)
+            }
+
+            if (failPairing) {
+                pairing.failPairing()
+            } else {
+                coordinator.cancelVeepooPairing()
+            }
+
+            if (sourceKind == null) {
+                assertEquals("$label must resume once", 1, whoopStarts)
+            } else {
+                assertEquals("$label must be recreated", 2, sources.size)
+                assertEquals("$label restored source must scan", 1, sources.last().scans)
+                assertEquals("$label must not resume WHOOP", 0, whoopStarts)
+            }
+        }
+    }
+
+    @Test
+    fun pairingObservationDoesNotCancelActiveSupplierDisplayObservation() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+        }
+        val activeSource = FakeVeepooManagedSource()
+        val pairingSource = FakeVeepooManagedSource()
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            noopBandSourceFactory = { id, _ ->
+                activeSource.takeIf { id == "supplier-band" }
+            },
+            veepooPairingSourceFactory = { pairingSource },
+            veepooCredentials = FakeCredentials(),
+        )
+        coordinator.start()
+        activeSource.publishDisplay(
+            VeepooDisplayState(
+                adapterState = VeepooAdapterState.LIVE_DISPLAY_ONLY,
+                heartRate = 71,
+                phoneReceiptMilliseconds = 1_000,
+                active = true,
+            ),
+        )
+        assertEquals(71, coordinator.veepooDisplay.value.heartRate)
+
+        assertTrue(coordinator.beginVeepooPairing())
+        activeSource.publishDisplay(
+            coordinator.veepooDisplay.value.copy(
+                heartRate = 72,
+                phoneReceiptMilliseconds = 2_000,
+            ),
+        )
+
+        assertEquals(72, coordinator.veepooDisplay.value.heartRate)
     }
 }

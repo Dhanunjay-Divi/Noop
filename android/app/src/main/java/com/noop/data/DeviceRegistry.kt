@@ -146,15 +146,20 @@ class DeviceRegistry(
                 rows.firstOrNull {
                     it.id == preferredId &&
                         it.id != unavailableDeviceId &&
-                        it.status != DeviceStatus.archived.name
+                        it.status != DeviceStatus.archived.name &&
+                        it.isActivatableLiveTransport
                 }
             }
             val fallback = preferred
                 ?: rows.firstOrNull {
-                    it.id == "my-whoop" && it.status != DeviceStatus.archived.name
+                    it.id == "my-whoop" &&
+                        it.status != DeviceStatus.archived.name &&
+                        it.isActivatableLiveTransport
                 }
                 ?: rows.firstOrNull {
-                    isWhoop(it) && it.status != DeviceStatus.archived.name
+                    isWhoop(it) &&
+                        it.status != DeviceStatus.archived.name &&
+                        it.isActivatableLiveTransport
                 }
                 ?: return@run null
 
@@ -225,13 +230,17 @@ class DeviceRegistry(
                 rows.firstOrNull {
                     it.id == "my-whoop" &&
                         it.id != id &&
-                        it.status != DeviceStatus.archived.name
+                        it.status != DeviceStatus.archived.name &&
+                        it.isActivatableLiveTransport
                 } ?: rows.firstOrNull {
                     it.id != id &&
                         isWhoop(it) &&
-                        it.status != DeviceStatus.archived.name
+                        it.status != DeviceStatus.archived.name &&
+                        it.isActivatableLiveTransport
                 } ?: rows.firstOrNull {
-                    it.id != id && it.status != DeviceStatus.archived.name
+                    it.id != id &&
+                        it.status != DeviceStatus.archived.name &&
+                        it.isActivatableLiveTransport
                 }
             } else {
                 null

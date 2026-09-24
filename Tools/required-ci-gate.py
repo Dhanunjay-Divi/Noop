@@ -140,7 +140,7 @@ RELEASE_SOURCE_DIGESTS = {
         "8cb907cd981db978a895668bfc97e9c66d9ae632957032dec727ea5c8450b983"
     ),
     "Tools/trusted-release-controls.py": (
-        "645bcd7637fc4e7fd57124e8564399231f7370c0fc414d5ef44db4c54ea5c0a3"
+        "8dbbdddcdfaa6e22abd057a89812350d3711ce8d70c9f01e8f7a164415f2a19c"
     ),
     "Tools/update-homebrew-cask.sh": (
         "1733e7b43266ac7f16ed3043cef4bea51f8353ebe533fb9aa3d260fa76639989"

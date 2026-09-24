@@ -100,11 +100,17 @@ class VeepooProvisioningCommit internal constructor(
     internal val peripheralId: String get() = binding.peripheralId
 
     @Synchronized
-    internal fun saveCredential(save: (CharArray) -> Boolean): Boolean {
+    internal fun saveCredential(
+        save: (CharArray, VeepooRevisionBinding) -> Boolean,
+    ): Boolean {
         val value = password ?: return false
         password = null
+        val revisionBinding = VeepooRevisionBinding.from(
+            hardwareRevision = hardwareRevision,
+            firmwareVersion = firmwareVersion,
+        )
         return try {
-            save(value)
+            revisionBinding != null && save(value, revisionBinding)
         } finally {
             value.fill('\u0000')
         }
@@ -128,6 +134,7 @@ class VeepooBandSource(
     private val deviceId: String,
     private val bridge: VeepooBridge,
     initialReconnectPassword: CharArray? = null,
+    initialReconnectRevisionBinding: VeepooRevisionBinding? = null,
     private val diagnostics: VeepooDiagnosticSink = AppVeepooDiagnosticSink,
     private val session: BandSessionMachine = NoopBandSdkBoundary.newSession(),
     private val onReconnectCredentialRejected: () -> Unit = {},
@@ -155,6 +162,8 @@ class VeepooBandSource(
     private var pendingPrintedId: CharArray? = null
     private var pendingPassword: CharArray? = null
     private var reconnectPassword: CharArray? = initialReconnectPassword?.copyOf()
+    private var reconnectRevisionBinding: VeepooRevisionBinding? =
+        initialReconnectRevisionBinding
     private var provisioningCommit: VeepooProvisioningCommit? = null
     private var reconnectCancellation: VeepooReconnectCancellation? = null
     private var reconnectAttemptCount = 0
@@ -202,12 +211,16 @@ class VeepooBandSource(
             return
         }
         val password = reconnectPassword
-        if (address.isBlank() || password == null) {
+        val revisionBinding = reconnectRevisionBinding
+        if (address.isBlank() || password == null || revisionBinding == null) {
             failAttempt(
                 VeepooDiagnosticCategory.RECONNECT,
                 if (address.isBlank()) VeepooDiagnosticFailure.INVALID_INPUT
                 else VeepooDiagnosticFailure.AUTHENTICATION,
             )
+            if (address.isNotBlank() && password != null && revisionBinding == null) {
+                notifyReconnectCredentialRejected()
+            }
             return
         }
         cancelReconnectSchedule()
@@ -401,6 +414,22 @@ class VeepooBandSource(
             failAttempt(VeepooDiagnosticCategory.CAPABILITY, VeepooDiagnosticFailure.REJECTED)
             return
         }
+        val observedRevisionBinding = VeepooRevisionBinding.from(
+            hardwareRevision = identity.hardwareRevision,
+            firmwareVersion = identity.firmwareVersion,
+        )
+        if (observedRevisionBinding == null) {
+            failAttempt(VeepooDiagnosticCategory.CAPABILITY, VeepooDiagnosticFailure.REJECTED)
+            return
+        }
+        if (
+            intent == VeepooConnectionIntent.RECONNECT &&
+            reconnectRevisionBinding != observedRevisionBinding
+        ) {
+            failAttempt(VeepooDiagnosticCategory.RECONNECT, VeepooDiagnosticFailure.REJECTED)
+            notifyReconnectCredentialRejected()
+            return
+        }
         val connection = connectionToken
         val reconnect = reconnectToken
         if (reconnect != null) {
@@ -454,6 +483,7 @@ class VeepooBandSource(
             )
             reconnectPassword?.fill('\u0000')
             reconnectPassword = password.copyOf()
+            reconnectRevisionBinding = observedRevisionBinding
             provisioningCommit?.close()
             provisioningCommit = VeepooProvisioningCommit(
                 binding,
@@ -753,6 +783,7 @@ class VeepooBandSource(
         clearPairingMaterial()
         reconnectPassword?.fill('\u0000')
         reconnectPassword = null
+        reconnectRevisionBinding = null
         scanToken = null
         connectionToken = null
         reconnectToken = null

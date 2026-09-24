@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -33,8 +34,19 @@ class AndroidSupplierSdkVerifierTest(unittest.TestCase):
         wrapper = repository / "android" / "gradle" / "wrapper" / "gradle-wrapper.jar"
         wrapper.parent.mkdir(parents=True)
         wrapper.write_bytes(b"synthetic wrapper")
+        trust = repository / VERIFIER.TRUST_RELATIVE_PATH
+        trust.parent.mkdir(parents=True)
+        trust.write_text(
+            json.dumps({"artifacts": [], "schemaVersion": 1}),
+            encoding="utf-8",
+        )
         self._git(repository, "init", "-q")
-        self._git(repository, "add", wrapper.relative_to(repository).as_posix())
+        self._git(
+            repository,
+            "add",
+            wrapper.relative_to(repository).as_posix(),
+            trust.relative_to(repository).as_posix(),
+        )
         return repository
 
     def _aar(
@@ -66,7 +78,9 @@ class AndroidSupplierSdkVerifierTest(unittest.TestCase):
         *,
         native_abis: str = "",
         native_libraries: str = "",
+        trust: bool = True,
     ) -> Path:
+        relative_path = artifact.relative_to(sdk_root).as_posix()
         config = repository / "android" / "noop-supplier-sdk.properties"
         config.write_text(
             "\n".join(
@@ -74,7 +88,7 @@ class AndroidSupplierSdkVerifierTest(unittest.TestCase):
                     "enabled=true",
                     f"sdk.root={sdk_root}",
                     "artifact.count=1",
-                    f"artifact.0.path={artifact.relative_to(sdk_root).as_posix()}",
+                    f"artifact.0.path={relative_path}",
                     f"artifact.0.sha256={digest}",
                     "artifact.0.requiredClasses=com.example.Required",
                     f"artifact.0.nativeAbis={native_abis}",
@@ -84,6 +98,32 @@ class AndroidSupplierSdkVerifierTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        if trust:
+            trust_root = repository / VERIFIER.TRUST_RELATIVE_PATH
+            trust_root.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "nativeAbis": [
+                                    entry for entry in native_abis.split(",") if entry
+                                ],
+                                "nativeLibraries": [
+                                    entry
+                                    for entry in native_libraries.split(",")
+                                    if entry
+                                ],
+                                "path": relative_path,
+                                "requiredClasses": ["com.example.Required"],
+                                "sha256": digest,
+                            }
+                        ],
+                        "schemaVersion": 1,
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
         return config
 
     def test_exact_aar_and_class_inventory_passes(self) -> None:
@@ -145,6 +185,54 @@ class AndroidSupplierSdkVerifierTest(unittest.TestCase):
             config = self._config(repository, sdk_root, artifact, "0" * 64)
 
             with self.assertRaisesRegex(VERIFIER.VerificationError, "digest mismatch"):
+                VERIFIER.verify(config, repository)
+
+    def test_local_config_cannot_self_bless_an_unapproved_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            repository = self._repository(root)
+            sdk_root = root / "supplier"
+            artifact = sdk_root / "core" / "transport.aar"
+            approved_digest = self._aar(artifact)
+            self._config(repository, sdk_root, artifact, approved_digest)
+
+            changed_digest = self._aar(
+                artifact,
+                classes=("com.example.Required", "com.example.Added"),
+            )
+            config = self._config(
+                repository,
+                sdk_root,
+                artifact,
+                changed_digest,
+                trust=False,
+            )
+
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationError,
+                "protected trust root",
+            ):
+                VERIFIER.verify(config, repository)
+
+    def test_enabled_config_is_rejected_while_trust_root_has_no_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            repository = self._repository(root)
+            sdk_root = root / "supplier"
+            artifact = sdk_root / "core" / "transport.aar"
+            digest = self._aar(artifact)
+            config = self._config(
+                repository,
+                sdk_root,
+                artifact,
+                digest,
+                trust=False,
+            )
+
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationError,
+                "protected trust root",
+            ):
                 VERIFIER.verify(config, repository)
 
     def test_missing_required_class_is_rejected(self) -> None:
@@ -232,6 +320,23 @@ class AndroidSupplierSdkVerifierTest(unittest.TestCase):
             with self.assertRaisesRegex(
                 VERIFIER.VerificationError,
                 "local supplier config must not be tracked",
+            ):
+                VERIFIER.verify_repository_boundary(repository)
+
+    def test_untracked_supplier_trust_root_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            repository = self._repository(root)
+            self._git(
+                repository,
+                "rm",
+                "--cached",
+                VERIFIER.TRUST_RELATIVE_PATH.as_posix(),
+            )
+
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationError,
+                "trust root must be tracked",
             ):
                 VERIFIER.verify_repository_boundary(repository)
 

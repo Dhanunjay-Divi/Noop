@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -721,6 +722,36 @@ private fun SupplierBandLiveScreen(
     display: com.noop.ble.veepoo.VeepooDisplayState,
     onManageDevices: () -> Unit,
 ) {
+    var nowMillis by remember(
+        display.adapterState,
+        display.active,
+        display.heartRate,
+        display.phoneReceiptMilliseconds,
+    ) {
+        mutableLongStateOf(System.currentTimeMillis())
+    }
+    LaunchedEffect(
+        display.adapterState,
+        display.active,
+        display.heartRate,
+        display.phoneReceiptMilliseconds,
+    ) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            nowMillis = now
+            val wait = SupplierDisplayHeartRatePolicy.expiryCheckDelayMillis(
+                display = display,
+                nowMillis = now,
+            )
+            if (wait == null || wait <= 0L) break
+            delay(wait)
+        }
+    }
+    val visibleHeartRate = SupplierDisplayHeartRatePolicy.visibleBpm(
+        display = display,
+        nowMillis = nowMillis,
+    )
+
     ScreenScaffold(
         title = uiString(R.string.nav_live),
         subtitle = uiString(R.string.timeline_my_whoop),
@@ -745,7 +776,7 @@ private fun SupplierBandLiveScreen(
                         color = Palette.textSecondary,
                     )
                     Text(
-                        display.heartRate?.toString() ?: "--",
+                        visibleHeartRate?.toString() ?: "--",
                         style = NoopType.number(48f),
                         color = Palette.textPrimary,
                     )

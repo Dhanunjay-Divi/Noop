@@ -16,7 +16,9 @@ from zipfile import BadZipFile, ZipFile, ZipInfo
 
 
 CONFIG_RELATIVE_PATH = Path("android/noop-supplier-sdk.properties")
+TRUST_RELATIVE_PATH = Path("release/supplier/android-artifact-trust.json")
 ALLOWED_TRACKED_BINARY = "android/gradle/wrapper/gradle-wrapper.jar"
+MAX_TRUST_ROOT_BYTES = 256 * 1024
 FORBIDDEN_TRACKED_SUFFIXES = {".aar", ".aab", ".apk", ".jar", ".so"}
 FORBIDDEN_ARCHIVE_SUFFIXES = {
     ".aar",
@@ -55,6 +57,11 @@ class ArtifactConfig:
 class SupplierConfig:
     enabled: bool
     sdk_root: Path | None
+    artifacts: tuple[ArtifactConfig, ...]
+
+
+@dataclass(frozen=True)
+class SupplierTrustRoot:
     artifacts: tuple[ArtifactConfig, ...]
 
 
@@ -208,6 +215,125 @@ def load_config(path: Path) -> SupplierConfig:
     )
 
 
+def _trust_string_list(
+    value: object,
+    key: str,
+    pattern: re.Pattern[str],
+    *,
+    required: bool = False,
+) -> tuple[str, ...]:
+    if not isinstance(value, list) or any(not isinstance(entry, str) for entry in value):
+        raise VerificationError(f"{key} must be an array of strings")
+    entries = tuple(value)
+    if any(pattern.fullmatch(entry) is None for entry in entries):
+        raise VerificationError(f"{key} has an invalid entry")
+    if len(entries) != len(set(entries)):
+        raise VerificationError(f"{key} contains a duplicate entry")
+    if required and not entries:
+        raise VerificationError(f"{key} must not be empty")
+    return entries
+
+
+def load_trust_root(path: Path) -> SupplierTrustRoot:
+    _reject_symlink_path(path, "supplier trust root")
+    if not path.is_file() or path.is_symlink():
+        raise VerificationError("supplier trust root must be a regular file")
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise VerificationError("supplier trust root is not readable") from error
+    if len(raw) > MAX_TRUST_ROOT_BYTES:
+        raise VerificationError("supplier trust root is too large")
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise VerificationError("supplier trust root is not valid UTF-8 JSON") from error
+    if not isinstance(document, dict) or set(document) != {"schemaVersion", "artifacts"}:
+        raise VerificationError("supplier trust root has unexpected fields")
+    if document["schemaVersion"] != 1:
+        raise VerificationError("supplier trust root schemaVersion must be 1")
+    raw_artifacts = document["artifacts"]
+    if not isinstance(raw_artifacts, list):
+        raise VerificationError("supplier trust root artifacts must be an array")
+
+    artifacts: list[ArtifactConfig] = []
+    configured_paths: set[str] = set()
+    expected_fields = {
+        "path",
+        "sha256",
+        "requiredClasses",
+        "nativeAbis",
+        "nativeLibraries",
+    }
+    for index, value in enumerate(raw_artifacts):
+        label = f"trust artifact {index}"
+        if not isinstance(value, dict) or set(value) != expected_fields:
+            raise VerificationError(f"{label} has unexpected fields")
+        relative = value["path"]
+        if not isinstance(relative, str):
+            raise VerificationError(f"{label}.path must be a string")
+        pure_path = PurePosixPath(relative)
+        if (
+            not relative
+            or pure_path.is_absolute()
+            or ".." in pure_path.parts
+            or "\\" in relative
+            or pure_path.suffix.lower() != ".aar"
+        ):
+            raise VerificationError(f"{label}.path must be a relative AAR path")
+        if relative in configured_paths:
+            raise VerificationError(f"duplicate trusted artifact path: {relative}")
+        configured_paths.add(relative)
+
+        digest = value["sha256"]
+        if not isinstance(digest, str) or SHA256.fullmatch(digest) is None:
+            raise VerificationError(f"{label}.sha256 must be lowercase SHA-256")
+        required_classes = _trust_string_list(
+            value["requiredClasses"],
+            f"{label}.requiredClasses",
+            CLASS_NAME,
+            required=True,
+        )
+        native_abis = _trust_string_list(
+            value["nativeAbis"],
+            f"{label}.nativeAbis",
+            ABI_NAME,
+        )
+        native_libraries = _trust_string_list(
+            value["nativeLibraries"],
+            f"{label}.nativeLibraries",
+            NATIVE_LIBRARY_NAME,
+        )
+        if bool(native_abis) != bool(native_libraries):
+            raise VerificationError(
+                f"{label} must configure nativeAbis and nativeLibraries together"
+            )
+        artifacts.append(
+            ArtifactConfig(
+                relative_path=relative,
+                expected_sha256=digest,
+                required_classes=required_classes,
+                native_abis=native_abis,
+                native_libraries=native_libraries,
+            )
+        )
+    if [artifact.relative_path for artifact in artifacts] != sorted(configured_paths):
+        raise VerificationError("supplier trust root artifacts must be sorted by path")
+    return SupplierTrustRoot(artifacts=tuple(artifacts))
+
+
+def verify_config_uses_trust_root(
+    config: SupplierConfig,
+    trust_root: SupplierTrustRoot,
+) -> None:
+    configured = {artifact.relative_path: artifact for artifact in config.artifacts}
+    trusted = {artifact.relative_path: artifact for artifact in trust_root.artifacts}
+    if configured != trusted:
+        raise VerificationError(
+            "local supplier config does not exactly match the protected trust root"
+        )
+
+
 def _reject_symlink_path(path: Path, label: str) -> None:
     absolute = path if path.is_absolute() else Path.cwd() / path
     current = Path(absolute.anchor)
@@ -251,6 +377,8 @@ def verify_repository_boundary(repository_root: Path) -> None:
     tracked = _git_tracked_paths(repository_root)
     if CONFIG_RELATIVE_PATH.as_posix() in tracked:
         raise VerificationError("local supplier config must not be tracked")
+    if TRUST_RELATIVE_PATH.as_posix() not in tracked:
+        raise VerificationError("supplier trust root must be tracked")
     if any(path.startswith("android/local-supplier-sdk/") for path in tracked):
         raise VerificationError("local supplier staging files must not be tracked")
 
@@ -367,6 +495,7 @@ def verify(
 ) -> dict[str, object]:
     repository_root = repository_root.resolve()
     verify_repository_boundary(repository_root)
+    trust_root = load_trust_root(repository_root / TRUST_RELATIVE_PATH)
     if repository_only:
         return {"enabled": False, "artifacts": []}
 
@@ -379,6 +508,7 @@ def verify(
     config = load_config(config_path)
     if not config.enabled:
         return {"enabled": False, "artifacts": []}
+    verify_config_uses_trust_root(config, trust_root)
 
     assert config.sdk_root is not None
     _reject_symlink_path(config.sdk_root, "supplier SDK root")
