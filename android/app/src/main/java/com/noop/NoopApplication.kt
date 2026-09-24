@@ -482,6 +482,7 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
      */
     private val sourceCoordinatorDelegate = lazy {
         val supplierBridgeProvider = VeepooBridgeProviderLoader.load()
+        val supplierCredentials = VeepooCredentialStore(applicationContext)
         SourceCoordinator(
             context = applicationContext,
             registry = deviceRegistry,
@@ -505,7 +506,10 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             // A generic strap's standard battery (0x180F) → the same live battery field the WHOOP uses.
             batterySink = { pct -> ble.publishExternalBattery(pct) },
             veepooBridgeProvider = supplierBridgeProvider,
-            veepooCredentials = supplierBridgeProvider?.let { VeepooCredentialStore(applicationContext) },
+            // Keep secure cleanup available even when this build cannot load the optional provider. A
+            // durable supplier row from an earlier build must still be removable and reconcilable.
+            veepooCredentials = supplierCredentials,
+            onDurableActiveDeviceChanged = ::noteActiveDeviceId,
         )
     }
     val sourceCoordinator: SourceCoordinator get() = sourceCoordinatorDelegate.value

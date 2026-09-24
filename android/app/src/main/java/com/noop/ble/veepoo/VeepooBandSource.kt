@@ -367,8 +367,8 @@ class VeepooBandSource(
         } else {
             val password = reconnectPassword
             if (password == null) {
-                onReconnectCredentialRejected()
                 failAttempt(VeepooDiagnosticCategory.AUTHENTICATION, VeepooDiagnosticFailure.AUTHENTICATION)
+                notifyReconnectCredentialRejected()
                 return
             }
             beginAuthentication(password)
@@ -475,8 +475,9 @@ class VeepooBandSource(
     ) {
         if (!accept(attempt) || authenticationToken !== authentication) return stale()
         authenticationToken = null
-        if (intent == VeepooConnectionIntent.RECONNECT) onReconnectCredentialRejected()
+        val reconcileCredential = intent == VeepooConnectionIntent.RECONNECT
         failAttempt(VeepooDiagnosticCategory.AUTHENTICATION, failure.toDiagnostic())
+        if (reconcileCredential) notifyReconnectCredentialRejected()
     }
 
     @Synchronized
@@ -565,7 +566,12 @@ class VeepooBandSource(
             scheduleReconnect(failure.toDiagnostic())
             return
         }
+        val reconcileCredential =
+            intent == VeepooConnectionIntent.RECONNECT &&
+                mutableState.value == VeepooAdapterState.AUTHENTICATING &&
+                failure in setOf(VeepooFailure.AUTHENTICATION, VeepooFailure.REJECTED)
         failAttempt(categoryForState(), failure.toDiagnostic())
+        if (reconcileCredential) notifyReconnectCredentialRejected()
     }
 
     private fun beginAuthentication(password: CharArray): Boolean {
@@ -647,6 +653,10 @@ class VeepooBandSource(
     private fun cancelReconnectSchedule() {
         reconnectCancellation?.cancel()
         reconnectCancellation = null
+    }
+
+    private fun notifyReconnectCredentialRejected() {
+        runCatching { onReconnectCredentialRejected() }
     }
 
     private fun startBatteryThenLive(capabilities: VeepooCapabilities) {

@@ -287,10 +287,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  the SourceCoordinator, not the WHOOP client, so it isn't touched here. */
     suspend fun archivePairedDevice(id: String) {
         val devices = runCatching { noopApp.deviceRegistry.all() }.getOrDefault(emptyList())
-        val wasEligible = devices.any {
-            it.id == id && it.status != com.noop.data.DeviceStatus.archived.name
+        val target = devices.firstOrNull { it.id == id }
+        val wasEligible = target?.status != null &&
+            target.status != com.noop.data.DeviceStatus.archived.name
+        val archived = if (target?.sourceKind == com.noop.data.SourceKind.veepoo.name) {
+            noopApp.sourceCoordinator.archiveVeepooDevice(id)
+        } else {
+            runCatching {
+                noopApp.deviceRegistry.archive(id)
+                true
+            }.getOrDefault(false)
         }
-        noopApp.deviceRegistry.archive(id)
+        if (!archived) return
         if (com.noop.ble.SourceCoordinator.isWhoop(id, devices)) ble.releaseStrap()
         if (wasEligible) {
             analyzeKick.trySend(Unit)

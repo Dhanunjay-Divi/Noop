@@ -248,6 +248,9 @@ class AnalysisInputGateContractTest {
         val viewModelStart = viewModel!!.indexOf("suspend fun archivePairedDevice(")
         val viewModelEnd = viewModel.indexOf("/** Rename a device", viewModelStart)
         val viewModelPath = viewModel.substring(viewModelStart, viewModelEnd)
+        assertTrue(viewModelPath.contains("SourceKind.veepoo.name"))
+        assertTrue(viewModelPath.contains("archiveVeepooDevice(id)"))
+        assertTrue(viewModelPath.contains("ble.releaseStrap()"))
         assertTrue(viewModelPath.contains("if (wasEligible)"))
         assertTrue(viewModelPath.contains("analyzeKick.trySend(Unit)"))
     }

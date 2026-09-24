@@ -49,4 +49,23 @@ class VeepooCredentialStoreTest {
         assertEquals(setOf("category", "outcome", "failure"), fields.keys)
         assertTrue(fields.values.all { it.matches(Regex("[a-z_]+")) })
     }
+
+    @Test
+    fun supplierLifecycleDiagnosticsExposeOnlyFixedPrivacySafeCategories() {
+        val event = VeepooSupplierLifecycleEvent(
+            stage = VeepooSupplierLifecycleStage.RECONCILIATION,
+            outcome = VeepooSupplierLifecycleOutcome.FAILED,
+            trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
+            failure = VeepooSupplierLifecycleFailure.FALLBACK_UNAVAILABLE,
+        )
+        val fields = event.fields()
+
+        assertEquals(
+            setOf("stage", "outcome", "trigger", "failure_kind"),
+            fields.keys,
+        )
+        assertTrue(fields.values.all { it.matches(Regex("[a-z_]+")) })
+        assertEquals("VeepooSupplierLifecycleEvent", event.toString())
+        assertFalse(fields.keys.any { it.contains("device") || it.contains("credential") })
+    }
 }

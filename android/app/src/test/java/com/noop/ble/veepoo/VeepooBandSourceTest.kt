@@ -119,13 +119,17 @@ class VeepooBandSourceTest {
         val reconnectScheduler = FakeReconnectScheduler()
         val diagnostics = mutableListOf<VeepooDiagnosticEvent>()
         var rejectedCredentials = 0
+        var operationsAtCredentialRejection: List<String> = emptyList()
         val source = VeepooBandSource(
             deviceId = "supplier-test",
             bridge = bridge,
             initialReconnectPassword = initialPassword,
             diagnostics = VeepooDiagnosticSink(diagnostics::add),
             session = session,
-            onReconnectCredentialRejected = { rejectedCredentials += 1 },
+            onReconnectCredentialRejected = {
+                rejectedCredentials += 1
+                operationsAtCredentialRejection = bridge.operations.toList()
+            },
             reconnectScheduler = reconnectScheduler,
         )
 
@@ -268,6 +272,26 @@ class VeepooBandSourceTest {
         )
         assertEquals(VeepooAdapterState.READING_BATTERY, harness.source.state.value)
         assertNull(harness.source.takeProvisioningCommit())
+    }
+
+    @Test
+    fun reconnectAuthenticationRejectionCleansUpBeforeCoordinatorCallback() {
+        val harness = Harness("0042".toCharArray())
+        harness.source.connect("AA:BB:CC:DD:EE:01")
+        val attempt = requireNotNull(harness.bridge.attempt)
+        harness.bridge.callback.onTransportConnected(attempt)
+
+        harness.bridge.callback.onAuthenticationFailed(
+            attempt,
+            requireNotNull(harness.bridge.authentication),
+            VeepooFailure.AUTHENTICATION,
+        )
+
+        assertEquals(1, harness.rejectedCredentials)
+        assertEquals(VeepooAdapterState.FAILED, harness.source.state.value)
+        assertTrue(harness.operationsAtCredentialRejection.contains("disconnect"))
+        assertTrue(harness.operationsAtCredentialRejection.contains("close"))
+        assertEquals("close", harness.operationsAtCredentialRejection.last())
     }
 
     @Test

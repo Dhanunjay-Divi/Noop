@@ -7,10 +7,21 @@ import com.noop.data.DeviceStatus
 import com.noop.data.AnalysisAffectedRange
 import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
+import com.noop.ble.veepoo.VeepooAttemptToken
+import com.noop.ble.veepoo.VeepooBinding
+import com.noop.ble.veepoo.VeepooCredentialAccess
+import com.noop.ble.veepoo.VeepooProvisioningCommit
+import com.noop.ble.veepoo.VeepooSupplierLifecycleDiagnosticSink
+import com.noop.ble.veepoo.VeepooSupplierLifecycleEvent
+import com.noop.ble.veepoo.VeepooSupplierLifecycleFailure
+import com.noop.ble.veepoo.VeepooSupplierLifecycleOutcome
+import com.noop.ble.veepoo.VeepooSupplierLifecycleStage
+import com.noop.ble.veepoo.VeepooSupplierLifecycleTrigger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,34 +42,47 @@ import org.junit.Test
  */
 class SourceCoordinatorAdoptionTest {
 
-    private class FakeNoopBandSource : LiveHrSource {
+    private class FakeNoopBandSource(
+        private val lifecycleOperations: MutableList<String>? = null,
+    ) : LiveHrSource {
         var scans = 0
         val connections = mutableListOf<String>()
         var stops = 0
 
         override fun scan() {
             scans += 1
+            lifecycleOperations?.add("source.scan")
         }
 
         override fun connect(address: String) {
             connections += address
+            lifecycleOperations?.add("source.connect")
         }
 
         override fun stop() {
             stops += 1
+            lifecycleOperations?.add("source.stop")
         }
     }
 
     /** In-memory [DeviceRegistryDao] (same reproduction as DeviceRegistryTest, trimmed to what's used). */
-    private class FakeRegistryDao : DeviceRegistryDao {
+    private class FakeRegistryDao(
+        private val lifecycleOperations: MutableList<String>? = null,
+    ) : DeviceRegistryDao {
         val devices = LinkedHashMap<String, PairedDeviceRow>()
         val owners = LinkedHashMap<String, DayOwnershipRow>()
         val touches = mutableListOf<String>()
+        var failUpsertFor: String? = null
+        var failArchiveFor: String? = null
 
         override suspend fun pairedDevices(): List<PairedDeviceRow> = devices.values.sortedBy { it.addedAt }
         override suspend fun activeDeviceId(): String? =
             devices.values.firstOrNull { it.status == DeviceStatus.active.name }?.id
-        override suspend fun upsertPairedDevice(row: PairedDeviceRow) { devices[row.id] = row }
+        override suspend fun upsertPairedDevice(row: PairedDeviceRow) {
+            lifecycleOperations?.add("registry.upsert")
+            if (row.id == failUpsertFor) error("injected registry failure")
+            devices[row.id] = row
+        }
         override suspend fun demoteActive() {
             for ((id, row) in devices) if (row.status == DeviceStatus.active.name) {
                 devices[id] = row.copy(status = DeviceStatus.paired.name)
@@ -68,6 +92,8 @@ class SourceCoordinatorAdoptionTest {
             devices[id]?.let { devices[id] = it.copy(status = DeviceStatus.active.name, lastSeenAt = now) }
         }
         override suspend fun archiveDevice(id: String) {
+            lifecycleOperations?.add("registry.archive")
+            if (id == failArchiveFor) error("injected archive failure")
             devices[id]?.let { devices[id] = it.copy(status = DeviceStatus.archived.name) }
         }
         override suspend fun renameDevice(id: String, nickname: String?) {
@@ -136,9 +162,51 @@ class SourceCoordinatorAdoptionTest {
     private fun registryWith(dao: FakeRegistryDao) = DeviceRegistry(
         dao,
         object : DeviceRegistry.Transactor {
-            override suspend fun <R> run(block: suspend () -> R): R = block()
+            override suspend fun <R> run(block: suspend () -> R): R {
+                val devices = LinkedHashMap(dao.devices)
+                val owners = LinkedHashMap(dao.owners)
+                val touches = dao.touches.toList()
+                return try {
+                    block()
+                } catch (failure: Throwable) {
+                    dao.devices.clear()
+                    dao.devices.putAll(devices)
+                    dao.owners.clear()
+                    dao.owners.putAll(owners)
+                    dao.touches.clear()
+                    dao.touches.addAll(touches)
+                    throw failure
+                }
+            }
         },
     )
+
+    private class FakeCredentials(
+        private val lifecycleOperations: MutableList<String>? = null,
+    ) : VeepooCredentialAccess {
+        val values = mutableMapOf<String, String>()
+        var saveSucceeds = true
+        var clearSucceeds = true
+
+        override fun save(deviceId: String, password: CharArray): Boolean {
+            lifecycleOperations?.add("credential.save")
+            if (!saveSucceeds) return false
+            values[deviceId] = password.concatToString()
+            return true
+        }
+
+        override fun load(deviceId: String): CharArray? {
+            lifecycleOperations?.add("credential.load")
+            return values[deviceId]?.toCharArray()
+        }
+
+        override fun clear(deviceId: String): Boolean {
+            lifecycleOperations?.add("credential.clear")
+            if (!clearSucceeds) return false
+            values.remove(deviceId)
+            return true
+        }
+    }
 
     /** A WHOOP row seeded active, with the given [peripheralId] (null = not yet adopted). */
     private fun whoopRow(id: String, peripheralId: String?) = PairedDeviceRow(
@@ -146,6 +214,22 @@ class SourceCoordinatorAdoptionTest {
         sourceKind = SourceKind.liveBLE.name, capabilities = "hr",
         status = DeviceStatus.active.name, addedAt = 100, lastSeenAt = 100,
         peripheralId = peripheralId,
+    )
+
+    private fun supplierRow(
+        id: String = "supplier-band",
+        status: DeviceStatus = DeviceStatus.active,
+    ) = PairedDeviceRow(
+        id = id,
+        brand = "NOOP",
+        model = "Supplier band",
+        nickname = null,
+        sourceKind = SourceKind.veepoo.name,
+        capabilities = "hr",
+        status = status.name,
+        addedAt = 200,
+        lastSeenAt = 200,
+        peripheralId = "AA:BB:CC:DD:EE:10",
     )
 
     private fun coordinatorOver(dao: FakeRegistryDao, log: (String) -> Unit = {}): SourceCoordinator =
@@ -403,5 +487,271 @@ class SourceCoordinatorAdoptionTest {
         assertEquals(0, factoryCalls)
         assertEquals(0, starts)
         assertEquals(0, stops)
+    }
+
+    @Test
+    fun supplierAdoptionCompensatesCredentialWhenRegistryTransactionFails() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+            failUpsertFor = "supplier-new"
+        }
+        val credentials = FakeCredentials()
+        val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
+        val attempt = VeepooAttemptToken.create()
+        val provisioning = VeepooProvisioningCommit(
+            binding = VeepooBinding.create("AA:BB:CC:DD:EE:10", attempt),
+            hardwareRevision = "hw",
+            firmwareVersion = "fw",
+            password = "2468".toCharArray(),
+        )
+
+        val adopted = VeepooPairingAdoption(
+            registry = registryWith(dao),
+            credentials = credentials,
+            diagnostics = VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+        ).commit(
+            deviceId = "supplier-new",
+            nickname = "  Supplier  ",
+            provisioning = provisioning,
+            now = 500,
+        )
+
+        assertFalse(adopted)
+        assertEquals("my-whoop", dao.activeDeviceId())
+        assertFalse(dao.devices.containsKey("supplier-new"))
+        assertTrue(credentials.values.isEmpty())
+        assertEquals(
+            listOf(
+                VeepooSupplierLifecycleStage.ADOPTION to VeepooSupplierLifecycleOutcome.BEGAN,
+                VeepooSupplierLifecycleStage.SECURE_CLEANUP to
+                    VeepooSupplierLifecycleOutcome.COMPLETED,
+                VeepooSupplierLifecycleStage.ADOPTION to VeepooSupplierLifecycleOutcome.FAILED,
+            ),
+            diagnostics.map { it.stage to it.outcome },
+        )
+        assertEquals(
+            VeepooSupplierLifecycleFailure.REGISTRY_PERSISTENCE,
+            diagnostics.last().failure,
+        )
+    }
+
+    @Test
+    fun unavailableSupplierRestoresDurableWhoopWithoutStoppingTheRunningWhoop() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+        }
+        val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
+        val projected = mutableListOf<String>()
+        var starts = 0
+        var stops = 0
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = { starts += 1 },
+            stopWhoop = { stops += 1 },
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            veepooCredentials = FakeCredentials(),
+            veepooLifecycleDiagnostics =
+                VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+            onDurableActiveDeviceChanged = projected::add,
+        )
+
+        coordinator.start()
+
+        assertEquals("my-whoop", dao.activeDeviceId())
+        assertEquals(listOf("my-whoop"), projected)
+        assertEquals(0, starts)
+        assertEquals(0, stops)
+        assertTrue(
+            diagnostics.any {
+                it.stage == VeepooSupplierLifecycleStage.RECONCILIATION &&
+                    it.outcome == VeepooSupplierLifecycleOutcome.COMPLETED &&
+                    it.trigger == VeepooSupplierLifecycleTrigger.SOURCE_UNAVAILABLE
+            },
+        )
+    }
+
+    @Test
+    fun unavailableSupplierKeepsTheStillRunningFallbackStrap() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["polar"] = PairedDeviceRow(
+                id = "polar",
+                brand = "Polar",
+                model = "H10",
+                nickname = null,
+                sourceKind = SourceKind.liveBLE.name,
+                capabilities = "hr",
+                status = DeviceStatus.active.name,
+                addedAt = 150,
+                lastSeenAt = 150,
+            )
+            devices["supplier-band"] = supplierRow(status = DeviceStatus.paired)
+        }
+        val fallback = FakeNoopBandSource()
+        val projected = mutableListOf<String>()
+        var stops = 0
+        val registry = registryWith(dao)
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registry,
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = { stops += 1 },
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            noopBandSourceFactory = { id, _ -> if (id == "polar") fallback else null },
+            veepooCredentials = FakeCredentials(),
+            onDurableActiveDeviceChanged = projected::add,
+        )
+        coordinator.start()
+        registry.setActive("supplier-band", now = 300)
+
+        coordinator.onActiveDeviceChanged("supplier-band")
+
+        assertEquals("polar", dao.activeDeviceId())
+        assertEquals(listOf("polar"), projected)
+        assertEquals(1, stops)
+        assertEquals(0, fallback.stops)
+        assertEquals(1, fallback.scans)
+    }
+
+    @Test
+    fun authenticationRejectionClearsCredentialAndStartsDurableWhoopFallback() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+        }
+        val source = FakeNoopBandSource()
+        val credentials = FakeCredentials().apply {
+            values["supplier-band"] = "2468"
+        }
+        val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
+        val projected = mutableListOf<String>()
+        var starts = 0
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = { starts += 1 },
+            stopWhoop = {},
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            noopBandSourceFactory = { id, _ -> if (id == "supplier-band") source else null },
+            veepooCredentials = credentials,
+            veepooLifecycleDiagnostics =
+                VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+            onDurableActiveDeviceChanged = projected::add,
+        )
+        coordinator.start()
+
+        coordinator.onVeepooAuthenticationRejected("supplier-band")
+
+        assertEquals("my-whoop", dao.activeDeviceId())
+        assertFalse(credentials.values.containsKey("supplier-band"))
+        assertEquals(1, source.stops)
+        assertEquals(1, starts)
+        assertEquals(listOf("my-whoop"), projected)
+        assertTrue(
+            diagnostics.any {
+                it.stage == VeepooSupplierLifecycleStage.RECONCILIATION &&
+                    it.outcome == VeepooSupplierLifecycleOutcome.COMPLETED &&
+                    it.trigger == VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED
+            },
+        )
+    }
+
+    @Test
+    fun activeSupplierRemovalStopsThenClearsThenArchives() = runBlocking {
+        val operations = mutableListOf<String>()
+        val dao = FakeRegistryDao(operations).apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+        }
+        val source = FakeNoopBandSource(operations)
+        val credentials = FakeCredentials(operations).apply {
+            values["supplier-band"] = "2468"
+        }
+        val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            noopBandSourceFactory = { id, _ -> if (id == "supplier-band") source else null },
+            veepooCredentials = credentials,
+            veepooLifecycleDiagnostics =
+                VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+        )
+        coordinator.start()
+        operations.clear()
+
+        val archived = coordinator.archiveVeepooDevice("supplier-band")
+
+        assertTrue(archived)
+        assertEquals(DeviceStatus.archived.name, dao.devices.getValue("supplier-band").status)
+        assertFalse(credentials.values.containsKey("supplier-band"))
+        assertTrue(operations.indexOf("source.stop") < operations.indexOf("credential.clear"))
+        assertTrue(operations.indexOf("credential.clear") < operations.indexOf("registry.archive"))
+        assertTrue(
+            diagnostics.any {
+                it.stage == VeepooSupplierLifecycleStage.REMOVAL &&
+                    it.outcome == VeepooSupplierLifecycleOutcome.COMPLETED
+            },
+        )
+    }
+
+    @Test
+    fun supplierRemovalRestoresCredentialAndSourceWhenArchiveFails() = runBlocking {
+        val operations = mutableListOf<String>()
+        val dao = FakeRegistryDao(operations).apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+            failArchiveFor = "supplier-band"
+        }
+        val sources = mutableListOf<FakeNoopBandSource>()
+        val credentials = FakeCredentials(operations).apply {
+            values["supplier-band"] = "2468"
+        }
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            noopBandSourceFactory = { id, _ ->
+                if (id != "supplier-band") {
+                    null
+                } else {
+                    FakeNoopBandSource(operations).also(sources::add)
+                }
+            },
+            veepooCredentials = credentials,
+        )
+        coordinator.start()
+        operations.clear()
+
+        val archived = coordinator.archiveVeepooDevice("supplier-band")
+
+        assertFalse(archived)
+        assertEquals("supplier-band", dao.activeDeviceId())
+        assertEquals("2468", credentials.values["supplier-band"])
+        assertEquals(2, sources.size)
+        assertEquals(1, sources.last().connections.size)
+        assertTrue(operations.indexOf("credential.clear") < operations.indexOf("registry.archive"))
+        assertTrue(operations.indexOf("registry.archive") < operations.indexOf("credential.save"))
     }
 }

@@ -67,3 +67,76 @@ object AppVeepooDiagnosticSink : VeepooDiagnosticSink {
         )
     }
 }
+
+enum class VeepooSupplierLifecycleStage {
+    ADOPTION,
+    SECURE_CLEANUP,
+    RECONCILIATION,
+    REMOVAL,
+}
+
+enum class VeepooSupplierLifecycleOutcome {
+    BEGAN,
+    COMPLETED,
+    FAILED,
+}
+
+enum class VeepooSupplierLifecycleTrigger {
+    SOURCE_UNAVAILABLE,
+    AUTHENTICATION_REJECTED,
+    DEVICE_REMOVAL,
+}
+
+enum class VeepooSupplierLifecycleFailure {
+    SECURE_PERSISTENCE,
+    REGISTRY_PERSISTENCE,
+    CLEANUP_FAILED,
+    FALLBACK_UNAVAILABLE,
+}
+
+data class VeepooSupplierLifecycleEvent(
+    val stage: VeepooSupplierLifecycleStage,
+    val outcome: VeepooSupplierLifecycleOutcome,
+    val trigger: VeepooSupplierLifecycleTrigger? = null,
+    val failure: VeepooSupplierLifecycleFailure? = null,
+) {
+    internal fun fields(): Map<String, String> = buildMap {
+        put("stage", stage.name.lowercase())
+        put("outcome", outcome.name.lowercase())
+        trigger?.let { put("trigger", it.name.lowercase()) }
+        failure?.let { put("failure_kind", it.name.lowercase()) }
+    }
+
+    override fun toString(): String = "VeepooSupplierLifecycleEvent"
+}
+
+fun interface VeepooSupplierLifecycleDiagnosticSink {
+    fun record(event: VeepooSupplierLifecycleEvent)
+}
+
+object AppVeepooSupplierLifecycleDiagnosticSink : VeepooSupplierLifecycleDiagnosticSink {
+    override fun record(event: VeepooSupplierLifecycleEvent) {
+        AppDiagnosticsRecorder.record(
+            event = "band.supplier_lifecycle",
+            fields = event.fields(),
+        )
+    }
+}
+
+internal fun VeepooSupplierLifecycleDiagnosticSink.recordSafely(
+    stage: VeepooSupplierLifecycleStage,
+    outcome: VeepooSupplierLifecycleOutcome,
+    trigger: VeepooSupplierLifecycleTrigger? = null,
+    failure: VeepooSupplierLifecycleFailure? = null,
+) {
+    runCatching {
+        record(
+            VeepooSupplierLifecycleEvent(
+                stage = stage,
+                outcome = outcome,
+                trigger = trigger,
+                failure = failure,
+            ),
+        )
+    }
+}

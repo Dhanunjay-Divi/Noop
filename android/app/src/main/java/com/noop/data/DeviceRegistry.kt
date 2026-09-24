@@ -38,6 +38,8 @@ class DeviceRegistry(
     private val dao: DeviceRegistryDao,
     private val transactor: Transactor,
 ) {
+    private class MutationVerificationFailure : IllegalStateException()
+
     /** A single-transaction boundary. Production wraps Room's `withTransaction`; tests pass through.
      *  Not a `fun interface` — a SAM method may not be generic — so implementors use the object form. */
     interface Transactor {
@@ -96,11 +98,14 @@ class DeviceRegistry(
     /** Add (or update) a device. */
     suspend fun add(row: PairedDeviceRow) = dao.upsertPairedDevice(row)
 
-    /** Insert a newly authenticated device and make it the sole active source in one transaction. */
+    /**
+     * Insert a newly authenticated device and make it the sole active source in one transaction.
+     * A false result means the transaction threw or its authoritative read-back did not name [row].
+     */
     suspend fun addAndSetActive(
         row: PairedDeviceRow,
         now: Long = System.currentTimeMillis() / 1000,
-    ) {
+    ): Boolean = try {
         transactor.run {
             dao.demoteActive()
             dao.upsertPairedDevice(
@@ -110,7 +115,53 @@ class DeviceRegistry(
                 ),
             )
             markOwnershipDirty()
+            if (dao.activeDeviceId() != row.id) throw MutationVerificationFailure()
         }
+        true
+    } catch (_: Throwable) {
+        false
+    }
+
+    /**
+     * Move an unavailable active supplier row back to the source that still owns transport. A valid
+     * preferred source wins; otherwise the seeded or first non-archived WHOOP is restored. The returned id
+     * is the verified durable active source, including when another mutation already reconciled it.
+     */
+    suspend fun reconcileUnavailableSupplier(
+        unavailableDeviceId: String,
+        preferredTransportDeviceId: String? = null,
+        now: Long = System.currentTimeMillis() / 1000,
+    ): String? = try {
+        transactor.run {
+            val rows = dao.pairedDevices()
+            val active = rows.firstOrNull { it.status == DeviceStatus.active.name } ?: return@run null
+            if (active.id != unavailableDeviceId) return@run active.id
+            if (active.sourceKind != SourceKind.veepoo.name) return@run null
+
+            val preferred = preferredTransportDeviceId?.let { preferredId ->
+                rows.firstOrNull {
+                    it.id == preferredId &&
+                        it.id != unavailableDeviceId &&
+                        it.status != DeviceStatus.archived.name
+                }
+            }
+            val fallback = preferred
+                ?: rows.firstOrNull {
+                    it.id == "my-whoop" && it.status != DeviceStatus.archived.name
+                }
+                ?: rows.firstOrNull {
+                    isWhoop(it) && it.status != DeviceStatus.archived.name
+                }
+                ?: return@run null
+
+            dao.demoteActive()
+            dao.promote(fallback.id, now)
+            markOwnershipDirty()
+            if (dao.activeDeviceId() != fallback.id) throw MutationVerificationFailure()
+            fallback.id
+        }
+    } catch (_: Throwable) {
+        null
     }
 
     /**
@@ -238,4 +289,7 @@ class DeviceRegistry(
 
     /** The owner override for a day, or null if none. */
     suspend fun dayOwner(day: String): DayOwnershipRow? = dao.dayOwner(day)
+
+    private fun isWhoop(row: PairedDeviceRow): Boolean =
+        row.id == "my-whoop" || row.brand.equals("WHOOP", ignoreCase = true)
 }

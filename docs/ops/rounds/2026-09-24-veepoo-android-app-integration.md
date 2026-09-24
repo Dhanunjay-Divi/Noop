@@ -2,12 +2,34 @@
 
 ## Status
 
-- State: `implementation complete; heavy verification deferred by resource hold`
+- State: `Android lifecycle consistency complete; focused JVM verification passed`
 - Owner: project team
 - Branch: `codex/veepoo-android-app-20260924`
 - Start commit: `5978bda7760d6f8378d0c5439ab1788f8e0aa24e`
 - End implementation commit: local commit containing this record; SHA reported in the final handoff
 - Record commit or PR: local commit only; push is out of scope
+
+### Android lifecycle consistency continuation
+
+- Continuation branch: `codex/android-supplier-lifecycle-final-20260924`
+- Continuation base: `9edf5ab0b5de122f0e9f6943369390dd70053f10`
+- Authorized slice: atomic or compensated supplier adoption, active supplier
+  removal teardown and credential cleanup, unavailable/rejected supplier
+  fallback reconciliation, fixed-category lifecycle diagnostics, and focused
+  deterministic JVM tests.
+- Explicit exclusions: Apple source, `project.yml`, shared operations
+  `ACTIVE.md`/`rounds/INDEX.md`, build wiring, supplier binaries, emulator,
+  deployment, and physical-device execution.
+- Continuation result:
+  - supplier adoption now compensates secure persistence when the verified
+    transactional registry mutation fails;
+  - active supplier removal stops its source, clears its credential before the
+    archive, and restores credential/source state if the archive fails;
+  - missing provider/credential and rejected reconnect authentication reconcile
+    the durable active row to the still-running or resumed fallback transport;
+  - lifecycle diagnostics expose fixed stage/outcome/trigger/failure categories
+    only; and
+  - the bounded focused FullDebug JVM suite passed 58 tests with no failures.
 
 ## Objective
 
@@ -108,6 +130,17 @@ Success means:
   reconnect, neutral reconnect after a durable drop, battery-before-HR,
   display-only/no-durable-sample behavior, explicit disconnect, credential
   handling, bounded diagnostics, and throwing cleanup.
+- Completed Android supplier lifecycle consistency:
+  - verified registry adoption is transactional and credential persistence is
+    compensated on failure;
+  - supplier removal performs source teardown and secure cleanup before archive
+    with rollback compensation;
+  - source-unavailable and authentication-rejected paths durably restore the
+    actual WHOOP or generic fallback source without changing WHOOP removal
+    behavior; and
+  - fixed-category lifecycle diagnostics cover adoption, reconciliation,
+    secure cleanup, and removal without identifiers, raw errors, or health
+    values.
 
 ## Data, privacy, and medical truth
 
@@ -132,7 +165,9 @@ Success means:
   supplier-specific categorical event is required for this lifecycle.
 - Existing evidence reused: `AppDiagnosticsRecorder` and neutral SDK
   diagnostics.
-- New bounded events or operation spans: pending.
+- New bounded events or operation spans: `band.supplier_lifecycle`, carrying
+  only fixed `stage`, `outcome`, optional `trigger`, and optional
+  `failure_kind` fields.
 - Redaction, retention, and high-frequency controls: no names, addresses,
   printed IDs, RSSI, passwords, raw errors, timestamps, or health values; no
   per-sample diagnostic events.
@@ -151,8 +186,39 @@ Success means:
 | Bounded exact-base ancestry check | Pass | Requested base remains an ancestor of the implementation | Absence of later source defects |
 | Bounded forbidden-path diff check | Pass | Gradle, manifest, `docs/ops/ACTIVE.md`, and `docs/ops/rounds/INDEX.md` were not edited | Build success |
 | Source-boundary audit | No repository, neutral-sample, or WHOOP live-publish calls under the supplier package | Phone-receipt HR has no app persistence/formula route in this implementation | Future provider correctness |
-| Focused supplier JVM tests | Added, not run under the resource hold | Deterministic coverage exists for the required lifecycle | Passing compilation/execution |
-| Full/Demo Kotlin compile | Not run under the resource hold | Nothing | Android source/resource integration |
+| Focused supplier lifecycle JVM suite | Pass: 58 tests, 0 failures/errors/skips; bounded command exit 0; `BUILD SUCCESSFUL in 2m 9s` | FullDebug main/test Kotlin compilation and deterministic adoption, fallback reconciliation, authentication cleanup, removal ordering/compensation, diagnostics, and ViewModel contract behavior | Optional provider binary compatibility or physical BLE behavior |
+| Full/Demo Kotlin compile | FullDebug main/test Kotlin compiled as part of the focused suite; Demo and broader compile wall not run | The changed default FullDebug source and selected tests compile | Demo variant and unrelated modules |
+| Final whitespace/path audit | Pass: `git diff --check`; only scoped Android source/tests and this existing round record changed | No whitespace defects or forbidden Apple/build/shared-ops/vendor path edits | Runtime behavior |
+
+### Continuation verification command
+
+```text
+python3 Tools/run-bounded-command.py \
+  --timeout-seconds 1200 \
+  --grace-seconds 30 \
+  --heartbeat-seconds 20 \
+  --min-free-disk-gib 12 \
+  --disk-path . \
+  --label android-supplier-lifecycle-focused \
+  --log-file /tmp/noop-android-supplier-lifecycle-focused.log \
+  --status-file /tmp/noop-android-supplier-lifecycle-focused.status \
+  -- env ANDROID_HOME="$HOME/Library/Android/sdk" \
+    ./android/gradlew -p android --no-daemon --no-configuration-cache \
+    :app:testFullDebugUnitTest \
+    --tests com.noop.ble.SourceCoordinatorAdoptionTest \
+    --tests com.noop.ble.veepoo.VeepooBandSourceTest \
+    --tests com.noop.ble.veepoo.VeepooCredentialStoreTest \
+    --tests com.noop.data.DeviceRegistryTest \
+    --tests com.noop.ui.AnalysisInputGateContractTest
+```
+
+Test-result XML totals:
+
+- `SourceCoordinatorAdoptionTest`: 16
+- `VeepooBandSourceTest`: 12
+- `VeepooCredentialStoreTest`: 4
+- `DeviceRegistryTest`: 19
+- `AnalysisInputGateContractTest`: 7
 
 ## Physical device and deployment
 
@@ -176,6 +242,19 @@ Success means:
   - `android/app/src/main/java/com/noop/ui/LiveScreen.kt`
   - `android/app/src/test/java/com/noop/ble/veepoo/`
   - this round record
+- Continuation lifecycle commit paths:
+  - `android/app/src/main/java/com/noop/NoopApplication.kt`
+  - `android/app/src/main/java/com/noop/ble/SourceCoordinator.kt`
+  - `android/app/src/main/java/com/noop/ble/veepoo/VeepooBandSource.kt`
+  - `android/app/src/main/java/com/noop/ble/veepoo/VeepooDiagnostics.kt`
+  - `android/app/src/main/java/com/noop/data/DeviceRegistry.kt`
+  - `android/app/src/main/java/com/noop/ui/AppViewModel.kt`
+  - `android/app/src/test/java/com/noop/ble/SourceCoordinatorAdoptionTest.kt`
+  - `android/app/src/test/java/com/noop/ble/veepoo/VeepooBandSourceTest.kt`
+  - `android/app/src/test/java/com/noop/ble/veepoo/VeepooCredentialStoreTest.kt`
+  - `android/app/src/test/java/com/noop/data/DeviceRegistryTest.kt`
+  - `android/app/src/test/java/com/noop/ui/AnalysisInputGateContractTest.kt`
+  - this round record
 - Commits: local implementation commit containing this record
 - Branch and remote state: local requested branch; no push
 - Repository visibility verified: not reverified in this round
@@ -189,8 +268,8 @@ Success means:
 
 ## Open risks and honest limitations
 
-- The resource hold defers every Android compile/build wall to the
-  parent-controlled sequential lane.
+- The focused FullDebug lifecycle suite passed. Demo compilation and a broader
+  Gradle wall remain intentionally unrun.
 - The separate build-wiring lane must provide
   `com.noop.ble.veepoo.vendor.VeepooBridgeProviderImpl` and the explicit
   `VEEPOO_ADAPTER_AVAILABLE` BuildConfig flag. This source branch deliberately
@@ -201,26 +280,8 @@ Success means:
 
 ## Next round
 
-1. Parent-controlled focused JVM verification:
-
-   ```text
-   python3 Tools/run-bounded-command.py \
-     --timeout-seconds 1200 \
-     --grace-seconds 30 \
-     --heartbeat-seconds 20 \
-     --min-free-disk-gib 12 \
-     --disk-path . \
-     --label veepoo-focused-jvm \
-     -- env ANDROID_HOME="$HOME/Library/Android/sdk" \
-       ./gradlew --no-daemon --no-configuration-cache \
-       :app:testFullDebugUnitTest \
-       --tests com.noop.ble.veepoo.VeepooBandSourceTest \
-       --tests com.noop.ble.veepoo.VeepooCredentialStoreTest \
-       --tests com.noop.ble.SourceCoordinatorAdoptionTest \
-       --tests com.noop.data.DeviceRegistryTest
-   ```
-
-2. Parent-controlled default source compile:
+1. Optional broader default-source verification, if the release lane requires
+   it:
 
    ```text
    python3 Tools/run-bounded-command.py \
@@ -236,7 +297,7 @@ Success means:
        :app:compileDemoDebugKotlin
    ```
 
-3. After the separate wiring lane lands, compile the optional provider against
+2. After the separate wiring lane lands, compile the optional provider against
    the exact reviewed supplier binaries, then exercise scan, explicit candidate
    choice, band confirmation, printed-ID match/mismatch, app relaunch reconnect,
    unexpected drop reconnect, battery-before-HR, background/foreground, and
