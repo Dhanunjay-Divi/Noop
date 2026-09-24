@@ -3,8 +3,11 @@ package com.noop.ui
 import com.noop.ble.LiveHeartRateNotificationPolicy
 import com.noop.ble.veepoo.VeepooAdapterState
 import com.noop.ble.veepoo.VeepooDisplayState
+import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SupplierDisplayHeartRatePolicyTest {
@@ -74,5 +77,33 @@ class SupplierDisplayHeartRatePolicyTest {
                     1L,
             ),
         )
+    }
+
+    @Test
+    fun liveScreenRendersOnlyTheBoundedPhoneReceiptPolicyOutput() {
+        val userDir = checkNotNull(System.getProperty("user.dir"))
+        val source = listOf(
+            File(userDir, "src/main/java/com/noop/ui/LiveScreen.kt"),
+            File(userDir, "app/src/main/java/com/noop/ui/LiveScreen.kt"),
+            File(userDir, "android/app/src/main/java/com/noop/ui/LiveScreen.kt"),
+        ).firstOrNull(File::isFile) ?: error("Could not locate LiveScreen.kt from $userDir")
+        val supplierScreen = source.readText()
+            .substringAfter("private fun SupplierBandLiveScreen(")
+            .substringBefore("// MARK: - Console header")
+
+        assertEquals(
+            LiveHeartRateNotificationPolicy.FRESHNESS_MS + 1L,
+            SUPPLIER_HEART_RATE_MAX_EXPIRY_DELAY_MS,
+        )
+        assertTrue(supplierScreen.contains("display.phoneReceiptMilliseconds"))
+        assertTrue(supplierScreen.contains("SupplierDisplayHeartRatePolicy.visibleBpm("))
+        assertTrue(supplierScreen.contains("SupplierDisplayHeartRatePolicy.expiryCheckDelayMillis("))
+        assertTrue(
+            supplierScreen.contains(
+                "wait.coerceAtMost(SUPPLIER_HEART_RATE_MAX_EXPIRY_DELAY_MS)",
+            ),
+        )
+        assertTrue(supplierScreen.contains("visibleHeartRate?.toString()"))
+        assertFalse(supplierScreen.contains("display.heartRate?.toString()"))
     }
 }

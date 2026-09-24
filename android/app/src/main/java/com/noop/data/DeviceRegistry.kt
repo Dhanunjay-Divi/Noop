@@ -142,25 +142,15 @@ class DeviceRegistry(
             if (active.id != unavailableDeviceId) return@run active.id
             if (active.sourceKind != SourceKind.veepoo.name) return@run null
 
+            val activatableFallbacks = rows.filter {
+                it.canActivateAsFallback(excludingDeviceId = unavailableDeviceId)
+            }
             val preferred = preferredTransportDeviceId?.let { preferredId ->
-                rows.firstOrNull {
-                    it.id == preferredId &&
-                        it.id != unavailableDeviceId &&
-                        it.status != DeviceStatus.archived.name &&
-                        it.isActivatableLiveTransport
-                }
+                activatableFallbacks.firstOrNull { it.id == preferredId }
             }
             val fallback = preferred
-                ?: rows.firstOrNull {
-                    it.id == "my-whoop" &&
-                        it.status != DeviceStatus.archived.name &&
-                        it.isActivatableLiveTransport
-                }
-                ?: rows.firstOrNull {
-                    isWhoop(it) &&
-                        it.status != DeviceStatus.archived.name &&
-                        it.isActivatableLiveTransport
-                }
+                ?: activatableFallbacks.firstOrNull { it.id == "my-whoop" }
+                ?: activatableFallbacks.firstOrNull(::isWhoop)
                 ?: return@run null
 
             dao.demoteActive()
@@ -227,21 +217,12 @@ class DeviceRegistry(
 
             val wasActive = row.status == DeviceStatus.active.name
             val fallback = if (wasActive) {
-                rows.firstOrNull {
-                    it.id == "my-whoop" &&
-                        it.id != id &&
-                        it.status != DeviceStatus.archived.name &&
-                        it.isActivatableLiveTransport
-                } ?: rows.firstOrNull {
-                    it.id != id &&
-                        isWhoop(it) &&
-                        it.status != DeviceStatus.archived.name &&
-                        it.isActivatableLiveTransport
-                } ?: rows.firstOrNull {
-                    it.id != id &&
-                        it.status != DeviceStatus.archived.name &&
-                        it.isActivatableLiveTransport
+                val activatableFallbacks = rows.filter {
+                    it.canActivateAsFallback(excludingDeviceId = id)
                 }
+                activatableFallbacks.firstOrNull { it.id == "my-whoop" }
+                    ?: activatableFallbacks.firstOrNull(::isWhoop)
+                    ?: activatableFallbacks.firstOrNull()
             } else {
                 null
             }
@@ -363,6 +344,11 @@ class DeviceRegistry(
 
     /** The owner override for a day, or null if none. */
     suspend fun dayOwner(day: String): DayOwnershipRow? = dao.dayOwner(day)
+
+    private fun PairedDeviceRow.canActivateAsFallback(excludingDeviceId: String): Boolean =
+        id != excludingDeviceId &&
+            status != DeviceStatus.archived.name &&
+            isActivatableLiveTransport
 
     private fun isWhoop(row: PairedDeviceRow): Boolean =
         row.id == "my-whoop" || row.brand.equals("WHOOP", ignoreCase = true)

@@ -461,6 +461,57 @@ class DeviceRegistryTest {
     }
 
     @Test
+    fun supplierArchiveLeavesNoActiveFallbackWhenOnlyNonLiveSourcesRemain() = runBlocking {
+        val dao = seededDao().apply {
+            devices["my-whoop"] = devices.getValue("my-whoop")
+                .copy(status = DeviceStatus.archived.name)
+            listOf(
+                "cloud" to SourceKind.cloudImport.name,
+                "file" to SourceKind.fileImport.name,
+                "activity" to SourceKind.activityFile.name,
+                "unknown" to "future-import",
+            ).forEachIndexed { index, (id, kind) ->
+                devices[id] = PairedDeviceRow(
+                    id = id,
+                    brand = "Import",
+                    model = kind,
+                    nickname = null,
+                    sourceKind = kind,
+                    capabilities = "hr",
+                    status = DeviceStatus.paired.name,
+                    addedAt = 110L + index,
+                    lastSeenAt = 110L + index,
+                )
+            }
+            devices["supplier-1"] = PairedDeviceRow(
+                id = "supplier-1",
+                brand = "NOOP",
+                model = "Supplier band",
+                nickname = null,
+                peripheralId = "AA:BB:CC:DD:EE:10",
+                sourceKind = SourceKind.veepoo.name,
+                capabilities = "hr",
+                status = DeviceStatus.active.name,
+                addedAt = 200,
+                lastSeenAt = 200,
+            )
+        }
+        val reg = registryWith(dao)
+
+        val outcome = reg.archiveSupplierAndSelectFallback("supplier-1", now = 999)
+
+        assertNotNull(outcome)
+        assertNull(outcome?.activeDeviceId)
+        assertNull(reg.activeDeviceId())
+        assertEquals(DeviceStatus.archived.name, dao.devices.getValue("supplier-1").status)
+        assertTrue(
+            listOf("cloud", "file", "activity", "unknown").all {
+                dao.devices.getValue(it).status == DeviceStatus.paired.name
+            },
+        )
+    }
+
+    @Test
     fun activatableLiveTransportPredicateFailsClosedForImportsAndUnknownKinds() {
         assertTrue(SourceKind.liveBLE.isActivatableLiveTransport)
         assertTrue(SourceKind.historyBLE.isActivatableLiveTransport)

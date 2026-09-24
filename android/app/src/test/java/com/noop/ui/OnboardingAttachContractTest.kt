@@ -87,6 +87,27 @@ class OnboardingAttachContractTest {
         assertTrue(addDevice.contains("onSuccess = onClose"))
     }
 
+    @Test fun claimEligibleWizardKeepsBothWhoopFamiliesAndSupplierReachable() {
+        val userDir = checkNotNull(System.getProperty("user.dir"))
+        val addDevice = source(userDir, "AddDeviceWizard.kt").readText()
+        val typeStep = addDevice
+            .substringAfter("private fun TypeStep(")
+            .substringBefore("/** A shared \"this tier is experimental\" note")
+
+        val whoop4 = typeStep.indexOf("onPick(DeviceType.Whoop4)")
+        val whoop5 = typeStep.indexOf("onPick(DeviceType.Whoop5MG)")
+        val supplier = typeStep.indexOf("onPick(DeviceType.SupplierBand)")
+
+        assertTrue(whoop4 >= 0)
+        assertTrue(whoop5 > whoop4)
+        assertTrue(supplier > whoop5)
+        assertTrue(
+            typeStep.contains(
+                "l10n_add_device_wizard_whoop_5_0_mg_support_is_e452e686",
+            ),
+        )
+    }
+
     @Test fun supplierPairingCopyUsesAppWideLocalizationWithoutChangingAvailability() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val addDevice = source(userDir, "AddDeviceWizard.kt").readText()

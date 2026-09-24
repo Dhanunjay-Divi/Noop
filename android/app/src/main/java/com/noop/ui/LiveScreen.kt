@@ -75,6 +75,7 @@ import com.noop.analytics.HrZones
 import com.noop.analytics.SpotHrvReading
 import com.noop.analytics.Sport
 import com.noop.analytics.WorkoutSport
+import com.noop.ble.LiveHeartRateNotificationPolicy
 import com.noop.ble.LiveState
 import com.noop.oura.OuraWearState
 import com.noop.ble.WhoopModel
@@ -100,6 +101,8 @@ internal const val LIVE_TRACKING_BATTERY_COPY =
 internal const val LIVE_TRACKING_SEPARATION_COPY =
     "Connection and history sync continue when it is off. " +
         "Continuous HRV capture is a separate option in Settings."
+internal const val SUPPLIER_HEART_RATE_MAX_EXPIRY_DELAY_MS =
+    LiveHeartRateNotificationPolicy.FRESHNESS_MS + 1L
 
 @Composable
 fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
@@ -744,7 +747,7 @@ private fun SupplierBandLiveScreen(
                 nowMillis = now,
             )
             if (wait == null || wait <= 0L) break
-            delay(wait)
+            delay(wait.coerceAtMost(SUPPLIER_HEART_RATE_MAX_EXPIRY_DELAY_MS))
         }
     }
     val visibleHeartRate = SupplierDisplayHeartRatePolicy.visibleBpm(

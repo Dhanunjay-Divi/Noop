@@ -917,6 +917,13 @@ private fun TypeStep(
         ) {
             onPick(DeviceType.Whoop4)
         }
+        TypeRow(
+            Icons.Filled.Watch,
+            DeviceType.Whoop5MG.title,
+            uiString(R.string.l10n_add_device_wizard_whoop_5_0_mg_support_is_e452e686),
+        ) {
+            onPick(DeviceType.Whoop5MG)
+        }
         if (selectionScope == AddDeviceSelectionScope.AllDevices) {
             TypeRow(Icons.Filled.FavoriteBorder, DeviceType.HrStrap.title, "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast") {
                 onPick(DeviceType.HrStrap)
