@@ -112,13 +112,13 @@ open gates.
 For the active SDK app-integration branch, the recorded inputs and current
 local evidence are:
 
-- upstream SDK source: `NoopBandSDK` PR `#31` protected merge
-  `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`
-- application candidate: the consolidated SDK PR `#31` source and evidence
+- upstream SDK source: `NoopBandSDK` PR `#32` reviewed merge
+  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7`
+- application candidate: the consolidated SDK PR `#32` source and evidence
   replacement carried by this branch
 - pull request: `#17`; only its final exact candidate head can authorize merge
-- exact current local verification: upstream Swift 100/100, Kotlin/JVM
-  102/102 plus `installDist`, 50/50 conformance, and the 71-file SDK repository gate
+- exact current local verification: upstream Swift 106/106, Kotlin/JVM
+  114/114 plus `installDist`, 50/50 conformance, and the 73-file SDK repository gate
   pass. The app artifact verifier and its 9-test adversarial suite, vendored
   Swift package 16/16, real macOS app boundary 10/10, Android Full and Demo
   integration 15/15 each, both Android instrumentation source graphs, and the
@@ -128,7 +128,7 @@ local evidence are:
   artifact, shell, and diff gates pass in the final 318-test wall with one
   intentional skip before the branch push.
 - required contexts: prior exact heads do not authorize this replacement. The
-  final PR `#31` source and documentation candidate must pass all ten exact-SHA
+  final PR `#32` source and documentation candidate must pass all ten exact-SHA
   hosted contexts before protected integration.
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`

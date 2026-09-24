@@ -798,6 +798,7 @@ final class TabShellVisualQAContractTests: XCTestCase {
         let script = try text("Tools/ios-tab-shell-visual-qa.sh")
         let shell = try text("StrandiOS/App/RootTabView.swift")
         let coach = try text("Strand/Screens/CoachView.swift")
+        let demoSeeder = try text("Strand/Data/AppleDemoSeeder.swift")
 
         XCTAssertTrue(script.contains("trap cleanup EXIT INT TERM"))
         XCTAssertTrue(script.contains("simctl shutdown"))
@@ -810,6 +811,9 @@ final class TabShellVisualQAContractTests: XCTestCase {
         XCTAssertTrue(coach.contains("Tab shell keyboard QA focused"))
         XCTAssertTrue(coach.contains("Tab shell keyboard QA dismissed"))
         XCTAssertTrue(script.contains("mixed=true"))
+        XCTAssertTrue(demoSeeder.contains(
+            #"VisualQALog.emit("AppleDemoSeeder: nutrition fixture ready mixed=true")"#
+        ))
         XCTAssertTrue(script.contains("Crash signature found"))
         XCTAssertTrue(script.contains("cmp -s"))
     }
@@ -1048,7 +1052,7 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(shell.contains(#"MoreRow("Health & Biology", "heart.text.square.fill", .health)"#))
     }
 
-    func testTodayShowsTheFullCatalogWithSavedMetricsPinnedFirst() throws {
+    func testTodayShowsOnlySavedKeyMetricsAndKeepsFullHistoryOneTapAway() throws {
         let classic = try text("Strand/Screens/TodayView.swift")
         let liquid = try text("Strand/Liquid/LiquidTodayView.swift")
         let recoveryRing = try text("Packages/StrandDesign/Sources/StrandDesign/RecoveryRing.swift")
@@ -1057,14 +1061,21 @@ final class ReferenceSurfaceContractTests: XCTestCase {
 
         XCTAssertTrue(classic.contains("private var visibleKeyMetrics: [KeyMetric]"))
         XCTAssertTrue(classic.contains("ForEach(visibleKeyMetrics)"))
-        XCTAssertTrue(classic.contains(
-            "KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)"
-        ))
+        XCTAssertTrue(classic.contains("{ enabledKeyMetrics }"))
         XCTAssertTrue(liquid.contains("private var visibleKeyMetrics: [KeyMetric]"))
         XCTAssertTrue(liquid.contains("ForEach(visibleKeyMetrics)"))
-        XCTAssertTrue(liquid.contains(
-            "KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)"
+        XCTAssertTrue(liquid.contains("{ enabledKeyMetrics }"))
+        XCTAssertTrue(liquid.contains("Open all metric history"))
+        XCTAssertTrue(androidToday.contains("val tiles = enabledMetrics"))
+        XCTAssertFalse(androidToday.contains("val tiles = KeyMetricPrefs.catalogOrder(enabledMetrics)"))
+        XCTAssertTrue(androidToday.contains("metricColumnCount"))
+        XCTAssertTrue(androidToday.contains("onClick = onOpenMetricHistory"))
+        XCTAssertTrue(androidToday.contains("R.string.key_metrics_open_history"))
+        let androidRoot = try text("android/app/src/main/java/com/noop/ui/AppRoot.kt")
+        XCTAssertTrue(androidRoot.contains(
+            "onOpenMetricHistory = { openTopLevel(Destination.Explore.route) }"
         ))
+        XCTAssertTrue(liquid.contains(".frame(maxWidth: .infinity, minHeight: 44)"))
         XCTAssertTrue(classic.contains("StrandPalette.recoveryGaugeColors(s).base"))
         XCTAssertTrue(liquid.contains("RecoveryBandPresentation.gaugeColors(for: score)"))
         XCTAssertTrue(recoveryRing.contains("StrandPalette.recoveryGaugeStops(score)"))

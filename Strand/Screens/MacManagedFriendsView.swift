@@ -423,6 +423,17 @@ struct MacManagedFriendsView: View {
 
 private struct MacManagedFriendCard: View {
     let friend: ManagedSocialFriend
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var visibleBadges: ArraySlice<ManagedSocialBadge> {
+        friend.badges.prefix(3)
+    }
+
+    private var visibleBadgeTitles: String {
+        visibleBadges
+            .map { MacManagedSocialFormat.badgeTitle($0.code) }
+            .joined(separator: ", ")
+    }
 
     var body: some View {
         StrandCard(padding: 18) {
@@ -451,22 +462,14 @@ private struct MacManagedFriendCard: View {
                 }
 
                 if let summary = friend.latest?.summary {
-                    HStack(spacing: 8) {
-                        MacManagedMetricTile(
-                            label: "Recovery",
-                            value: summary.charge,
-                            color: StrandPalette.chargeColor
-                        )
-                        MacManagedMetricTile(
-                            label: "Effort",
-                            value: summary.effort,
-                            color: StrandPalette.effortColor
-                        )
-                        MacManagedMetricTile(
-                            label: "Sleep Score",
-                            value: summary.rest,
-                            color: StrandPalette.restColor
-                        )
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(spacing: 8) {
+                            summaryTiles(summary)
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            summaryTiles(summary)
+                        }
                     }
                     let details = MacManagedSocialFormat.details(summary)
                     if !details.isEmpty {
@@ -487,33 +490,56 @@ private struct MacManagedFriendCard: View {
                 }
 
                 if !friend.badges.isEmpty {
-                    HStack(spacing: 8) {
-                        ForEach(friend.badges.prefix(3)) { badge in
-                            Label(
-                                MacManagedSocialFormat.badgeTitle(
-                                    badge.code
-                                ),
-                                systemImage:
-                                    MacManagedSocialFormat.badgeSymbol(
-                                        badge.code
-                                    )
-                            )
-                            .font(StrandFont.caption)
-                            .foregroundStyle(
-                                StrandPalette.textSecondary
-                            )
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(
-                                StrandPalette.surfaceInset,
-                                in: Capsule()
-                            )
+                    Group {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            VStack(alignment: .leading, spacing: 8) {
+                                badgeLabels
+                            }
+                        } else {
+                            HStack(spacing: 8) {
+                                badgeLabels
+                            }
                         }
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("Wellness badges")
+                    .accessibilityValue(visibleBadgeTitles)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func summaryTiles(_ summary: ManagedSocialSummary) -> some View {
+        MacManagedMetricTile(
+            label: "Recovery",
+            value: summary.charge,
+            color: StrandPalette.chargeColor
+        )
+        MacManagedMetricTile(
+            label: "Effort",
+            value: summary.effort,
+            color: StrandPalette.effortColor
+        )
+        MacManagedMetricTile(
+            label: "Sleep Score",
+            value: summary.rest,
+            color: StrandPalette.restColor
+        )
+    }
+
+    @ViewBuilder
+    private var badgeLabels: some View {
+        ForEach(visibleBadges) { badge in
+            Label(
+                MacManagedSocialFormat.badgeTitle(badge.code),
+                systemImage: MacManagedSocialFormat.badgeSymbol(badge.code)
+            )
+            .font(StrandFont.caption)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(StrandPalette.surfaceInset, in: Capsule())
         }
     }
 }
@@ -526,14 +552,14 @@ private struct MacManagedMetricTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(StrandFont.overlineScaled(9))
+                .font(StrandFont.metricLabel)
                 .foregroundStyle(StrandPalette.textTertiary)
-                .lineLimit(1)
+                .lineLimit(2)
             Text(
                 value.map { String(Int($0.rounded())) }
                     ?? StrandFormat.missing
             )
-            .font(StrandFont.number(24))
+            .font(StrandFont.metricValue)
             .foregroundStyle(
                 value == nil ? StrandPalette.textTertiary : color
             )

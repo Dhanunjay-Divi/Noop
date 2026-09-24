@@ -24,6 +24,7 @@ enum SettingsFocus: Equatable {
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var live: LiveState
+    @EnvironmentObject private var repo: Repository
     @EnvironmentObject var profile: ProfileStore
     #if os(iOS)
     @EnvironmentObject private var health: HealthKitBridge
@@ -1680,34 +1681,35 @@ struct SettingsView: View {
     /// #22); the raw-sensor CSV diagnostic is split into its own card so it stays available on every
     /// model — a 4.0 owner still needs the export to share decoded streams.
     @ViewBuilder private var experimentalCard: some View {
-        liquidTodayCard
-        liveSessionsCard
+        if Self.showsCollectorLiveSessionControl(runtimeRole: model.runtimeRole) {
+            liveSessionsCard
+        }
         if showFiveMGControls { fiveMGCard }
         sleepStagingCard
         rawSensorDiagnosticsCard
     }
 
-    /// Opt-in liquid Today redesign (default ON in this build). Off falls back to the
-    /// classic dashboard immediately, no rebuild. Same data either way.
-    @AppStorage("noop.liquidTodayEnabled") private var liquidTodayEnabled = true
-    private var liquidTodayCard: some View {
-        SettingsSection(
-            icon: "drop.fill",
-            title: "Experimental · Liquid Today",
-            blurb: "A redesigned Today screen in the new liquid language: the scores as living liquid, a time-of-day sky, and a calmer layout. Same numbers, new look."
-        ) {
-            VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) {
-                Toggle(isOn: $liquidTodayEnabled) {
-                    Text("Liquid Today (prototype)")
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                }
-                .toggleStyle(.noopSwitch)
-                Text("Replaces the Today tab with the prototype redesign. Turn it off any time to return to the classic dashboard. Reads the same live data from Noop Band.")
-                    .font(StrandFont.caption)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+    static func showsCollectorLiveSessionControl(
+        runtimeRole: AppRuntimeRole = .currentPlatform
+    ) -> Bool {
+        runtimeRole.allowsLocalCollection
+    }
+
+    private var liveSessionSettingsState: LiveSessionEntryState {
+        .resolve(
+            bandReady: liveSessionBandReady(live),
+            hasCurrentRecovery: repo.today?.recovery != nil
+        )
+    }
+
+    private var liveSessionSettingsDetail: LocalizedStringKey {
+        switch liveSessionSettingsState {
+        case .bandRequired:
+            return "appwide.live_session.band_required"
+        case .recoveryUnavailable:
+            return "appwide.live_session.start_detail_unavailable"
+        case .ready:
+            return "appwide.live_session.start_detail"
         }
     }
 
@@ -1717,7 +1719,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "shield.lefthalf.filled",
             title: "Experimental · Live Sessions",
-            blurb: "Live heart-rate coaching against a range shaped by today's Recovery. The screen always shows state; wrist cues require a connected, bonded, supported band and enabled wrist alerts."
+            blurb: "An explicit pre-session guide and screen-first live heart-rate coaching. Starting still requires a connected, bonded, worn supported band; wrist cues also require enabled wrist alerts."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) {
                 Toggle(isOn: $liveSessionsBeta) {
@@ -1726,7 +1728,7 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
                 .toggleStyle(.noopSwitch)
-                Text("appwide.live_session.start_detail")
+                Text(liveSessionSettingsDetail)
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -3709,6 +3711,7 @@ private struct FormRow<Control: View>: View {
     return SettingsView()
         .environmentObject(model)
         .environmentObject(model.live)
+        .environmentObject(model.repo)
         .environmentObject(model.profile)
         // iPhone-width (402pt) so the narrow Backup row stays in the preview's blast radius —
         // at 720 the three-up button row had slack and the truncation regression slipped through. (#188)

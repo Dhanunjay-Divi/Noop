@@ -561,6 +561,8 @@ fun TodayScreen(
     // wrongly dumping into the Health monitor). Mirrors the iOS liquidCard `metricDetail(key)`. Takes the
     // vital_detail key; defaults to the Health screen so an unbound caller keeps the old behaviour.
     onOpenMetric: (String) -> Unit = { onOpenHealth() },
+    // The selected Today cards stay compact; the complete longitudinal metric surface remains one tap away.
+    onOpenMetricHistory: () -> Unit = {},
     onOpenSleep: () -> Unit = {},
     // Optional Coupled view card (task #43): a tap-through to the WHOOP-style day screen. Defaulted to a
     // no-op so the call site stays compiling; AppRoot binds it to nav.navigate(CoupledView).
@@ -1244,8 +1246,8 @@ fun TodayScreen(
     val journalReminderOn = remember { NoopPrefs.journalReminderEnabled(context) }
     // S4: the Synthesis card collapses to a one-liner that expands on tap (default collapsed). Mirrors iOS.
     var synthesisExpanded by remember { mutableStateOf(false) }
-    // Key Metrics always shows the complete catalog with the user's three-to-five pins first. Data Sources
-    // still collapses to its summary.
+    // Key Metrics stays focused on the user's selected three-to-five signals. Data Sources still
+    // collapses to its summary, and the complete metric catalog remains in history.
     var sourcesExpanded by remember { mutableStateOf(false) }
     var scoringCardSeen by remember { mutableStateOf(ScoringGuidePrefs.cardSeen(context)) }
 
@@ -2450,6 +2452,26 @@ fun TodayScreen(
                                     onOpenMetric = onOpenMetric,
                                 )
                             }
+                            TextButton(
+                                onClick = onOpenMetricHistory,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 44.dp),
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = Palette.textSecondary,
+                                ),
+                            ) {
+                                Icon(
+                                    Icons.Filled.History,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(Metrics.iconSmall),
+                                )
+                                Spacer(Modifier.width(Metrics.space8))
+                                Text(
+                                    stringResource(R.string.key_metrics_open_history),
+                                    style = NoopType.subhead,
+                                )
+                            }
                         }
                         // #991: TodayWorkoutsSection emits header + card as two siblings; spaced Column.
                         TodaySection.WORKOUTS -> Column(
@@ -2976,118 +2998,115 @@ private fun DailyPlanTargetSection(
                     )
                 }
 
-                HorizontalDivider(color = Palette.hairline)
-                when (plan.availability) {
-                    DailyActionPlanner.Availability.CHECK_IN_NEEDED -> DailyPlanStateRow(
-                        icon = Icons.Filled.Check,
-                        title = stringResource(R.string.daily_plan_state_check_in_title),
-                        body = stringResource(R.string.daily_plan_state_check_in_body),
-                        tint = Palette.textTertiary,
-                    )
-                    DailyActionPlanner.Availability.CALIBRATING -> DailyPlanStateRow(
-                        icon = Icons.Filled.Autorenew,
-                        title = stringResource(R.string.daily_plan_state_calibrating_title),
-                        body = stringResource(R.string.daily_plan_state_calibrating_body),
-                        action = dailyPlanActionLabel(plan.action),
-                        tint = Palette.statusWarning,
-                    )
-                    DailyActionPlanner.Availability.RECOVERY_SHIFT -> DailyPlanStateRow(
-                        icon = Icons.AutoMirrored.Filled.DirectionsWalk,
-                        title = stringResource(R.string.daily_plan_state_recovery_shift_title),
-                        body = stringResource(R.string.daily_plan_state_recovery_shift_body),
-                        action = dailyPlanActionLabel(plan.action),
-                        tint = Palette.statusWarning,
-                    )
-                    DailyActionPlanner.Availability.STOP -> DailyPlanStateRow(
-                        icon = Icons.Filled.Warning,
-                        title = stringResource(R.string.daily_plan_state_stop_title),
-                        body = stringResource(R.string.daily_plan_state_stop_body),
-                        action = dailyPlanActionLabel(plan.action),
-                        tint = Palette.statusCritical,
-                    )
-                    DailyActionPlanner.Availability.READY -> {
-                        val target = plan.target
-                        if (target == null) {
-                            DailyPlanStateRow(
-                                icon = Icons.Filled.Autorenew,
-                                title = stringResource(R.string.daily_plan_state_calibrating_title),
-                                body = stringResource(R.string.daily_plan_state_calibrating_body),
-                                tint = Palette.statusWarning,
-                            )
-                        } else {
-                            val guidance = DailyEffortGuidance.evaluate(currentEffort, target)
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(Metrics.space10),
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.Bottom,
-                                    horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                if (plan.availability != DailyActionPlanner.Availability.CHECK_IN_NEEDED) {
+                    HorizontalDivider(color = Palette.hairline)
+                    when (plan.availability) {
+                        DailyActionPlanner.Availability.CHECK_IN_NEEDED -> Unit
+                        DailyActionPlanner.Availability.CALIBRATING -> DailyPlanStateRow(
+                            icon = Icons.Filled.Autorenew,
+                            title = stringResource(R.string.daily_plan_state_calibrating_title),
+                            body = stringResource(R.string.daily_plan_state_calibrating_body),
+                            action = dailyPlanActionLabel(plan.action),
+                            tint = Palette.statusWarning,
+                        )
+                        DailyActionPlanner.Availability.RECOVERY_SHIFT -> DailyPlanStateRow(
+                            icon = Icons.AutoMirrored.Filled.DirectionsWalk,
+                            title = stringResource(R.string.daily_plan_state_recovery_shift_title),
+                            body = stringResource(R.string.daily_plan_state_recovery_shift_body),
+                            action = dailyPlanActionLabel(plan.action),
+                            tint = Palette.statusWarning,
+                        )
+                        DailyActionPlanner.Availability.STOP -> DailyPlanStateRow(
+                            icon = Icons.Filled.Warning,
+                            title = stringResource(R.string.daily_plan_state_stop_title),
+                            body = stringResource(R.string.daily_plan_state_stop_body),
+                            action = dailyPlanActionLabel(plan.action),
+                            tint = Palette.statusCritical,
+                        )
+                        DailyActionPlanner.Availability.READY -> {
+                            val target = plan.target
+                            if (target == null) {
+                                DailyPlanStateRow(
+                                    icon = Icons.Filled.Autorenew,
+                                    title = stringResource(R.string.daily_plan_state_calibrating_title),
+                                    body = stringResource(R.string.daily_plan_state_calibrating_body),
+                                    tint = Palette.statusWarning,
+                                )
+                            } else {
+                                val guidance = DailyEffortGuidance.evaluate(currentEffort, target)
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(Metrics.space10),
                                 ) {
-                                    Text(
-                                        stringResource(
-                                            R.string.appwide_range_format,
-                                            target.lower,
-                                            target.upper,
-                                        ),
-                                        style = NoopType.number(30f),
-                                        color = Palette.textPrimary,
-                                    )
-                                    Text(
-                                        stringResource(R.string.daily_plan_effort_scale),
-                                        style = NoopType.overline,
-                                        color = Palette.textTertiary,
-                                    )
-                                }
-                                Text(
-                                    stringResource(R.string.daily_plan_state_ready_body),
-                                    style = NoopType.subhead,
-                                    color = Palette.textSecondary,
-                                )
-                                if (guidance.state != DailyEffortGuidance.State.UNAVAILABLE) {
-                                    DailyPlanEffortProgress(guidance)
-                                }
-                                DailyPlanActionRow(
-                                    text = dailyPlanActionLabel(plan.action),
-                                    tint = Palette.accent,
-                                )
-                                if (showNotificationControl) {
-                                    HorizontalDivider(color = Palette.hairline)
                                     Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                onNotificationEnabledChange(!notificationEnabled)
-                                            }
-                                            .padding(vertical = Metrics.space4),
-                                        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
-                                        verticalAlignment = Alignment.CenterVertically,
+                                        verticalAlignment = Alignment.Bottom,
+                                        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
                                     ) {
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            verticalArrangement = Arrangement.spacedBy(Metrics.space4),
-                                        ) {
-                                            Text(
-                                                stringResource(R.string.daily_plan_notification_toggle),
-                                                style = NoopType.subhead,
-                                                color = Palette.textPrimary,
-                                            )
-                                            Text(
-                                                stringResource(R.string.daily_plan_notification_help),
-                                                style = NoopType.footnote,
-                                                color = Palette.textTertiary,
-                                            )
-                                        }
-                                        NoopToggleSwitch(
-                                            checked = notificationEnabled,
-                                            onCheckedChange = null,
+                                        Text(
+                                            stringResource(
+                                                R.string.appwide_range_format,
+                                                target.lower,
+                                                target.upper,
+                                            ),
+                                            style = NoopType.number(30f),
+                                            color = Palette.textPrimary,
+                                        )
+                                        Text(
+                                            stringResource(R.string.daily_plan_effort_scale),
+                                            style = NoopType.overline,
+                                            color = Palette.textTertiary,
                                         )
                                     }
-                                    if (notificationPermissionDenied) {
-                                        Text(
-                                            stringResource(R.string.appwide_notifications_system_disabled),
-                                            style = NoopType.footnote,
-                                            color = Palette.statusCritical,
-                                        )
+                                    Text(
+                                        stringResource(R.string.daily_plan_state_ready_body),
+                                        style = NoopType.subhead,
+                                        color = Palette.textSecondary,
+                                    )
+                                    if (guidance.state != DailyEffortGuidance.State.UNAVAILABLE) {
+                                        DailyPlanEffortProgress(guidance)
+                                    }
+                                    DailyPlanActionRow(
+                                        text = dailyPlanActionLabel(plan.action),
+                                        tint = Palette.accent,
+                                    )
+                                    if (showNotificationControl) {
+                                        HorizontalDivider(color = Palette.hairline)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    onNotificationEnabledChange(!notificationEnabled)
+                                                }
+                                                .padding(vertical = Metrics.space4),
+                                            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                                            ) {
+                                                Text(
+                                                    stringResource(R.string.daily_plan_notification_toggle),
+                                                    style = NoopType.subhead,
+                                                    color = Palette.textPrimary,
+                                                )
+                                                Text(
+                                                    stringResource(R.string.daily_plan_notification_help),
+                                                    style = NoopType.footnote,
+                                                    color = Palette.textTertiary,
+                                                )
+                                            }
+                                            NoopToggleSwitch(
+                                                checked = notificationEnabled,
+                                                onCheckedChange = null,
+                                            )
+                                        }
+                                        if (notificationPermissionDenied) {
+                                            Text(
+                                                stringResource(R.string.appwide_notifications_system_disabled),
+                                                style = NoopType.footnote,
+                                                color = Palette.statusCritical,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -8045,7 +8064,7 @@ private fun MetricGrid(
     // mini-graph tracks the Rest SCORE rather than raw sleep minutes (#614 follow-up). Other tiles still
     // read their series off `w` (the DailyMetric windows).
     restSpark: List<Double> = emptyList(),
-    enabledMetrics: List<KeyMetric> = KeyMetric.defaultOrder,
+    enabledMetrics: List<KeyMetric> = KeyMetric.defaultSelection,
     isToday: Boolean = false,
     onScoreInfo: (ScoreSection) -> Unit = {},
     // Detailed tiles (the #251 editor's switch): squarer tiles with a 14-day trend graph under the bar.
@@ -8054,8 +8073,8 @@ private fun MetricGrid(
     // night-detail pattern) via [onOpenMetric].
     onOpenMetric: (String) -> Unit = {},
 ) {
-    // Current iOS parity: two readable columns, a dimensional semantic glyph, large value, and either a
-    // real trend or a bounded-score liquid rail. The editor's pin order still leads the complete catalog.
+    // Current iOS parity: selected metrics only, dimensional semantic glyphs, and either a real trend or a
+    // bounded-score liquid rail. The full catalog remains in metric history.
     val descriptors: Map<KeyMetric, KeyTileData> = mapOf(
         KeyMetric.CHARGE to run {
             val v = d?.recovery ?: lastScoredCharge?.value
@@ -8182,8 +8201,7 @@ private fun MetricGrid(
         },
     )
 
-    // Always show the complete catalog. The saved three-to-five pins only determine which tiles lead.
-    val tiles = KeyMetricPrefs.catalogOrder(enabledMetrics)
+    val tiles = enabledMetrics
         .mapNotNull { m -> descriptors[m]?.let { m to it } }
     // Tile tap -> its focused trend TIMELINE (the Sleep night-detail pattern), uniformly for every tile
     // with a windowed series: Recovery/Effort/Rest open their new trend details; the vitals +
@@ -8202,10 +8220,10 @@ private fun MetricGrid(
         KeyMetric.CALORIES -> ({ onOpenMetric("active_kcal") })
         KeyMetric.WEIGHT -> null
     }
-    // iOS `keyMetricsSection` LazyVGrid: 2 columns, spacing 8. Build from rows so tile heights stay uniform
-    // and a partial last row pads with empty weight so the columns stay aligned.
+    val metricColumnCount = if (LocalDensity.current.fontScale >= 1.3f) 1 else 2
+    // Match iOS: two columns normally and one at large text sizes.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        tiles.chunked(2).forEach { rowTiles ->
+        tiles.chunked(metricColumnCount).forEach { rowTiles ->
             // Detailed rows equalise heights (IntrinsicSize.Max + fillMaxHeight, the #399 idiom): a
             // graph-less tile (Steps/Weight/Calories) sharing a row with graphed neighbours must not
             // shrink its card. Compact rows keep the plain layout, byte-identical to before.
@@ -8225,7 +8243,7 @@ private fun MetricGrid(
                             .then(if (detailed) Modifier.fillMaxHeight() else Modifier),
                     )
                 }
-                repeat(2 - rowTiles.size) { Spacer(Modifier.weight(1f)) }
+                repeat(metricColumnCount - rowTiles.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -8280,6 +8298,7 @@ private fun LiquidKeyTile(
     val hasValue = data.value != NO_DATA
     val trend = data.spark.takeLast(14)
     val showsTrend = trend.size >= 2
+    val largeText = LocalDensity.current.fontScale >= 1.3f
     // Tap -> the tile's focused trend detail (the Sleep night-detail tile idiom): liquidPress on the
     // tappable tile, indication = null so only the liquid settle shows. A null onClick keeps the tile
     // inert with zero modifier overhead (byte-identical to before).
@@ -8351,7 +8370,7 @@ private fun LiquidKeyTile(
                 data.label.uppercase(),
                 style = NoopType.overline.copy(fontSize = 9.5.sp, letterSpacing = 0.sp),
                 color = Palette.textSecondary,
-                maxLines = 1,
+                maxLines = if (largeText) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
         } else {
@@ -8364,26 +8383,45 @@ private fun LiquidKeyTile(
                     data.label.uppercase(),
                     style = NoopType.overline.copy(fontSize = 9.5.sp, letterSpacing = 0.sp),
                     color = Palette.textSecondary,
-                    maxLines = 1,
+                    maxLines = if (largeText) 2 else 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
             }
         }
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                data.value,
-                style = NoopType.number(24f),
-                color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
-                maxLines = 1,
-            )
-            if (data.unit.isNotEmpty() && hasValue) {
+        if (largeText) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    uiString(R.string.l10n_today_screen_data_unit_c768ef8c, data.unit),
-                    style = NoopType.subhead,
-                    color = Palette.textPrimary,
+                    data.value,
+                    style = NoopType.number(24f),
+                    color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
                     maxLines = 1,
                 )
+                if (data.unit.isNotEmpty() && hasValue) {
+                    Text(
+                        data.unit,
+                        style = NoopType.subhead,
+                        color = Palette.textPrimary,
+                        maxLines = 1,
+                    )
+                }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    data.value,
+                    style = NoopType.number(24f),
+                    color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
+                    maxLines = 1,
+                )
+                if (data.unit.isNotEmpty() && hasValue) {
+                    Text(
+                        uiString(R.string.l10n_today_screen_data_unit_c768ef8c, data.unit),
+                        style = NoopType.subhead,
+                        color = Palette.textPrimary,
+                        maxLines = 1,
+                    )
+                }
             }
         }
         Box(

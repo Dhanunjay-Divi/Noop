@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-23**
+Last updated: **2026-09-24**
 
 ## Authoritative context
 
@@ -12,57 +12,40 @@ Last updated: **2026-09-23**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: `NoopBandSDK` PR `#31` is merged normally at
-  `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`. Two independent source-only
-  exports from that exact merge were byte-identical. The ten-file export
-  manifest SHA-256 is
-  `1290444d1e997a2e9bc4bcc025685f33e9bdd8cf147e49c716f8d7017bc56fa1`;
-  the SDK artifact test-wrapper SHA-256 is
-  `f2250d3a7f301c893c280fe091b0a46e32beadadd7938e1e4735dbaeb39e3149`.
-  PR `#31` retains capability schema v3, makes public model rendering
-  privacy-safe, and preserves exact-generation history-acknowledgement
-  authority across suspension. Upstream verification passes Swift 100/100,
-  Kotlin/JVM 102/102 plus `installDist`, 50 shared conformance scenarios, and
-  the 71-file repository policy gate. Exact-current application verification passes the artifact
-  verifier and its 9-test adversarial suite, vendored Swift 16/16, the real
-  macOS boundary 10/10, Android Full and Demo integration 15/15 each, both
-  Android instrumentation source graphs, and the unsigned Release
-  iPhone/Watch/complication/widget graph. The exact-current focused iOS
-  profile clear-and-retype regression passes 1/1. Independent SDK review found
-  no P0/P1 blocker; both P2 evidence findings were corrected before merge.
-  Repository-control gates require one final rerun after this documentation
-  repin. Remote app head
-  `6d3b54a01ed6fd7e741e721aa6ff467d3b6bfcb4` passed every hosted context
-  except the iOS production shell, whose only failure was immediate re-entry
-  after clearing a focused profile measurement. The native-button/focus
-  correction passes the exact case three times locally. One narrow follow-up
-  commit/push, replacement hosted exact-head checks, protected integration,
-  and protected-main verification remain pending.
-  Historical PR `#27` app evidence remains: the artifact verifier and its
-  9-test adversarial suite passed; the vendored Swift package passed 16/16
-  across all 46 scenarios plus the app-repository actor-suspension regression;
-  the real macOS boundary passes 10/10 and the complete macOS wall passes 2,228
-  with one intentional skip; the prior Android Full boundary passes 14/14 and
-  the exact PR `#27` integration class passes 15/15, including reentrant
-  close/disconnect rejection with continued live-session usability. Demo plus
-  Full/Demo instrumentation sources compile; the iOS production shell
-  passes 39 with one intentional skip; and the unsigned Release iPhone graph
-  embeds and validates Watch, complications, and widgets. The complete Tools
-  wall passes 318/318 with one intentional skip; required-CI verifies ten
-  contexts and trusted-main self-verification passes. The reviewed terminology
-  snapshot remains 17,872 occurrences across 1,588 groups with unchanged
-  category totals, unchanged active allowlist, and zero forbidden mappings.
-  Final dirty-diff review found no P0/P1; its three P2 findings are corrected:
-  Android rejects a same-session field-identical forged reconnect token in a
-  fresh 14/14 integration run, while incomplete cross-platform notification
-  states and local-retention approval remain open checklist gates.
-  Generated SwiftPM and Apple DerivedData were removed after evidence capture.
-  Those PR `#27` results remain historical and do not replace the PR `#29`
-  exact-current evidence carried by
-  the dedicated app PR `#17` branch. Every required hosted context and applicable
-  review thread must pass on that exact candidate head before protected
-  merge/main verification. Supplier physical-device validation remains
-  separate.
+- Current state: `NoopBandSDK` PR `#32` merged normally at
+  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7`. Two independent source-only
+  exports were byte-identical. The exact ten-file manifest SHA-256 is
+  `13ff578d92d3654d07075c0afe1fafef8f74f48a07f462ff0eb5b21dacda62ca`;
+  supplier artifacts are absent. Upstream verification passes Swift 106/106,
+  Kotlin/JVM 114/114 plus `installDist`, all 50 shared conformance scenarios,
+  and the 73-file repository gate. The app consumes that exact revision while
+  preserving WHOOP as the default comparison transport and leaving the
+  first-party source factory disabled.
+  Exact-current local app evidence includes the artifact verifier and its
+  9-test adversarial suite, vendored Swift 16/16, macOS boundary 10/10,
+  Android Full and Demo integration 15/15 each, both Android instrumentation
+  source graphs, the unsigned Release iPhone graph with embedded Watch,
+  complication, and widget products, 16 focused macOS app tests, and a
+  21-scenario iPhone visual matrix. A disposable API 35 emulator built,
+  installed, and launched the Demo APK; inspected Today, More, and Friends
+  Review Sample states contained only fictional data, and the app-specific
+  crash/ANR scan was empty. The emulator was then removed from the active
+  process set.
+  Final local review found no P0/P1 blocker and corrected four P2 contract
+  defects in history navigation, Apple's touch target, current-versus-historical
+  handoff wording, and the Android account/cloud guide. The focused trust and
+  terminology matrix passes 69 tests, Apple screen-state contracts pass 15/15,
+  Android Demo compilation plus its presentation contract complete across 46
+  tasks, and the complete repository wall passes 318 tests with one intentional
+  optional Safety smoke skip. Direct release, required-context, trust,
+  artifact, calibration, distribution, privacy, health-claim, localization,
+  operations, shell, Python, and diff controls are green.
+  The local branch now needs its consolidated commit and one push, replacement
+  exact-SHA hosted checks, normal protected merge, exact protected-main
+  verification, and round-owned cleanup.
+  Supplier adapter integration, signing, physical BLE, background collection,
+  disconnected history, haptics, battery, firmware, and physiological
+  accuracy remain separate device/external gates.
 - Historical checkpoint: `NoopBandSDK` PR `#24` merged normally at
   `f20f4ed552328a64a8a598aaac72befa1d481262`. Two independent app-source
   exports from that exact merge are byte-identical. The app's exact ten-file
@@ -491,7 +474,7 @@ Resume from:
    supplier artifacts, firmware project, rights/SBOM/security evidence, and
    representative physical units are available.
 
-## September 23 latest local evidence
+## September 23 historical local evidence
 
 - The Recovery chart correction now uses an expiry deadline rather than
   delayed state mutation, preventing a stale first-scrub cleanup from
@@ -518,7 +501,7 @@ Resume from:
   `d266cf5458193d6e6d54fac1b9eb949438f537e7ee2a4866c284d04a91e9a529`.
   Candidate `e12b71fb` remains the previous remote head; the PR `#30`
   replacement is still local.
-- SDK PR `#31` is now consumed at
+- Historical PR `#31` checkpoint (superseded by current PR `#32`) consumed
   `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`. Two clean exports are
   byte-identical with manifest SHA-256
   `1290444d1e997a2e9bc4bcc025685f33e9bdd8cf147e49c716f8d7017bc56fa1`.

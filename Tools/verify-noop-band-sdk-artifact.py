@@ -13,10 +13,10 @@ from typing import Any
 
 
 EXPECTED_MANIFEST_SHA256 = (
-    "1290444d1e997a2e9bc4bcc025685f33e9bdd8cf147e49c716f8d7017bc56fa1"
+    "13ff578d92d3654d07075c0afe1fafef8f74f48a07f462ff0eb5b21dacda62ca"
 )
 EXPECTED_SOURCE_REPOSITORY = "Dhanunjay-Divi/NoopBandSDK"
-EXPECTED_SOURCE_REVISION = "9fd84ff6af3d48c41fb5af3128efec9dcc6948a4"
+EXPECTED_SOURCE_REVISION = "50a16fbc75f9ae604e773ff6608c87f0b96b67f7"
 EXPORT_DIRECTORIES = ("contract", "production", "test-support")
 EXPECTED_INTEGRATION_FILES = {
     "Package.swift": "16fdef516135df5e4df8dd6c260e910e41ca3a6091e9151ba058e8ce2da95053",

@@ -109,8 +109,8 @@ position without changing its ID. This inbox intentionally starts empty.
 
 ## 2. Mainline, CI, and release controls
 
-- [x] CI-010 [ENG] Reproduce and fix the current iOS production-shell test
-  failure on current `main`. (Evidence:
+- [x] CI-010 [ENG] Reproduce and fix the September 6 iOS production-shell test
+  failure on its protected `main` baseline. (Evidence:
   `ops/rounds/2026-09-06-hosted-release-gates.md`, GitHub Actions run
   `34080116658`)
 - [x] CI-020 [ENG] Make the Android managed-emulator production-shell test
@@ -121,13 +121,16 @@ position without changing its ID. This inbox intentionally starts empty.
   immutable migration checks cannot inherit another test engine's state.
   (Evidence: `ops/rounds/2026-09-06-hosted-release-gates.md`, GitHub Actions
   run `34078811154`)
-- [x] CI-040 [ENG] Make Apple application CI green on the release commit.
+- [x] CI-040 [ENG] Establish green Apple application CI on a protected
+  baseline; CI-100 still requires the final release candidate's exact SHA.
   (Evidence: exact-main GitHub Actions run `34080116658`)
-- [x] CI-050 [ENG] Make Android build, unit, lint, and instrumentation CI green
-  on the release commit. (Evidence: exact-main GitHub Actions run
+- [x] CI-050 [ENG] Establish green Android build, unit, lint, and
+  instrumentation CI on a protected baseline; CI-100 still requires the final
+  release candidate's exact SHA. (Evidence: exact-main GitHub Actions run
   `34079190997`)
-- [x] CI-060 [ENG] Make server lint, dependency, migration, database, backup,
-  restore, and container CI green on the release commit. (Evidence: exact-main
+- [x] CI-060 [ENG] Establish green server lint, dependency, migration,
+  database, backup, restore, and container CI on a protected baseline; CI-100
+  still requires the final release candidate's exact SHA. (Evidence: exact-main
   GitHub Actions run `34078811154`)
 - [x] CI-070 [ENG] Keep Swift package, localization, health-claims, legal,
   privacy, dependency, and operations-record gates green. (Evidence:
@@ -285,8 +288,8 @@ position without changing its ID. This inbox intentionally starts empty.
   bounded diagnostics, deterministic virtual conformance, and one
   digest-pinned source-only app boundary. Keep every production NOOP-band
   factory disabled and retain WHOOP as the comparison transport until the
-  supplier and physical gates pass. (Evidence: protected SDK merge
-  `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`,
+  supplier and physical gates pass. (Evidence: reviewed SDK merge
+  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7`,
   `ops/rounds/2026-09-21-noop-band-sdk-app-integration.md`)
 - [ ] SDK-007 [ENG] Build quarantined Apple and Android supplier adapters behind
   neutral NOOP session/sample types; keep vendor callbacks, persistence, and

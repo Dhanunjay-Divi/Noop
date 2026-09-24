@@ -137,14 +137,12 @@ struct LiquidTodayView: View {
         #endif
         return saved
     }
-    // The Key-Metrics grid always shows the full catalog. The shared editor chooses the three-to-five
-    // metrics pinned first and their order; every applicable tile keeps its compact history trace.
+    // Today stays focused on the user's three-to-five selected metrics. The full catalog remains one
+    // tap away through "Open all metric history".
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showKeyMetricsEditor = false
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
-    private var visibleKeyMetrics: [KeyMetric] {
-        KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)
-    }
+    private var visibleKeyMetrics: [KeyMetric] { enabledKeyMetrics }
     /// One shared, selected-day-anchored history cache for the compact tile traces. Building this in
     /// `load()` keeps the grid body O(1), and prevents an older selected day from seeing future readings.
     @State private var keyMetricTrends: [KeyMetric: [Double]] = [:]
@@ -481,9 +479,9 @@ struct LiquidTodayView: View {
             }
             .modifier(LegacyLiquidTodayScrollOffsetProbe())
             #if os(macOS)
-            // Keep the phone-shaped column readable + centred on the wide mac detail pane. The sky is a
-            // ScrollView background (full-bleed), so constraining the content column here doesn't touch it.
-            .frame(maxWidth: 680)
+            // Use the desktop pane without returning to the detached two-column self-check layout.
+            // The sky remains full-bleed while one stable content track keeps the reading order intact.
+            .frame(maxWidth: 960)
             .frame(maxWidth: .infinity)
             #endif
         }
@@ -1898,8 +1896,10 @@ struct LiquidTodayView: View {
                         dailyPlanCheckInButton(.painOrUnwell, label: "daily_plan.check_in.pain_unwell")
                     }
 
-                    dailyPlanDivider
-                    dailyPlanResult(plan)
+                    if plan.availability != .checkInNeeded {
+                        dailyPlanDivider
+                        dailyPlanResult(plan)
+                    }
                     if let adjustment = plan.workoutAdjustment {
                         dailyPlanDivider
                         dailyPlanWorkoutAdjustment(adjustment)
@@ -2657,10 +2657,12 @@ struct LiquidTodayView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Edit Key Metrics")
             }
-            // Pinned metrics lead in the user's order, followed by every remaining catalog metric.
-            // Two columns keep values and long labels readable; three made the grid feel like a table.
+            // Show only the editor-selected metrics here. The full catalog remains in metric history.
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: NoopMetrics.space3), count: 2),
+                columns: Array(
+                    repeating: GridItem(.flexible(), spacing: NoopMetrics.space3),
+                    count: dynamicTypeSize.isAccessibilitySize ? 1 : 2
+                ),
                 spacing: NoopMetrics.space3
             ) {
                 ForEach(visibleKeyMetrics) { metric in
@@ -2672,7 +2674,7 @@ struct LiquidTodayView: View {
                 Label("Open all metric history", systemImage: "clock.arrow.circlepath")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textSecondary)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.plain)
         }
@@ -2811,11 +2813,23 @@ struct LiquidTodayView: View {
             spacing: showsTrend ? NoopMetrics.space1 : NoopMetrics.space2
         ) {
             keyMetricTileHeader(label, symbol: symbol, trend: trend)
-            (Text(value).font(StrandFont.number(24))
-                + Text(unit.isEmpty ? "" : " \(unit)").font(StrandFont.subhead))
-                .foregroundStyle(StrandPalette.textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                        Text(value)
+                            .font(StrandFont.metricValue)
+                        if !unit.isEmpty {
+                            Text(unit)
+                                .font(StrandFont.subhead)
+                        }
+                    }
+                } else {
+                    (Text(value).font(StrandFont.metricValue)
+                        + Text(unit.isEmpty ? "" : " \(unit)").font(StrandFont.subhead))
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(StrandPalette.textPrimary)
             if showsTrend, let trend {
                 Sparkline(
                     values: trend,
@@ -2880,22 +2894,20 @@ struct LiquidTodayView: View {
                     trendDirectionBadge(trend)
                 }
                 Text(label.uppercased())
-                    .font(StrandFont.overlineScaled(9.5))
+                    .font(StrandFont.metricLabel)
                     .tracking(0)
                     .foregroundStyle(StrandPalette.textSecondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.62)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
             HStack(alignment: .center, spacing: NoopMetrics.space2) {
                 MetricGlyph(symbol, size: 28)
                 Text(label.uppercased())
-                    .font(StrandFont.overlineScaled(9.5))
+                    .font(StrandFont.metricLabel)
                     .tracking(0)
                     .foregroundStyle(StrandPalette.textSecondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 Spacer(minLength: 0)
             }
         }

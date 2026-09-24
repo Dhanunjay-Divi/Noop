@@ -52,7 +52,7 @@ packages:
     path: Packages/WhoopStore
   NoopRemoteSync:
     path: Packages/NoopRemoteSync
-  # Digest-pinned, source-only export from the private NoopBandSDK repository.
+  # Digest-pinned, source-only export from the public NoopBandSDK repository.
   # The artifact verifier rejects drift and supplier binaries. This package is
   # the neutral state machine only; no production transport is registered.
   NoopBandSDK:

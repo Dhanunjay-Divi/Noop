@@ -27,6 +27,10 @@ Android install/validation round:
 
 1. Start from clean protected `main`, run the context snapshot, and read
    `docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`.
+   Confirm the vendored neutral SDK still reports source revision
+   `50a16fbc75f9ae604e773ff6608c87f0b96b67f7` and manifest SHA-256
+   `13ff578d92d3654d07075c0afe1fafef8f74f48a07f462ff0eb5b21dacda62ca`
+   before installing a candidate.
 2. Install one exact signed candidate on a clean supported iPhone and Android
    phone; exercise first-run account/onboarding before using a preconfigured
    development state.
@@ -43,6 +47,12 @@ Android install/validation round:
 6. Attach privacy-safe evidence to a new operations round and update the
    release checklist. Never claim BLE, retention, haptics, battery, sensor
    accuracy, or background behavior from a simulator.
+
+The executable clean-checkout, iPhone signing/install, Android APK/install,
+first-run, and evidence commands are in section 1.2 of
+`docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`. Do not improvise a
+firmware flash or enable the supplier source merely because the neutral wrapper
+compiled.
 
 Both GitHub repositories remain public by current owner decision. Public source
 must still exclude supplier binaries, firmware, credentials, signing material,

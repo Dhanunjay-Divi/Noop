@@ -1,6 +1,6 @@
 # NOOP Band physical validation handoff
 
-**Updated:** 2026-09-23
+**Updated:** 2026-09-24
 **Purpose:** give the next hardware agent an executable, evidence-bounded plan
 for closing only the supplier, firmware, signed-device, and physical-behavior
 gates that source, unit, simulator, emulator, and synthetic cloud tests cannot
@@ -29,8 +29,9 @@ prove.
   Mac presentation, SMS/voice fallback, or carrier behavior.
 - The supplier wrapper is not implemented or production-approved merely
   because the candidate SDK exposes an API or the app compiles.
-- App PR `#17` consumes the supplier-neutral SDK at protected merge
-  `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4` while retaining WHOOP as the
+- The current working-tree candidate for app PR `#17` consumes the
+  supplier-neutral SDK at reviewed merge
+  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7` while retaining WHOOP as the
   default comparison transport and leaving the first-party source factory
   disabled. A device-connected agent must not expect a supplier band to pair
   until the quarantined exact-model adapter and approved supplier artifacts are
@@ -57,6 +58,104 @@ After app PR `#17` is merged and protected `main` is verified:
    blocked supplier inputs, diagnostics categories, and preserved data. Do not
    include serials, printed identifiers, addresses, credentials, or health
    values in Git.
+
+## 1.2 Exact install starting point
+
+Use a clean checkout of protected `main`; do not install from the integration
+worktree after PR `#17` has merged:
+
+```bash
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+git status --short
+
+python3 - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+
+manifest = Path("Vendor/NoopBandSDK/noop-band-sdk-manifest.json")
+data = json.loads(manifest.read_text())
+assert data["sourceRevision"] == "50a16fbc75f9ae604e773ff6608c87f0b96b67f7"
+assert hashlib.sha256(manifest.read_bytes()).hexdigest() == (
+    "13ff578d92d3654d07075c0afe1fafef8f74f48a07f462ff0eb5b21dacda62ca"
+)
+assert data["supplierArtifactsIncluded"] is False
+print("pinned source-only SDK verified")
+PY
+```
+
+`git status --short` must be empty before creating the device round. Record the
+exact source before building:
+
+```bash
+git rev-parse HEAD
+git status --short
+```
+
+For iOS, configure only the gitignored local signing file, regenerate the
+project, and identify the connected device locally:
+
+```bash
+cp -n Config/BundleIdSecrets.example.xcconfig \
+  Config/BundleIdSecrets.xcconfig
+# Set the local BUNDLE_ID_PREFIX and DEVELOPMENT_TEAM values.
+xcodegen generate
+xcrun devicectl list devices
+```
+
+Keep the device identifier out of Git and shared logs. Xcode's `NOOPiOS`
+scheme may be used interactively, or the same signed development build can be
+installed and launched with:
+
+```bash
+IOS_UDID="<local connected-device identifier>"
+DERIVED_DATA="/tmp/noop-ios-device-build"
+
+xcodebuild \
+  -project Strand.xcodeproj \
+  -scheme NOOPiOS \
+  -configuration Debug \
+  -destination "platform=iOS,id=${IOS_UDID}" \
+  -derivedDataPath "${DERIVED_DATA}" \
+  build
+
+APP="$(find "${DERIVED_DATA}/Build/Products/Debug-iphoneos" \
+  -maxdepth 1 -type d -name '*.app' -print -quit)"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+  "${APP}/Info.plist")"
+xcrun devicectl device install app --device "${IOS_UDID}" "${APP}"
+xcrun devicectl device process launch \
+  --device "${IOS_UDID}" --terminate-existing "${BUNDLE_ID}"
+```
+
+Select the same team for the app, widget, Watch app, and complication targets.
+Record the app commit, bundle family, marketing/build version, and generalized
+iPhone/OS class. Do not publish or upload the archive from this step.
+
+For Android, build and install the full transport flavor rather than the
+fictional Review Sample:
+
+```bash
+cd android
+./gradlew --no-daemon --no-parallel :app:assembleFullDebug
+adb devices -l
+adb install -r app/build/outputs/apk/full/debug/app-full-debug.apk
+shasum -a 256 app/build/outputs/apk/full/debug/app-full-debug.apk
+
+PACKAGE_ID="com.noop.whoop.debug"
+adb logcat -c
+adb shell am start -W -n "${PACKAGE_ID}/com.noop.IconDefault"
+adb logcat -d -v brief | \
+  grep -E "FATAL EXCEPTION|ANR in ${PACKAGE_ID}|Process: ${PACKAGE_ID}" || true
+```
+
+Record the exact APK SHA-256, app commit, version/build, and generalized
+phone/OS class. A successful install is only the start of the physical matrix;
+it does not close any `PHY-*` row by itself. Do not clear, uninstall, or change
+the bundle/application ID on a phone containing retained test or user history;
+use a clean test phone or first export and verify the approved backup.
 
 ## 2. Inputs required before testing
 

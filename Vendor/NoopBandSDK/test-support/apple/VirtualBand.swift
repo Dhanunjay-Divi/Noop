@@ -1690,14 +1690,15 @@ public enum BandConformanceRunner {
     private static func historyCheckpointRestored()
         async throws -> BandConformanceResult
     {
+        let checkpointSamples =
+            VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
         let checkpoint = BandHistoryCheckpoint(
             sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
             acknowledgedCursor: "cursor-2",
             lastHistoryComplete: false,
-            durableSampleIdentities: Set(
-                VirtualBandFixtures.historyChunk.batches
-                    .flatMap(\.samples)
-                    .map(\.identity)
+            durableSampleIdentities: Set(checkpointSamples.map(\.identity)),
+            durableSampleFingerprints: Set(
+                checkpointSamples.map(BandSampleFingerprint.init(sample:))
             )
         )
         let session = BandSessionMachine(historyCheckpoint: checkpoint)
@@ -1789,14 +1790,15 @@ public enum BandConformanceRunner {
     private static func historyCheckpointSurvivesSourceMismatch()
         async throws -> BandConformanceResult
     {
+        let checkpointSamples =
+            VirtualBandFixtures.historyChunk.batches.flatMap(\.samples)
         let checkpoint = BandHistoryCheckpoint(
             sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
             acknowledgedCursor: "cursor-2",
             lastHistoryComplete: false,
-            durableSampleIdentities: Set(
-                VirtualBandFixtures.historyChunk.batches
-                    .flatMap(\.samples)
-                    .map(\.identity)
+            durableSampleIdentities: Set(checkpointSamples.map(\.identity)),
+            durableSampleFingerprints: Set(
+                checkpointSamples.map(BandSampleFingerprint.init(sample:))
             )
         )
         let session = BandSessionMachine(historyCheckpoint: checkpoint)
@@ -2640,7 +2642,17 @@ public enum BandConformanceRunner {
             sourceIdentity: VirtualBandFixtures.identity.sourceIdentity,
             acknowledgedCursor: nil,
             lastHistoryComplete: nil,
-            durableSampleIdentities: identities
+            durableSampleIdentities: identities,
+            durableSampleFingerprints: Set(
+                identities.map {
+                    BandSampleFingerprint(
+                        identity: $0,
+                        payloadFingerprint:
+                            "a10e64de6afbbee0a9f4c4da6ab1e54"
+                            + "a3c5a77adc94ba6c76092b1cf419a0046"
+                    )
+                }
+            )
         )
         let session = BandSessionMachine(historyCheckpoint: checkpoint)
         let scanToken = try await session.beginScan()

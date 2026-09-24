@@ -135,9 +135,9 @@ remains manual until the final go/no-go review.
 
 ### Current mainline health
 
-The protected integrated baseline for the September 17-18 review is `main` at
-`b688b3b725cd497e96a31b28540a219bf50446e1`. Live GitHub settings and the exact
-commit's checks were reverified on 2026-09-18:
+The current protected integrated baseline is `main` at
+`9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`. The remote branch head was
+reverified on 2026-09-24:
 
 - `main` uses strict up-to-date status checks, administrator enforcement, and
   linear history; force pushes and branch deletion are disabled. Release work
@@ -160,11 +160,11 @@ commit's checks were reverified on 2026-09-18:
 - Historical exact-main evidence at `1443acb1` and `b5caec52` remains valid for
   those exact trees, including the retained commit/tree-bound SBOM manifest.
   It is not evidence for the active September 17-19 branch.
-- The `codex/ui-cloud-readiness-20260917` candidate has complete local Apple,
-  Android, package, server, simulator, infrastructure, bounded-runner, and
-  exact-current policy walls, and exact round-owned cleanup is complete. Its
-  protected pull request and exact-head check suite are the authoritative
-  record for the candidate SHA, hosted wall, merge, and protected-main result.
+- App PR `#17` on `codex/noop-band-sdk-app-integration-20260921` carries the
+  current source-only SDK/UI replacement. Focused local Apple, Android,
+  simulator, and artifact evidence is green; its final exact-tree control wall,
+  consolidated push, exact-head checks, merge, and protected-main result remain
+  authoritative pending gates.
 - Reviewed deployment environments, production credentials and rotation,
   signed artifacts, physical-device evidence, supplier inputs, legal and
   certification approvals, store records, production operations, and final
@@ -324,9 +324,9 @@ PR `#29` advances the accepted supplier-neutral capability contract to schema
 v3 and makes report equivalence deterministic across Swift and Kotlin,
 including exact per-stream semantics, UTF-8 byte semantics, and explicit
 live-operation allowlists.
-Current protected `main` is
-`9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`. The app integration candidate
-consumes the deterministic export from that protected revision through a
+Current reviewed SDK `main` is
+`50a16fbc75f9ae604e773ff6608c87f0b96b67f7`. The app integration candidate
+consumes the deterministic export from that reviewed revision through a
 digest-pinned, supplier-artifact-free boundary. By owner decision on
 2026-09-23, the app and SDK repositories remain public. D-056 therefore
 requires a continuously enforced public-source boundary rather than a later
@@ -471,7 +471,9 @@ arbitrary errors.
 - Firmware and both clients pass the same conformance scenarios.
 - Parsers pass truncation, corruption, bounds, replay, duplicate, ordering, and
   fuzz/property tests.
-- A deterministic simulator proves every lifecycle and error transition.
+- A deterministic simulator exercises every modeled neutral lifecycle and
+  error transition; it does not prove supplier callbacks, BLE, firmware,
+  background execution, OS termination behavior, or physical hardware errors.
 - Hardware-in-loop proves reconnect, backlog, clock drift, power loss, full
   flash, haptics, and OTA recovery.
 - Public SDK symbols and protocol versions are documented and compatibility
@@ -496,7 +498,7 @@ and vendor-named apnea/body-composition outputs are not validated NOOP
 features. The package remains outside Git until legal, dependency, security,
 privacy, network, exact-version, and update-support gates pass.
 
-The neutral SDK contract is developed in the separate private
+The neutral SDK contract is developed in the separate public
 `Dhanunjay-Divi/NoopBandSDK` repository. Its local gate rejects tracked
 supplier binaries and CJK text in NOOP-owned public source/docs. This does not
 alter or delete NOOP's supported app localizations, and it does not rewrite the
@@ -742,14 +744,14 @@ with traceable calibration and identity.
 
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
-| S3.1 | PARTIAL | Maintain the supplier-neutral versioned capability schema; bind supplier-approved protocol details only after dossier approval. | Schema v2 and change policy are reviewed; supplier protocol truth remains gated |
-| S3.2 | OPEN | Build pure Swift and Kotlin models, framing, parser, clock, history, command, and update state machines. | Shared golden and negative corpus green |
+| S3.1 | PARTIAL | Maintain the supplier-neutral versioned capability schema; bind supplier-approved protocol details only after dossier approval. | Schema v3 and change policy are reviewed; supplier protocol truth remains gated |
+| S3.2 | PARTIAL | The pure Swift/Kotlin neutral models and session/history/command/firmware state machines are implemented; exact supplier framing, parsing, clock, and transport truth remain gated. | Shared golden and negative corpus green for the neutral contract; supplier corpus pending |
 | S3.3 | OPEN | Build CoreBluetooth and Android BLE transports around one serialized session state machine. | Lifecycle tests and platform builds |
-| S3.4 | OPEN | Build deterministic virtual band, fault injection, CLI, and packet/manifest inspector. | CI scenarios for every state and failure |
-| S3.5 | OPEN | Bind accepted batches to additive neutral storage and durable acknowledgment. | Crash/retry/idempotency database tests |
-| S3.6 | OPEN | Add bounded cross-platform diagnostics and report coverage. | Redaction, bounding, stall, and failure tests |
-| S3.7 | OPEN | Publish internal SDK integration docs, API compatibility policy, and examples. | A new client can integrate without transport internals |
-| S3.8 | OPEN | Run firmware/Swift/Kotlin conformance in CI and hardware-in-loop. | Version-pair compatibility matrix |
+| S3.4 | PARTIAL | A deterministic Swift/Kotlin virtual band and fault scenarios are implemented; supplier packet/manifest inspection and any required CLI remain open. | Neutral scenarios pass; supplier fixtures and tools pending |
+| S3.5 | PARTIAL | The neutral contract binds accepted batches to durable receipt authority; production app storage and supplier acknowledgements remain default-off. | Neutral crash/retry/idempotency tests pass; supplier/database path pending |
+| S3.6 | PARTIAL | Bounded cross-platform neutral diagnostics and app-boundary category tests exist; real adapter/report coverage remains open. | Neutral redaction, bounding, stall, and failure tests pass; physical adapter evidence pending |
+| S3.7 | PARTIAL | Public SDK integration, compatibility, and physical-handoff documents exist; exact supplier adapter examples remain gated. | A neutral client can integrate without supplier internals; supplier adapter guide pending |
+| S3.8 | PARTIAL | Swift/Kotlin conformance runs locally and through the app gates; firmware conformance and hardware-in-loop remain open. | Neutral version-pair matrix passes; firmware/physical matrix pending |
 | S3.9 | OPEN | Model printed-label matching, identify, possession challenge, confirmation, and claim-proof results without exposing identifiers. | Shared fixtures, redaction tests, and supplier conformance |
 
 **Exit:** mobile integration uses the SDK, not duplicated screen-level GATT

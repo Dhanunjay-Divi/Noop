@@ -1275,7 +1275,7 @@ enum DemoScreens {
         }
         guard let i = args.firstIndex(of: "--demo-screen"), i + 1 < args.count else { return nil }
         switch args[i + 1].lowercased() {
-        case "today":    return AnyView(TodayView())
+        case "today", "liquidtoday": return AnyView(LiquidTodayView())
         case "releasewelcome", "release_welcome":
             return AnyView(
                 WhatsNewView(
@@ -1288,11 +1288,6 @@ enum DemoScreens {
             return AnyView(WhatsNewView(presentation: .history, onClose: {}))
         case "noopplus", "noop_plus":
             return AnyView(NoopPlusView())
-        // The DEFAULT iOS Today (`noop.liquidTodayEnabled` ships true), so it needs its own entry — plain
-        // "today" renders the CLASSIC screen, which is exactly the screen whose behaviour Liquid was found
-        // to have diverged from. Without this, the default Today was the one screen the harness could not
-        // capture.
-        case "liquidtoday": return AnyView(LiquidTodayView())
         case "calendar": return AnyView(CalendarMonthView())
         case "trends":   return AnyView(TrendsView())
         case "sleep":    return AnyView(SleepView())

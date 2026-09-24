@@ -9,13 +9,13 @@ class BandSessionMachine(
 ) {
     private data class PendingLive(
         val acceptance: LiveAcceptance,
-        val sampleIdentities: List<BandSampleIdentity>,
+        val samples: List<BandSample>,
         val expectedSampleCount: Int,
     )
 
     private data class PendingHistory(
         val acceptance: HistoryAcceptance,
-        val sampleIdentities: List<BandSampleIdentity>,
+        val samples: List<BandSample>,
         val expectedSampleCount: Int,
     )
 
@@ -67,6 +67,10 @@ class BandSessionMachine(
     private var historyOperationReceivedDurableReceipt = false
     private var historyOperationLastReceiptComplete: Boolean? = null
     private val durableSampleIdentities = mutableSetOf<BandSampleIdentity>()
+    private val durableSamplesByIdentity =
+        mutableMapOf<BandSampleIdentity, BandSample>()
+    private val durableSampleFingerprintsByIdentity =
+        mutableMapOf<BandSampleIdentity, BandSampleFingerprint>()
     private val durableSampleIdentityOrder = ArrayDeque<BandSampleIdentity>()
     private var durableSourceIdentity: String? = null
     private var restoredHistoryCheckpointConsumed = false
@@ -95,6 +99,8 @@ class BandSessionMachine(
             acknowledgedCursor = acknowledgedHistoryCursor,
             lastHistoryComplete = lastDurableHistoryComplete,
             durableSampleIdentities = durableSampleIdentities.toSet(),
+            durableSampleFingerprints =
+                durableSampleFingerprintsByIdentity.values.toSet(),
         )
     }
 
@@ -687,7 +693,8 @@ class BandSessionMachine(
         }
         if (
             state != BandSessionState.READY &&
-            state != BandSessionState.LIVE_COLLECTING
+            state != BandSessionState.LIVE_COLLECTING &&
+            !isActiveOperationalState
         ) {
             diagnostics.record(
                 BandDiagnosticEvent(
@@ -712,6 +719,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_INPUT)
         }
 
+        val interruptedOperation = activeOperation
         val liveWasActive = liveActive
         invalidateAuthenticatedSession(
             if (category == BandFailureCategory.SECURITY_FAILURE) {
@@ -722,6 +730,16 @@ class BandSessionMachine(
         )
         diagnostics.record(
             buildList {
+                interruptedOperation?.let {
+                    add(
+                        BandDiagnosticEvent(
+                            diagnosticKind(it.operationClass),
+                            BandDiagnosticOutcome.INTERRUPTED,
+                            failureCategory = category,
+                            operationClass = it.operationClass,
+                        ),
+                    )
+                }
                 if (liveWasActive) {
                     add(
                         BandDiagnosticEvent(
@@ -959,15 +977,15 @@ class BandSessionMachine(
         )
         val negotiatedReport = capabilityReport
             ?: fail(BandFailureCategory.INVALID_STATE)
-        val acceptedIdentities = mutableSetOf<BandSampleIdentity>()
-        val unique = immutableBatch.samples.filter {
-            it.identity !in durableSampleIdentities &&
-                acceptedIdentities.add(it.identity)
-        }
+        val deduplicated = deduplicateSamples(
+            immutableBatch.samples,
+            BandDiagnosticKind.LIVE,
+        )
+        val unique = deduplicated.first
         nextLiveReceiptSequence += 1
         val acceptance = LiveAcceptance(
             acceptedSamples = unique,
-            duplicateSamples = immutableBatch.samples.size - unique.size,
+            duplicateSamples = deduplicated.second,
             capabilityReportRevision = negotiatedReport.reportRevision,
             parserRevision = immutableBatch.parserRevision,
             calibrationRevision = immutableBatch.calibrationRevision,
@@ -977,7 +995,7 @@ class BandSessionMachine(
         )
         pendingLive = PendingLive(
             acceptance = acceptance,
-            sampleIdentities = unique.map(BandSample::identity),
+            samples = unique,
             expectedSampleCount = unique.size,
         )
         diagnostics.recordCoalescingLatest(
@@ -1033,7 +1051,7 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.STORAGE)
         }
-        rememberDurableSampleIdentities(pending.sampleIdentities)
+        rememberDurableSamples(pending.samples)
         pendingLive = null
         diagnostics.recordCoalescingConsecutive(
             BandDiagnosticEvent(
@@ -1326,17 +1344,20 @@ class BandSessionMachine(
             fail(BandFailureCategory.INVALID_INPUT)
         }
 
-        val uniqueSet = mutableSetOf<BandSampleIdentity>()
+        val deduplicated = deduplicateSamples(
+            immutableChunk.batches.flatMap(BandSampleBatch::samples),
+            BandDiagnosticKind.HISTORY,
+        )
+        val acceptedIdentities =
+            deduplicated.first.map(BandSample::identity).toSet()
+        val appendedIdentities = mutableSetOf<BandSampleIdentity>()
         val unique = mutableListOf<AcceptedHistorySample>()
-        var duplicates = 0
         immutableChunk.batches.forEach { batch ->
             batch.samples.forEach { sample ->
                 if (
-                    sample.identity in durableSampleIdentities ||
-                    !uniqueSet.add(sample.identity)
+                    sample.identity in acceptedIdentities &&
+                    appendedIdentities.add(sample.identity)
                 ) {
-                    duplicates += 1
-                } else {
                     unique += AcceptedHistorySample(
                         sourceIdentity = batch.sourceIdentity,
                         lane = batch.lane,
@@ -1365,13 +1386,13 @@ class BandSessionMachine(
             retainedRange = immutableChunk.retainedRange,
             firstLostRange = immutableChunk.firstLostRange,
             acceptedSamples = unique,
-            duplicateSamples = duplicates,
+            duplicateSamples = deduplicated.second,
             sessionNonce = sessionNonce,
             receiptSequence = nextHistoryReceiptSequence,
         )
         pendingHistory = PendingHistory(
             acceptance,
-            unique.map { it.sample.identity },
+            unique.map(AcceptedHistorySample::sample),
             unique.size,
         )
         diagnostics.record(
@@ -1448,7 +1469,7 @@ class BandSessionMachine(
             fail(BandFailureCategory.STORAGE)
         }
 
-        rememberDurableSampleIdentities(pending.sampleIdentities)
+        rememberDurableSamples(pending.samples)
         acknowledgedHistoryCursor = receipt.nextCursor
         lastDurableHistoryComplete = pending.acceptance.complete
         historyOperationReceivedDurableReceipt = true
@@ -1617,6 +1638,17 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.INVALID_INPUT)
         }
+        if (category !in operationFailureCategories(token.operationClass)) {
+            diagnostics.record(
+                BandDiagnosticEvent(
+                    operationDiagnosticKind,
+                    BandDiagnosticOutcome.REJECTED,
+                    failureCategory = BandFailureCategory.INVALID_INPUT,
+                    operationClass = token.operationClass,
+                ),
+            )
+            fail(BandFailureCategory.INVALID_INPUT)
+        }
         val terminalFirmwareFailure =
             token.operationClass == BandOperationClass.FIRMWARE &&
                 firmwareDisposition == BandFirmwareFailureDisposition.TERMINAL
@@ -1642,12 +1674,42 @@ class BandSessionMachine(
             )
             fail(BandFailureCategory.BUSY)
         }
-        if (category == BandFailureCategory.SECURITY_FAILURE) {
-            invalidateAuthenticatedSession(BandSessionState.SECURITY_FAILURE)
-        } else if (terminalFirmwareFailure) {
+        if (terminalFirmwareFailure) {
             invalidateAuthenticatedSession(BandSessionState.FIRMWARE_FAILURE)
-        } else if (category == BandFailureCategory.AUTHENTICATION) {
-            invalidateAuthenticatedSession(BandSessionState.REJECTED)
+        } else if (
+            category == BandFailureCategory.SECURITY_FAILURE ||
+            category == BandFailureCategory.AUTHENTICATION
+        ) {
+            val liveWasActive = liveActive
+            invalidateAuthenticatedSession(
+                if (category == BandFailureCategory.SECURITY_FAILURE) {
+                    BandSessionState.SECURITY_FAILURE
+                } else {
+                    BandSessionState.REJECTED
+                },
+            )
+            diagnostics.record(
+                buildList {
+                    if (liveWasActive) {
+                        add(
+                            BandDiagnosticEvent(
+                                BandDiagnosticKind.LIVE,
+                                BandDiagnosticOutcome.INTERRUPTED,
+                                failureCategory = category,
+                            ),
+                        )
+                    }
+                    add(
+                        BandDiagnosticEvent(
+                            operationDiagnosticKind,
+                            BandDiagnosticOutcome.FAILED,
+                            failureCategory = category,
+                            operationClass = token.operationClass,
+                        ),
+                    )
+                },
+            )
+            return null
         } else if (
             token.operationClass == BandOperationClass.FIRMWARE &&
             category == BandFailureCategory.DISCONNECTED
@@ -2391,24 +2453,31 @@ class BandSessionMachine(
 
     private fun clearDurableSampleIdentities() {
         durableSampleIdentities.clear()
+        durableSamplesByIdentity.clear()
+        durableSampleFingerprintsByIdentity.clear()
         durableSampleIdentityOrder.clear()
     }
 
-    private fun restoreDurableSampleIdentities(
-        identities: Set<BandSampleIdentity>,
+    private fun restoreDurableSampleFingerprints(
+        fingerprints: Set<BandSampleFingerprint>,
     ) {
         clearDurableSampleIdentities()
-        rememberDurableSampleIdentities(
-            identities.sortedWith(
-                compareBy<BandSampleIdentity> {
-                    it.deviceTimeMilliseconds
-                }.thenBy {
-                    it.sequence
-                }.thenBy {
-                    it.stream.wireValue
-                },
-            ),
+        val ordered = fingerprints.sortedWith(
+            compareBy<BandSampleFingerprint> {
+                it.identity.deviceTimeMilliseconds
+            }.thenBy {
+                it.identity.sequence
+            }.thenBy {
+                it.identity.stream.wireValue
+            },
         )
+        rememberDurableSampleIdentities(
+            ordered.map(BandSampleFingerprint::identity),
+        )
+        ordered.forEach { fingerprint ->
+            durableSampleFingerprintsByIdentity[fingerprint.identity] =
+                fingerprint
+        }
     }
 
     private fun prepareDurableState(sourceIdentity: String) {
@@ -2428,8 +2497,8 @@ class BandSessionMachine(
                 )
                 fail(BandFailureCategory.INVALID_INPUT)
             }
-            restoreDurableSampleIdentities(
-                restoredHistoryCheckpoint.durableSampleIdentities,
+            restoreDurableSampleFingerprints(
+                restoredHistoryCheckpoint.durableSampleFingerprints,
             )
             acknowledgedHistoryCursor =
                 restoredHistoryCheckpoint.acknowledgedCursor
@@ -2454,14 +2523,131 @@ class BandSessionMachine(
                     durableSampleIdentities.size ==
                     BandContractLimits.HISTORY_CHECKPOINT_IDENTITIES
                 ) {
-                    durableSampleIdentities.remove(
-                        durableSampleIdentityOrder.removeFirst(),
-                    )
+                    val oldest = durableSampleIdentityOrder.removeFirst()
+                    durableSampleIdentities.remove(oldest)
+                    durableSamplesByIdentity.remove(oldest)
+                    durableSampleFingerprintsByIdentity.remove(oldest)
                 }
                 durableSampleIdentities.add(identity)
                 durableSampleIdentityOrder.addLast(identity)
             }
         }
+    }
+
+    private fun rememberDurableSamples(samples: List<BandSample>) {
+        rememberDurableSampleIdentities(samples.map(BandSample::identity))
+        samples.forEach { sample ->
+            if (sample.identity in durableSampleIdentities) {
+                durableSamplesByIdentity[sample.identity] = sample
+                durableSampleFingerprintsByIdentity[sample.identity] =
+                    BandSampleFingerprint(sample)
+            }
+        }
+    }
+
+    private fun deduplicateSamples(
+        samples: List<BandSample>,
+        diagnosticKind: BandDiagnosticKind,
+    ): Pair<List<BandSample>, Int> {
+        val incomingByIdentity =
+            mutableMapOf<BandSampleIdentity, BandSample>()
+        val unique = mutableListOf<BandSample>()
+        var duplicates = 0
+
+        samples.forEach { sample ->
+            val incoming = incomingByIdentity[sample.identity]
+            if (incoming != null) {
+                if (!incoming.hasEquivalentPayload(sample)) {
+                    diagnostics.record(
+                        BandDiagnosticEvent(
+                            diagnosticKind,
+                            BandDiagnosticOutcome.REJECTED,
+                            failureCategory = BandFailureCategory.INVALID_INPUT,
+                        ),
+                    )
+                    fail(BandFailureCategory.INVALID_INPUT)
+                }
+                duplicates += 1
+            } else {
+                incomingByIdentity[sample.identity] = sample
+                val durable = durableSamplesByIdentity[sample.identity]
+                if (durable != null) {
+                    if (!durable.hasEquivalentPayload(sample)) {
+                        diagnostics.record(
+                            BandDiagnosticEvent(
+                                diagnosticKind,
+                                BandDiagnosticOutcome.REJECTED,
+                                failureCategory =
+                                BandFailureCategory.INVALID_INPUT,
+                            ),
+                        )
+                        fail(BandFailureCategory.INVALID_INPUT)
+                    }
+                    duplicates += 1
+                } else {
+                    val fingerprint =
+                        durableSampleFingerprintsByIdentity[sample.identity]
+                    if (fingerprint != null) {
+                        if (!fingerprint.matches(sample)) {
+                            diagnostics.record(
+                                BandDiagnosticEvent(
+                                    diagnosticKind,
+                                    BandDiagnosticOutcome.REJECTED,
+                                    failureCategory =
+                                    BandFailureCategory.INVALID_INPUT,
+                                ),
+                            )
+                            fail(BandFailureCategory.INVALID_INPUT)
+                        }
+                        duplicates += 1
+                    } else {
+                        unique += sample
+                    }
+                }
+            }
+        }
+        return unique to duplicates
+    }
+
+    private val isActiveOperationalState: Boolean
+        get() = when (activeOperation?.operationClass) {
+            BandOperationClass.HISTORY ->
+                state == BandSessionState.HISTORY_COLLECTING
+            BandOperationClass.FIRMWARE ->
+                state == BandSessionState.UPDATING_FIRMWARE
+            null -> false
+            else -> state == BandSessionState.EXECUTING_COMMAND
+        }
+
+    private fun operationFailureCategories(
+        operationClass: BandOperationClass,
+    ): Set<BandFailureCategory> {
+        val categories = mutableSetOf(
+            BandFailureCategory.UNAVAILABLE,
+            BandFailureCategory.PERMISSION,
+            BandFailureCategory.NO_RESULT,
+            BandFailureCategory.TIMEOUT,
+            BandFailureCategory.REJECTED,
+            BandFailureCategory.AUTHENTICATION,
+            BandFailureCategory.SECURITY_FAILURE,
+            BandFailureCategory.DISCONNECTED,
+            BandFailureCategory.LOW_BATTERY,
+            BandFailureCategory.UNSUPPORTED,
+            BandFailureCategory.INTERNAL_FAILURE,
+        )
+        when (operationClass) {
+            BandOperationClass.HISTORY -> categories += setOf(
+                BandFailureCategory.STORAGE,
+                BandFailureCategory.HISTORY_STALLED,
+            )
+            BandOperationClass.FIRMWARE -> categories += setOf(
+                BandFailureCategory.UPDATE_NOT_ELIGIBLE,
+                BandFailureCategory.UPDATE_INTERRUPTED,
+                BandFailureCategory.UPDATE_VERIFICATION,
+            )
+            else -> Unit
+        }
+        return categories
     }
 
     private fun validateNegotiatedBatch(

@@ -3608,8 +3608,8 @@ struct TodayView: View {
                 .accessibilityLabel("Edit Key Metrics")
                 .help("Choose and reorder pinned Key Metrics")
             }
-            // Keep every prior metric visible. The editor's three-to-five pins lead the grid in saved order,
-            // and the unpinned catalog follows in its stable canonical order.
+            // Keep Today focused on the editor-selected three-to-five metrics. The full catalog remains in
+            // Explore and each metric's history view.
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                 ForEach(visibleKeyMetrics) { metric in
                     // Pin every tile to one height so the grid reads as an even matrix. A LazyVGrid only
@@ -3629,10 +3629,7 @@ struct TodayView: View {
         }
     }
 
-    /// The complete catalog with the user's saved three-to-five pins first.
-    private var visibleKeyMetrics: [KeyMetric] {
-        KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)
-    }
+    private var visibleKeyMetrics: [KeyMetric] { enabledKeyMetrics }
 
     /// A carried recovery-vital tile's (value, caption): today's own value wins (with the metric's
     /// static unit caption); otherwise, when we're carrying the last scored day (#543), the PRIOR row's

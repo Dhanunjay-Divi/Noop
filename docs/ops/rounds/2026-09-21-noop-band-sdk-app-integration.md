@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `final public-source handoff locally green; push and hosted checks pending`
+- State: `September 24 final local candidate green; commit, hosted checks, protected merge, and cleanup pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
@@ -25,8 +25,8 @@
 - Final runtime and SDK-repin candidate:
   `e12b71fb55d620a642ef340c4503b4b15970091c`
 - Record commit or PR: app PR `#17`, remote app head
-  `6d3b54a01ed6fd7e741e721aa6ff467d3b6bfcb4`; SDK PR `#31` upstream merge
-  `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`. The source-only app artifact
+  `aa3fa63c401fc60e486055ada3676df0f5f02d5b`; SDK PR `#32` upstream merge
+  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7`. The source-only app artifact
   and provenance pins consume that exact merge. Exact local app, simulator,
   and onboarding verification are green; final repository-control verification
   follows this documentation repin. Independent final review found no P0/P1
@@ -44,7 +44,7 @@ future supplier adapter without changing the existing WHOOP transport.
 
 Success means:
 
-- the app pins and verifies one exact private-SDK source revision and file
+- the app pins and verifies one exact public source-only SDK revision and file
   digest set;
 - Apple and Android compile the neutral production contract;
 - deterministic tests exercise the neutral session and app source-selection
@@ -740,7 +740,7 @@ Success means:
 | Prior PR `#23` independent app exports | Two exact-merge ten-file app-source exports are byte-identical; manifest SHA-256 is `539ec7ab2c5906ea64ab98bb1be0f5ceb70f5ffbf9e0911b5b91cbf0b56e7bc7`, with app wrapper digest `b24cb6b607710f867d96a3ea5d3c794b3d7517073b995acadfe750153d24d815` | The prior vendored artifact was deterministic and traceable to SDK PR `#23` merge `1b4c614e` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Historical PR `#24` independent app exports | Two independent exact-merge ten-file app-source exports are byte-identical; manifest SHA-256 is `4801fd6ecbece36df653d91e0d0d975f2fea4c1f7d59f81c69a8b08d90f1b9cf`, app wrapper digest is `31705f1ceb14f0d6eac686083b7012ff685403b0e01435c472e5a8fce3ca7943`, supplier payloads are absent, and both normalized file-digest lists match | The historical vendored artifact was deterministic and traceable to SDK PR `#24` merge `f20f4ed` | Legal rights or supplier provenance beyond the absent-artifact declaration |
 | Prior protected SDK app repin | SDK Swift 55/55, Kotlin 63/63 plus distribution, shared conformance 38/38, and clean repository gate 56/56 passed before PR `#20` merged. The 9-test app verifier suite, vendored Swift 15/15, macOS app boundary 10/10, and Android Full app boundary 12/12 pass; Demo plus Full and Demo instrumentation sources compile. | Ordered conformance publication and the ready-session late-callback correction were consumed while WHOOP remained the default comparison transport and the first-party factory remained disabled | Supplier transport invocation or any physical-device behavior |
-| Current protected SDK app repin | SDK PR `#31` merged at `9fd84ff6`; two clean exports are byte-identical with manifest SHA-256 `1290444d1e997a2e9bc4bcc025685f33e9bdd8cf147e49c716f8d7017bc56fa1` and app-owned wrapper SHA-256 `f2250d3a7f301c893c280fe091b0a46e32beadadd7938e1e4735dbaeb39e3149`. Upstream Swift passes 100/100, Kotlin/JVM 102/102 plus `installDist`, all 50 shared scenarios match, and the 71-file repository gate passes. The app artifact wall passes 9/9, vendored Swift 16/16, macOS boundary 10/10, Android Full and Demo 15/15 each with both instrumentation source graphs compiling, the unsigned Release iPhone graph embeds Watch, complications, and widgets, and the exact-current focused iOS profile regression passes 1/1. | Capability schema v3, privacy-safe public rendering, exact-generation history-acknowledgement authority, source provenance, default-off routing, and first-run account visibility are consumed while WHOOP remains the default comparison transport and the first-party factory remains disabled | Supplier transport invocation, signed-device behavior, live identity-provider operation, or any physical-device result |
+| Current protected SDK app repin | SDK PR `#32` merged at `50a16fbc`; two clean exports are byte-identical with manifest SHA-256 `13ff578d92d3654d07075c0afe1fafef8f74f48a07f462ff0eb5b21dacda62ca`. Upstream Swift passes 106/106, Kotlin/JVM 114/114 plus `installDist`, all 50 shared scenarios match, and the 73-file repository gate passes. The app artifact wall passes 9/9, vendored Swift 16/16, macOS boundary 10/10, Android Full and Demo 15/15 each with both instrumentation source graphs compiling, and the unsigned Release iPhone graph embeds Watch, complications, and widgets. | Capability schema v3, collision-resistant replay evidence, Java checkpoint compatibility, duplicate-payload conflict rejection, source provenance, default-off routing, and privacy-safe bounded rendering are consumed while WHOOP remains the default comparison transport and the first-party factory remains disabled | Supplier transport invocation, signed-device behavior, live identity-provider operation, or any physical-device result |
 | Artifact verifier plus unit tests | Exact ten-file export passed; all 9 verifier tests passed, including one positive case and eight adversarial cases covering symlink roots and ancestors, content drift, unexpected files, supplier payloads, and an unmanifested Git mode-160000 entry; no supplier artifacts found | Source, manifest, package wrapper, exact tracked-file layout, complete path/tree symlink policy, Git-index regular-file policy, and no-binary policy are pinned | Physical compatibility |
 | Independent app review remediation | A real temporary-Git protected-base test rejects both source tampering and an unmanifested gitlink. Apple passes 10/10 and Android passes 11/11 after adding same-session stop/restart live-token replay regressions; the current token still persists and closes normally. | Candidate-controlled filesystem shape cannot hide a tracked gitlink, and a prior live operation cannot authorize a restarted collection within the same authenticated session | Supplier callback behavior, BLE transport timing, or physical persistence |
 | Protected-base artifact authority | 70 focused release/trust tests pass; a copied artifact with a one-line source mutation is rejected by the protected verifier; non-owner `unittest` and standard-library shadow paths are rejected; the complete Tools wall passes 315 tests with one intentional skip | Future non-owner candidates cannot satisfy the SDK artifact gate by shadowing Python's test runner or by relying only on candidate-controlled tests | Owner authorization, hosted exact-SHA execution, supplier rights, or physical compatibility |
@@ -800,8 +800,8 @@ Success means:
   repin, verifier hardening, callback correction, and reviewed evidence
   `e6a932f5accd8c2fc01b1778b52c3d7c0d1b932f`.
 - Branch and remote state: PR `#17` is open from the dedicated branch.
-  SDK PR `#31` is merged at
-  `9fd84ff6af3d48c41fb5af3128efec9dcc6948a4`. The source-only app artifact
+  SDK PR `#32` is merged at
+  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7`. The source-only app artifact
   and app-owned provenance pins consume that exact merge locally. Exact app,
   simulator, and onboarding verification are green; repository controls are
   being rerun after the final documentation repin. Independent final review
@@ -825,7 +825,7 @@ Success means:
 
 ## Open risks and honest limitations
 
-- Exact PR `#31` SDK and app-boundary verification is green, including
+- Exact PR `#32` SDK and app-boundary verification is green, including
   Apple/Android app boundaries, the iPhone/Watch/widget build graph, and the
   focused hosted-failure regression. Independent final review found no P0/P1
   blocker; its two P2 evidence findings were corrected upstream. The final
@@ -842,7 +842,7 @@ Success means:
 
 ## Next round
 
-1. Complete the exact reviewed PR `#31` repository-control wall, commit the
+1. Complete the exact reviewed PR `#32` repository-control wall, commit the
    replacement, and push once.
 2. Require every exact-SHA protected context and matching review on that
    candidate, then resolve only threads proven fixed by matching evidence.
@@ -1121,3 +1121,98 @@ Success means:
   replacement repository wall passes 318/318 with one intentional skip,
   focused trust checks pass 64/64, and all 84 operations records validate.
   Replacement exact-head hosted checks remain before protected integration.
+
+## September 24 SDK PR 32, UI, and simulator closeout
+
+- SDK PR `#32` merged normally at
+  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7`. Two clean source-only exports
+  are byte-identical; the exact ten-file manifest SHA-256 is
+  `13ff578d92d3654d07075c0afe1fafef8f74f48a07f462ff0eb5b21dacda62ca`.
+  Supplier artifacts remain absent. Upstream evidence passes Swift 106/106,
+  Kotlin/JVM 114/114 plus `installDist`, all 50 shared conformance scenarios,
+  and the 73-file repository gate.
+- The app's neutral SDK boundary, artifact verifier, release controls,
+  Apple/Android constants, and physical handoff now pin that exact revision.
+  WHOOP remains the default comparison transport; the first-party source
+  factory is still disabled.
+- The supported Today presentation is now one metric-first Liquid surface on
+  iPhone and macOS rather than a customer-facing prototype toggle. It limits
+  the first view to selected key metrics with full history behind its explicit
+  action, uses semantic typography, preserves an accessibility single-column
+  layout, and keeps the macOS viewer in a bounded sequential track. Settings
+  and Friends no longer expose obsolete self-hosted or collector-only controls
+  on managed viewers.
+- The unsigned Release iOS graph completed successfully and embedded
+  `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex`.
+  Focused macOS application tests passed 16/16. Current macOS Today and Friends
+  captures show the sequential metric-first layout and managed-account
+  unavailable state without the removed self-hosted setup.
+- The DEBUG iPhone visual harness was repaired with one fixed, synthetic-only
+  seeder-ready marker. The disposable simulator matrix then passed 21/21
+  scenarios with 21 unique manifest rows and a clean crash scan; the simulator
+  was deleted. The marker contains no health value, identity, payload, or
+  user-provided content and is absent from Release behavior.
+- Android Full and Demo SDK integration tests passed 15/15 for each variant,
+  and both instrumentation source graphs compiled. The Demo APK built,
+  installed, and launched on a disposable API 35 emulator. Direct inspection
+  covered the fictional metric-first Today screen, simplified More screen, and
+  consent-first Friends sample. The app-specific crash/ANR scan was empty.
+  The emulator was shut down immediately after evidence capture.
+- These results prove compilation, deterministic contracts, and simulator UI
+  behavior only. They do not prove signed installation, BLE, supplier-band
+  compatibility, background execution, history retention, haptics,
+  notifications, battery, firmware, sensor accuracy, or physiological
+  validity. Section 1.2 of the physical handoff gives the next device-connected
+  agent exact clean-checkout and install starting commands.
+
+## September 24 independent review and final local controls
+
+- A fresh read-only review of the complete dirty diff found no P0 or P1
+  blocker. Four P2 contract defects were confirmed and corrected:
+  Android's full-history action now opens Explore rather than Trends; Apple's
+  equivalent action has a 44-point minimum touch target; the current handoff
+  labels SDK PR `#31` evidence as historical rather than current; and the
+  Android guide no longer claims a fully offline, account-free shipping model.
+- One proposed SDK replay finding was rejected as inconsistent with the
+  reviewed contract rather than patched. At SDK merge `50a16fbc`,
+  `docs/ARCHITECTURE.md` states that a legacy identity-only checkpoint restores
+  cursor/completion progress but cannot suppress replay without payload
+  evidence, SDK-D-007 records the same decision, and the Apple and Android
+  regressions intentionally accept one replayed sample with zero SDK duplicate
+  count. Application storage remains the durable dedupe authority. Changing
+  that behavior in the vendored artifact would have violated the protected SDK
+  contract.
+- The post-remediation focused trust and terminology matrix passes 69 tests.
+  Apple `ScreenStateContractTests` passes 15/15. Android Demo compilation and
+  `UiAuditPresentationContractTest` complete successfully across 46 tasks.
+  The complete repository Tools wall passes 318 tests with one intentional
+  Safety smoke skip when its optional server cryptography dependency is not
+  installed. The first focused trust rerun failed closed only because SwiftPM
+  had regenerated an empty vendor `.swiftpm` directory; exact deletion of that
+  zero-byte generated path restored the required ten-file artifact layout and
+  the unchanged 69-test matrix passed.
+- Direct controls pass all nine release controls, all ten required contexts,
+  trusted self-verification, exact SDK artifact verification and its nine
+  adversarial cases, calibration parity for 12 metrics, 3 revisions, 13
+  thresholds, and 16 guards, distribution provenance, private-data and
+  health-claim scans, complete localization, all 84 operations records, shell
+  syntax and ShellCheck, Python compilation, and diff hygiene. One earlier
+  direct invocation named a nonexistent Python test module; the corrected
+  repository-owned command passed and no product failure was hidden.
+- Observability review found no new health-data or transport boundary in these
+  final fixes. Navigation, accessibility sizing, and presentation-state
+  failures remain covered by deterministic UI contracts and simulator crash
+  scans. Existing bounded app diagnostics remain unchanged; no health value,
+  identity, content, credential, URL, payload, or arbitrary exception text was
+  added to logs.
+- GitHub again reports both repositories public with default branch `main`.
+  The final local source remains source-only: supplier binaries, firmware,
+  credentials, signing material, private inputs, and personal or health data
+  are absent. The only remaining software-integration steps are one
+  consolidated commit and push, replacement exact-head protected checks,
+  normal merge, protected-main verification, and exact round-owned cleanup.
+  Signed installation and every supplier/physical behavior remain separate
+  device or external gates.
+- The final reviewed terminology snapshot records 17,883 occurrences across
+  1,589 groups with zero forbidden mappings. Its protected SHA-256 is
+  `194d2a4bd735f25df861b9a95a4f805ae4a50c22f59ebd7d1f20e09273ec3423`.

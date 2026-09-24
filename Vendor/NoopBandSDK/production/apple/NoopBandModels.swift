@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum BandContractLimits {
@@ -337,7 +338,13 @@ public struct BandStreamSemantics:
     }
 }
 
-public struct BandPairingCandidate: Equatable, Sendable {
+public struct BandPairingCandidate:
+    Equatable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     public let handle: String
     public let compatible: Bool
     public let identifyEligible: Bool
@@ -355,6 +362,25 @@ public struct BandPairingCandidate: Equatable, Sendable {
         else {
             throw BandFailureCategory.invalidInput
         }
+    }
+
+    public var description: String {
+        "BandPairingCandidate("
+            + "compatible: \(compatible), "
+            + "identifyEligible: \(identifyEligible)"
+            + ")"
+    }
+
+    public var debugDescription: String { description }
+    public var customMirror: Mirror {
+        Mirror(
+            self,
+            children: [
+                "compatible": compatible,
+                "identifyEligible": identifyEligible,
+            ],
+            displayStyle: .struct
+        )
     }
 }
 
@@ -798,6 +824,13 @@ public struct BandSample:
         self.quality = quality
     }
 
+    public static func == (lhs: BandSample, rhs: BandSample) -> Bool {
+        lhs.identity == rhs.identity
+            && lhs.value == rhs.value
+            && lhs.unit == rhs.unit
+            && lhs.quality == rhs.quality
+    }
+
     public func validate() throws {
         guard identity.sequence <= BandContractLimits.maximumSampleSequence,
               identity.deviceTimeMilliseconds
@@ -844,11 +877,87 @@ public struct BandSample:
         }
     }
 
+    func hasEquivalentPayload(to other: BandSample) -> Bool {
+        identity == other.identity
+            && value == other.value
+            && unit == other.unit
+            && quality == other.quality
+    }
+
     public var description: String { "BandSample" }
     public var debugDescription: String { "BandSample" }
     public var customMirror: Mirror {
         redactedMirror(of: self, name: "BandSample")
     }
+}
+
+public struct BandSampleFingerprint:
+    Hashable,
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
+    public let identity: BandSampleIdentity
+    public let payloadFingerprint: String
+
+    public init(
+        identity: BandSampleIdentity,
+        payloadFingerprint: String
+    ) {
+        self.identity = identity
+        self.payloadFingerprint = payloadFingerprint
+    }
+
+    public init(sample: BandSample) {
+        identity = sample.identity
+        payloadFingerprint = samplePayloadFingerprint(sample)
+    }
+
+    public func validate() throws {
+        guard identity.sequence <= BandContractLimits.maximumSampleSequence,
+              identity.deviceTimeMilliseconds
+                >= BandContractLimits.minimumDeviceTimeMilliseconds,
+              payloadFingerprint.utf8.count == 64,
+              payloadFingerprint.utf8.allSatisfy({
+                  (48 ... 57).contains($0) || (97 ... 102).contains($0)
+              })
+        else {
+            throw BandFailureCategory.invalidInput
+        }
+    }
+
+    func matches(_ sample: BandSample) -> Bool {
+        identity == sample.identity
+            && payloadFingerprint == samplePayloadFingerprint(sample)
+    }
+
+    public var description: String { "BandSampleFingerprint" }
+    public var debugDescription: String { "BandSampleFingerprint" }
+    public var customMirror: Mirror {
+        redactedMirror(of: self, name: "BandSampleFingerprint")
+    }
+}
+
+private func samplePayloadFingerprint(_ sample: BandSample) -> String {
+    let normalizedBits = sample.value == 0 ? UInt64(0) : sample.value.bitPattern
+    let bits = String(normalizedBits, radix: 16)
+    let paddedBits = String(repeating: "0", count: 16 - bits.count) + bits
+    let canonical = [
+        "v2",
+        paddedBits,
+        sample.unit.rawValue,
+        sample.quality.rawValue,
+    ].joined(separator: "|")
+    let digest = SHA256.hash(data: Data(canonical.utf8))
+    let hex = Array("0123456789abcdef".utf8)
+    var encoded = [UInt8]()
+    encoded.reserveCapacity(64)
+    for byte in digest {
+        encoded.append(hex[Int(byte >> 4)])
+        encoded.append(hex[Int(byte & 0x0f)])
+    }
+    return String(decoding: encoded, as: UTF8.self)
 }
 
 public struct BandSampleBatch:
@@ -1089,17 +1198,20 @@ public struct BandHistoryCheckpoint:
     public let acknowledgedCursor: String?
     public let lastHistoryComplete: Bool?
     public let durableSampleIdentities: Set<BandSampleIdentity>
+    public let durableSampleFingerprints: Set<BandSampleFingerprint>
 
     public init(
         sourceIdentity: String,
         acknowledgedCursor: String?,
         lastHistoryComplete: Bool?,
-        durableSampleIdentities: Set<BandSampleIdentity>
+        durableSampleIdentities: Set<BandSampleIdentity>,
+        durableSampleFingerprints: Set<BandSampleFingerprint> = []
     ) {
         self.sourceIdentity = sourceIdentity
         self.acknowledgedCursor = acknowledgedCursor
         self.lastHistoryComplete = lastHistoryComplete
         self.durableSampleIdentities = durableSampleIdentities
+        self.durableSampleFingerprints = durableSampleFingerprints
     }
 
     public static func == (
@@ -1114,9 +1226,12 @@ public struct BandHistoryCheckpoint:
             && lhs.lastHistoryComplete == rhs.lastHistoryComplete
             && lhs.durableSampleIdentities
                 == rhs.durableSampleIdentities
+            && lhs.durableSampleFingerprints
+                == rhs.durableSampleFingerprints
     }
 
     public func validate() throws {
+        let fingerprintIdentities = durableSampleFingerprints.map(\.identity)
         guard sourceIdentity.hasValidUTF8Length(
                   maximum: BandContractLimits.sourceIdentityLength
               ),
@@ -1131,10 +1246,17 @@ public struct BandHistoryCheckpoint:
                   $0.sequence <= BandContractLimits.maximumSampleSequence
                     && $0.deviceTimeMilliseconds
                         >= BandContractLimits.minimumDeviceTimeMilliseconds
-              })
+              }),
+              durableSampleFingerprints.count
+                <= BandContractLimits.historyCheckpointIdentities,
+              Set(fingerprintIdentities).count
+                == durableSampleFingerprints.count,
+              durableSampleFingerprints.isEmpty
+                || Set(fingerprintIdentities) == durableSampleIdentities
         else {
             throw BandFailureCategory.invalidInput
         }
+        try durableSampleFingerprints.forEach { try $0.validate() }
     }
 
     public var description: String { "BandHistoryCheckpoint" }

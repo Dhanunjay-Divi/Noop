@@ -1556,15 +1556,17 @@ object BandConformanceRunner {
     }
 
     private fun historyCheckpointRestored(): BandConformanceResult {
+        val checkpointSamples =
+            VirtualBandFixtures.historyChunk.batches
+                .flatMap(BandSampleBatch::samples)
         val checkpoint = BandHistoryCheckpoint(
             sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
             acknowledgedCursor = "cursor-2",
             lastHistoryComplete = false,
             durableSampleIdentities =
-                VirtualBandFixtures.historyChunk.batches
-                    .flatMap(BandSampleBatch::samples)
-                    .map(BandSample::identity)
-                    .toSet(),
+                checkpointSamples.map(BandSample::identity).toSet(),
+            durableSampleFingerprints =
+                checkpointSamples.map(::BandSampleFingerprint).toSet(),
         )
         val session = BandSessionMachine(restoredHistoryCheckpoint = checkpoint)
         val scanToken = session.beginScan()
@@ -1644,15 +1646,17 @@ object BandConformanceRunner {
     }
 
     private fun historyCheckpointSurvivesSourceMismatch(): BandConformanceResult {
+        val checkpointSamples =
+            VirtualBandFixtures.historyChunk.batches
+                .flatMap(BandSampleBatch::samples)
         val checkpoint = BandHistoryCheckpoint(
             sourceIdentity = VirtualBandFixtures.identity.sourceIdentity,
             acknowledgedCursor = "cursor-2",
             lastHistoryComplete = false,
             durableSampleIdentities =
-                VirtualBandFixtures.historyChunk.batches
-                    .flatMap(BandSampleBatch::samples)
-                    .map(BandSample::identity)
-                    .toSet(),
+                checkpointSamples.map(BandSample::identity).toSet(),
+            durableSampleFingerprints =
+                checkpointSamples.map(::BandSampleFingerprint).toSet(),
         )
         val session = BandSessionMachine(restoredHistoryCheckpoint = checkpoint)
         val alternateIdentity = VirtualBandFixtures.identity.copy(
@@ -2425,6 +2429,14 @@ object BandConformanceRunner {
             acknowledgedCursor = null,
             lastHistoryComplete = null,
             durableSampleIdentities = identities,
+            durableSampleFingerprints = identities.map {
+                BandSampleFingerprint(
+                    identity = it,
+                    payloadFingerprint =
+                        "a10e64de6afbbee0a9f4c4da6ab1e54" +
+                            "a3c5a77adc94ba6c76092b1cf419a0046",
+                )
+            }.toSet(),
         )
         val session = BandSessionMachine(restoredHistoryCheckpoint = checkpoint)
         val scanToken = session.beginScan()

@@ -1707,6 +1707,7 @@
     <string name="key_metrics_selection_count">%1$d von %2$d angepinnt</string>
     <string name="key_metrics_show_selected">Ausgewählte Messwerte anzeigen</string>
     <string name="key_metrics_show_all_count">Alle Messwerte anzeigen (%1$d)</string>
+    <string name="key_metrics_open_history">Gesamten Messwertverlauf öffnen</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
     <string name="l10n_today_screen_data_unit_c768ef8c">%1$s</string>
     <string name="l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96">%1$s, %2$s. Tippen Sie, um einen Tag auszuwählen, wischen Sie, um den Tag zu ändern.</string>
