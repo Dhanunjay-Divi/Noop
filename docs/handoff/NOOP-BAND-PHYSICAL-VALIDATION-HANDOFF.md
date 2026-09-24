@@ -77,9 +77,9 @@ from pathlib import Path
 
 manifest = Path("Vendor/NoopBandSDK/noop-band-sdk-manifest.json")
 data = json.loads(manifest.read_text())
-assert data["sourceRevision"] == "50a16fbc75f9ae604e773ff6608c87f0b96b67f7"
+assert data["sourceRevision"] == "b02808372b7c537f22058c7ebc75d92c750373be"
 assert hashlib.sha256(manifest.read_bytes()).hexdigest() == (
-    "13ff578d92d3654d07075c0afe1fafef8f74f48a07f462ff0eb5b21dacda62ca"
+    "6beca829f3b2a367cf7046544e8d06dc74ae9f905e1eefe4bb58ccf41615fd34"
 )
 assert data["supplierArtifactsIncluded"] is False
 print("pinned source-only SDK verified")

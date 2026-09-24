@@ -12,13 +12,14 @@ Last updated: **2026-09-24**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: `NoopBandSDK` PR `#32` merged normally at
-  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7`. Two independent source-only
+- Current state: `NoopBandSDK` PR `#33` merged normally at
+  `b02808372b7c537f22058c7ebc75d92c750373be`. Two independent source-only
   exports were byte-identical. The exact ten-file manifest SHA-256 is
-  `13ff578d92d3654d07075c0afe1fafef8f74f48a07f462ff0eb5b21dacda62ca`;
+  `6beca829f3b2a367cf7046544e8d06dc74ae9f905e1eefe4bb58ccf41615fd34`;
   supplier artifacts are absent. Upstream verification passes Swift 106/106,
   Kotlin/JVM 114/114 plus `installDist`, all 50 shared conformance scenarios,
-  and the 73-file repository gate. The app consumes that exact revision while
+  and the 74-file repository gate. The app is being repinned to that exact
+  revision while
   preserving WHOOP as the default comparison transport and leaving the
   first-party source factory disabled.
   Exact-current local app evidence includes the artifact verifier and its

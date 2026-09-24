@@ -403,8 +403,11 @@ public actor BandSessionMachine {
                 )
                 throw BandFailureCategory.invalidInput
             }
-            restoreDurableSampleFingerprints(
-                restoredHistoryCheckpoint.durableSampleFingerprints
+            restoreDurableSampleState(
+                identities:
+                    restoredHistoryCheckpoint.durableSampleIdentities,
+                fingerprints:
+                    restoredHistoryCheckpoint.durableSampleFingerprints
             )
             acknowledgedHistoryCursor =
                 restoredHistoryCheckpoint.acknowledgedCursor
@@ -2462,14 +2465,16 @@ public actor BandSessionMachine {
         durableSampleIdentityNextEviction = 0
     }
 
-    private func restoreDurableSampleFingerprints(
-        _ fingerprints: Set<BandSampleFingerprint>
+    private func restoreDurableSampleState(
+        identities: Set<BandSampleIdentity>,
+        fingerprints: Set<BandSampleFingerprint>
     ) {
         clearDurableSampleIdentities()
+        let orderedIdentities = identities.sorted(by: sampleIdentityPrecedes)
+        rememberDurableSampleIdentities(orderedIdentities)
         let ordered = fingerprints.sorted {
             sampleIdentityPrecedes($0.identity, $1.identity)
         }
-        rememberDurableSampleIdentities(ordered.map(\.identity))
         for fingerprint in ordered {
             durableSampleFingerprintsByIdentity[fingerprint.identity] =
                 fingerprint

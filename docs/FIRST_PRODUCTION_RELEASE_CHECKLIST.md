@@ -289,7 +289,7 @@ position without changing its ID. This inbox intentionally starts empty.
   digest-pinned source-only app boundary. Keep every production NOOP-band
   factory disabled and retain WHOOP as the comparison transport until the
   supplier and physical gates pass. (Evidence: reviewed SDK merge
-  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7`,
+  `b02808372b7c537f22058c7ebc75d92c750373be`,
   `ops/rounds/2026-09-21-noop-band-sdk-app-integration.md`)
 - [ ] SDK-007 [ENG] Build quarantined Apple and Android supplier adapters behind
   neutral NOOP session/sample types; keep vendor callbacks, persistence, and

@@ -53,7 +53,7 @@ The executable signed-device and hardware matrix is
 The NOOP-owned SDK contract targets the separate public
 `Dhanunjay-Divi/NoopBandSDK` repository. Its initial `main` commit is
 `ee82cc0`, and reviewed contract remediation is merged through
-`50a16fbc75f9ae604e773ff6608c87f0b96b67f7`. The latest remediation retains
+`b02808372b7c537f22058c7ebc75d92c750373be`. The latest remediation retains
 exact connection, live-operation, and opaque one-use reconnect authority;
 preserves Swift actor authority across diagnostic suspension; invalidates
 reconnect authority when recovery restarts; rejects every public Kotlin

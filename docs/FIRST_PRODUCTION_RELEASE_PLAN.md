@@ -325,7 +325,7 @@ v3 and makes report equivalence deterministic across Swift and Kotlin,
 including exact per-stream semantics, UTF-8 byte semantics, and explicit
 live-operation allowlists.
 Current reviewed SDK `main` is
-`50a16fbc75f9ae604e773ff6608c87f0b96b67f7`. The app integration candidate
+`b02808372b7c537f22058c7ebc75d92c750373be`. The app integration candidate
 consumes the deterministic export from that reviewed revision through a
 digest-pinned, supplier-artifact-free boundary. By owner decision on
 2026-09-23, the app and SDK repositories remain public. D-056 therefore

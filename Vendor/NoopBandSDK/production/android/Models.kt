@@ -895,10 +895,7 @@ data class BandHistoryCheckpoint @JvmOverloads constructor(
             } ||
             fingerprintIdentities.toSet().size !=
             immutableFingerprints.size ||
-            (
-                immutableFingerprints.isNotEmpty() &&
-                    fingerprintIdentities.toSet() != immutableIdentities
-                )
+            !immutableIdentities.containsAll(fingerprintIdentities)
         ) {
             fail(BandFailureCategory.INVALID_INPUT)
         }

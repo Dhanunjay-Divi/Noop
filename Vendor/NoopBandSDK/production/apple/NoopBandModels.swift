@@ -1251,8 +1251,9 @@ public struct BandHistoryCheckpoint:
                 <= BandContractLimits.historyCheckpointIdentities,
               Set(fingerprintIdentities).count
                 == durableSampleFingerprints.count,
-              durableSampleFingerprints.isEmpty
-                || Set(fingerprintIdentities) == durableSampleIdentities
+              Set(fingerprintIdentities).isSubset(
+                  of: durableSampleIdentities
+              )
         else {
             throw BandFailureCategory.invalidInput
         }

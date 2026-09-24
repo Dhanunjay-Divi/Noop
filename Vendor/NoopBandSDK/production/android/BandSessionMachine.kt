@@ -2458,10 +2458,21 @@ class BandSessionMachine(
         durableSampleIdentityOrder.clear()
     }
 
-    private fun restoreDurableSampleFingerprints(
+    private fun restoreDurableSampleState(
+        identities: Set<BandSampleIdentity>,
         fingerprints: Set<BandSampleFingerprint>,
     ) {
         clearDurableSampleIdentities()
+        val orderedIdentities = identities.sortedWith(
+            compareBy<BandSampleIdentity> {
+                it.deviceTimeMilliseconds
+            }.thenBy {
+                it.sequence
+            }.thenBy {
+                it.stream.wireValue
+            },
+        )
+        rememberDurableSampleIdentities(orderedIdentities)
         val ordered = fingerprints.sortedWith(
             compareBy<BandSampleFingerprint> {
                 it.identity.deviceTimeMilliseconds
@@ -2470,9 +2481,6 @@ class BandSessionMachine(
             }.thenBy {
                 it.identity.stream.wireValue
             },
-        )
-        rememberDurableSampleIdentities(
-            ordered.map(BandSampleFingerprint::identity),
         )
         ordered.forEach { fingerprint ->
             durableSampleFingerprintsByIdentity[fingerprint.identity] =
@@ -2497,7 +2505,8 @@ class BandSessionMachine(
                 )
                 fail(BandFailureCategory.INVALID_INPUT)
             }
-            restoreDurableSampleFingerprints(
+            restoreDurableSampleState(
+                restoredHistoryCheckpoint.durableSampleIdentities,
                 restoredHistoryCheckpoint.durableSampleFingerprints,
             )
             acknowledgedHistoryCursor =

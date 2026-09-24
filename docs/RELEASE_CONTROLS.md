@@ -112,13 +112,13 @@ open gates.
 For the active SDK app-integration branch, the recorded inputs and current
 local evidence are:
 
-- upstream SDK source: `NoopBandSDK` PR `#32` reviewed merge
-  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7`
-- application candidate: the consolidated SDK PR `#32` source and evidence
+- upstream SDK source: `NoopBandSDK` PR `#33` reviewed merge
+  `b02808372b7c537f22058c7ebc75d92c750373be`
+- application candidate: the consolidated SDK PR `#33` source and evidence
   replacement carried by this branch
 - pull request: `#17`; only its final exact candidate head can authorize merge
 - exact current local verification: upstream Swift 106/106, Kotlin/JVM
-  114/114 plus `installDist`, 50/50 conformance, and the 73-file SDK repository gate
+  114/114 plus `installDist`, 50/50 conformance, and the 74-file SDK repository gate
   pass. The app artifact verifier and its 9-test adversarial suite, vendored
   Swift package 16/16, real macOS app boundary 10/10, Android Full and Demo
   integration 15/15 each, both Android instrumentation source graphs, and the
