@@ -393,7 +393,12 @@ class SourceCoordinator(
     suspend fun archiveVeepooDevice(id: String): Boolean = reconcileLock.withLock {
         val row = runCatching { registry.all().firstOrNull { it.id == id } }.getOrNull()
             ?: return@withLock false
-        if (row.sourceKind != SourceKind.veepoo.name) return@withLock false
+        if (
+            row.sourceKind != SourceKind.veepoo.name ||
+            row.status == DeviceStatus.archived.name
+        ) {
+            return@withLock false
+        }
 
         veepooLifecycleDiagnostics.recordSafely(
             stage = VeepooSupplierLifecycleStage.REMOVAL,
@@ -401,8 +406,8 @@ class SourceCoordinator(
             trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
         )
 
-        val stoppedActiveSource =
-            row.status == DeviceStatus.active.name && activeStrapId == id
+        val wasDurablyActive = row.status == DeviceStatus.active.name
+        val stoppedActiveSource = wasDurablyActive && activeStrapId == id
         if (stoppedActiveSource) {
             tearDownNonWhoopSource()
             activeStrapId = null
@@ -452,11 +457,8 @@ class SourceCoordinator(
                 return@withLock false
             }
 
-            val archived = runCatching {
-                registry.archive(id)
-                registry.all().firstOrNull { it.id == id }?.status == DeviceStatus.archived.name
-            }.getOrDefault(false)
-            if (!archived) {
+            val archiveOutcome = registry.archiveSupplierAndSelectFallback(id)
+            if (archiveOutcome == null) {
                 val restored = retainedCredential?.let {
                     runCatching { credentialStore.save(id, it) }.getOrDefault(false)
                 } ?: true
@@ -478,9 +480,16 @@ class SourceCoordinator(
                 return@withLock false
             }
 
-            if (stoppedActiveSource) {
-                onStrap = false
+            if (wasDurablyActive) {
+                activeStrapId = null
                 lastSeenId = null
+                val fallback = archiveOutcome.activeDeviceId
+                if (fallback != null) {
+                    runCatching { onDurableActiveDeviceChanged(fallback) }
+                    reconcile(fallback)
+                } else {
+                    onStrap = false
+                }
             }
             veepooLifecycleDiagnostics.recordSafely(
                 stage = VeepooSupplierLifecycleStage.REMOVAL,

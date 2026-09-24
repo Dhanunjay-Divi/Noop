@@ -373,6 +373,35 @@ class DeviceRegistryTest {
     }
 
     @Test
+    fun activeSupplierArchivePromotesFallbackInTheSameTransaction() = runBlocking {
+        val dao = seededDao().apply {
+            devices["my-whoop"] = devices.getValue("my-whoop")
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-1"] = PairedDeviceRow(
+                id = "supplier-1",
+                brand = "NOOP",
+                model = "Supplier band",
+                nickname = null,
+                peripheralId = "AA:BB:CC:DD:EE:10",
+                sourceKind = SourceKind.veepoo.name,
+                capabilities = "hr",
+                status = DeviceStatus.active.name,
+                addedAt = 200,
+                lastSeenAt = 200,
+            )
+        }
+        val reg = registryWith(dao)
+
+        val outcome = reg.archiveSupplierAndSelectFallback("supplier-1", now = 999)
+
+        assertNotNull(outcome)
+        assertEquals("my-whoop", outcome?.activeDeviceId)
+        assertEquals("my-whoop", reg.activeDeviceId())
+        assertEquals(DeviceStatus.archived.name, dao.devices.getValue("supplier-1").status)
+        assertEquals(DeviceStatus.active.name, dao.devices.getValue("my-whoop").status)
+    }
+
+    @Test
     fun activeDeviceSwitchCarriesTheCompleteMeasuredHistoryRange() = runBlocking {
         val dao = seededDao().apply {
             ownershipInputRange = AnalysisAffectedRange(101L, 909L)

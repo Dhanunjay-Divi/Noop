@@ -40,6 +40,10 @@ class DeviceRegistry(
 ) {
     private class MutationVerificationFailure : IllegalStateException()
 
+    data class ArchiveOutcome(
+        val activeDeviceId: String?,
+    )
+
     /** A single-transaction boundary. Production wraps Room's `withTransaction`; tests pass through.
      *  Not a `fun interface` — a SAM method may not be generic — so implementors use the object form. */
     interface Transactor {
@@ -195,6 +199,67 @@ class DeviceRegistry(
             dao.deleteDayOwnershipFor(id)
             markOwnershipDirty()
         }
+    }
+
+    /**
+     * Archive [id] and, when it was active, promote a deterministic non-archived fallback in the same
+     * transaction. A null result means the mutation failed or [id] was not an eligible supplier row.
+     */
+    suspend fun archiveSupplierAndSelectFallback(
+        id: String,
+        now: Long = System.currentTimeMillis() / 1000,
+    ): ArchiveOutcome? = try {
+        transactor.run {
+            val rows = dao.pairedDevices()
+            val row = rows.firstOrNull { it.id == id }
+                ?: throw MutationVerificationFailure()
+            if (
+                row.sourceKind != SourceKind.veepoo.name ||
+                row.status == DeviceStatus.archived.name
+            ) {
+                throw MutationVerificationFailure()
+            }
+
+            val wasActive = row.status == DeviceStatus.active.name
+            val fallback = if (wasActive) {
+                rows.firstOrNull {
+                    it.id == "my-whoop" &&
+                        it.id != id &&
+                        it.status != DeviceStatus.archived.name
+                } ?: rows.firstOrNull {
+                    it.id != id &&
+                        isWhoop(it) &&
+                        it.status != DeviceStatus.archived.name
+                } ?: rows.firstOrNull {
+                    it.id != id && it.status != DeviceStatus.archived.name
+                }
+            } else {
+                null
+            }
+
+            dao.archiveDevice(id)
+            dao.deleteDayOwnershipFor(id)
+            if (wasActive && fallback != null) {
+                dao.promote(fallback.id, now)
+            }
+            markOwnershipDirty()
+
+            val archived = dao.pairedDevices()
+                .firstOrNull { it.id == id }
+                ?.status == DeviceStatus.archived.name
+            if (!archived) throw MutationVerificationFailure()
+
+            val activeId = dao.activeDeviceId()
+            when {
+                wasActive && fallback != null && activeId != fallback.id ->
+                    throw MutationVerificationFailure()
+                wasActive && fallback == null && activeId != null ->
+                    throw MutationVerificationFailure()
+            }
+            ArchiveOutcome(activeId)
+        }
+    } catch (_: Throwable) {
+        null
     }
 
     /** Atomically update the paired model and matching legacy-device name for this exact id. */

@@ -24,12 +24,15 @@
   - supplier adoption now compensates secure persistence when the verified
     transactional registry mutation fails;
   - active supplier removal stops its source, clears its credential before the
-    archive, and restores credential/source state if the archive fails;
+    archive, atomically promotes a fallback source, and restores
+    credential/source state if the archive fails;
   - missing provider/credential and rejected reconnect authentication reconcile
     the durable active row to the still-running or resumed fallback transport;
   - lifecycle diagnostics expose fixed stage/outcome/trigger/failure categories
     only; and
-  - the bounded focused FullDebug JVM suite passed 58 tests with no failures.
+  - the worker's bounded focused FullDebug JVM suite passed 58 tests with no
+    failures, and the receiving branch passed 59/59 after adding the active
+    removal fallback regression.
 
 ## Objective
 
@@ -134,7 +137,8 @@ Success means:
   - verified registry adoption is transactional and credential persistence is
     compensated on failure;
   - supplier removal performs source teardown and secure cleanup before archive
-    with rollback compensation;
+    with rollback compensation, and an active removal archives/promotes the
+    fallback in one transaction before transport reconciliation;
   - source-unavailable and authentication-rejected paths durably restore the
     actual WHOOP or generic fallback source without changing WHOOP removal
     behavior; and
@@ -186,7 +190,7 @@ Success means:
 | Bounded exact-base ancestry check | Pass | Requested base remains an ancestor of the implementation | Absence of later source defects |
 | Bounded forbidden-path diff check | Pass | Gradle, manifest, `docs/ops/ACTIVE.md`, and `docs/ops/rounds/INDEX.md` were not edited | Build success |
 | Source-boundary audit | No repository, neutral-sample, or WHOOP live-publish calls under the supplier package | Phone-receipt HR has no app persistence/formula route in this implementation | Future provider correctness |
-| Focused supplier lifecycle JVM suite | Pass: 58 tests, 0 failures/errors/skips; bounded command exit 0; `BUILD SUCCESSFUL in 2m 9s` | FullDebug main/test Kotlin compilation and deterministic adoption, fallback reconciliation, authentication cleanup, removal ordering/compensation, diagnostics, and ViewModel contract behavior | Optional provider binary compatibility or physical BLE behavior |
+| Focused supplier lifecycle JVM suite | Worker pass: 58 tests, 0 failures/errors/skips; receiving-branch pass after review correction: 59/59, bounded command exit 0, `BUILD SUCCESSFUL in 33s` | FullDebug main/test Kotlin compilation and deterministic adoption, fallback reconciliation, authentication cleanup, atomic active-removal fallback, removal ordering/compensation, diagnostics, and ViewModel contract behavior | Optional provider binary compatibility or physical BLE behavior |
 | Full/Demo Kotlin compile | FullDebug main/test Kotlin compiled as part of the focused suite; Demo and broader compile wall not run | The changed default FullDebug source and selected tests compile | Demo variant and unrelated modules |
 | Final whitespace/path audit | Pass: `git diff --check`; only scoped Android source/tests and this existing round record changed | No whitespace defects or forbidden Apple/build/shared-ops/vendor path edits | Runtime behavior |
 
@@ -217,7 +221,7 @@ Test-result XML totals:
 - `SourceCoordinatorAdoptionTest`: 16
 - `VeepooBandSourceTest`: 12
 - `VeepooCredentialStoreTest`: 4
-- `DeviceRegistryTest`: 19
+- `DeviceRegistryTest`: 20
 - `AnalysisInputGateContractTest`: 7
 
 ## Physical device and deployment

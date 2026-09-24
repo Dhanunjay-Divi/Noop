@@ -680,18 +680,21 @@ class SourceCoordinatorAdoptionTest {
             values["supplier-band"] = "2468"
         }
         val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
+        val projected = mutableListOf<String>()
+        var starts = 0
         val coordinator = SourceCoordinator(
             context = null,
             registry = registryWith(dao),
             repository = null,
             liveSink = { _, _ -> },
-            startWhoop = {},
+            startWhoop = { starts += 1 },
             stopWhoop = {},
             scope = CoroutineScope(Dispatchers.Unconfined),
             noopBandSourceFactory = { id, _ -> if (id == "supplier-band") source else null },
             veepooCredentials = credentials,
             veepooLifecycleDiagnostics =
                 VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+            onDurableActiveDeviceChanged = projected::add,
         )
         coordinator.start()
         operations.clear()
@@ -700,7 +703,10 @@ class SourceCoordinatorAdoptionTest {
 
         assertTrue(archived)
         assertEquals(DeviceStatus.archived.name, dao.devices.getValue("supplier-band").status)
+        assertEquals("my-whoop", dao.activeDeviceId())
         assertFalse(credentials.values.containsKey("supplier-band"))
+        assertEquals(listOf("my-whoop"), projected)
+        assertEquals(1, starts)
         assertTrue(operations.indexOf("source.stop") < operations.indexOf("credential.clear"))
         assertTrue(operations.indexOf("credential.clear") < operations.indexOf("registry.archive"))
         assertTrue(
