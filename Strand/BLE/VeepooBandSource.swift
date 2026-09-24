@@ -235,9 +235,10 @@ enum VeepooBandSourceFactory {
     static func productionFactory(
         registry: DeviceRegistry,
         live: LiveState,
-        credentials: any VeepooCredentialAccess = VeepooCredentialStore.shared
+        credentials: (any VeepooCredentialAccess)? = nil
     ) -> ((String) -> (any LiveHRSource)?)? {
         guard VeepooBandAdapterFactory.productionEnabled else { return nil }
+        let credentials = credentials ?? VeepooCredentialStore.shared
         return { deviceID in
             guard let row = registry.devices.first(where: { $0.id == deviceID }),
                   row.sourceKind == .veepoo,
@@ -304,10 +305,10 @@ final class VeepooBandPairingSession: ObservableObject {
 
     init(
         adapter: any VeepooBandAdapterControlling,
-        credentials: any VeepooCredentialAccess = VeepooCredentialStore.shared
+        credentials: (any VeepooCredentialAccess)? = nil
     ) {
         self.adapter = adapter
-        self.credentials = credentials
+        self.credentials = credentials ?? VeepooCredentialStore.shared
         adapter.eventHandler = { [weak self] event in self?.handle(event) }
     }
 
