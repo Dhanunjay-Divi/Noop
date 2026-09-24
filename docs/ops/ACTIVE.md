@@ -33,7 +33,7 @@ Last updated: **2026-09-24**
   Debug iPhoneOS graph builds with all required frameworks embedded. The
   complete Tools wall passes 360 tests with one intentional skip, required CI
   validates all ten contexts, all 91 operations records validate, and the
-  terminology snapshot records 18,145 classified occurrences across 1,616
+  terminology snapshot records 18,146 classified occurrences across 1,616
   groups with zero forbidden mappings. The first exact-head hosted run exposed
   one deterministic Android localization-generation mismatch: the canonical
   nine-locale source contained the printed-band-ID copy, but generated Android

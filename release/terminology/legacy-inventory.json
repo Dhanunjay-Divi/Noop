@@ -5,7 +5,7 @@
     "customer": 890,
     "fixture": 5679,
     "generated": 21,
-    "historical": 3251,
+    "historical": 3252,
     "import": 871,
     "persisted": 680
   },
@@ -26853,13 +26853,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        642,
         643,
         644,
         645,
         646,
         647,
-        648
+        648,
+        649
       ],
       "occurrenceCount": 7,
       "path": "android/app/src/main/res/values-de/appwide.xml",
@@ -27053,13 +27053,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        642,
         643,
         644,
         645,
         646,
         647,
-        648
+        648,
+        649
       ],
       "occurrenceCount": 7,
       "path": "android/app/src/main/res/values-es/appwide.xml",
@@ -27253,13 +27253,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        642,
         643,
         644,
         645,
         646,
         647,
-        648
+        648,
+        649
       ],
       "occurrenceCount": 7,
       "path": "android/app/src/main/res/values-fr/appwide.xml",
@@ -27453,13 +27453,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        642,
         643,
         644,
         645,
         646,
         647,
-        648
+        648,
+        649
       ],
       "occurrenceCount": 7,
       "path": "android/app/src/main/res/values-it/appwide.xml",
@@ -27489,13 +27489,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        642,
         643,
         644,
         645,
         646,
         647,
-        648
+        648,
+        649
       ],
       "occurrenceCount": 7,
       "path": "android/app/src/main/res/values-pt-rPT/appwide.xml",
@@ -27689,13 +27689,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        642,
         643,
         644,
         645,
         646,
         647,
-        648
+        648,
+        649
       ],
       "occurrenceCount": 7,
       "path": "android/app/src/main/res/values-ru/appwide.xml",
@@ -27725,13 +27725,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        642,
         643,
         644,
         645,
         646,
         647,
-        648
+        648,
+        649
       ],
       "occurrenceCount": 7,
       "path": "android/app/src/main/res/values-zh-rTW/appwide.xml",
@@ -27761,13 +27761,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        642,
         643,
         644,
         645,
         646,
         647,
-        648
+        648,
+        649
       ],
       "occurrenceCount": 7,
       "path": "android/app/src/main/res/values-zh/appwide.xml",
@@ -27961,13 +27961,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        642,
         643,
         644,
         645,
         646,
         647,
-        648
+        648,
+        649
       ],
       "occurrenceCount": 7,
       "path": "android/app/src/main/res/values/appwide.xml",
@@ -36637,19 +36637,19 @@
     {
       "category": "historical",
       "lineNumbers": [
-        17,
+        18,
         20,
-        104,
-        152,
-        173,
-        317,
-        449,
-        554,
-        558
+        106,
+        154,
+        175,
+        319,
+        451,
+        556,
+        560
       ],
       "occurrenceCount": 9,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "071706c122973f60650be15393a059e46bd86127071218e859ce24a18c3aca48",
+      "sha256": "183a93ecf347debc6d459abad923ee6c656277e101c709165282ff9dbdc2340a",
       "tokenCounts": {
         "whoop": 6,
         "whoopstore": 3
@@ -37030,13 +37030,14 @@
         258,
         259,
         293,
-        316
+        316,
+        371
       ],
-      "occurrenceCount": 7,
+      "occurrenceCount": 8,
       "path": "docs/ops/rounds/2026-09-24-pr17-protected-review-remediation.md",
-      "sha256": "be2e3d463a197ae1cc8e220c38485091073d72c418e337e669ab633f2658230c",
+      "sha256": "50e82f0b7b8075924ffc72d9638cced97f38012a543a828f91d237d15a5b6df7",
       "tokenCounts": {
-        "whoop": 6,
+        "whoop": 7,
         "whoop-only": 1
       }
     },
@@ -39362,7 +39363,7 @@
       }
     }
   ],
-  "occurrenceCount": 18145,
+  "occurrenceCount": 18146,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

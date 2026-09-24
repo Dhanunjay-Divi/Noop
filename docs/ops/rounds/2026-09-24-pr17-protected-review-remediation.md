@@ -322,7 +322,7 @@ firmware, background operation, and physiological accuracy remain unproven.
   trusted release controls passed 34/34 Python tests.
 - The complete repository Tools wall passed 360 tests with one intentional
   skip after the protected terminology snapshot was reviewed and repinned.
-  Terminology now records 18,145 classified occurrences across 1,616 groups
+  Terminology now records 18,146 classified occurrences across 1,616 groups
   with zero forbidden mappings. Required CI validates all ten contexts, all 91
   operations records validate, and protected-main self-verification passes.
 - The unsigned Debug iPhoneOS build passed with the exact supplier bundle and
