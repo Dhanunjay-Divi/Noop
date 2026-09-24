@@ -194,7 +194,7 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
         )
         XCTAssertTrue(
             onboarding.contains(
-                "if step == .scan && ownershipRequired { return bandBonded }"
+                "if step == .scan && ownershipRequired { return deviceSetupComplete }"
             )
         )
         XCTAssertTrue(onboarding.contains("title: LocalizedStringKey"))
