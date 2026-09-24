@@ -50,6 +50,11 @@ packages:
     path: Packages/WhoopProtocol
   WhoopStore:
     path: Packages/WhoopStore
+  # StrandTests directly imports GRDB for database failure-injection coverage.
+  # Keep this exact pin aligned with Packages/WhoopStore/Package.swift.
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    exactVersion: 6.29.3
   NoopRemoteSync:
     path: Packages/NoopRemoteSync
   # Digest-pinned, source-only export from the public NoopBandSDK repository.
@@ -227,6 +232,7 @@ targets:
       - target: Strand
       - package: WhoopProtocol
       - package: WhoopStore
+      - package: GRDB
       - package: NoopRemoteSync
       - package: NoopBandSDK
       - package: OuraProtocol

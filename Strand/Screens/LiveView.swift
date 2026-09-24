@@ -56,11 +56,8 @@ struct LiveView: View {
         live.connected && !live.bonded && live.heartRate != nil
     }
     private var activeSourceKind: SourceKind? {
-        guard let registry = model.deviceRegistry,
-              let activeID = registry.activeDeviceId
-        else {
-            return nil
-        }
+        guard let registry = model.deviceRegistry else { return nil }
+        let activeID = registry.activeDeviceId
         return registry.devices.first(where: { $0.id == activeID })?.sourceKind
     }
     private var supplierSourceActive: Bool { activeSourceKind == .veepoo }
