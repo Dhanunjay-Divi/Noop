@@ -1,4 +1,5 @@
 import groovy.json.JsonSlurper
+import java.nio.file.Paths
 import java.security.MessageDigest
 import java.util.Properties
 
@@ -115,6 +116,134 @@ val ownershipAllowLocalHttp = managedDebugBoolean(
     "noopOwnershipAllowLocalHttp",
     "NOOP_OWNERSHIP_ALLOW_LOCAL_HTTP",
 )
+
+fun loadStrictLocalProperties(source: File): Map<String, String> {
+    val values = linkedMapOf<String, String>()
+    source.readLines(Charsets.UTF_8).forEachIndexed { index, rawLine ->
+        val line = rawLine.trim()
+        if (line.isEmpty() || line.startsWith("#")) return@forEachIndexed
+        val separator = line.indexOf('=')
+        if (separator <= 0) {
+            throw GradleException(
+                "${source.name}:${index + 1} must use an unescaped key=value entry",
+            )
+        }
+        val key = line.substring(0, separator).trim()
+        val value = line.substring(separator + 1).trim()
+        if (key.isEmpty() || key.any(Char::isWhitespace) || key.contains('\\')) {
+            throw GradleException("${source.name}:${index + 1} has an invalid key")
+        }
+        if (values.put(key, value) != null) {
+            throw GradleException("${source.name}:${index + 1} duplicates $key")
+        }
+    }
+    return values
+}
+
+val supplierSdkConfigFile = rootProject.file("noop-supplier-sdk.properties")
+val supplierSdkConfigPresent = supplierSdkConfigFile.exists()
+if (supplierSdkConfigPresent && !supplierSdkConfigFile.isFile) {
+    throw GradleException(
+        "${supplierSdkConfigFile.name} must be a regular file when present",
+    )
+}
+val supplierSdkConfig = if (supplierSdkConfigPresent) {
+    loadStrictLocalProperties(supplierSdkConfigFile)
+} else {
+    emptyMap()
+}
+val supplierSdkEnabled = when {
+    !supplierSdkConfigPresent -> false
+    supplierSdkConfig["enabled"] == "false" -> {
+        if (supplierSdkConfig.keys != setOf("enabled")) {
+            throw GradleException(
+                "${supplierSdkConfigFile.name}: disabled config must contain only enabled=false",
+            )
+        }
+        false
+    }
+    supplierSdkConfig["enabled"] == "true" -> true
+    else -> throw GradleException(
+        "${supplierSdkConfigFile.name}: enabled must be exactly true or false",
+    )
+}
+if (supplierSdkEnabled) {
+    val rawCount = supplierSdkConfig["artifact.count"]
+        ?: throw GradleException("${supplierSdkConfigFile.name}: artifact.count is required")
+    val count = rawCount.toIntOrNull()
+        ?: throw GradleException("${supplierSdkConfigFile.name}: artifact.count must be an integer")
+    if (count <= 0 || count.toString() != rawCount) {
+        throw GradleException(
+            "${supplierSdkConfigFile.name}: artifact.count must be a canonical positive integer",
+        )
+    }
+    val expectedKeys = mutableSetOf("enabled", "sdk.root", "artifact.count")
+    (0 until count).forEach { index ->
+        listOf(
+            "path",
+            "sha256",
+            "requiredClasses",
+            "nativeAbis",
+            "nativeLibraries",
+        ).forEach { field ->
+            expectedKeys += "artifact.$index.$field"
+        }
+    }
+    val missing = expectedKeys - supplierSdkConfig.keys
+    val unexpected = supplierSdkConfig.keys - expectedKeys
+    if (missing.isNotEmpty()) {
+        throw GradleException(
+            "${supplierSdkConfigFile.name}: missing config key ${missing.sorted().first()}",
+        )
+    }
+    if (unexpected.isNotEmpty()) {
+        throw GradleException(
+            "${supplierSdkConfigFile.name}: unexpected config key ${unexpected.sorted().first()}",
+        )
+    }
+}
+val supplierSdkRoot = if (supplierSdkEnabled) {
+    val configured = supplierSdkConfig["sdk.root"]
+        ?: throw GradleException("${supplierSdkConfigFile.name}: sdk.root is required")
+    val path = Paths.get(configured)
+    if (!path.isAbsolute) {
+        throw GradleException("${supplierSdkConfigFile.name}: sdk.root must be absolute")
+    }
+    path.toFile()
+} else {
+    null
+}
+val supplierArtifactCount = if (supplierSdkEnabled) {
+    val raw = supplierSdkConfig["artifact.count"]
+        ?: throw GradleException("${supplierSdkConfigFile.name}: artifact.count is required")
+    val count = raw.toIntOrNull()
+        ?: throw GradleException("${supplierSdkConfigFile.name}: artifact.count must be an integer")
+    if (count <= 0 || count.toString() != raw) {
+        throw GradleException(
+            "${supplierSdkConfigFile.name}: artifact.count must be a canonical positive integer",
+        )
+    }
+    count
+} else {
+    0
+}
+val supplierArtifactFiles = (0 until supplierArtifactCount).map { index ->
+    val key = "artifact.$index.path"
+    val relative = supplierSdkConfig[key]
+        ?: throw GradleException("${supplierSdkConfigFile.name}: $key is required")
+    val path = Paths.get(relative)
+    if (
+        path.isAbsolute ||
+        path.any { it.toString() == ".." } ||
+        relative.contains('\\') ||
+        !relative.endsWith(".aar", ignoreCase = true)
+    ) {
+        throw GradleException(
+            "${supplierSdkConfigFile.name}: $key must be a relative AAR path without traversal",
+        )
+    }
+    requireNotNull(supplierSdkRoot).resolve(relative)
+}
 if (hasPartialReleaseSigning) {
     throw GradleException(
         "Incomplete release signing configuration. Provide storeFile, storePassword, keyAlias, " +
@@ -136,6 +265,21 @@ gradle.taskGraph.whenReady {
     }
     if (!hasReleaseSigning && includesAppRelease) {
         throw GradleException(releaseSigningFailureMessage)
+    }
+    val packagesSupplierRelease = supplierSdkEnabled && allTasks.any {
+        it.project.path == project.path &&
+            it.name.contains("FullRelease") &&
+            (
+                it.name.startsWith("assemble") ||
+                    it.name.startsWith("bundle") ||
+                    it.name.startsWith("package")
+            )
+    }
+    if (packagesSupplierRelease) {
+        throw GradleException(
+            "Supplier SDK release packaging is blocked until redistribution, legal, " +
+                "transitive-dependency, signing, and physical-device gates are recorded.",
+        )
     }
 }
 val legalAssetsDir = layout.buildDirectory.dir("generated/legalAssets")
@@ -196,6 +340,7 @@ android {
             "OWNERSHIP_ALLOW_LOCAL_HTTP",
             ownershipAllowLocalHttp.toString(),
         )
+        buildConfigField("boolean", "VEEPOO_ADAPTER_AVAILABLE", "false")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -207,6 +352,10 @@ android {
         getByName("main").java.srcDir(
             rootProject.file("../Vendor/NoopBandSDK/production/android"),
         )
+        if (supplierSdkEnabled) {
+            // Supplier imports stay outside ordinary builds and are compiled only for Full.
+            maybeCreate("full").java.srcDir("src/veepoo/java")
+        }
         getByName("test").java.srcDir(
             rootProject.file("../Vendor/NoopBandSDK/test-support/android"),
         )
@@ -269,6 +418,11 @@ android {
             dimension = "tier"
             buildConfigField("String", "TIER", "\"full\"")
             buildConfigField("boolean", "ENABLE_DEMO", "false")
+            buildConfigField(
+                "boolean",
+                "VEEPOO_ADAPTER_AVAILABLE",
+                supplierSdkEnabled.toString(),
+            )
         }
         create("demo") {
             dimension = "tier"
@@ -276,6 +430,7 @@ android {
             versionNameSuffix = "-demo"
             buildConfigField("String", "TIER", "\"demo\"")
             buildConfigField("boolean", "ENABLE_DEMO", "true")
+            buildConfigField("boolean", "VEEPOO_ADAPTER_AVAILABLE", "false")
         }
     }
 
@@ -324,6 +479,52 @@ tasks.register("verifyPlayTargetSdk") {
                 "Google Play release blocked: targetSdk $noopTargetSdk; " +
                     "required targetSdk is $noopRequiredPlayTargetSdk."
             )
+        }
+    }
+}
+
+val verifyNoopSupplierSdk = tasks.register<Exec>("verifyNoopSupplierSdk") {
+    group = "verification"
+    description = "Verifies the explicitly configured external Android supplier AARs."
+    workingDir(rootProject.projectDir.parentFile)
+    commandLine(
+        "python3",
+        rootProject.file("../Tools/local/verify-android-supplier-sdk.py"),
+        "--repo-root",
+        rootProject.projectDir.parentFile,
+        "--config",
+        supplierSdkConfigFile,
+    )
+    doFirst {
+        if (!supplierSdkEnabled) {
+            throw GradleException(
+                "Supplier SDK is disabled; create gitignored ${supplierSdkConfigFile.name} " +
+                    "with enabled=true to verify local artifacts.",
+            )
+        }
+    }
+    if (supplierSdkEnabled) {
+        inputs.file(supplierSdkConfigFile)
+        inputs.files(supplierArtifactFiles)
+    }
+}
+
+tasks.register("noopSupplierSdkStatus") {
+    group = "verification"
+    description = "Prints the local supplier dependency state without resolving dependencies."
+    doLast {
+        println(
+            "NOOP supplier SDK: enabled=$supplierSdkEnabled, " +
+                "artifacts=$supplierArtifactCount, veepooSourceSet=" +
+                if (supplierSdkEnabled) "included-for-full" else "excluded",
+        )
+    }
+}
+
+if (supplierSdkEnabled) {
+    tasks.configureEach {
+        if (name.contains("Full") && name != verifyNoopSupplierSdk.name) {
+            dependsOn(verifyNoopSupplierSdk)
         }
     }
 }
@@ -587,4 +788,8 @@ dependencies {
     // --- Compose tooling (debug-only) ---
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    if (supplierSdkEnabled) {
+        add("fullImplementation", files(supplierArtifactFiles))
+    }
 }

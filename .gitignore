@@ -60,6 +60,12 @@ android/app/release/
 *.aab
 *.keystore
 *.jks
+*.aar
+*.so
+*.jar
+!android/gradle/wrapper/gradle-wrapper.jar
+android/noop-supplier-sdk.properties
+android/local-supplier-sdk/
 
 # Locally imported third-party workout media is for licensed/dev QA only. Mapping and import tools
 # are tracked; binary media must be distributed through an approved CDN or separately licensed build.
