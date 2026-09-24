@@ -354,7 +354,11 @@ android {
         )
         if (supplierSdkEnabled) {
             // Supplier imports stay outside ordinary builds and are compiled only for Full.
-            maybeCreate("full").java.srcDir("src/veepoo/java")
+            maybeCreate("full").apply {
+                java.srcDir("src/veepoo/java")
+                manifest.srcFile("src/veepoo/AndroidManifest.xml")
+            }
+            maybeCreate("testFull").java.srcDir("src/veepooTest/java")
         }
         getByName("test").java.srcDir(
             rootProject.file("../Vendor/NoopBandSDK/test-support/android"),
@@ -700,12 +704,15 @@ tasks.withType<Test>().configureEach {
     // precise message if its snapshot is unavailable or stale.
 }
 
-// Resolve every external module to the exact version recorded in app/gradle.lockfile. Direct
-// dependencies are already pinned below; this also freezes the transitive graph selected through
-// AndroidX POMs and the Compose BOM. Update intentionally with `./gradlew :app:dependencies
-// --write-locks` and review the lockfile diff alongside the dependency declaration change (#658).
+// Resolve every external module to an exact reviewed version. The optional supplier lane has a
+// separate tracked lock so enabling it cannot rewrite or constrain the ordinary WHOOP/Demo graph.
+// Update intentionally with `./gradlew :app:dependencies --write-locks` under the intended local
+// supplier state and review the selected lockfile alongside dependency declarations (#658).
 dependencyLocking {
     lockAllConfigurations()
+    if (supplierSdkEnabled) {
+        lockFile.set(layout.projectDirectory.file("noop-supplier-sdk.lockfile"))
+    }
 }
 
 dependencies {
@@ -791,5 +798,15 @@ dependencies {
 
     if (supplierSdkEnabled) {
         add("fullImplementation", files(supplierArtifactFiles))
+        // Required by the reviewed supplier integration guide. These remain absent
+        // from ordinary Full and Demo dependency graphs.
+        add("fullImplementation", "com.google.code.gson:gson:2.8.9")
+        add("fullImplementation", "no.nordicsemi.android:mcumgr-core:2.7.4")
+        add("fullImplementation", "no.nordicsemi.android:mcumgr-ble:2.7.4")
+        add("fullImplementation", "no.nordicsemi.android.support.v18:scanner:1.4.2")
+        add(
+            "fullImplementation",
+            "androidx.localbroadcastmanager:localbroadcastmanager:1.1.0",
+        )
     }
 }
