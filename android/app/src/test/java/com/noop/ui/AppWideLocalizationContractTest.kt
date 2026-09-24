@@ -109,6 +109,20 @@ class AppWideLocalizationContractTest {
             base.getValue("appwide_terms_subtitle")
                 .contains("compatible band you own"),
         )
+        val supplierKeys = base.keys.filter {
+            it.startsWith("appwide_onboarding_device_wizard_supplier_")
+        }
+        assertEquals(48, supplierKeys.size)
+        assertEquals(
+            "The supplier password authorizes this Bluetooth transport only. " +
+                "It does not prove band ownership.",
+            base["appwide_onboarding_device_wizard_supplier_prep_password_scope"],
+        )
+        assertEquals(
+            "Live heart rate uses the phone receipt time for display freshness only. " +
+                "This supplier stream is not added to durable health history or formulas.",
+            base["appwide_onboarding_device_wizard_supplier_ready_body"],
+        )
         assertEquals(
             "Recovery scores: %1\$d of %2\$d days. One score per day is used in the average.",
             base["appwide_trends_recovery_coverage_format"],
@@ -161,6 +175,14 @@ class AppWideLocalizationContractTest {
                     placeholder.findAll(base.getValue(key)).map { it.value }.sorted().toList(),
                     placeholder.findAll(localized.getValue(key)).map { it.value }.sorted().toList(),
                 )
+            }
+            if (folder != "values") {
+                for (key in supplierKeys) {
+                    assertTrue(
+                        "$folder must translate $key",
+                        localized.getValue(key) != base.getValue(key),
+                    )
+                }
             }
         }
     }

@@ -133,7 +133,8 @@ private enum class DeviceType {
             MiBand -> "Xiaomi Mi Band"
             Garmin -> "Garmin watch"
             Oura -> "Oura ring"
-            SupplierBand -> "Supplier band preview"
+            SupplierBand ->
+                uiString(R.string.appwide_onboarding_device_wizard_supplier_android_title)
     }
 }
 
@@ -945,7 +946,9 @@ private fun TypeStep(
             TypeRow(
                 Icons.Filled.GraphicEq,
                 DeviceType.SupplierBand.title,
-                "Live heart rate and battery only. Pairing requires the printed band ID.",
+                uiString(
+                    R.string.appwide_onboarding_device_wizard_supplier_android_subtitle,
+                ),
             ) {
                 onPick(DeviceType.SupplierBand)
             }
@@ -1156,9 +1159,11 @@ private fun prepInstructions(type: DeviceType): List<String> = when (type) {
     // branch is unreached for Oura; kept for the exhaustive when.
     DeviceType.Oura -> ouraPrepInstructions
     DeviceType.SupplierBand -> listOf(
-        "Wake the band and keep it close to this phone.",
-        "Find the numeric ID printed on the band or its label. You will verify it after choosing a nearby candidate.",
-        "The four-digit password opens the local transport. It is not proof that you own the band.",
+        uiString(R.string.appwide_onboarding_device_wizard_supplier_android_prep_wake),
+        uiString(R.string.appwide_onboarding_device_wizard_supplier_android_prep_identifier),
+        uiString(
+            R.string.appwide_onboarding_device_wizard_supplier_android_prep_password_scope,
+        ),
     )
 }
 
@@ -1181,13 +1186,19 @@ private fun SupplierBandPickStep(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Nearby band ${candidate.ordinal}",
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_candidate_format,
+                        candidate.ordinal,
+                    ),
                     style = NoopType.body,
                     color = Palette.textPrimary,
                 )
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "Select nearby band ${candidate.ordinal}",
+                    contentDescription = uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_candidate_accessibility_format,
+                        candidate.ordinal,
+                    ),
                     tint = Palette.textSecondary,
                 )
             }
@@ -1214,17 +1225,29 @@ private fun SupplierBandConfirmStep(
         Text(
             when (state) {
                 com.noop.ble.veepoo.VeepooAdapterState.CONNECTING ->
-                    "Connecting to the selected band..."
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_connecting,
+                    )
                 com.noop.ble.veepoo.VeepooAdapterState.AUTHENTICATING ->
-                    "Checking the band response and printed ID..."
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_authenticating,
+                    )
                 com.noop.ble.veepoo.VeepooAdapterState.READING_BATTERY ->
-                    "Reading battery before starting live heart rate..."
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_reading_battery,
+                    )
                 com.noop.ble.veepoo.VeepooAdapterState.LIVE_DISPLAY_ONLY ->
-                    "Band verified. Live heart rate is display-only and is not saved or scored."
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_ready,
+                    )
                 com.noop.ble.veepoo.VeepooAdapterState.FAILED ->
-                    "Pairing failed. Go back and choose the band again."
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_failed,
+                    )
                 else ->
-                    "Confirm the pairing prompt on the selected band, then enter its printed ID and transport password."
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_input_prompt,
+                    )
             },
             style = NoopType.body,
             color = if (state == com.noop.ble.veepoo.VeepooAdapterState.FAILED) {
@@ -1237,7 +1260,13 @@ private fun SupplierBandConfirmStep(
             value = printedId,
             onValueChange = onPrintedId,
             enabled = waitingForInput,
-            label = { Text("Printed band ID") },
+            label = {
+                Text(
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_identifier_field,
+                    ),
+                )
+            },
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                 keyboardType = KeyboardType.Number,
             ),
@@ -1248,8 +1277,20 @@ private fun SupplierBandConfirmStep(
             value = password,
             onValueChange = onPassword,
             enabled = waitingForInput,
-            label = { Text("Four-digit transport password") },
-            supportingText = { Text("This opens the local transport; it is not ownership proof.") },
+            label = {
+                Text(
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_password_field,
+                    ),
+                )
+            },
+            supportingText = {
+                Text(
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_password_help,
+                    ),
+                )
+            },
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                 keyboardType = KeyboardType.NumberPassword,
             ),
@@ -1261,7 +1302,9 @@ private fun SupplierBandConfirmStep(
             OutlinedTextField(
                 value = nickname,
                 onValueChange = onNickname,
-                label = { Text("Name") },
+                label = {
+                    Text(uiString(R.string.appwide_onboarding_device_wizard_name))
+                },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -1279,7 +1322,15 @@ private fun SupplierBandConfirmStep(
                 .background(Palette.accent),
         ) {
             Text(
-                if (ready) "Add verified band" else "Verify and connect",
+                if (ready) {
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_add_verified,
+                    )
+                } else {
+                    uiString(
+                        R.string.appwide_onboarding_device_wizard_supplier_android_verify_connect,
+                    )
+                },
                 style = NoopType.headline,
                 color = Palette.accentInk,
             )

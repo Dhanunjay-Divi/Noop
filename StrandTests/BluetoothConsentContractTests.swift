@@ -110,6 +110,44 @@ final class BluetoothConsentContractTests: XCTestCase {
         )
     }
 
+    func testSupplierPairingCopyUsesAppWideLocalizationWithoutChangingTheGate() throws {
+        let source = try text("Strand/Screens/AddDeviceWizard.swift")
+        let supplierFace = try slice(
+            source,
+            from: "private struct VeepooPairingFace: View",
+            to: "// MARK: - Shared pick-step pieces"
+        )
+
+        XCTAssertTrue(source.contains("if VeepooBandAdapterFactory.productionEnabled"))
+        XCTAssertTrue(source.contains("appwide.onboarding.device_wizard.supplier_title"))
+        XCTAssertTrue(
+            source.contains(
+                "appwide.onboarding.device_wizard.supplier_prep_password_scope"
+            )
+        )
+        XCTAssertTrue(
+            supplierFace.contains(
+                "appwide.onboarding.device_wizard.supplier_ready_body"
+            )
+        )
+        XCTAssertTrue(
+            supplierFace.contains(
+                "appwide.onboarding.device_wizard.supplier_registration_failed"
+            )
+        )
+        XCTAssertTrue(supplierFace.contains("session.registrationFailed"))
+        XCTAssertFalse(
+            supplierFace.contains(
+                "Live heart rate uses the phone receipt time for display freshness only."
+            )
+        )
+        XCTAssertFalse(
+            supplierFace.contains(
+                "The band could not be saved. Registration was not reported as complete."
+            )
+        )
+    }
+
     private func text(_ relativePath: String) throws -> String {
         let here = URL(fileURLWithPath: #filePath)
         let root = here.deletingLastPathComponent().deletingLastPathComponent()

@@ -1265,6 +1265,22 @@ final class AppWideLocalizationContractTests: XCTestCase {
         )
         XCTAssertNil(source["appwide.live_session.start_accessibility"])
         XCTAssertNil(source["appwide.live_session.start_detail_calibrating"])
+        let supplierKeys = source.keys.filter {
+            $0.hasPrefix("appwide.onboarding.device_wizard.supplier_")
+        }
+        XCTAssertEqual(supplierKeys.count, 48)
+        XCTAssertEqual(
+            source[
+                "appwide.onboarding.device_wizard.supplier_prep_password_scope"
+            ]?["en"],
+            "The supplier password authorizes this Bluetooth transport only. It does not prove band ownership."
+        )
+        XCTAssertEqual(
+            source[
+                "appwide.onboarding.device_wizard.supplier_ready_body"
+            ]?["en"],
+            "Live heart rate uses the phone receipt time for display freshness only. This supplier stream is not added to durable health history or formulas."
+        )
         XCTAssertEqual(
             source["appwide.friends.data_boundary"]?["en"],
             "Only Recovery, Effort, Sleep Score, sleep duration, HRV, and resting heart rate can be shared. Raw streams, locations, journals, routes, workouts, and sleep stages are excluded."
@@ -1279,6 +1295,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
         )
         let uiAuditKeys = source.keys.filter { $0.hasPrefix("appwide.ui_audit.") }
         XCTAssertEqual(uiAuditKeys.count, 50)
+        let fullyLocalizedKeys = uiAuditKeys + supplierKeys
         let placeholderRegex = try NSRegularExpression(
             pattern: #"%(?:\d+\$)?[a-zA-Z@]"#
         )
@@ -1289,7 +1306,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
                 return String(value[range])
             }.sorted()
         }
-        for key in uiAuditKeys {
+        for key in fullyLocalizedKeys {
             let translations = try XCTUnwrap(source[key], key)
             XCTAssertEqual(Set(translations.keys), locales, key)
             let english = try XCTUnwrap(translations["en"], key)

@@ -382,9 +382,13 @@ struct AddDeviceWizard: View {
                 typeRow(
                     .veepoo,
                     icon: "waveform.path.ecg.rectangle",
-                    title: String(localized: "Compatible supplier band"),
+                    title: String(
+                        localized:
+                            "appwide.onboarding.device_wizard.supplier_title"
+                    ),
                     subtitle: String(
-                        localized: "Uses the printed band identifier and four-digit device password. Experimental."
+                        localized:
+                            "appwide.onboarding.device_wizard.supplier_subtitle"
                     )
                 )
             }
@@ -562,10 +566,22 @@ struct AddDeviceWizard: View {
             return GarminBroadcast.broadcastHint
         case .veepoo:
             return [
-                String(localized: "Wake the band and close other apps currently connected to it."),
-                String(localized: "Choose one discovered candidate, then enter the identifier printed on that physical band."),
-                String(localized: "Only after the printed identifier matches will NOOP ask for the four-digit device password."),
-                String(localized: "The supplier password authorizes this Bluetooth transport only. It does not prove band ownership."),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.supplier_prep_wake"
+                ),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.supplier_prep_choose"
+                ),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.supplier_prep_identifier_gate"
+                ),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.supplier_prep_password_scope"
+                ),
             ]
         case .oura:
             // The factory-reset-and-adopt checklist, shown only AFTER the irreversible-consent gate. NOOP
@@ -1560,7 +1576,11 @@ struct AddDeviceWizard: View {
         case .miBand:       return "Xiaomi Mi Band"
         case .garmin:       return String(localized: "Garmin watch")
         case .oura:         return String(localized: "Oura ring")
-        case .veepoo:       return String(localized: "Compatible supplier band")
+        case .veepoo:
+            return String(
+                localized:
+                    "appwide.onboarding.device_wizard.supplier_title"
+            )
         }
     }
 
@@ -1834,13 +1854,19 @@ private struct VeepooPairingFace: View {
             case .confirmPrintedIdentifier:
                 printedIdentifierEntry
             case .connecting:
-                progress("Connecting to the selected band")
+                progress(
+                    "appwide.onboarding.device_wizard.supplier_progress_connecting"
+                )
             case .password:
                 passwordEntry
             case .checkingBattery:
-                progress("Checking battery capability")
+                progress(
+                    "appwide.onboarding.device_wizard.supplier_progress_battery"
+                )
             case .checkingLiveHeartRate:
-                progress("Checking live heart rate")
+                progress(
+                    "appwide.onboarding.device_wizard.supplier_progress_live_heart_rate"
+                )
             case .ready:
                 ready
             case .failed:
@@ -1851,11 +1877,13 @@ private struct VeepooPairingFace: View {
 
     private var experimentalNotice: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Experimental supplier connection")
+            Text(
+                "appwide.onboarding.device_wizard.supplier_notice_title"
+            )
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.statusWarning)
             Text(
-                "The printed identifier selects the physical band. The four-digit supplier password authorizes only this Bluetooth connection and does not prove ownership."
+                "appwide.onboarding.device_wizard.supplier_notice_body"
             )
             .font(StrandFont.footnote)
             .foregroundStyle(StrandPalette.textSecondary)
@@ -1873,11 +1901,14 @@ private struct VeepooPairingFace: View {
         if session.candidates.isEmpty {
             SearchingCard()
         } else {
-            Text("Choose the physical band you are setting up.")
+            Text(
+                "appwide.onboarding.device_wizard.supplier_choose_band"
+            )
                 .font(StrandFont.subhead)
                 .foregroundStyle(StrandPalette.textSecondary)
             ForEach(Array(session.candidates.enumerated()), id: \.element.id) {
                 index, candidate in
+                let ordinal = index + 1
                 Button {
                     printedIdentifier = ""
                     session.select(candidate)
@@ -1885,7 +1916,15 @@ private struct VeepooPairingFace: View {
                     HStack {
                         Image(systemName: "waveform.path.ecg.rectangle")
                             .foregroundStyle(StrandPalette.accent)
-                        Text("Compatible band \(index + 1)")
+                        Text(
+                            String.localizedStringWithFormat(
+                                String(
+                                    localized:
+                                        "appwide.onboarding.device_wizard.supplier_candidate_format"
+                                ),
+                                ordinal
+                            )
+                        )
                             .font(StrandFont.body)
                             .foregroundStyle(StrandPalette.textPrimary)
                         Spacer()
@@ -1899,23 +1938,36 @@ private struct VeepooPairingFace: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Select compatible band \(index + 1)")
+                .accessibilityLabel(
+                    String.localizedStringWithFormat(
+                        String(
+                            localized:
+                                "appwide.onboarding.device_wizard.supplier_candidate_accessibility_format"
+                        ),
+                        ordinal
+                    )
+                )
             }
         }
     }
 
     private var printedIdentifierEntry: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Confirm the printed band identifier")
+            Text(
+                "appwide.onboarding.device_wizard.supplier_identifier_title"
+            )
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.textPrimary)
             Text(
-                "Enter the identifier printed on the selected physical band. NOOP will not reveal the scanned identifier or continue on a mismatch."
+                "appwide.onboarding.device_wizard.supplier_identifier_body"
             )
             .font(StrandFont.subhead)
             .foregroundStyle(StrandPalette.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
-            TextField("Printed identifier", text: $printedIdentifier)
+            TextField(
+                "appwide.onboarding.device_wizard.supplier_identifier_field",
+                text: $printedIdentifier
+            )
                 .textFieldStyle(.roundedBorder)
                 #if os(iOS)
                 .textInputAutocapitalization(.characters)
@@ -1923,7 +1975,9 @@ private struct VeepooPairingFace: View {
                 .autocorrectionDisabled()
                 .accessibilityIdentifier("noop.veepoo.printed-identifier")
             if session.lastFailure == .identifierMismatch {
-                Text("That printed identifier did not match the selected band.")
+                Text(
+                    "appwide.onboarding.device_wizard.supplier_identifier_mismatch"
+                )
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1931,7 +1985,10 @@ private struct VeepooPairingFace: View {
             Button {
                 session.confirmPrintedIdentifier(printedIdentifier)
             } label: {
-                Label("Confirm identifier", systemImage: "checkmark.shield")
+                Label(
+                    "appwide.onboarding.device_wizard.supplier_identifier_confirm",
+                    systemImage: "checkmark.shield"
+                )
                     .font(StrandFont.headline)
                     .frame(maxWidth: .infinity)
             }
@@ -1943,16 +2000,21 @@ private struct VeepooPairingFace: View {
 
     private var passwordEntry: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Enter the device password")
+            Text(
+                "appwide.onboarding.device_wizard.supplier_password_title"
+            )
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.textPrimary)
             Text(
-                "Use the band's four-digit supplier password. This is transport authentication only, not ownership confirmation."
+                "appwide.onboarding.device_wizard.supplier_password_body"
             )
             .font(StrandFont.subhead)
             .foregroundStyle(StrandPalette.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
-            SecureField("Four digits", text: $password)
+            SecureField(
+                "appwide.onboarding.device_wizard.supplier_password_field",
+                text: $password
+            )
                 .textFieldStyle(.roundedBorder)
                 #if os(iOS)
                 .keyboardType(.numberPad)
@@ -1961,7 +2023,9 @@ private struct VeepooPairingFace: View {
             if session.lastFailure == .credentialRejected
                 || session.lastFailure == .invalidCredential
             {
-                Text("The band rejected that transport password.")
+                Text(
+                    "appwide.onboarding.device_wizard.supplier_password_rejected"
+                )
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1971,7 +2035,10 @@ private struct VeepooPairingFace: View {
                 password = ""
                 session.submitPassword(value)
             } label: {
-                Label("Verify password", systemImage: "key.fill")
+                Label(
+                    "appwide.onboarding.device_wizard.supplier_password_verify",
+                    systemImage: "key.fill"
+                )
                     .font(StrandFont.headline)
                     .frame(maxWidth: .infinity)
             }
@@ -1983,20 +2050,30 @@ private struct VeepooPairingFace: View {
 
     private var ready: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Battery and live heart rate confirmed")
+            Text(
+                "appwide.onboarding.device_wizard.supplier_ready_title"
+            )
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.textPrimary)
             Text(
-                "Live heart rate uses the phone receipt time for display freshness only. This supplier stream is not added to durable health history or formulas."
+                "appwide.onboarding.device_wizard.supplier_ready_body"
             )
             .font(StrandFont.subhead)
             .foregroundStyle(StrandPalette.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
-            Text("Name").strandOverline()
-            TextField("Compatible band", text: $nameDraft)
+            Text(
+                "appwide.onboarding.device_wizard.name"
+            ).strandOverline()
+            TextField(
+                "appwide.onboarding.device_wizard.compatible_band",
+                text: $nameDraft
+            )
                 .textFieldStyle(.roundedBorder)
             Button(action: onAdd) {
-                Label("Add as active band", systemImage: "checkmark.circle.fill")
+                Label(
+                    "appwide.onboarding.device_wizard.supplier_add_active",
+                    systemImage: "checkmark.circle.fill"
+                )
                     .font(StrandFont.headline)
                     .frame(maxWidth: .infinity)
             }
@@ -2007,11 +2084,17 @@ private struct VeepooPairingFace: View {
 
     private var failure: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(
-                session.registrationFailed
-                    ? "The band could not be saved. Registration was not reported as complete."
-                    : "The supplier connection could not be verified."
-            )
+            Group {
+                if session.registrationFailed {
+                    Text(
+                        "appwide.onboarding.device_wizard.supplier_registration_failed"
+                    )
+                } else {
+                    Text(
+                        "appwide.onboarding.device_wizard.supplier_connection_failed"
+                    )
+                }
+            }
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.statusWarning)
             Button {
@@ -2019,7 +2102,10 @@ private struct VeepooPairingFace: View {
                 password = ""
                 session.start()
             } label: {
-                Label("Try again", systemImage: "arrow.clockwise")
+                Label(
+                    "appwide.onboarding.device_wizard.supplier_try_again",
+                    systemImage: "arrow.clockwise"
+                )
                     .font(StrandFont.headline)
                     .frame(maxWidth: .infinity)
             }
@@ -2028,7 +2114,7 @@ private struct VeepooPairingFace: View {
         }
     }
 
-    private func progress(_ title: String) -> some View {
+    private func progress(_ title: LocalizedStringKey) -> some View {
         HStack(spacing: 12) {
             ProgressView().tint(StrandPalette.accent)
             Text(title)

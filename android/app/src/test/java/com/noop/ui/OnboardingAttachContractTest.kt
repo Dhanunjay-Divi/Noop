@@ -87,6 +87,44 @@ class OnboardingAttachContractTest {
         assertTrue(addDevice.contains("onSuccess = onClose"))
     }
 
+    @Test fun supplierPairingCopyUsesAppWideLocalizationWithoutChangingAvailability() {
+        val userDir = checkNotNull(System.getProperty("user.dir"))
+        val addDevice = source(userDir, "AddDeviceWizard.kt").readText()
+
+        assertTrue(
+            addDevice.contains(
+                "supplierAvailable = viewModel.supplierBandAvailable",
+            ),
+        )
+        assertTrue(addDevice.contains("if (supplierAvailable)"))
+        assertTrue(
+            addDevice.contains(
+                "appwide_onboarding_device_wizard_supplier_android_title",
+            ),
+        )
+        assertTrue(
+            addDevice.contains(
+                "appwide_onboarding_device_wizard_supplier_android_password_help",
+            ),
+        )
+        assertTrue(
+            addDevice.contains(
+                "appwide_onboarding_device_wizard_supplier_android_ready",
+            ),
+        )
+        assertFalse(
+            addDevice.contains(
+                "Band verified. Live heart rate is display-only and is not saved or scored.",
+            ),
+        )
+        assertFalse(
+            addDevice.contains(
+                "This opens the local transport; it is not ownership proof.",
+            ),
+        )
+        assertFalse(addDevice.contains("supplierCommitFailed"))
+    }
+
     @Test fun dailyRhythmMapsEverydayToolsWithoutEnablingThem() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val onboarding = source(userDir, "OnboardingScreen.kt").readText()
