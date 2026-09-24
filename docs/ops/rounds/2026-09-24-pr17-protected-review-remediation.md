@@ -245,6 +245,54 @@ firmware, background operation, and physiological accuracy remain unproven.
   instruction. No push, deployment, supplier binary, or physical-device action
   occurred.
 
+## Integrated replacement checkpoint
+
+- Integrated local commits: `f7ac75205`, `b490e2969`, `0ff3afeff`, and
+  `bdcca95aa`, plus the reviewed-source digest, terminology, and Swift
+  isolation corrections in the final working tree.
+- Apple runtime: supplier terminal live failure/stoppage clears display state,
+  supplier mode hides WHOOP-only controls, and onboarding accepts only a
+  supplier registration with an available adapter, valid peripheral UUID, and
+  valid stored credential.
+- Android runtime: supplier removal cannot activate an import-only source,
+  display HR expires within the bounded freshness interval, and WHOOP 5.0/MG
+  remains reachable beside WHOOP 4.0 and the supplier band.
+- SDK parity: Swift and Kotlin reject non-operation failure categories before
+  mutation and preserve the existing ordered authentication/security terminal
+  behavior.
+- Artifact trust: generated FMDB and MJExtension device frameworks, their
+  approved build inputs, and the complete iOS supplier script/test surface are
+  protected by reviewed hashes and inventories.
+- Focused verification: iOS trust tests pass 29/29; Swift SDK filtering
+  executes 3/3; Android supplier/runtime filtering passes 5/5 after verifying
+  seven exact AARs; Apple app-target filtering passes 4/4.
+- Build verification: the generic unsigned iPhoneOS build succeeds without the
+  new Swift isolation warnings and embeds ABParTool, FMDB, GRDFUSDK,
+  JLDialUnit, MJExtension, and ZipZap. Android `assembleFullDebug` succeeds
+  after the exact supplier verifier passes.
+- Repository verification: source release control passes 9 checks; the exact
+  hosted release unit matrix passes 204/204; required CI validates ten
+  contexts; calibration parity reports 12 metrics, 3 revisions, 13 thresholds,
+  and 16 guards; terminology records 18,138 occurrences across 1,616 groups
+  with zero forbidden mappings; distribution provenance, private-data, diff,
+  and all 91 operations-record gates pass.
+- Test artifacts:
+  - Android Full debug APK:
+    `~/Downloads/NOOP-band-test-2026-09-24/NOOP-Android-supplier-debug.apk`
+    with SHA-256
+    `161317662b8054343243a192c8e4813d263865ea5d3be9b2b7b2a9ed16ed2b62`.
+  - Unsigned iPhoneOS app ZIP:
+    `~/Downloads/NOOP-band-test-2026-09-24/NOOP-iPhone-supplier-unsigned-app.zip`
+    with SHA-256
+    `c88dac96161005123c2e5d8c6582feb4ed95d5f5eb05865b2e1ebb63510abc5b`.
+- Remaining protected work: commit and push one replacement candidate, reply
+  to and resolve the eight confirmed review threads with exact evidence, wait
+  for all exact-SHA hosted contexts, merge normally, verify protected `main`,
+  and remove only round-owned generated output after checking open handles.
+- Remaining external evidence: Apple signing/install, physical supplier and
+  WHOOP pairing, reconnect/background collection, history retention, battery,
+  haptics, firmware, egress, and physiological accuracy.
+
 ## Privacy check
 
 - [x] No credentials, personal names, email addresses, raw health exports,

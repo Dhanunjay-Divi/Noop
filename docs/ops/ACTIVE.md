@@ -12,20 +12,22 @@ Last updated: **2026-09-24**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current integration state: PR `#17` is at exact candidate
-  `f65366fcabca93a1a78c6d7f7c11e38e11d2189d`. The supplier-enabled Android
-  Full APK and unsigned generic iPhoneOS app both compile and package from the
-  owner-supplied local SDK while WHOOP remains available. Supplier binaries
-  remain ignored and absent from Git. The Apple app embeds the verified
-  ABParTool, FMDB, GRDFUSDK, JLDialUnit, MJExtension, and ZipZap runtime
-  frameworks; Android verifies and packages the seven pinned AARs. Focused
-  Apple supplier tests pass 39/39, the SDK wiring tests pass 18/18, the
-  operations validator passes all 91 records, and the complete release-control
-  matrix passes 204/204 after exact generated-cache cleanup. The reviewed
-  terminology ratchet records 18,121 classified occurrences across 1,614
-  groups with zero forbidden mappings. All PR review threads are resolved.
-  Replacement exact-SHA hosted checks are running; normal protected merge,
-  protected-main verification, and exact round-owned cleanup remain.
+- Current integration state: PR `#17` remains remote at
+  `60df38a2ad3e1a825198909336e75c415459b310`; a consolidated replacement is
+  prepared locally. The same Full/iPhone app build keeps WHOOP and the
+  verified local supplier adapter available together. Apple terminal live
+  state, supplier-only Live presentation, usable-registration onboarding,
+  Android live fallback/freshness, WHOOP 5/MG reachability, operation failure
+  parity, and iOS artifact trust findings are corrected. Supplier binaries
+  remain ignored and absent from Git. The generic iPhoneOS app and Android
+  Full APK build successfully; focused Apple, Android, Swift SDK, and local
+  trust tests pass. The complete release-control matrix passes 204/204, all
+  91 operations records validate, all ten required CI contexts validate, and
+  the reviewed terminology ratchet records 18,138 classified occurrences
+  across 1,616 groups with zero forbidden mappings. Eight protected-review
+  conversations remain to resolve after the replacement push. Exact-SHA
+  hosted checks, normal protected merge, protected-main verification, and
+  exact round-owned cleanup remain.
   Supplier redistribution, signing/store review, physical BLE, background
   collection, history retention, haptics, battery, firmware, egress, provider
   delivery, production load, and physiological accuracy remain external or

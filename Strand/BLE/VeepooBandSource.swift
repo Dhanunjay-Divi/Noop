@@ -165,7 +165,7 @@ enum VeepooSupplierRemoval {
 /// intentionally never mapped to `Streams` or inserted into durable history.
 @MainActor
 final class VeepooBandSource: LiveHRSource {
-    static let displayFreshnessInterval: TimeInterval = 30
+    nonisolated static let displayFreshnessInterval: TimeInterval = 30
 
     private let live: LiveState
     private let adapter: any VeepooBandAdapterControlling
