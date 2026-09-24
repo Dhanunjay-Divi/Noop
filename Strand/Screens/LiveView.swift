@@ -1148,9 +1148,9 @@ private struct LiveHeartReadout: View {
     @EnvironmentObject private var live: LiveState
     let hrMax: Int
 
-    /// Accepted sources prefer the smoothed value. Supplier HR remains on LiveState's
-    /// separate display-only lane and never feeds AppModel smoothing or formulas.
-    private var displayHR: Int? { model.bpm ?? live.displayOnlyHeartRate }
+    /// Supplier HR owns the focal value while its display-only lane is fresh. Falling
+    /// back to the accepted source's smoothed value preserves existing formula inputs.
+    private var displayHR: Int? { live.displayOnlyHeartRate ?? model.bpm }
     private var activeConnection: Bool { live.connected && live.bonded }
 
     /// The live HR zone for the focal readout's colour world (presentation only). 0 = below Zone 1.
@@ -1370,7 +1370,7 @@ private struct LiveSignalTrustRail: View {
     @EnvironmentObject private var live: LiveState
     let activeConnection: Bool
 
-    private var displayHR: Int? { model.bpm ?? live.displayOnlyHeartRate }
+    private var displayHR: Int? { live.displayOnlyHeartRate ?? model.bpm }
     /// Oura ring actively streaming live HR — trusted stream without a WHOOP bond (see LiveView.ringStreaming).
     private var ringStreaming: Bool { live.connected && live.streamingLiveHR }
     /// #218: a live link for the wear stat = a WHOOP bond OR an Oura HR stream. Oura streams only while worn

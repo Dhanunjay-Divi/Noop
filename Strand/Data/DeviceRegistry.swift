@@ -137,9 +137,21 @@ final class DeviceRegistry: ObservableObject {
     /// Archive (remove) a device: NOOP stops connecting to it, but its recorded data is kept. If the
     /// archived device was the active one, `activeDeviceId` is left as-is here — the caller decides the
     /// next active device (or leaves none active) and calls `setActive` explicitly.
-    func archive(_ id: String) {
-        try? store.archive(id)
-        reload()
+    @discardableResult
+    func archive(_ id: String) -> Bool {
+        guard let originalRows = try? store.all() else { return false }
+        do {
+            try store.archive(id)
+            let rows = try store.all()
+            guard rows.first(where: { $0.id == id })?.status == .archived else {
+                throw MutationFailure.verificationFailed
+            }
+            publish(rows)
+            return true
+        } catch {
+            restore(originalRows)
+            return false
+        }
     }
 
     /// Rename a device. `name` nil/empty clears the nickname so it falls back to brand+model.
@@ -204,6 +216,20 @@ final class DeviceRegistry: ObservableObject {
             if !originalRows.contains(where: { $0.id == attemptedDeviceID }) {
                 try store.archive(attemptedDeviceID)
             }
+            for row in originalRows {
+                try store.add(row)
+            }
+            if let originalActive = originalRows.first(where: { $0.status == .active }) {
+                try store.setActive(originalActive.id)
+            }
+            publish(try store.all())
+        } catch {
+            reload()
+        }
+    }
+
+    private func restore(_ originalRows: [PairedDevice]) {
+        do {
             for row in originalRows {
                 try store.add(row)
             }

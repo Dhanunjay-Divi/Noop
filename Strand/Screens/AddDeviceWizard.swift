@@ -1557,7 +1557,6 @@ struct AddDeviceWizard: View {
         }
         guard committed else { return }
         veepooCommitted = true
-        session.cancel()
         onClose()
     }
 

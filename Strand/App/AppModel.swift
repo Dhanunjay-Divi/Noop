@@ -1950,9 +1950,6 @@ final class AppModel: ObservableObject {
     /// ambiguous and must never be allowed to mean "release the active WHOOP." Historical data is not
     /// touched — this only stops the live owner for the row the user explicitly removed.
     func prepareForDeviceRemoval(_ device: PairedDevice) {
-        if device.sourceKind == .veepoo {
-            VeepooCredentialStore.shared.clear(deviceID: device.id)
-        }
         switch SourceCoordinator.removalAction(for: device) {
         case .archiveOnly:
             break
@@ -1961,6 +1958,23 @@ final class AppModel: ObservableObject {
         case .stopActiveNonWhoop:
             sourceCoordinator?.prepareForRemoval(deviceId: device.id)
         }
+    }
+
+    @discardableResult
+    func removeDevice(_ device: PairedDevice, from registry: DeviceRegistry) -> Bool {
+        if device.sourceKind == .veepoo {
+            guard VeepooSupplierRemoval.remove(
+                deviceID: device.id,
+                credentials: VeepooCredentialStore.shared,
+                archive: { registry.archive(device.id) }
+            ) else {
+                return false
+            }
+            sourceCoordinator?.prepareForRemoval(deviceId: device.id)
+            return true
+        }
+        prepareForDeviceRemoval(device)
+        return registry.archive(device.id)
     }
 
     /// Register a paired device and (optionally) make it the active one. The Add-a-device wizard's

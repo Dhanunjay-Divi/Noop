@@ -751,13 +751,17 @@ public final class LiveState: ObservableObject {
         displayOnlyHeartRate = bpm
     }
 
+    public func clearDisplayOnlyHeartRate() {
+        displayOnlyHeartRate = nil
+        displayOnlyHeartRateReceivedAt = nil
+    }
+
     /// Blank all live biometric readouts (HR + R-R + the rolling buffer) so a stale heart rate or
     /// R-R strip can't outlive the link. Called on CoreBluetooth disconnect (BLEManager), the twin of
     /// the `charging = nil` / `encryptedBond = false` clears on the same path.
     public func clearBiometrics() {
         heartRate = nil
-        displayOnlyHeartRate = nil
-        displayOnlyHeartRateReceivedAt = nil
+        clearDisplayOnlyHeartRate()
         latestHeartRateSample = nil
         rr.removeAll()
         rrRecent.removeAll()

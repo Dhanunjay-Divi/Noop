@@ -73,6 +73,7 @@ final class VeepooCredentialStore: VeepooCredentialAccess {
 
 enum VeepooSupplierLifecycleStage: String {
     case registration
+    case removal
     case secureCleanup = "secure_cleanup"
     case reconciliation
 }
@@ -92,6 +93,7 @@ enum VeepooSupplierLifecycleFailure: String {
     case securePersistence = "secure_persistence"
     case registryPersistence = "registry_persistence"
     case cleanupFailed = "cleanup_failed"
+    case credentialRestore = "credential_restore"
     case fallbackUnavailable = "fallback_unavailable"
 }
 
@@ -120,16 +122,62 @@ enum VeepooSupplierLifecycleDiagnostics {
     }
 }
 
+@MainActor
+enum VeepooSupplierRemoval {
+    static func remove(
+        deviceID: String,
+        credentials: any VeepooCredentialAccess,
+        archive: () -> Bool
+    ) -> Bool {
+        let priorCredential = credentials.load(deviceID: deviceID)
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .removal,
+            outcome: .began
+        )
+        guard credentials.clear(deviceID: deviceID) else {
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .removal,
+                outcome: .failed,
+                failure: .cleanupFailed
+            )
+            return false
+        }
+        guard archive() else {
+            let restored = priorCredential.map {
+                credentials.save($0, deviceID: deviceID)
+            } ?? true
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .removal,
+                outcome: .failed,
+                failure: restored ? .registryPersistence : .credentialRestore
+            )
+            return false
+        }
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .removal,
+            outcome: .completed
+        )
+        return true
+    }
+}
+
 /// Registered-source bridge. Supplier live HR updates only `LiveState`; it is
 /// intentionally never mapped to `Streams` or inserted into durable history.
 @MainActor
 final class VeepooBandSource: LiveHRSource {
+    static let displayFreshnessInterval: TimeInterval = 30
+
     private let live: LiveState
     private let adapter: any VeepooBandAdapterControlling
     private let password: String
     private let onCredentialRejected: () -> Void
+    private let displayFreshnessInterval: TimeInterval
+    private let reconnectDelaysNanoseconds: [UInt64]
+    private let reconnectDiscoveryTimeoutNanoseconds: UInt64
+    private let now: () -> Date
     private var targetPeripheralID: UUID?
     private var reconnectTask: Task<Void, Never>?
+    private var displayFreshnessTask: Task<Void, Never>?
     private var reconnectAttempt = 0
     private var credentialRejected = false
     private var stopped = false
@@ -138,12 +186,25 @@ final class VeepooBandSource: LiveHRSource {
         live: LiveState,
         adapter: any VeepooBandAdapterControlling,
         password: String,
-        onCredentialRejected: @escaping () -> Void
+        onCredentialRejected: @escaping () -> Void,
+        displayFreshnessInterval: TimeInterval = displayFreshnessInterval,
+        reconnectDelaysNanoseconds: [UInt64] = [
+            2_000_000_000,
+            5_000_000_000,
+            15_000_000_000,
+        ],
+        reconnectDiscoveryTimeoutNanoseconds: UInt64 = 12_000_000_000,
+        now: @escaping () -> Date = Date.init
     ) {
         self.live = live
         self.adapter = adapter
         self.password = password
         self.onCredentialRejected = onCredentialRejected
+        self.displayFreshnessInterval = displayFreshnessInterval
+        self.reconnectDelaysNanoseconds = reconnectDelaysNanoseconds
+        self.reconnectDiscoveryTimeoutNanoseconds =
+            reconnectDiscoveryTimeoutNanoseconds
+        self.now = now
         adapter.eventHandler = { [weak self] event in self?.handle(event) }
     }
 
@@ -165,6 +226,8 @@ final class VeepooBandSource: LiveHRSource {
         stopped = true
         reconnectTask?.cancel()
         reconnectTask = nil
+        displayFreshnessTask?.cancel()
+        displayFreshnessTask = nil
         adapter.disconnect()
         live.connected = false
         live.batteryPct = nil
@@ -176,6 +239,8 @@ final class VeepooBandSource: LiveHRSource {
         switch event {
         case .candidate(let candidate):
             guard candidate.peripheralID == targetPeripheralID else { return }
+            reconnectTask?.cancel()
+            reconnectTask = nil
             adapter.reconnect(candidateHandle: candidate.handle)
         case .state(.connected):
             adapter.verifyPassword(password)
@@ -185,13 +250,24 @@ final class VeepooBandSource: LiveHRSource {
             }
             adapter.startLiveHeartRate()
         case .heartRate(let reading):
+            guard Self.freshnessRemaining(
+                receivedAt: reading.receivedAt,
+                now: now(),
+                freshnessInterval: displayFreshnessInterval
+            ) != nil else {
+                clearDisplayHeartRate()
+                return
+            }
             reconnectAttempt = 0
             live.setDisplayOnlyHeartRate(
                 reading.bpm,
                 receivedAt: reading.receivedAt
             )
             live.connected = true
+            scheduleDisplayExpiry(for: reading.receivedAt)
         case .disconnected:
+            displayFreshnessTask?.cancel()
+            displayFreshnessTask = nil
             live.connected = false
             live.batteryPct = nil
             live.clearBiometrics()
@@ -203,10 +279,15 @@ final class VeepooBandSource: LiveHRSource {
                 onCredentialRejected()
                 return
             }
+            if stage == .live {
+                clearDisplayHeartRate()
+            }
             if stage == .connection || stage == .disconnect {
                 scheduleReconnect()
             }
-        case .state, .authenticated, .liveStarted, .liveStopped:
+        case .liveStopped:
+            clearDisplayHeartRate()
+        case .state, .authenticated, .liveStarted:
             break
         }
     }
@@ -215,18 +296,66 @@ final class VeepooBandSource: LiveHRSource {
         guard !stopped,
               reconnectTask == nil,
               let targetPeripheralID,
-              reconnectAttempt < 3
+              reconnectAttempt < reconnectDelaysNanoseconds.count
         else {
             return
         }
         reconnectAttempt += 1
-        let delay = UInt64([2, 5, 15][reconnectAttempt - 1])
-        reconnectTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+        let delay = reconnectDelaysNanoseconds[reconnectAttempt - 1]
+        reconnectTask = Task { @MainActor [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+            }
             guard !Task.isCancelled, let self, !self.stopped else { return }
-            self.reconnectTask = nil
             self.adapter.startDiscovery(targetPeripheralID: targetPeripheralID)
+            try? await Task.sleep(
+                nanoseconds: self.reconnectDiscoveryTimeoutNanoseconds
+            )
+            guard !Task.isCancelled, !self.stopped else { return }
+            self.adapter.stopDiscovery()
+            self.reconnectTask = nil
+            self.scheduleReconnect()
         }
+    }
+
+    static func freshnessRemaining(
+        receivedAt: Date,
+        now: Date,
+        freshnessInterval: TimeInterval = displayFreshnessInterval
+    ) -> TimeInterval? {
+        let age = now.timeIntervalSince(receivedAt)
+        guard age >= 0, age <= freshnessInterval else { return nil }
+        return freshnessInterval - age
+    }
+
+    private func scheduleDisplayExpiry(for receivedAt: Date) {
+        displayFreshnessTask?.cancel()
+        guard let remaining = Self.freshnessRemaining(
+            receivedAt: receivedAt,
+            now: now(),
+            freshnessInterval: displayFreshnessInterval
+        ) else {
+            clearDisplayHeartRate()
+            return
+        }
+        let sleepNanoseconds = UInt64(
+            max(0, remaining) * 1_000_000_000
+        )
+        displayFreshnessTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: sleepNanoseconds)
+            guard !Task.isCancelled, let self, !self.stopped else { return }
+            guard self.live.displayOnlyHeartRateReceivedAt == receivedAt else {
+                return
+            }
+            self.displayFreshnessTask = nil
+            self.live.clearDisplayOnlyHeartRate()
+        }
+    }
+
+    private func clearDisplayHeartRate() {
+        displayFreshnessTask?.cancel()
+        displayFreshnessTask = nil
+        live.clearDisplayOnlyHeartRate()
     }
 }
 
@@ -302,6 +431,7 @@ final class VeepooBandPairingSession: ObservableObject {
     private let credentials: any VeepooCredentialAccess
     private let deviceID = "veepoo-\(UUID().uuidString.lowercased())"
     private var acceptedPassword = ""
+    private var ignoringExpectedDisconnect = false
 
     init(
         adapter: any VeepooBandAdapterControlling,
@@ -337,7 +467,15 @@ final class VeepooBandPairingSession: ObservableObject {
         guard candidates.contains(candidate) else { return }
         selectedCandidate = candidate
         lastFailure = nil
-        phase = .confirmPrintedIdentifier
+        if candidate.printedIdentifier == nil {
+            phase = .connecting
+            adapter.connect(
+                candidateHandle: candidate.handle,
+                confirmedPrintedIdentifier: ""
+            )
+        } else {
+            phase = .confirmPrintedIdentifier
+        }
     }
 
     func confirmPrintedIdentifier(_ value: String) {
@@ -397,6 +535,13 @@ final class VeepooBandPairingSession: ObservableObject {
             failRegistration(.securePersistence)
             return false
         }
+        // The supplier SDK uses a process-wide manager. Release the pairing
+        // owner before publishing the new active row so SourceCoordinator can
+        // start the production owner without the pairing session subsequently
+        // clearing its observer or disconnecting its link.
+        ignoringExpectedDisconnect = true
+        adapter.disconnect()
+        ignoringExpectedDisconnect = false
         guard register(device) else {
             let cleared = credentials.clear(deviceID: deviceID)
             VeepooSupplierLifecycleDiagnostics.record(
@@ -409,6 +554,7 @@ final class VeepooBandPairingSession: ObservableObject {
         }
 
         acceptedPassword = ""
+        phase = .idle
         VeepooSupplierLifecycleDiagnostics.record(
             stage: .registration,
             outcome: .completed
@@ -467,6 +613,7 @@ final class VeepooBandPairingSession: ObservableObject {
                 phase = .failed(failure)
             }
         case .disconnected:
+            if ignoringExpectedDisconnect { return }
             lastFailure = .disconnected
             if phase != .idle { phase = .failed(.disconnected) }
         case .state, .liveStarted, .liveStopped:

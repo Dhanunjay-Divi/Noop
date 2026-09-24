@@ -413,8 +413,10 @@ private struct DevicesContent: View {
         // #78: release only the LIVE owner represented by this exact row. AppModel still has the row's
         // source/status context here, so a nil Apple Watch/import/inactive-WHOOP identifier can never be
         // misread as "release whichever WHOOP happens to be connected."
-        model.prepareForDeviceRemoval(device)
-        registry.archive(device.id)
+        guard model.removeDevice(device, from: registry) else {
+            removeTarget = nil
+            return
+        }
         removeTarget = nil
         if wasActive {
             // Other ACTIVATABLE devices left → ask which becomes active; otherwise (none left, or only

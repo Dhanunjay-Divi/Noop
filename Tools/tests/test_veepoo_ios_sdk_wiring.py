@@ -159,7 +159,16 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             "NOOP_VEEPOO_FRAMEWORK_DIR": str(
                 MODULE.EXPECTED_FRAMEWORK_PATH.parent
             ),
-            "NOOP_VEEPOO_LINK_FLAGS": "-ObjC -framework VeepooBleSDK",
+            "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR": str(
+                MODULE.EXPECTED_VENDOR_FRAMEWORK_DIR
+            ),
+            "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR": str(
+                MODULE.EXPECTED_FMDB_FRAMEWORK_DIR
+            ),
+            "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR": str(
+                MODULE.EXPECTED_MJEXTENSION_FRAMEWORK_DIR
+            ),
+            "NOOP_VEEPOO_LINK_FLAGS": MODULE.EXPECTED_LINK_FLAGS,
             "NOOP_VEEPOO_SWIFT_CONDITION": "NOOP_SUPPLIER_VEEPOO",
         }
         MODULE.verify_build_environment(approved)
@@ -175,7 +184,7 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             ROOT / "Config" / "VeepooLocalSDK.example.xcconfig"
         ).read_text(encoding="utf-8")
         self.assertEqual(MODULE.render_local_config(), example)
-        self.assertEqual(example.count("[sdk=iphoneos*]"), 4)
+        self.assertEqual(example.count("[sdk=iphoneos*]"), 7)
         self.assertNotIn("NOOP_VEEPOO_SDK_ENABLED = YES", example)
 
     def test_writer_creates_only_the_local_config(self) -> None:
@@ -209,12 +218,16 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             self.assertEqual(project.count(setting), 1)
         self.assertIn("--build-check", target)
         self.assertIn('"${PLATFORM_NAME:-}" = "iphoneos"', target)
+        self.assertIn("embed-veepoo-ios-frameworks.sh", target)
 
         wrapper = (ROOT / "Config" / "NOOPiOS.xcconfig").read_text(
             encoding="utf-8"
         )
         self.assertIn("NOOP_VEEPOO_SDK_ENABLED = NO", wrapper)
         self.assertIn("NOOP_VEEPOO_FRAMEWORK_DIR =", wrapper)
+        self.assertIn("NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR =", wrapper)
+        self.assertIn("NOOP_VEEPOO_FMDB_FRAMEWORK_DIR =", wrapper)
+        self.assertIn("NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR =", wrapper)
         self.assertIn('#include? "VeepooLocalSDK.xcconfig"', wrapper)
         self.assertLess(
             wrapper.index("NOOP_VEEPOO_SDK_ENABLED = NO"),

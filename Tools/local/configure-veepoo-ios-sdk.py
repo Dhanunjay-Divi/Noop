@@ -19,8 +19,39 @@ EXPECTED_FRAMEWORK_PATH = Path(
     "/Users/divii/Downloads/SDK/iOS_Ble_SDK-master/iOS_sdk_source/"
     "Framework/2.2.XX.15/VeepooBleSDK.framework"
 )
+EXPECTED_DEMO_ROOT = Path(
+    "/Users/divii/Downloads/SDK/iOS_Ble_SDK-master/iOS_sdk_source/"
+    "Demo/VeepooBleSDKDemo"
+)
+EXPECTED_VENDOR_FRAMEWORK_DIR = EXPECTED_DEMO_ROOT / "VeepooBleSDKDemo"
+EXPECTED_PODS_PROJECT = EXPECTED_DEMO_ROOT / "Pods" / "Pods.xcodeproj"
+EXPECTED_PODS_BUILD_ROOT = EXPECTED_DEMO_ROOT / "build"
+EXPECTED_PODS_PRODUCTS_ROOT = EXPECTED_PODS_BUILD_ROOT / "Debug-iphoneos"
+EXPECTED_FMDB_FRAMEWORK_DIR = EXPECTED_PODS_PRODUCTS_ROOT / "FMDB"
+EXPECTED_MJEXTENSION_FRAMEWORK_DIR = EXPECTED_PODS_PRODUCTS_ROOT / "MJExtension"
 EXPECTED_BINARY_SHA256 = (
     "22e9d0154c5fecddbd3a21ef309fb3d33d734ec5f8e671787fa9ee8564d13d35"
+)
+EXPECTED_VENDOR_FRAMEWORK_SHA256 = {
+    "ABParTool": "585f084f6955f5da0abc7d57eacaa123c0a0342016238770119cab077a74e39b",
+    "DFUnits": "9fdd6bf728f2733051ccb1aeaf9c8035b8916556401b1e0c932d27e2673f0100",
+    "GRDFUSDK": "8a84fde46a0f9fdb36a8aa1150afa6f01ad054abf9621e74385de8fcf2ade499",
+    "JLDialUnit": "3bcd10c92d490187ff8b441bedbae9f7bb3ff32918d4130d6db7156be8737146",
+    "JL_BLEKit": "e35bb7b223f35f624af8323aa6ed39b8356e0694bfffd10ecd3925026ce4aa48",
+    "ZipZap": "a9fe0ba509e08b4bc13b7f41f7770596d1496fca297d1ff032d0d7e1e6cc51c2",
+}
+EXPECTED_LINK_FLAGS = (
+    "-ObjC "
+    "-framework VeepooBleSDK "
+    "-framework ABParTool "
+    "-framework DFUnits "
+    "-framework GRDFUSDK "
+    "-framework JLDialUnit "
+    "-framework JL_BLEKit "
+    "-framework ZipZap "
+    "-framework FMDB "
+    "-framework MJExtension "
+    "-lsqlite3 -lz"
 )
 EXPECTED_EXECUTABLE_NAME = "VeepooBleSDK"
 EXPECTED_ARCHITECTURES = ("arm64",)
@@ -31,6 +62,7 @@ MAX_BINARY_BYTES = 32 * 1024 * 1024
 MAX_METADATA_BYTES = 1024 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 4096
 COMMAND_TIMEOUT_SECONDS = 10
+DEPENDENCY_BUILD_TIMEOUT_SECONDS = 600
 
 
 class VerificationError(RuntimeError):
@@ -189,6 +221,118 @@ def verify_framework(
     }
 
 
+def _verify_companion_framework(
+    framework_path: Path,
+    framework_name: str,
+    *,
+    expected_sha256: str | None,
+) -> None:
+    framework_path = _absolute(framework_path)
+    _reject_symlinked_path(framework_path)
+    try:
+        framework_stat = framework_path.lstat()
+    except OSError as error:
+        raise VerificationError(
+            f"{framework_name}.framework is not readable"
+        ) from error
+    if not stat.S_ISDIR(framework_stat.st_mode):
+        raise VerificationError(
+            f"{framework_name}.framework must be a directory"
+        )
+
+    binary_path = framework_path / framework_name
+    info_path = framework_path / "Info.plist"
+    _regular_file(
+        binary_path,
+        maximum_bytes=MAX_BINARY_BYTES,
+        label=f"{framework_name} executable",
+    )
+    _regular_file(
+        info_path,
+        maximum_bytes=MAX_METADATA_BYTES,
+        label=f"{framework_name} Info.plist",
+    )
+    if (
+        expected_sha256 is not None
+        and _sha256_file(binary_path) != expected_sha256
+    ):
+        raise VerificationError(
+            f"{framework_name} executable SHA-256 does not match"
+        )
+    architectures = _lipo_architectures(binary_path)
+    if "arm64" not in architectures:
+        raise VerificationError(
+            f"{framework_name}.framework has no physical arm64 slice"
+        )
+
+
+def build_pod_frameworks() -> None:
+    _reject_symlinked_path(EXPECTED_PODS_PROJECT)
+    command = [
+        "/usr/bin/xcrun",
+        "xcodebuild",
+        "-project",
+        str(EXPECTED_PODS_PROJECT),
+        "-scheme",
+        "Pods-VeepooBleSDKDemo",
+        "-configuration",
+        "Debug",
+        "-destination",
+        "generic/platform=iOS",
+        f"SYMROOT={EXPECTED_PODS_BUILD_ROOT}",
+        f"OBJROOT={EXPECTED_PODS_BUILD_ROOT / 'Intermediates'}",
+        "IPHONEOS_DEPLOYMENT_TARGET=17.0",
+        "ARCHS=arm64",
+        "ONLY_ACTIVE_ARCH=YES",
+        "CODE_SIGNING_ALLOWED=NO",
+        "CODE_SIGNING_REQUIRED=NO",
+        "build",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            cwd=EXPECTED_DEMO_ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=DEPENDENCY_BUILD_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise VerificationError(
+            "FMDB and MJExtension dependency build did not complete"
+        ) from error
+    if result.returncode != 0:
+        output = result.stdout[-MAX_COMMAND_OUTPUT_BYTES:].decode(
+            "utf-8",
+            errors="replace",
+        )
+        raise VerificationError(
+            "FMDB and MJExtension dependency build failed:\n" + output
+        )
+
+
+def verify_companion_frameworks() -> None:
+    for framework_name, expected_sha256 in (
+        EXPECTED_VENDOR_FRAMEWORK_SHA256.items()
+    ):
+        _verify_companion_framework(
+            EXPECTED_VENDOR_FRAMEWORK_DIR
+            / f"{framework_name}.framework",
+            framework_name,
+            expected_sha256=expected_sha256,
+        )
+    for framework_name, framework_directory in (
+        ("FMDB", EXPECTED_FMDB_FRAMEWORK_DIR),
+        ("MJExtension", EXPECTED_MJEXTENSION_FRAMEWORK_DIR),
+    ):
+        _verify_companion_framework(
+            framework_directory / f"{framework_name}.framework",
+            framework_name,
+            expected_sha256=None,
+        )
+
+
 def render_local_config() -> str:
     return (
         "// Generated only after Tools/local/configure-veepoo-ios-sdk.py verifies the\n"
@@ -198,8 +342,14 @@ def render_local_config() -> str:
         "NOOP_VEEPOO_SDK_ENABLED[sdk=iphoneos*] = YES\n"
         "NOOP_VEEPOO_FRAMEWORK_DIR[sdk=iphoneos*] = "
         f"{EXPECTED_FRAMEWORK_PATH.parent}\n"
+        "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR[sdk=iphoneos*] = "
+        f"{EXPECTED_VENDOR_FRAMEWORK_DIR}\n"
+        "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR[sdk=iphoneos*] = "
+        f"{EXPECTED_FMDB_FRAMEWORK_DIR}\n"
+        "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR[sdk=iphoneos*] = "
+        f"{EXPECTED_MJEXTENSION_FRAMEWORK_DIR}\n"
         "NOOP_VEEPOO_LINK_FLAGS[sdk=iphoneos*] = "
-        "-ObjC -framework VeepooBleSDK\n"
+        f"{EXPECTED_LINK_FLAGS}\n"
         "NOOP_VEEPOO_SWIFT_CONDITION[sdk=iphoneos*] = "
         "NOOP_SUPPLIER_VEEPOO\n"
     )
@@ -254,7 +404,16 @@ def verify_build_environment(environment: Mapping[str, str]) -> None:
         "PLATFORM_NAME": EXPECTED_PLATFORM_NAME,
         "NOOP_VEEPOO_SDK_ENABLED": "YES",
         "NOOP_VEEPOO_FRAMEWORK_DIR": str(EXPECTED_FRAMEWORK_PATH.parent),
-        "NOOP_VEEPOO_LINK_FLAGS": "-ObjC -framework VeepooBleSDK",
+        "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR": str(
+            EXPECTED_VENDOR_FRAMEWORK_DIR
+        ),
+        "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR": str(
+            EXPECTED_FMDB_FRAMEWORK_DIR
+        ),
+        "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR": str(
+            EXPECTED_MJEXTENSION_FRAMEWORK_DIR
+        ),
+        "NOOP_VEEPOO_LINK_FLAGS": EXPECTED_LINK_FLAGS,
         "NOOP_VEEPOO_SWIFT_CONDITION": "NOOP_SUPPLIER_VEEPOO",
     }
     for name, expected_value in required_values.items():
@@ -271,7 +430,7 @@ def _repository_root() -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Verify the exact local Veepoo iPhoneOS framework without copying it."
+            "Verify the exact local Veepoo iPhoneOS SDK dependency bundle."
         )
     )
     mode = parser.add_mutually_exclusive_group()
@@ -290,13 +449,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if arguments.build_check:
             verify_build_environment(os.environ)
+        if arguments.write_config:
+            build_pod_frameworks()
         result = verify_framework()
+        verify_companion_frameworks()
         if arguments.write_config:
             destination = write_local_config(_repository_root())
             print(f"wrote {destination.relative_to(_repository_root())}")
         print(
-            "verified VeepooBleSDK.framework: "
-            f"{result['platform']} {result['architecture']}, SHA-256 matched"
+            "verified Veepoo iPhoneOS bundle: "
+            f"{result['platform']} {result['architecture']}, "
+            "primary and companion frameworks matched"
         )
     except VerificationError as error:
         print(f"error: {error}", file=sys.stderr)

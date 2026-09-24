@@ -454,7 +454,7 @@ targets:
         # Config/VeepooLocalSDK.xcconfig is generated locally. Qualifying all
         # consumers by iphoneos keeps simulator, Mac, Watch, widgets, and CI
         # independent of the arm64 device-only framework.
-        "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]": "$(inherited) $(NOOP_VEEPOO_FRAMEWORK_DIR)"
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]": "$(inherited) $(NOOP_VEEPOO_FRAMEWORK_DIR) $(NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR) $(NOOP_VEEPOO_FMDB_FRAMEWORK_DIR) $(NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR)"
         "OTHER_LDFLAGS[sdk=iphoneos*]": "$(inherited) $(NOOP_VEEPOO_LINK_FLAGS)"
         "SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphoneos*]": "$(inherited) $(NOOP_VEEPOO_SWIFT_CONDITION)"
       configs:
@@ -480,6 +480,13 @@ targets:
         script: |
           if [ "${PLATFORM_NAME:-}" = "iphoneos" ] && [ "${NOOP_VEEPOO_SDK_ENABLED:-NO}" = "YES" ]; then
             "$SRCROOT/Tools/local/configure-veepoo-ios-sdk.py" --build-check
+          fi
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      - name: Embed Optional Veepoo iPhoneOS Dependencies
+        script: |
+          if [ "${PLATFORM_NAME:-}" = "iphoneos" ] && [ "${NOOP_VEEPOO_SDK_ENABLED:-NO}" = "YES" ]; then
+            "$SRCROOT/Tools/local/embed-veepoo-ios-frameworks.sh"
           fi
         basedOnDependencyAnalysis: false
     dependencies:

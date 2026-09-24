@@ -92,7 +92,6 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
         self.manager = manager
         manager.isLogEnable = false
         manager.automaticConnection = false
-        manager.deviceShowConfirm = true
         manager.deviceConfirmTimeout = 12
     }
 
@@ -120,11 +119,16 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
         manager.veepooSDKStopScanDevice()
     }
 
-    func connect(generation: UInt64, candidateHandle: UInt64) {
+    func connect(
+        generation: UInt64,
+        candidateHandle: UInt64,
+        requiresUserConfirmation: Bool
+    ) {
         guard let model = candidates[candidateHandle] else {
             emit(.connection(generation: generation, .failed))
             return
         }
+        manager.deviceShowConfirm = requiresUserConfirmation
         installConnectionObserver(generation: generation)
         manager.veepooSDKConnectDevice(model) { [weak self] state in
             Task { @MainActor [weak self] in
@@ -235,7 +239,11 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
                 generation: generation,
                 handle: handle,
                 peripheralID: peripheralID,
-                printedIdentifier: model.deviceAddress
+                // `deviceAddress` is a Bluetooth address, not a proven mapping
+                // to the identifier printed on the band. The test integration
+                // therefore relies on the SDK's physical confirmation prompt
+                // instead of presenting this address as a printed identifier.
+                printedIdentifier: nil
             )
         )
     }

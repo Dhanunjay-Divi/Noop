@@ -3,7 +3,7 @@ import Foundation
 struct VeepooBandCandidate: Equatable, Sendable, Identifiable {
     let handle: UInt64
     let peripheralID: UUID
-    fileprivate let printedIdentifier: String
+    let printedIdentifier: String?
 
     var id: UInt64 { handle }
 }
@@ -136,7 +136,7 @@ enum VeepooBandSDKEvent: Equatable, Sendable {
         generation: UInt64,
         handle: UInt64,
         peripheralID: UUID,
-        printedIdentifier: String
+        printedIdentifier: String?
     )
     case connection(generation: UInt64, VeepooBandSDKConnectionEvent)
     case password(generation: UInt64, VeepooBandSDKPasswordEvent)
@@ -161,7 +161,11 @@ protocol VeepooBandSDKClient: AnyObject {
 
     func startDiscovery(generation: UInt64, targetPeripheralID: UUID?)
     func stopDiscovery()
-    func connect(generation: UInt64, candidateHandle: UInt64)
+    func connect(
+        generation: UInt64,
+        candidateHandle: UInt64,
+        requiresUserConfirmation: Bool
+    )
     func disconnect()
     func verifyPassword(generation: UInt64, password: String)
     func readBattery(generation: UInt64)
@@ -289,15 +293,17 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
         confirmedPrintedIdentifier: String
     ) {
         guard let candidate = selectableCandidate(candidateHandle) else { return }
-        guard Self.printedIdentifiersMatch(
-            confirmedPrintedIdentifier,
-            candidate.printedIdentifier
-        ) else {
-            reject(.identifierMismatch, stage: .identification)
-            return
+        if let printedIdentifier = candidate.printedIdentifier {
+            guard Self.printedIdentifiersMatch(
+                confirmedPrintedIdentifier,
+                printedIdentifier
+            ) else {
+                reject(.identifierMismatch, stage: .identification)
+                return
+            }
         }
         diagnostics.record(.init(stage: .identification, outcome: .completed))
-        beginConnection(candidateHandle)
+        beginConnection(candidateHandle, requiresUserConfirmation: true)
     }
 
     /// Reconnect is allowed only for a previously persisted peripheral. The
@@ -305,7 +311,7 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
     /// confirmation.
     func reconnect(candidateHandle: UInt64) {
         guard selectableCandidate(candidateHandle) != nil else { return }
-        beginConnection(candidateHandle)
+        beginConnection(candidateHandle, requiresUserConfirmation: false)
     }
 
     func disconnect() {
@@ -428,7 +434,10 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
         return candidate
     }
 
-    private func beginConnection(_ handle: UInt64) {
+    private func beginConnection(
+        _ handle: UInt64,
+        requiresUserConfirmation: Bool
+    ) {
         client.stopDiscovery()
         diagnostics.record(
             .init(
@@ -439,7 +448,11 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
         )
         transition(to: .connecting)
         diagnostics.record(.init(stage: .connection, outcome: .began))
-        client.connect(generation: generation, candidateHandle: handle)
+        client.connect(
+            generation: generation,
+            candidateHandle: handle,
+            requiresUserConfirmation: requiresUserConfirmation
+        )
     }
 
     private func handle(_ event: VeepooBandSDKEvent) {

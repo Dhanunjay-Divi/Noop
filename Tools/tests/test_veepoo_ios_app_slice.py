@@ -18,6 +18,7 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
             "#if os(iOS) && NOOP_SUPPLIER_VEEPOO && canImport(VeepooBleSDK)",
             adapter,
         )
+        self.assertIn("static let productionEnabled = true", adapter)
         self.assertIn("static let productionEnabled = false", adapter)
         for relative in (
             "Strand/BLE/VeepooBandAdapterCore.swift",
@@ -26,15 +27,26 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
         ):
             self.assertNotIn("import VeepooBleSDK", self.read(relative))
 
-    def test_pairing_order_requires_selection_and_printed_id_before_password(
+    def test_pairing_uses_trusted_id_when_available_and_physical_confirmation_otherwise(
         self,
     ) -> None:
         core = self.read("Strand/BLE/VeepooBandAdapterCore.swift")
+        source = self.read("Strand/BLE/VeepooBandSource.swift")
         wizard = self.read("Strand/Screens/AddDeviceWizard.swift")
         connect = core.index("func connect(")
+        optional_mapping = core.index(
+            "if let printedIdentifier = candidate.printedIdentifier",
+            connect,
+        )
         printed_match = core.index("Self.printedIdentifiersMatch", connect)
-        begin_connection = core.index("beginConnection(candidateHandle)", connect)
+        begin_connection = core.index(
+            "beginConnection(candidateHandle, requiresUserConfirmation: true)",
+            connect,
+        )
+        self.assertLess(optional_mapping, printed_match)
         self.assertLess(printed_match, begin_connection)
+        self.assertIn("if candidate.printedIdentifier == nil", source)
+        self.assertIn("confirmedPrintedIdentifier: \"\"", source)
         self.assertIn("session.select(candidate)", wizard)
         self.assertIn(
             "session.confirmPrintedIdentifier(printedIdentifier)",
@@ -121,7 +133,7 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
         source = self.read("Strand/BLE/VeepooBandSource.swift")
         lifecycle = source[
             source.index("enum VeepooSupplierLifecycleDiagnostics") :
-            source.index("/// Registered-source bridge")
+            source.index("@MainActor\nenum VeepooSupplierRemoval")
         ]
         self.assertEqual(
             {'"stage"', '"outcome"', '"trigger"', '"failure_kind"'},

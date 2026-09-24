@@ -81,6 +81,23 @@ final class LiveHeartRatePresentationContractTests: XCTestCase {
         XCTAssertFalse(source.contains(#""error": error"#))
     }
 
+    func testSupplierDisplayHeartRatePrecedesAcceptedFallbackOnLiveSurface() throws {
+        let source = try String(
+            contentsOf: repositoryRoot().appendingPathComponent(
+                "Strand/Screens/LiveView.swift"
+            ),
+            encoding: .utf8
+        )
+        let precedence = "live.displayOnlyHeartRate ?? model.bpm"
+
+        XCTAssertEqual(
+            source.components(separatedBy: precedence).count - 1,
+            2,
+            "Both the focal readout and signal rail must prefer fresh supplier display HR."
+        )
+        XCTAssertFalse(source.contains("model.bpm ?? live.displayOnlyHeartRate"))
+    }
+
     private func repositoryRoot() -> URL {
         var candidate = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
