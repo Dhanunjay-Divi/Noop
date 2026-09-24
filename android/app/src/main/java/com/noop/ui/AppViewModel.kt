@@ -427,9 +427,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         handle: com.noop.ble.veepoo.VeepooCandidateHandle,
     ): Boolean = noopApp.sourceCoordinator.selectVeepooCandidate(handle)
 
-    fun submitSupplierBandPairing(printedId: String, transportPassword: String): Boolean =
+    fun submitSupplierBandPairing(transportPassword: String): Boolean =
         noopApp.sourceCoordinator.submitVeepooPairing(
-            printedId.toCharArray(),
             transportPassword.toCharArray(),
         )
 

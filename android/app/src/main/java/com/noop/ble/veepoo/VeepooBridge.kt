@@ -70,7 +70,7 @@ class VeepooBinding private constructor(
 }
 
 data class VeepooIdentity(
-    val printedDeviceNumber: String,
+    val modelCode: String,
     val hardwareRevision: String,
     val firmwareVersion: String,
 ) {

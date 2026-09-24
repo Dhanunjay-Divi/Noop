@@ -4,6 +4,35 @@ import XCTest
 import WhoopStore
 
 final class VeepooBandAdapterCoreTests: XCTestCase {
+    private static let approvedIdentity = VeepooBandProductIdentity(
+        modelCode: "4321",
+        hardwareRevision: "HW-1",
+        firmwareRevision: "FW-2"
+    )
+
+    private static let approvedPolicy: VeepooBandCompatibilityPolicy = {
+        let data = Data(
+            """
+            {
+              "schemaVersion": 1,
+              "approvedBands": [
+                {
+                  "platform": "apple",
+                  "modelCode": "4321",
+                  "hardwareRevision": "HW-1",
+                  "firmwareRevision": "FW-2",
+                  "protocolVersion": "noop-band-v1",
+                  "wrapperRevision": "veepoo-apple-display-v1"
+                }
+              ]
+            }
+            """.utf8
+        )
+        return try! VeepooBandCompatibilityPolicy(
+            validatingManifestData: data
+        )
+    }()
+
     @MainActor
     private final class FakeClient: VeepooBandSDKClient {
         var eventHandler: ((VeepooBandSDKEvent) -> Void)?
@@ -145,6 +174,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         let diagnostics = RecordingDiagnostics()
         let core = VeepooBandAdapterCore(
             client: client,
+            compatibilityPolicy: Self.approvedPolicy,
             diagnostics: diagnostics
         )
         let generation = beginDiscovery(core, client: client)
@@ -191,6 +221,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         let diagnostics = RecordingDiagnostics()
         let core = VeepooBandAdapterCore(
             client: client,
+            compatibilityPolicy: Self.approvedPolicy,
             diagnostics: diagnostics
         )
         let generation = beginDiscovery(core, client: client)
@@ -247,6 +278,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         let client = FakeClient()
         let core = VeepooBandAdapterCore(
             client: client,
+            compatibilityPolicy: Self.approvedPolicy,
             diagnostics: RecordingDiagnostics()
         )
         let generation = beginDiscovery(core, client: client)
@@ -279,12 +311,18 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         let client = FakeClient()
         let core = VeepooBandAdapterCore(
             client: client,
+            compatibilityPolicy: Self.approvedPolicy,
             diagnostics: RecordingDiagnostics()
         )
         let generation = connect(core, client: client)
 
         core.verifyPassword("2468")
-        client.emit(.password(generation: generation, .verified))
+        client.emit(
+            .password(
+                generation: generation,
+                .verified(Self.approvedIdentity)
+            )
+        )
 
         XCTAssertEqual(core.state, .readingBattery)
         XCTAssertEqual(client.batteryReads, [generation])
@@ -305,6 +343,164 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         XCTAssertEqual(core.state, .ready)
         core.startLiveHeartRate()
         XCTAssertEqual(client.liveStarts, [generation])
+    }
+
+    @MainActor
+    func testUnknownProductTupleIsRejectedBeforeAuthenticationAndBattery() {
+        let identities = [
+            VeepooBandProductIdentity(
+                modelCode: "9999",
+                hardwareRevision: Self.approvedIdentity.hardwareRevision,
+                firmwareRevision: Self.approvedIdentity.firmwareRevision
+            ),
+            VeepooBandProductIdentity(
+                modelCode: Self.approvedIdentity.modelCode,
+                hardwareRevision: "HW-9",
+                firmwareRevision: Self.approvedIdentity.firmwareRevision
+            ),
+            VeepooBandProductIdentity(
+                modelCode: Self.approvedIdentity.modelCode,
+                hardwareRevision: Self.approvedIdentity.hardwareRevision,
+                firmwareRevision: "FW-9"
+            ),
+        ]
+
+        for identity in identities {
+            let client = FakeClient()
+            let diagnostics = RecordingDiagnostics()
+            let core = VeepooBandAdapterCore(
+                client: client,
+                compatibilityPolicy: Self.approvedPolicy,
+                diagnostics: diagnostics
+            )
+            var events: [VeepooBandAdapterEvent] = []
+            core.eventHandler = { events.append($0) }
+            let generation = connect(core, client: client)
+
+            core.verifyPassword("2468")
+            client.emit(
+                .password(generation: generation, .verified(identity))
+            )
+
+            XCTAssertEqual(core.state, .failed(.unsupported))
+            XCTAssertTrue(client.batteryReads.isEmpty)
+            XCTAssertFalse(
+                events.contains {
+                    if case .authenticated = $0 { return true }
+                    return false
+                }
+            )
+            XCTAssertTrue(
+                diagnostics.events.contains(
+                    .init(
+                        stage: .compatibility,
+                        outcome: .failed,
+                        failure: .unsupported
+                    )
+                )
+            )
+        }
+    }
+
+    @MainActor
+    func testBlankProductIdentityIsRejectedBeforeAuthenticationAndBattery() {
+        let client = FakeClient()
+        let diagnostics = RecordingDiagnostics()
+        let core = VeepooBandAdapterCore(
+            client: client,
+            compatibilityPolicy: Self.approvedPolicy,
+            diagnostics: diagnostics
+        )
+        var events: [VeepooBandAdapterEvent] = []
+        core.eventHandler = { events.append($0) }
+        let generation = connect(core, client: client)
+
+        core.verifyPassword("2468")
+        client.emit(
+            .password(
+                generation: generation,
+                .verified(
+                    .init(
+                        modelCode: "",
+                        hardwareRevision: "HW-1",
+                        firmwareRevision: "FW-2"
+                    )
+                )
+            )
+        )
+
+        XCTAssertEqual(core.state, .failed(.invalidIdentity))
+        XCTAssertTrue(client.batteryReads.isEmpty)
+        XCTAssertFalse(
+            events.contains {
+                if case .authenticated = $0 { return true }
+                return false
+            }
+        )
+        XCTAssertTrue(
+            diagnostics.events.contains(
+                .init(
+                    stage: .compatibility,
+                    outcome: .failed,
+                    failure: .invalidIdentity
+                )
+            )
+        )
+    }
+
+    @MainActor
+    func testReconnectFirmwareDriftCannotPromoteBatteryOrLiveState() {
+        let client = FakeClient()
+        let diagnostics = RecordingDiagnostics()
+        let core = VeepooBandAdapterCore(
+            client: client,
+            compatibilityPolicy: Self.approvedPolicy,
+            diagnostics: diagnostics
+        )
+        var events: [VeepooBandAdapterEvent] = []
+        core.eventHandler = { events.append($0) }
+        let firstGeneration = ready(core, client: client)
+        XCTAssertEqual(client.batteryReads, [firstGeneration])
+
+        core.disconnect()
+        let reconnectGeneration = beginDiscovery(core, client: client)
+        client.emit(
+            .candidate(
+                generation: reconnectGeneration,
+                handle: 2,
+                peripheralID: UUID(),
+                printedIdentifier: nil
+            )
+        )
+        core.reconnect(candidateHandle: 2)
+        client.emit(
+            .connection(generation: reconnectGeneration, .connected)
+        )
+        core.verifyPassword("2468")
+        client.emit(
+            .password(
+                generation: reconnectGeneration,
+                .verified(
+                    .init(
+                        modelCode: Self.approvedIdentity.modelCode,
+                        hardwareRevision:
+                            Self.approvedIdentity.hardwareRevision,
+                        firmwareRevision: "FW-DRIFT"
+                    )
+                )
+            )
+        )
+
+        XCTAssertEqual(core.state, .failed(.unsupported))
+        XCTAssertEqual(client.batteryReads, [firstGeneration])
+        XCTAssertEqual(
+            events.filter {
+                if case .authenticated = $0 { return true }
+                return false
+            }.count,
+            1
+        )
+        XCTAssertTrue(client.liveStarts.isEmpty)
     }
 
     @MainActor
@@ -349,6 +545,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         let diagnostics = RecordingDiagnostics()
         let core = VeepooBandAdapterCore(
             client: client,
+            compatibilityPolicy: Self.approvedPolicy,
             diagnostics: diagnostics
         )
         var events: [VeepooBandAdapterEvent] = []
@@ -567,24 +764,25 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     @MainActor
     func testReconnectDiscoveryTimesOutAndStopsAfterBoundedAttempts() async {
         let adapter = FakeAdapter()
-        let discoveries = expectation(description: "bounded discoveries")
-        discoveries.expectedFulfillmentCount = 4
-        let stops = expectation(description: "bounded discovery timeouts")
-        stops.expectedFulfillmentCount = 3
-        adapter.onDiscovery = { discoveries.fulfill() }
-        adapter.onStopDiscovery = { stops.fulfill() }
         let source = VeepooBandSource(
             live: LiveState(),
             adapter: adapter,
             password: "2468",
             onCredentialRejected: {},
-            reconnectDelaysNanoseconds: [1_000_000, 1_000_000, 1_000_000],
-            reconnectDiscoveryTimeoutNanoseconds: 5_000_000
+            reconnectDelaysNanoseconds: [0, 0, 0],
+            reconnectDiscoveryTimeoutNanoseconds: 0
         )
         source.connect(UUID())
         adapter.emit(.disconnected)
 
-        await fulfillment(of: [discoveries, stops], timeout: 2)
+        for _ in 0..<100 {
+            if adapter.discoveries.count == 4,
+               adapter.stopDiscoveryCount == 3
+            {
+                break
+            }
+            await Task.yield()
+        }
 
         XCTAssertEqual(adapter.discoveries.count, 4)
         XCTAssertEqual(adapter.stopDiscoveryCount, 3)
@@ -740,6 +938,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         let diagnostics = RecordingDiagnostics()
         let core = VeepooBandAdapterCore(
             client: client,
+            compatibilityPolicy: Self.approvedPolicy,
             diagnostics: diagnostics
         )
         var events: [VeepooBandAdapterEvent] = []
@@ -783,6 +982,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         let client = FakeClient()
         let core = VeepooBandAdapterCore(
             client: client,
+            compatibilityPolicy: Self.approvedPolicy,
             diagnostics: RecordingDiagnostics()
         )
         let session = VeepooBandPairingSession(
@@ -804,7 +1004,12 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         session.confirmPrintedIdentifier("AABB1234")
         client.emit(.connection(generation: generation, .connected))
         session.submitPassword("2468")
-        client.emit(.password(generation: generation, .verified))
+        client.emit(
+            .password(
+                generation: generation,
+                .verified(Self.approvedIdentity)
+            )
+        )
         client.emit(
             .battery(
                 generation: generation,
@@ -869,7 +1074,12 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     ) -> UInt64 {
         let generation = connect(core, client: client)
         core.verifyPassword("2468")
-        client.emit(.password(generation: generation, .verified))
+        client.emit(
+            .password(
+                generation: generation,
+                .verified(Self.approvedIdentity)
+            )
+        )
         client.emit(
             .battery(
                 generation: generation,

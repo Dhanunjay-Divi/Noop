@@ -2,6 +2,13 @@
 set -eu
 
 repository_root="${SRCROOT:?}"
+
+if [ "${CONFIGURATION:-}" != "Debug" ] ||
+   [ "${ACTION:-}" = "install" ]; then
+    echo "error: supplier SDK embedding is limited to Debug device builds" >&2
+    exit 1
+fi
+
 "$repository_root/Tools/local/configure-veepoo-ios-sdk.py" --build-check
 
 destination_root="${TARGET_BUILD_DIR:?}/${FRAMEWORKS_FOLDER_PATH:?}"

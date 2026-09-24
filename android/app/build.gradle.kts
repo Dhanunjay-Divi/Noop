@@ -352,6 +352,9 @@ android {
         getByName("main").java.srcDir(
             rootProject.file("../Vendor/NoopBandSDK/production/android"),
         )
+        getByName("main").assets.srcDir(
+            rootProject.file("../release/supplier/runtime"),
+        )
         if (supplierSdkEnabled) {
             // Supplier imports stay outside ordinary builds and are compiled only for Full.
             maybeCreate("full").apply {
@@ -427,6 +430,11 @@ android {
                 "VEEPOO_ADAPTER_AVAILABLE",
                 supplierSdkEnabled.toString(),
             )
+            buildConfigField(
+                "boolean",
+                "VEEPOO_QUALIFICATION_MODE",
+                supplierSdkEnabled.toString(),
+            )
         }
         create("demo") {
             dimension = "tier"
@@ -435,6 +443,7 @@ android {
             buildConfigField("String", "TIER", "\"demo\"")
             buildConfigField("boolean", "ENABLE_DEMO", "true")
             buildConfigField("boolean", "VEEPOO_ADAPTER_AVAILABLE", "false")
+            buildConfigField("boolean", "VEEPOO_QUALIFICATION_MODE", "false")
         }
     }
 

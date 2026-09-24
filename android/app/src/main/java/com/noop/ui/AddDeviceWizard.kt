@@ -203,7 +203,6 @@ fun AddDeviceWizard(
 
     var nameDraft by remember { mutableStateOf("") }
     var askMakeActive by remember { mutableStateOf(false) }
-    var supplierPrintedId by remember { mutableStateOf("") }
     var supplierPassword by remember { mutableStateOf("") }
     var supplierNickname by remember { mutableStateOf("NOOP Band") }
     var registrationBusy by remember { mutableStateOf(false) }
@@ -298,7 +297,6 @@ fun AddDeviceWizard(
         }
         if (type == DeviceType.SupplierBand) {
             viewModel.cancelSupplierBandPairing()
-            supplierPrintedId = ""
             supplierPassword = ""
         }
         when (step) {
@@ -654,7 +652,6 @@ fun AddDeviceWizard(
                                 candidates = supplierCandidates,
                                 onSelect = { candidate ->
                                     if (viewModel.selectSupplierBandCandidate(candidate.handle)) {
-                                        supplierPrintedId = ""
                                         supplierPassword = ""
                                         step = WizardStep.Confirm
                                     }
@@ -678,19 +675,15 @@ fun AddDeviceWizard(
                     WizardStep.Confirm -> if (type == DeviceType.SupplierBand) {
                         SupplierBandConfirmStep(
                             state = supplierPairingState,
-                            printedId = supplierPrintedId,
-                            onPrintedId = { supplierPrintedId = it.filter(Char::isDigit).take(16) },
                             password = supplierPassword,
                             onPassword = { supplierPassword = it.filter(Char::isDigit).take(4) },
                             nickname = supplierNickname,
                             onNickname = { supplierNickname = it },
                             onAuthenticate = {
                                 val submitted = viewModel.submitSupplierBandPairing(
-                                    supplierPrintedId,
                                     supplierPassword,
                                 )
                                 if (submitted) {
-                                    supplierPrintedId = ""
                                     supplierPassword = ""
                                 }
                             },
@@ -1216,8 +1209,6 @@ private fun SupplierBandPickStep(
 @Composable
 private fun SupplierBandConfirmStep(
     state: com.noop.ble.veepoo.VeepooAdapterState,
-    printedId: String,
-    onPrintedId: (String) -> Unit,
     password: String,
     onPassword: (String) -> Unit,
     nickname: String,
@@ -1264,23 +1255,6 @@ private fun SupplierBandConfirmStep(
             },
         )
         OutlinedTextField(
-            value = printedId,
-            onValueChange = onPrintedId,
-            enabled = waitingForInput,
-            label = {
-                Text(
-                    uiString(
-                        R.string.appwide_onboarding_device_wizard_supplier_android_identifier_field,
-                    ),
-                )
-            },
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                keyboardType = KeyboardType.Number,
-            ),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
             value = password,
             onValueChange = onPassword,
             enabled = waitingForInput,
@@ -1321,7 +1295,7 @@ private fun SupplierBandConfirmStep(
             enabled = if (ready) {
                 nickname.isNotBlank()
             } else {
-                waitingForInput && printedId.isNotBlank() && password.length == 4
+                waitingForInput && password.length == 4
             },
             modifier = Modifier
                 .fillMaxWidth()

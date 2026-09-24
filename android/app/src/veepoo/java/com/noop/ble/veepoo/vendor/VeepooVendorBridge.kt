@@ -684,7 +684,7 @@ internal class VeepooVendorBridge(
                         authentication.token,
                         state.binding,
                         VeepooIdentity(
-                            printedDeviceNumber = identity.deviceNumber.toString(),
+                            modelCode = identity.deviceNumber.toString(),
                             hardwareRevision = hardwareRevision,
                             firmwareVersion = firmwareVersion,
                         ),

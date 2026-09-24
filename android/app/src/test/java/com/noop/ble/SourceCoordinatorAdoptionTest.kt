@@ -114,10 +114,7 @@ class SourceCoordinatorAdoptionTest {
             return true
         }
 
-        override fun submitPairing(
-            printedId: CharArray,
-            transportPassword: CharArray,
-        ): Boolean = false
+        override fun submitPairing(transportPassword: CharArray): Boolean = false
 
         override fun takeProvisioningCommit(): VeepooProvisioningCommit? = null
 

@@ -15,6 +15,7 @@ import com.noop.ble.veepoo.VeepooBandSource
 import com.noop.ble.veepoo.VeepooBridgeProvider
 import com.noop.ble.veepoo.VeepooCandidateHandle
 import com.noop.ble.veepoo.VeepooCandidateRow
+import com.noop.ble.veepoo.VeepooCompatibilityPolicy
 import com.noop.ble.veepoo.VeepooCredentialAccess
 import com.noop.ble.veepoo.VeepooDisplayState
 import com.noop.ble.veepoo.VeepooManagedSource
@@ -213,6 +214,19 @@ class SourceCoordinator(
      *  keeps existing call sites + JVM tests compiling unchanged. */
     private val sensorSink: (StandardHrSource.SensorMetrics) -> Unit = {},
 ) {
+    private val veepooCompatibilityPolicy: VeepooCompatibilityPolicy by lazy(
+        LazyThreadSafetyMode.SYNCHRONIZED,
+    ) {
+        context?.let {
+            VeepooCompatibilityPolicy.loadFromAssets(
+                it,
+                allowUnlistedQualification =
+                    com.noop.BuildConfig.DEBUG &&
+                        com.noop.BuildConfig.VEEPOO_QUALIFICATION_MODE,
+            )
+        }
+            ?: VeepooCompatibilityPolicy.invalid()
+    }
 
     /** Latest instantaneous speed/cadence/power from the active standard fitness sensor (RSC/CSC/CPS),
      *  read ADDITIVELY alongside HR by [StandardHrSource]. The in-workout UI observes this to surface the
@@ -328,6 +342,7 @@ class SourceCoordinator(
                 VeepooBandSource(
                     deviceId = deviceId,
                     bridge = provider.create(requireNotNull(context)),
+                    compatibilityPolicy = veepooCompatibilityPolicy,
                 )
             }.getOrNull() ?: return false
         }
@@ -346,12 +361,11 @@ class SourceCoordinator(
         return selected
     }
 
-    fun submitVeepooPairing(printedId: CharArray, transportPassword: CharArray): Boolean {
+    fun submitVeepooPairing(transportPassword: CharArray): Boolean {
         val source = veepooPairingSource ?: return false
         return try {
-            source.submitPairing(printedId, transportPassword)
+            source.submitPairing(transportPassword)
         } finally {
-            printedId.fill('\u0000')
             transportPassword.fill('\u0000')
         }
     }
@@ -897,6 +911,7 @@ class SourceCoordinator(
                         bridge = provider.create(ctx),
                         initialReconnectPassword = credential.password,
                         initialReconnectRevisionBinding = credential.revisionBinding,
+                        compatibilityPolicy = veepooCompatibilityPolicy,
                         onReconnectCredentialRejected = { onVeepooAuthenticationRejected(id) },
                     )
                 } finally {

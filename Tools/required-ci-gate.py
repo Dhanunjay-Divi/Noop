@@ -71,7 +71,7 @@ RELEASE_SOURCE_DIGESTS = {
         "84ff7cc3025685fe50f01d48af844ee290e7fa85fe63db3b1719f54b33916116"
     ),
     "release/terminology/legacy-inventory.json": (
-        "be3ce6d7ca5471796df49fd41a3748ba0287e4d2547d1f2183ba3ef70dd2f7fc"
+        "73f6b0b01e326d93431b9307a436cfbbe15a7fdaae29b75eae6291315e68af2e"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -140,7 +140,7 @@ RELEASE_SOURCE_DIGESTS = {
         "8cb907cd981db978a895668bfc97e9c66d9ae632957032dec727ea5c8450b983"
     ),
     "Tools/trusted-release-controls.py": (
-        "4e962141e46fde1f120f65029591f38410d79118b42b1dd574e96ff724919987"
+        "e81965b73e54a1c994f9c63186fff1fa9efe82373b54c72d81c92be0e9353d77"
     ),
     "Tools/update-homebrew-cask.sh": (
         "1733e7b43266ac7f16ed3043cef4bea51f8353ebe533fb9aa3d260fa76639989"

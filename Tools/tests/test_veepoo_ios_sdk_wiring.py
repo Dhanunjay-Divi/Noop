@@ -99,7 +99,7 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             Path("release/supplier/ios-artifact-trust.json"),
         )
 
-    def test_tracked_manifest_pins_generated_frameworks_and_inputs(self) -> None:
+    def test_tracked_manifest_pins_all_frameworks_and_inputs(self) -> None:
         trust_root = MODULE.load_trust_root(
             ROOT / MODULE.TRUST_RELATIVE_PATH
         )
@@ -110,6 +110,59 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
         self.assertEqual(
             tuple(item.relative_path for item in trust_root.build_trees),
             MODULE.EXPECTED_BUILD_TREE_PATHS,
+        )
+        self.assertEqual(
+            {
+                item.name: (
+                    item.binary_sha256,
+                    item.inventory_sha256,
+                )
+                for item in trust_root.fixed_frameworks
+            },
+            {
+                "ABParTool": (
+                    "585f084f6955f5da0abc7d57eacaa123"
+                    "c0a0342016238770119cab077a74e39b",
+                    "964947d92a8dfa94f0f7e1679a3d75f"
+                    "2b683bac378d71e24e5381272d146e560",
+                ),
+                "DFUnits": (
+                    "9fdd6bf728f2733051ccb1aeaf9c8035b"
+                    "8916556401b1e0c932d27e2673f0100",
+                    "916318be7fb422059f8c774ecbd76cd96"
+                    "5d730e7f825e495cda6cb0aea21ed73",
+                ),
+                "GRDFUSDK": (
+                    "8a84fde46a0f9fdb36a8aa1150afa6f0"
+                    "1ad054abf9621e74385de8fcf2ade499",
+                    "aa2b1809b3c6ee711e07779db9ddcc47"
+                    "fa8971639005ec137e7693591f37dcd9",
+                ),
+                "JLDialUnit": (
+                    "3bcd10c92d490187ff8b441bedbae9f7b"
+                    "b3ff32918d4130d6db7156be8737146",
+                    "08f41c2e20a8871391e04d80d3ccaf43"
+                    "adaddfe701c051d1531278e5d8d39f3b",
+                ),
+                "JL_BLEKit": (
+                    "e35bb7b223f35f624af8323aa6ed39b8"
+                    "356e0694bfffd10ecd3925026ce4aa48",
+                    "7f62684721cd86e2765b109644a0c45b"
+                    "b0b615ed347ccb96958964a14234c5b2",
+                ),
+                "VeepooBleSDK": (
+                    "22e9d0154c5fecddbd3a21ef309fb3d33"
+                    "d734ec5f8e671787fa9ee8564d13d35",
+                    "b7ef91819dfd077434366a60c360023cd"
+                    "215a875406e83a233969633bb41f65e",
+                ),
+                "ZipZap": (
+                    "a9fe0ba509e08b4bc13b7f41f7770596"
+                    "d1496fca297d1ff032d0d7e1e6cc51c2",
+                    "92587c4d3d9340ea8b230a3794e4302c"
+                    "45a28d4a9f4acab43cb5e729ec206e16",
+                ),
+            },
         )
         self.assertEqual(
             {
@@ -128,6 +181,23 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             },
         )
         MODULE.verify_repository_boundary(ROOT)
+
+    def test_trust_root_rejects_unapproved_fixed_path(self) -> None:
+        document = json.loads(
+            (ROOT / MODULE.TRUST_RELATIVE_PATH).read_text(encoding="utf-8")
+        )
+        document["fixedFrameworks"][0]["path"] = (
+            "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/"
+            "Unreviewed.framework"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary).resolve() / "trust.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                MODULE.VerificationError,
+                "fixed framework inventory is not approved",
+            ):
+                MODULE.load_trust_root(path)
 
     def test_trust_root_rejects_unapproved_generated_path(self) -> None:
         document = json.loads(
@@ -268,6 +338,7 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
                         inventory.sha256,
                     ),
                 ),
+                fixed_frameworks=(),
                 generated_frameworks=(),
             )
             MODULE.verify_build_inputs(trust_root, sdk_root=sdk_root)
@@ -309,7 +380,7 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
                 total_bytes=inventory.total_bytes,
                 inventory_sha256=inventory.sha256,
             )
-            MODULE._verify_generated_framework(
+            MODULE._verify_framework_trust(
                 expected,
                 sdk_root=sdk_root,
                 architecture_reader=lambda _: ("arm64",),
@@ -321,7 +392,7 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
                 MODULE.VerificationError,
                 "SHA-256",
             ):
-                MODULE._verify_generated_framework(
+                MODULE._verify_framework_trust(
                     expected,
                     sdk_root=sdk_root,
                     architecture_reader=lambda _: ("arm64",),
@@ -332,7 +403,44 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
                 MODULE.VerificationError,
                 "protected inventory",
             ):
-                MODULE._verify_generated_framework(
+                MODULE._verify_framework_trust(
+                    expected,
+                    sdk_root=sdk_root,
+                    architecture_reader=lambda _: ("arm64",),
+                )
+
+    def test_fixed_framework_rejects_bundle_inventory_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            sdk_root = Path(temporary).resolve()
+            framework = self._synthetic_companion_framework(
+                sdk_root,
+                "ABParTool",
+            )
+            inventory = MODULE._tree_inventory(
+                framework,
+                label="ABParTool.framework",
+            )
+            expected = MODULE.GeneratedFrameworkTrust(
+                name="ABParTool",
+                relative_path="ABParTool.framework",
+                binary_sha256=hashlib.sha256(
+                    (framework / "ABParTool").read_bytes()
+                ).hexdigest(),
+                file_count=inventory.file_count,
+                total_bytes=inventory.total_bytes,
+                inventory_sha256=inventory.sha256,
+            )
+            MODULE._verify_fixed_framework(
+                expected,
+                sdk_root=sdk_root,
+                architecture_reader=lambda _: ("arm64",),
+            )
+            (framework / "injected.bundle").write_bytes(b"unreviewed")
+            with self.assertRaisesRegex(
+                MODULE.VerificationError,
+                "protected inventory",
+            ):
+                MODULE._verify_fixed_framework(
                     expected,
                     sdk_root=sdk_root,
                     architecture_reader=lambda _: ("arm64",),
@@ -340,6 +448,8 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
 
     def test_build_check_requires_exact_physical_device_settings(self) -> None:
         approved = {
+            "ACTION": "build",
+            "CONFIGURATION": "Debug",
             "PLATFORM_NAME": "iphoneos",
             "SDK_NAME": "iphoneos26.5",
             "NOOP_VEEPOO_SDK_ENABLED": "YES",
@@ -356,7 +466,9 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
                 MODULE.EXPECTED_MJEXTENSION_FRAMEWORK_DIR
             ),
             "NOOP_VEEPOO_LINK_FLAGS": MODULE.EXPECTED_LINK_FLAGS,
-            "NOOP_VEEPOO_SWIFT_CONDITION": "NOOP_SUPPLIER_VEEPOO",
+            "NOOP_VEEPOO_SWIFT_CONDITION": (
+                "NOOP_SUPPLIER_VEEPOO NOOP_SUPPLIER_QUALIFICATION"
+            ),
         }
         MODULE.verify_build_environment(approved)
         simulator = dict(approved, PLATFORM_NAME="iphonesimulator")
@@ -365,6 +477,18 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             "PLATFORM_NAME",
         ):
             MODULE.verify_build_environment(simulator)
+        with self.assertRaisesRegex(
+            MODULE.VerificationError,
+            "CONFIGURATION",
+        ):
+            MODULE.verify_build_environment(
+                dict(approved, CONFIGURATION="Release")
+            )
+        with self.assertRaisesRegex(
+            MODULE.VerificationError,
+            "ACTION",
+        ):
+            MODULE.verify_build_environment(dict(approved, ACTION="install"))
 
     def test_generated_config_matches_the_tracked_example(self) -> None:
         example = (
@@ -372,6 +496,7 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertEqual(MODULE.render_local_config(), example)
         self.assertEqual(example.count("[sdk=iphoneos*]"), 7)
+        self.assertEqual(example.count("[config=Debug]"), 7)
         self.assertNotIn("NOOP_VEEPOO_SDK_ENABLED = YES", example)
 
     def test_writer_creates_only_the_local_config(self) -> None:
@@ -405,6 +530,8 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             self.assertEqual(project.count(setting), 1)
         self.assertIn("--build-check", target)
         self.assertIn('"${PLATFORM_NAME:-}" = "iphoneos"', target)
+        self.assertIn('"${CONFIGURATION:-}" != "Debug"', target)
+        self.assertIn('"${ACTION:-}" = "install"', target)
         self.assertIn("embed-veepoo-ios-frameworks.sh", target)
 
         embed = (
@@ -415,6 +542,14 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
         )
         first_copy = embed.index("/usr/bin/ditto")
         self.assertLess(verification, first_copy)
+        self.assertLess(
+            embed.index('"${CONFIGURATION:-}" != "Debug"'),
+            first_copy,
+        )
+        self.assertLess(
+            embed.index('"${ACTION:-}" = "install"'),
+            first_copy,
+        )
 
         wrapper = (ROOT / "Config" / "NOOPiOS.xcconfig").read_text(
             encoding="utf-8"

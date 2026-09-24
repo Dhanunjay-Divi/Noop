@@ -85,7 +85,7 @@ interface VeepooManagedSource : LiveHrSource {
     val candidates: StateFlow<List<VeepooCandidateRow>>
     val display: StateFlow<VeepooDisplayState>
     fun selectCandidate(handle: VeepooCandidateHandle): Boolean
-    fun submitPairing(printedId: CharArray, transportPassword: CharArray): Boolean
+    fun submitPairing(transportPassword: CharArray): Boolean
     fun takeProvisioningCommit(): VeepooProvisioningCommit?
 }
 
@@ -135,6 +135,8 @@ class VeepooBandSource(
     private val bridge: VeepooBridge,
     initialReconnectPassword: CharArray? = null,
     initialReconnectRevisionBinding: VeepooRevisionBinding? = null,
+    private val compatibilityPolicy: VeepooCompatibilityPolicy =
+        VeepooCompatibilityPolicy.invalid(),
     private val diagnostics: VeepooDiagnosticSink = AppVeepooDiagnosticSink,
     private val session: BandSessionMachine = NoopBandSdkBoundary.newSession(),
     private val onReconnectCredentialRejected: () -> Unit = {},
@@ -159,7 +161,6 @@ class VeepooBandSource(
     private var establishedIdentity: VeepooIdentity? = null
     private var establishedCapabilities: VeepooCapabilities? = null
     private var intent = VeepooConnectionIntent.PAIRING
-    private var pendingPrintedId: CharArray? = null
     private var pendingPassword: CharArray? = null
     private var reconnectPassword: CharArray? = initialReconnectPassword?.copyOf()
     private var reconnectRevisionBinding: VeepooRevisionBinding? =
@@ -308,12 +309,11 @@ class VeepooBandSource(
     }
 
     @Synchronized
-    override fun submitPairing(printedId: CharArray, transportPassword: CharArray): Boolean {
+    override fun submitPairing(transportPassword: CharArray): Boolean {
         if (
             stopped ||
             intent != VeepooConnectionIntent.PAIRING ||
             mutableState.value != VeepooAdapterState.AWAITING_PAIRING_CONFIRMATION ||
-            !validPrintedId(printedId) ||
             !validPassword(transportPassword)
         ) {
             record(
@@ -324,7 +324,6 @@ class VeepooBandSource(
             return false
         }
         clearPairingMaterial()
-        pendingPrintedId = printedId.copyOf()
         pendingPassword = transportPassword.copyOf()
         return beginAuthentication(transportPassword)
     }
@@ -399,16 +398,35 @@ class VeepooBandSource(
         if (!accept(attempt) || authenticationToken !== authentication) return stale()
         if (!binding.belongsTo(attempt)) return stale()
         authenticationToken = null
+        when (compatibilityPolicy.evaluate(identity)) {
+            VeepooCompatibilityDecision.APPROVED,
+            VeepooCompatibilityDecision.QUALIFICATION_APPROVED,
+            -> Unit
+            VeepooCompatibilityDecision.INVALID_POLICY -> {
+                failAttempt(VeepooDiagnosticCategory.CAPABILITY, VeepooDiagnosticFailure.INTERNAL)
+                return
+            }
+            VeepooCompatibilityDecision.UNAPPROVED -> {
+                val reconnect = intent == VeepooConnectionIntent.RECONNECT
+                failAttempt(
+                    if (reconnect) {
+                        VeepooDiagnosticCategory.RECONNECT
+                    } else {
+                        VeepooDiagnosticCategory.CAPABILITY
+                    },
+                    if (reconnect) {
+                        VeepooDiagnosticFailure.REJECTED
+                    } else {
+                        VeepooDiagnosticFailure.UNSUPPORTED
+                    },
+                )
+                if (reconnect) notifyReconnectCredentialRejected()
+                return
+            }
+        }
         if (!capabilities.liveHeartRate || !capabilities.battery) {
             failAttempt(VeepooDiagnosticCategory.CAPABILITY, VeepooDiagnosticFailure.UNSUPPORTED)
             return
-        }
-        if (intent == VeepooConnectionIntent.PAIRING) {
-            val expected = pendingPrintedId
-            if (expected == null || normalizePrintedId(expected) != normalizePrintedId(identity.printedDeviceNumber)) {
-                failAttempt(VeepooDiagnosticCategory.PAIRING_CONFIRMATION, VeepooDiagnosticFailure.REJECTED)
-                return
-            }
         }
         if (identity.hardwareRevision.isBlank() || identity.firmwareVersion.isBlank()) {
             failAttempt(VeepooDiagnosticCategory.CAPABILITY, VeepooDiagnosticFailure.REJECTED)
@@ -818,8 +836,6 @@ class VeepooBandSource(
     }
 
     private fun clearPairingMaterial() {
-        pendingPrintedId?.fill('\u0000')
-        pendingPrintedId = null
         pendingPassword?.fill('\u0000')
         pendingPassword = null
     }
@@ -892,18 +908,6 @@ class VeepooBandSource(
     private fun validPassword(value: CharArray): Boolean =
         value.size == 4 && value.all { it in '0'..'9' }
 
-    private fun validPrintedId(value: CharArray): Boolean =
-        value.isNotEmpty() && value.size <= 16 && value.all { it in '0'..'9' }
-
-    private fun normalizePrintedId(value: CharArray): String =
-        normalizePrintedId(value.concatToString())
-
-    private fun normalizePrintedId(value: String): String =
-        value.trim().takeIf { it.isNotEmpty() && it.length <= 16 && it.all(Char::isDigit) }
-            ?.trimStart('0')
-            ?.ifEmpty { "0" }
-            ?: ""
-
     private fun VeepooFailure.toDiagnostic(): VeepooDiagnosticFailure = when (this) {
         VeepooFailure.UNAVAILABLE -> VeepooDiagnosticFailure.UNAVAILABLE
         VeepooFailure.PERMISSION -> VeepooDiagnosticFailure.PERMISSION
@@ -932,7 +936,7 @@ class VeepooBandSource(
 
     companion object {
         private const val DIRECT_HANDLE = "known-device"
-        private const val WRAPPER_REVISION = "veepoo-android-display-v2"
+        private const val WRAPPER_REVISION = VeepooCompatibilityPolicy.WRAPPER_REVISION
         private const val MAX_CANDIDATES = 24
         private val RECONNECT_DELAYS_MILLISECONDS =
             longArrayOf(2_000L, 5_000L, 15_000L)

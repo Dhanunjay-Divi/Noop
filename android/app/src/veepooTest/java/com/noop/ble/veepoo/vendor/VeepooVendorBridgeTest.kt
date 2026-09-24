@@ -367,7 +367,7 @@ class VeepooVendorBridgeTest {
         callback.onComplete()
         val result = harness.listener.authentications.single()
         assertEquals(token, result.token)
-        assertEquals("42", result.identity.printedDeviceNumber)
+        assertEquals("42", result.identity.modelCode)
         assertEquals("test-revision", result.identity.hardwareRevision)
         assertEquals("release-version", result.identity.firmwareVersion)
         assertEquals(VeepooCapabilities(liveHeartRate = true, battery = true), result.capabilities)

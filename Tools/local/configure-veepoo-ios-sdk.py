@@ -36,14 +36,6 @@ EXPECTED_MJEXTENSION_FRAMEWORK_DIR = EXPECTED_PODS_PRODUCTS_ROOT / "MJExtension"
 EXPECTED_BINARY_SHA256 = (
     "22e9d0154c5fecddbd3a21ef309fb3d33d734ec5f8e671787fa9ee8564d13d35"
 )
-EXPECTED_VENDOR_FRAMEWORK_SHA256 = {
-    "ABParTool": "585f084f6955f5da0abc7d57eacaa123c0a0342016238770119cab077a74e39b",
-    "DFUnits": "9fdd6bf728f2733051ccb1aeaf9c8035b8916556401b1e0c932d27e2673f0100",
-    "GRDFUSDK": "8a84fde46a0f9fdb36a8aa1150afa6f01ad054abf9621e74385de8fcf2ade499",
-    "JLDialUnit": "3bcd10c92d490187ff8b441bedbae9f7bb3ff32918d4130d6db7156be8737146",
-    "JL_BLEKit": "e35bb7b223f35f624af8323aa6ed39b8356e0694bfffd10ecd3925026ce4aa48",
-    "ZipZap": "a9fe0ba509e08b4bc13b7f41f7770596d1496fca297d1ff032d0d7e1e6cc51c2",
-}
 EXPECTED_LINK_FLAGS = (
     "-ObjC "
     "-framework VeepooBleSDK "
@@ -68,6 +60,33 @@ EXPECTED_BUILD_FILE_PATHS = (
     "Demo/VeepooBleSDKDemo/Podfile.lock",
 )
 EXPECTED_BUILD_TREE_PATHS = ("Demo/VeepooBleSDKDemo/Pods",)
+EXPECTED_FIXED_FRAMEWORK_PATHS = {
+    "ABParTool": (
+        "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/"
+        "ABParTool.framework"
+    ),
+    "DFUnits": (
+        "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/"
+        "DFUnits.framework"
+    ),
+    "GRDFUSDK": (
+        "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/"
+        "GRDFUSDK.framework"
+    ),
+    "JLDialUnit": (
+        "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/"
+        "JLDialUnit.framework"
+    ),
+    "JL_BLEKit": (
+        "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/"
+        "JL_BLEKit.framework"
+    ),
+    "VeepooBleSDK": "Framework/2.2.XX.15/VeepooBleSDK.framework",
+    "ZipZap": (
+        "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/"
+        "ZipZap.framework"
+    ),
+}
 EXPECTED_GENERATED_FRAMEWORK_PATHS = {
     "FMDB": (
         "Demo/VeepooBleSDKDemo/build/Debug-iphoneos/"
@@ -117,6 +136,7 @@ class GeneratedFrameworkTrust(NamedTuple):
 class IOSSupplierTrustRoot(NamedTuple):
     build_files: tuple[FileTrust, ...]
     build_trees: tuple[TreeTrust, ...]
+    fixed_frameworks: tuple[GeneratedFrameworkTrust, ...]
     generated_frameworks: tuple[GeneratedFrameworkTrust, ...]
 
 
@@ -341,14 +361,15 @@ def load_trust_root(path: Path) -> IOSSupplierTrustRoot:
     if not isinstance(document, dict) or set(document) != {
         "schemaVersion",
         "buildInputs",
+        "fixedFrameworks",
         "generatedFrameworks",
     }:
         raise VerificationError(
             "iOS supplier trust root has unexpected fields"
         )
-    if document["schemaVersion"] != 1:
+    if document["schemaVersion"] != 2:
         raise VerificationError(
-            "iOS supplier trust root schemaVersion must be 1"
+            "iOS supplier trust root schemaVersion must be 2"
         )
 
     build_inputs = document["buildInputs"]
@@ -361,12 +382,17 @@ def load_trust_root(path: Path) -> IOSSupplierTrustRoot:
         )
     raw_files = build_inputs["files"]
     raw_trees = build_inputs["trees"]
-    raw_frameworks = document["generatedFrameworks"]
+    raw_fixed_frameworks = document["fixedFrameworks"]
+    raw_generated_frameworks = document["generatedFrameworks"]
     if not isinstance(raw_files, list):
         raise VerificationError("iOS supplier build files must be an array")
     if not isinstance(raw_trees, list):
         raise VerificationError("iOS supplier build trees must be an array")
-    if not isinstance(raw_frameworks, list):
+    if not isinstance(raw_fixed_frameworks, list):
+        raise VerificationError(
+            "iOS supplier fixedFrameworks must be an array"
+        )
+    if not isinstance(raw_generated_frameworks, list):
         raise VerificationError(
             "iOS supplier generatedFrameworks must be an array"
         )
@@ -420,46 +446,61 @@ def load_trust_root(path: Path) -> IOSSupplierTrustRoot:
             )
         )
 
-    generated_frameworks: list[GeneratedFrameworkTrust] = []
-    for index, value in enumerate(raw_frameworks):
-        label = f"iOS supplier generated framework {index}"
-        if not isinstance(value, dict) or set(value) != {
-            "name",
-            "path",
-            "binarySha256",
-            "fileCount",
-            "bytes",
-            "inventorySha256",
-        }:
-            raise VerificationError(f"{label} has unexpected fields")
-        name = value["name"]
-        if not isinstance(name, str) or not name:
-            raise VerificationError(f"{label}.name must be a string")
-        generated_frameworks.append(
-            GeneratedFrameworkTrust(
-                name=name,
-                relative_path=_relative_path(
-                    value["path"],
-                    label=f"{label}.path",
-                ),
-                binary_sha256=_digest(
-                    value["binarySha256"],
-                    label=f"{label}.binarySha256",
-                ),
-                file_count=_canonical_nonnegative_integer(
-                    value["fileCount"],
-                    label=f"{label}.fileCount",
-                ),
-                total_bytes=_canonical_nonnegative_integer(
-                    value["bytes"],
-                    label=f"{label}.bytes",
-                ),
-                inventory_sha256=_digest(
-                    value["inventorySha256"],
-                    label=f"{label}.inventorySha256",
-                ),
+    def parse_frameworks(
+        raw_values: list[object],
+        *,
+        kind: str,
+    ) -> list[GeneratedFrameworkTrust]:
+        frameworks: list[GeneratedFrameworkTrust] = []
+        for index, value in enumerate(raw_values):
+            label = f"iOS supplier {kind} framework {index}"
+            if not isinstance(value, dict) or set(value) != {
+                "name",
+                "path",
+                "binarySha256",
+                "fileCount",
+                "bytes",
+                "inventorySha256",
+            }:
+                raise VerificationError(f"{label} has unexpected fields")
+            name = value["name"]
+            if not isinstance(name, str) or not name:
+                raise VerificationError(f"{label}.name must be a string")
+            frameworks.append(
+                GeneratedFrameworkTrust(
+                    name=name,
+                    relative_path=_relative_path(
+                        value["path"],
+                        label=f"{label}.path",
+                    ),
+                    binary_sha256=_digest(
+                        value["binarySha256"],
+                        label=f"{label}.binarySha256",
+                    ),
+                    file_count=_canonical_nonnegative_integer(
+                        value["fileCount"],
+                        label=f"{label}.fileCount",
+                    ),
+                    total_bytes=_canonical_nonnegative_integer(
+                        value["bytes"],
+                        label=f"{label}.bytes",
+                    ),
+                    inventory_sha256=_digest(
+                        value["inventorySha256"],
+                        label=f"{label}.inventorySha256",
+                    ),
+                )
             )
-        )
+        return frameworks
+
+    fixed_frameworks = parse_frameworks(
+        raw_fixed_frameworks,
+        kind="fixed",
+    )
+    generated_frameworks = parse_frameworks(
+        raw_generated_frameworks,
+        kind="generated",
+    )
 
     if tuple(entry.relative_path for entry in build_files) != (
         EXPECTED_BUILD_FILE_PATHS
@@ -473,20 +514,38 @@ def load_trust_root(path: Path) -> IOSSupplierTrustRoot:
         raise VerificationError(
             "iOS supplier build tree inventory is not approved"
         )
-    expected_framework_entries = tuple(
+    expected_fixed_framework_entries = tuple(
+        sorted(EXPECTED_FIXED_FRAMEWORK_PATHS.items())
+    )
+    actual_fixed_framework_entries = tuple(
+        (entry.name, entry.relative_path)
+        for entry in fixed_frameworks
+    )
+    if actual_fixed_framework_entries != expected_fixed_framework_entries:
+        raise VerificationError(
+            "iOS supplier fixed framework inventory is not approved"
+        )
+    expected_generated_framework_entries = tuple(
         sorted(EXPECTED_GENERATED_FRAMEWORK_PATHS.items())
     )
-    actual_framework_entries = tuple(
+    actual_generated_framework_entries = tuple(
         (entry.name, entry.relative_path)
         for entry in generated_frameworks
     )
-    if actual_framework_entries != expected_framework_entries:
+    if (
+        actual_generated_framework_entries
+        != expected_generated_framework_entries
+    ):
         raise VerificationError(
             "iOS supplier generated framework inventory is not approved"
         )
     if any(
         entry.file_count <= 0 or entry.total_bytes <= 0
-        for entry in (*build_trees, *generated_frameworks)
+        for entry in (
+            *build_trees,
+            *fixed_frameworks,
+            *generated_frameworks,
+        )
     ):
         raise VerificationError(
             "iOS supplier inventories must not be empty"
@@ -494,6 +553,7 @@ def load_trust_root(path: Path) -> IOSSupplierTrustRoot:
     return IOSSupplierTrustRoot(
         build_files=tuple(build_files),
         build_trees=tuple(build_trees),
+        fixed_frameworks=tuple(fixed_frameworks),
         generated_frameworks=tuple(generated_frameworks),
     )
 
@@ -700,7 +760,7 @@ def _verify_companion_framework(
     return architectures
 
 
-def _verify_generated_framework(
+def _verify_framework_trust(
     expected: GeneratedFrameworkTrust,
     *,
     sdk_root: Path = EXPECTED_SDK_ROOT,
@@ -763,6 +823,43 @@ def _verify_generated_framework(
     )
 
 
+def _verify_fixed_framework(
+    expected: GeneratedFrameworkTrust,
+    *,
+    sdk_root: Path = EXPECTED_SDK_ROOT,
+    architecture_reader: Callable[
+        [Path], tuple[str, ...]
+    ] = _lipo_architectures,
+) -> dict[str, object] | None:
+    framework_path = _absolute(sdk_root) / expected.relative_path
+    if expected.name == EXPECTED_EXECUTABLE_NAME:
+        result = verify_framework(
+            framework_path,
+            expected_path=framework_path,
+            expected_sha256=expected.binary_sha256,
+            architecture_reader=architecture_reader,
+        )
+    else:
+        _verify_companion_framework(
+            framework_path,
+            expected.name,
+            expected_sha256=expected.binary_sha256,
+            architecture_reader=architecture_reader,
+        )
+        result = None
+    _verify_tree(
+        framework_path,
+        TreeTrust(
+            relative_path=expected.relative_path,
+            file_count=expected.file_count,
+            total_bytes=expected.total_bytes,
+            inventory_sha256=expected.inventory_sha256,
+        ),
+        label=f"{expected.name}.framework",
+    )
+    return result
+
+
 def build_pod_frameworks(trust_root: IOSSupplierTrustRoot) -> None:
     verify_build_inputs(trust_root)
     _reject_symlinked_path(EXPECTED_PODS_PROJECT, "approved Pods project")
@@ -811,20 +908,21 @@ def build_pod_frameworks(trust_root: IOSSupplierTrustRoot) -> None:
     verify_build_inputs(trust_root)
 
 
-def verify_companion_frameworks(
+def verify_frameworks(
     trust_root: IOSSupplierTrustRoot,
-) -> None:
-    for framework_name, expected_sha256 in (
-        EXPECTED_VENDOR_FRAMEWORK_SHA256.items()
-    ):
-        _verify_companion_framework(
-            EXPECTED_VENDOR_FRAMEWORK_DIR
-            / f"{framework_name}.framework",
-            framework_name,
-            expected_sha256=expected_sha256,
-        )
+) -> dict[str, object]:
+    primary_result: dict[str, object] | None = None
+    for expected in trust_root.fixed_frameworks:
+        result = _verify_fixed_framework(expected)
+        if result is not None:
+            primary_result = result
     for expected in trust_root.generated_frameworks:
-        _verify_generated_framework(expected)
+        _verify_framework_trust(expected)
+    if primary_result is None:
+        raise VerificationError(
+            "iOS supplier primary framework trust is unavailable"
+        )
+    return primary_result
 
 
 def render_local_config() -> str:
@@ -832,21 +930,21 @@ def render_local_config() -> str:
         "// Generated only after Tools/local/configure-veepoo-ios-sdk.py verifies the\n"
         "// protected iOS supplier manifest and local bundle. Do not copy supplier\n"
         "// frameworks into this repo.\n"
-        "// The values themselves are qualified so simulator builds retain the empty,\n"
-        "// default-off settings from Config/NOOPiOS.xcconfig.\n"
-        "NOOP_VEEPOO_SDK_ENABLED[sdk=iphoneos*] = YES\n"
-        "NOOP_VEEPOO_FRAMEWORK_DIR[sdk=iphoneos*] = "
+        "// The values are qualified to Debug iPhoneOS builds so simulator and\n"
+        "// Release/Archive builds retain the default-off settings.\n"
+        "NOOP_VEEPOO_SDK_ENABLED[config=Debug][sdk=iphoneos*] = YES\n"
+        "NOOP_VEEPOO_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "
         f"{EXPECTED_FRAMEWORK_PATH.parent}\n"
-        "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR[sdk=iphoneos*] = "
+        "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "
         f"{EXPECTED_VENDOR_FRAMEWORK_DIR}\n"
-        "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR[sdk=iphoneos*] = "
+        "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "
         f"{EXPECTED_FMDB_FRAMEWORK_DIR}\n"
-        "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR[sdk=iphoneos*] = "
+        "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "
         f"{EXPECTED_MJEXTENSION_FRAMEWORK_DIR}\n"
-        "NOOP_VEEPOO_LINK_FLAGS[sdk=iphoneos*] = "
+        "NOOP_VEEPOO_LINK_FLAGS[config=Debug][sdk=iphoneos*] = "
         f"{EXPECTED_LINK_FLAGS}\n"
-        "NOOP_VEEPOO_SWIFT_CONDITION[sdk=iphoneos*] = "
-        "NOOP_SUPPLIER_VEEPOO\n"
+        "NOOP_VEEPOO_SWIFT_CONDITION[config=Debug][sdk=iphoneos*] = "
+        "NOOP_SUPPLIER_VEEPOO NOOP_SUPPLIER_QUALIFICATION\n"
     )
 
 
@@ -896,6 +994,8 @@ def write_local_config(repository_root: Path) -> Path:
 
 def verify_build_environment(environment: Mapping[str, str]) -> None:
     required_values = {
+        "ACTION": "build",
+        "CONFIGURATION": "Debug",
         "PLATFORM_NAME": EXPECTED_PLATFORM_NAME,
         "NOOP_VEEPOO_SDK_ENABLED": "YES",
         "NOOP_VEEPOO_FRAMEWORK_DIR": str(EXPECTED_FRAMEWORK_PATH.parent),
@@ -909,7 +1009,9 @@ def verify_build_environment(environment: Mapping[str, str]) -> None:
             EXPECTED_MJEXTENSION_FRAMEWORK_DIR
         ),
         "NOOP_VEEPOO_LINK_FLAGS": EXPECTED_LINK_FLAGS,
-        "NOOP_VEEPOO_SWIFT_CONDITION": "NOOP_SUPPLIER_VEEPOO",
+        "NOOP_VEEPOO_SWIFT_CONDITION": (
+            "NOOP_SUPPLIER_VEEPOO NOOP_SUPPLIER_QUALIFICATION"
+        ),
     }
     for name, expected_value in required_values.items():
         if environment.get(name) != expected_value:
@@ -952,8 +1054,7 @@ def main(argv: list[str] | None = None) -> int:
         verify_build_inputs(trust_root)
         if arguments.write_config:
             build_pod_frameworks(trust_root)
-        result = verify_framework()
-        verify_companion_frameworks(trust_root)
+        result = verify_frameworks(trust_root)
         if arguments.write_config:
             destination = write_local_config(repository_root)
             print(f"wrote {destination.relative_to(repository_root)}")

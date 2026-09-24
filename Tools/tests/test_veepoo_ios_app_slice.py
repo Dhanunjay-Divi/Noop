@@ -60,7 +60,7 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
 
     def test_battery_is_automatic_and_precedes_live(self) -> None:
         core = self.read("Strand/BLE/VeepooBandAdapterCore.swift")
-        verified = core.index("case .verified:")
+        verified = core.index("case .verified(let identity):")
         battery_state = core.index("transition(to: .readingBattery)", verified)
         battery_read = core.index("client.readBattery", battery_state)
         self.assertLess(battery_state, battery_read)

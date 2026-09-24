@@ -36,8 +36,19 @@ private final class VeepooBandAdapter: VeepooBandAdapterControlling {
     private let core: VeepooBandAdapterCore
 
     init() {
-        core = VeepooBandAdapterCore(client: VeepooBleSDKClient())
+        core = VeepooBandAdapterCore(
+            client: VeepooBleSDKClient(),
+            compatibilityPolicy: .loadFromMainBundle(
+                allowsUnlistedQualification: Self.qualificationMode
+            )
+        )
     }
+
+#if NOOP_SUPPLIER_QUALIFICATION
+    private static let qualificationMode = true
+#else
+    private static let qualificationMode = false
+#endif
 
     func startDiscovery(targetPeripheralID: UUID?) {
         core.startDiscovery(targetPeripheralID: targetPeripheralID)
@@ -314,7 +325,22 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
     ) {
         switch result {
         case .validationSuccess, .validationAllSuccess:
-            emit(.password(generation: generation, .verified))
+            let model = manager.peripheralModel
+            emit(
+                .password(
+                    generation: generation,
+                    .verified(
+                        .init(
+                            modelCode: model.map {
+                                String($0.deviceNumber)
+                            } ?? "",
+                            hardwareRevision:
+                                model?.deviceTestVersion ?? "",
+                            firmwareRevision: model?.deviceVersion ?? ""
+                        )
+                    )
+                )
+            )
         case .validationFailed:
             emit(.password(generation: generation, .rejected))
         default:

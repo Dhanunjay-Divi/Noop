@@ -293,6 +293,57 @@ firmware, background operation, and physiological accuracy remain unproven.
   WHOOP pairing, reconnect/background collection, history retention, battery,
   haptics, firmware, egress, and physiological accuracy.
 
+## Debug qualification compatibility checkpoint
+
+- State: `locally verified; replacement push pending`
+- The supplier documents its `deviceNumber` callback as product metadata, not
+  the identifier printed on an individual band. Android therefore no longer
+  asks the user to compare that callback with the printed label. Apple retains
+  printed-label comparison only when discovery supplies a trusted mapping;
+  otherwise both platforms rely on explicit candidate selection and the
+  supplier's on-band pairing confirmation.
+- A shared, protected compatibility manifest now binds platform, model code,
+  hardware revision, firmware revision, protocol revision, and wrapper
+  revision. It is embedded byte-for-byte in both apps, rejects malformed,
+  wildcard, placeholder, oversized, and duplicate entries, and is empty by
+  default.
+- Normal builds fail closed when the exact product tuple is absent. A verified
+  local supplier configuration enables unlisted qualification only in Debug
+  physical-device builds. Apple Release/install actions are blocked, Android
+  requires both a Debug build and the locally verified supplier flavor, and
+  qualification turns off for a platform as soon as that platform has an
+  approved manifest row.
+- WHOOP remains available in the same Full/iPhone app. Supplier live heart rate
+  remains display-only and cannot enter durable history, recovery, sleep,
+  Effort, or other derived metrics.
+- Focused Apple compatibility and adapter tests passed 34/34. Focused Android
+  supplier lifecycle, source-coordinator, and vendor-bridge tests passed with
+  all seven exact AARs verified. The shared manifest, iOS artifact wiring, and
+  trusted release controls passed 34/34 Python tests.
+- The complete repository Tools wall passed 360 tests with one intentional
+  skip after the protected terminology snapshot was reviewed and repinned.
+  Terminology now records 18,145 classified occurrences across 1,616 groups
+  with zero forbidden mappings. Required CI validates all ten contexts, all 91
+  operations records validate, and protected-main self-verification passes.
+- The unsigned Debug iPhoneOS build passed with the exact supplier bundle and
+  embedded ABParTool, FMDB, GRDFUSDK, JLDialUnit, MJExtension, and ZipZap
+  frameworks. The Android Full Debug APK passed assembly and contains the
+  protected compatibility manifest plus supplier native libraries for all
+  packaged ABIs.
+- Current test artifacts:
+  - Android Full Debug APK:
+    `~/Downloads/NOOP-band-test-2026-09-24-qualification/NOOP-Android-supplier-debug.apk`
+    with SHA-256
+    `354ea1c6a879885d92feee4fdfda0b4c0497ac3fb0826131047d7e0c472356a3`.
+  - Unsigned iPhoneOS app ZIP:
+    `~/Downloads/NOOP-band-test-2026-09-24-qualification/NOOP-iPhone-supplier-unsigned-app.zip`
+    with SHA-256
+    `dc9216033fef7834b66e37da3612ef70836efdfa61896fc7aa2950a2af291f63`.
+- These artifacts prove compilation and packaging only. Signing/install,
+  candidate identity truth, on-band confirmation, live data, reconnect,
+  background behavior, history, battery, haptics, firmware compatibility, and
+  sensor accuracy remain physical-device gates.
+
 ## Privacy check
 
 - [x] No credentials, personal names, email addresses, raw health exports,

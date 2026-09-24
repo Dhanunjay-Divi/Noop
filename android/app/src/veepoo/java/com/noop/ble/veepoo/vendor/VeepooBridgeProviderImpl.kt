@@ -170,13 +170,19 @@ internal class VpOperateClient(
                     when (value.getmStatus()) {
                         EPwdStatus.CHECK_SUCCESS,
                         EPwdStatus.CHECK_AND_TIME_SUCCESS,
-                        -> callback.onIdentity(
-                            VeepooVendorIdentity(
-                                deviceNumber = value.getDeviceNumber(),
-                                hardwareRevision = value.getDeviceTestVersion(),
-                                firmwareVersion = value.getDeviceVersion(),
-                            ),
-                        )
+                        -> {
+                            // The supplier documents deviceNumber as firmware
+                            // product metadata, not the identifier printed on
+                            // an individual band.
+                            val modelCode = value.getDeviceNumber()
+                            callback.onIdentity(
+                                VeepooVendorIdentity(
+                                    deviceNumber = modelCode,
+                                    hardwareRevision = value.getDeviceTestVersion(),
+                                    firmwareVersion = value.getDeviceVersion(),
+                                ),
+                            )
+                        }
                         EPwdStatus.CHECK_FAIL ->
                             callback.onFailure(VeepooFailure.AUTHENTICATION)
                         else -> callback.onFailure(VeepooFailure.INTERNAL)

@@ -13,8 +13,8 @@ Last updated: **2026-09-24**
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
 - Current integration state: PR `#17` remains remote at
-  `60df38a2ad3e1a825198909336e75c415459b310`; a consolidated replacement is
-  prepared locally. The same Full/iPhone app build keeps WHOOP and the
+  `e6f0f46f558e23a74c97589450d23c0c5183c34f`; a final qualification
+  replacement is prepared locally. The same Full/iPhone app build keeps WHOOP and the
   verified local supplier adapter available together. Apple terminal live
   state, supplier-only Live presentation, usable-registration onboarding,
   Android live fallback/freshness, WHOOP 5/MG reachability, operation failure
@@ -25,7 +25,19 @@ Last updated: **2026-09-24**
   91 operations records validate, all ten required CI contexts validate, and
   the reviewed terminology ratchet records 18,138 classified occurrences
   across 1,616 groups with zero forbidden mappings. Eight protected-review
-  conversations remain to resolve after the replacement push. Exact-SHA
+  conversations remain to resolve after the replacement push. The final local
+  slice adds one shared exact product-compatibility manifest and rejects
+  malformed or unapproved model, hardware, firmware, protocol, and wrapper
+  tuples before battery or live data. Because the supplied hardware tuple is
+  not yet physically known, only verified local Debug builds permit unlisted
+  qualification; Release/install paths stay blocked and fail closed. Focused
+  Apple tests pass 34/34, focused Android supplier tests and Full APK assembly
+  pass with seven exact AARs, focused trust tests pass 34/34, and the unsigned
+  Debug iPhoneOS graph builds with all required frameworks embedded. The
+  complete Tools wall passes 360 tests with one intentional skip, required CI
+  validates all ten contexts, all 91 operations records validate, and the
+  terminology snapshot records 18,145 classified occurrences across 1,616
+  groups with zero forbidden mappings. Exact-SHA
   hosted checks, normal protected merge, protected-main verification, and
   exact round-owned cleanup remain.
   Supplier redistribution, signing/store review, physical BLE, background

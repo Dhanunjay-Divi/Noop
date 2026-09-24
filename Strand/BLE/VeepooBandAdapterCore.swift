@@ -34,6 +34,8 @@ enum VeepooBandAdapterFailure: String, Error, Equatable, Sendable {
     case confirmationTimeout
     case invalidCredential
     case credentialRejected
+    case compatibilityManifestInvalid
+    case invalidIdentity
     case invalidBattery
     case invalidSample
     case notWorn
@@ -48,6 +50,7 @@ enum VeepooBandAdapterStage: String, Equatable, Hashable, Sendable {
     case identification
     case connection
     case authentication
+    case compatibility
     case battery
     case live
     case disconnect
@@ -104,7 +107,7 @@ enum VeepooBandSDKConnectionEvent: Equatable, Sendable {
 }
 
 enum VeepooBandSDKPasswordEvent: Equatable, Sendable {
-    case verified
+    case verified(VeepooBandProductIdentity)
     case rejected
     case failed
 }
@@ -242,6 +245,7 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
     private(set) var state: VeepooBandAdapterState = .idle
 
     private let client: any VeepooBandSDKClient
+    private let compatibilityPolicy: VeepooBandCompatibilityPolicy
     private let diagnostics: any VeepooBandDiagnosticsRecording
     private var generation: UInt64 = 0
     private var candidates: [UInt64: VeepooBandCandidate] = [:]
@@ -251,9 +255,11 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
 
     init(
         client: any VeepooBandSDKClient,
+        compatibilityPolicy: VeepooBandCompatibilityPolicy,
         diagnostics: (any VeepooBandDiagnosticsRecording)? = nil
     ) {
         self.client = client
+        self.compatibilityPolicy = compatibilityPolicy
         self.diagnostics = diagnostics ?? VeepooBandAppDiagnostics.shared
         client.eventHandler = { [weak self] event in self?.handle(event) }
     }
@@ -522,7 +528,23 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
             return
         }
         switch event {
-        case .verified:
+        case .verified(let identity):
+            switch compatibilityPolicy.decision(for: identity) {
+            case .approved, .qualificationApproved:
+                diagnostics.record(
+                    .init(stage: .compatibility, outcome: .completed)
+                )
+                break
+            case .invalidManifest:
+                fail(.compatibilityManifestInvalid, stage: .compatibility)
+                return
+            case .notApproved:
+                fail(.unsupported, stage: .compatibility)
+                return
+            case .invalidIdentity:
+                fail(.invalidIdentity, stage: .compatibility)
+                return
+            }
             eventHandler?(.authenticated)
             diagnostics.record(.init(stage: .authentication, outcome: .completed))
             transition(to: .readingBattery)

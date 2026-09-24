@@ -7,6 +7,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayInputStream
+import java.io.FileNotFoundException
 
 class VeepooBandSourceTest {
     private class FakeReconnectScheduler : VeepooReconnectScheduler {
@@ -130,6 +132,7 @@ class VeepooBandSourceTest {
             bridge = bridge,
             initialReconnectPassword = initialPassword,
             initialReconnectRevisionBinding = initialRevisionBinding,
+            compatibilityPolicy = approvedPolicy(),
             diagnostics = VeepooDiagnosticSink(diagnostics::add),
             session = session,
             onReconnectCredentialRejected = {
@@ -154,26 +157,161 @@ class VeepooBandSourceTest {
         }
 
         fun pairThroughBattery(
-            printedId: String = "00042",
-            returnedId: String = "42",
+            returnedModelCode: String = "42",
         ): VeepooAttemptToken {
             val candidate = discover()
             assertTrue(source.selectCandidate(candidate.handle))
             val attempt = requireNotNull(bridge.attempt)
             bridge.callback.onTransportConnected(attempt)
-            val printed = printedId.toCharArray()
             val password = "1234".toCharArray()
-            assertTrue(source.submitPairing(printed, password))
-            printed.fill('\u0000')
+            assertTrue(source.submitPairing(password))
             password.fill('\u0000')
             bridge.callback.onAuthenticated(
                 attempt,
                 requireNotNull(bridge.authentication),
                 VeepooBinding.create("AA:BB:CC:DD:EE:01", attempt),
-                VeepooIdentity(returnedId, "hw-1", "fw-1"),
+                VeepooIdentity(returnedModelCode, "hw-1", "fw-1"),
                 VeepooCapabilities(liveHeartRate = true, battery = true),
             )
             return attempt
+        }
+    }
+
+    @Test
+    fun compatibilityManifestApprovesOnlyTheExactCaseSensitiveTuple() {
+        val policy = approvedPolicy()
+
+        assertEquals(
+            VeepooCompatibilityDecision.APPROVED,
+            policy.evaluate(VeepooIdentity("42", "hw-1", "fw-1")),
+        )
+        listOf(
+            VeepooIdentity("43", "hw-1", "fw-1"),
+            VeepooIdentity("42", "hw-2", "fw-1"),
+            VeepooIdentity("42", "hw-1", "fw-2"),
+            VeepooIdentity("42", "HW-1", "fw-1"),
+        ).forEach { identity ->
+            assertEquals(
+                VeepooCompatibilityDecision.UNAPPROVED,
+                policy.evaluate(identity),
+            )
+        }
+    }
+
+    @Test
+    fun compatibilityManifestRejectsBlankWildcardUnknownAndDuplicateRows() {
+        val invalidManifests = listOf(
+            manifest(row(modelCode = "")),
+            manifest(row(modelCode = "*")),
+            manifest(row(modelCode = "ANY")),
+            manifest(row(modelCode = "all")),
+            manifest(row(modelCode = "default")),
+            manifest(row(modelCode = "unknown")),
+            manifest(row(modelCode = "A".repeat(65))),
+            manifest(row().dropLast(1) + ""","extra":"field"}"""),
+            manifest(row(), row()),
+            """{"schemaVersion":1,"approvedBands":"not-an-array"}""",
+            """{"schemaVersion":1,"approvedBands":[]} trailing""",
+        )
+
+        invalidManifests.forEachIndexed { index, raw ->
+            assertEquals(
+                "invalid manifest fixture $index was accepted: $raw",
+                VeepooCompatibilityDecision.INVALID_POLICY,
+                VeepooCompatibilityPolicy.parse(raw)
+                    .evaluate(VeepooIdentity("42", "hw-1", "fw-1")),
+            )
+        }
+    }
+
+    @Test
+    fun qualificationModeRequiresAValidEmptyManifest() {
+        assertEquals(
+            VeepooCompatibilityDecision.QUALIFICATION_APPROVED,
+            VeepooCompatibilityPolicy.parse(
+                manifest(),
+                allowUnlistedQualification = true,
+            ).evaluate(VeepooIdentity("42", "hw-1", "fw-1")),
+        )
+        assertEquals(
+            VeepooCompatibilityDecision.UNAPPROVED,
+            VeepooCompatibilityPolicy.parse(
+                manifest(row()),
+                allowUnlistedQualification = true,
+            ).evaluate(VeepooIdentity("43", "hw-2", "fw-2")),
+        )
+        assertEquals(
+            VeepooCompatibilityDecision.QUALIFICATION_APPROVED,
+            VeepooCompatibilityPolicy.parse(
+                manifest(
+                    row(
+                        platform = "apple",
+                        wrapperRevision = "veepoo-apple-display-v1",
+                    ),
+                ),
+                allowUnlistedQualification = true,
+            ).evaluate(VeepooIdentity("43", "hw-2", "fw-2")),
+        )
+        assertEquals(
+            VeepooCompatibilityDecision.INVALID_POLICY,
+            VeepooCompatibilityPolicy.load(
+                allowUnlistedQualification = true,
+            ) {
+                throw FileNotFoundException("missing test manifest")
+            }.evaluate(VeepooIdentity("42", "hw-1", "fw-1")),
+        )
+    }
+
+    @Test
+    fun emptyManifestIsValidButMissingManifestFailsClosed() {
+        assertEquals(
+            VeepooCompatibilityDecision.UNAPPROVED,
+            VeepooCompatibilityPolicy.parse(manifest())
+                .evaluate(VeepooIdentity("42", "hw-1", "fw-1")),
+        )
+        assertEquals(
+            VeepooCompatibilityDecision.INVALID_POLICY,
+            VeepooCompatibilityPolicy.load {
+                throw FileNotFoundException("missing test manifest")
+            }.evaluate(VeepooIdentity("42", "hw-1", "fw-1")),
+        )
+        assertEquals(
+            VeepooCompatibilityDecision.APPROVED,
+            VeepooCompatibilityPolicy.load {
+                ByteArrayInputStream(manifest(row()).toByteArray())
+            }.evaluate(VeepooIdentity("42", "hw-1", "fw-1")),
+        )
+    }
+
+    @Test
+    fun unapprovedOrBlankIdentityCannotPromoteBatteryLiveOrProvisioning() {
+        listOf(
+            VeepooIdentity("43", "hw-1", "fw-1"),
+            VeepooIdentity("42", "hw-2", "fw-1"),
+            VeepooIdentity("42", "hw-1", "fw-2"),
+            VeepooIdentity("", "hw-1", "fw-1"),
+            VeepooIdentity("42", "", "fw-1"),
+            VeepooIdentity("42", "hw-1", ""),
+        ).forEach { identity ->
+            val harness = Harness()
+            val candidate = harness.discover()
+            assertTrue(harness.source.selectCandidate(candidate.handle))
+            val attempt = requireNotNull(harness.bridge.attempt)
+            harness.bridge.callback.onTransportConnected(attempt)
+            assertTrue(harness.source.submitPairing("1234".toCharArray()))
+
+            harness.bridge.callback.onAuthenticated(
+                attempt,
+                requireNotNull(harness.bridge.authentication),
+                VeepooBinding.create("AA:BB:CC:DD:EE:01", attempt),
+                identity,
+                VeepooCapabilities(liveHeartRate = true, battery = true),
+            )
+
+            assertEquals(VeepooAdapterState.FAILED, harness.source.state.value)
+            assertNull(harness.source.takeProvisioningCommit())
+            assertFalse(harness.bridge.operations.contains("battery"))
+            assertFalse(harness.bridge.operations.contains("live"))
         }
     }
 
@@ -205,7 +343,7 @@ class VeepooBandSourceTest {
         )
         assertTrue(harness.bridge.submittedPasswords.isEmpty())
 
-        assertTrue(harness.source.submitPairing("00042".toCharArray(), "1234".toCharArray()))
+        assertTrue(harness.source.submitPairing("1234".toCharArray()))
         harness.bridge.callback.onAuthenticated(
             attempt,
             requireNotNull(harness.bridge.authentication),
@@ -234,9 +372,9 @@ class VeepooBandSourceTest {
     }
 
     @Test
-    fun printedIdMismatchCleansUpWithoutProvisioningCommit() {
+    fun unknownProductCodeCleansUpWithoutProvisioningCommit() {
         val harness = Harness()
-        harness.pairThroughBattery(printedId = "41", returnedId = "42")
+        harness.pairThroughBattery(returnedModelCode = "41")
 
         assertEquals(VeepooAdapterState.FAILED, harness.source.state.value)
         assertNull(harness.source.takeProvisioningCommit())
@@ -308,6 +446,7 @@ class VeepooBandSourceTest {
     @Test
     fun reconnectRejectsHardwareOrFirmwareRevisionDrift() {
         listOf(
+            VeepooIdentity("43", "hw-1", "fw-1"),
             VeepooIdentity("42", "hw-2", "fw-1"),
             VeepooIdentity("42", "hw-1", "fw-2"),
         ).forEach { identity ->
@@ -486,5 +625,22 @@ class VeepooBandSourceTest {
 
         assertEquals(VeepooAdapterState.FAILED, harness.source.state.value)
         assertTrue(harness.diagnostics.any { it.category == VeepooDiagnosticCategory.CLEANUP })
+    }
+
+    companion object {
+        private fun approvedPolicy(): VeepooCompatibilityPolicy =
+            VeepooCompatibilityPolicy.parse(manifest(row()))
+
+        private fun manifest(vararg rows: String): String =
+            """{"schemaVersion":1,"approvedBands":[${rows.joinToString(",")}]}"""
+
+        private fun row(
+            platform: String = "android",
+            modelCode: String = "42",
+            hardwareRevision: String = "hw-1",
+            firmwareRevision: String = "fw-1",
+            wrapperRevision: String = "veepoo-android-display-v2",
+        ): String =
+            """{"platform":"$platform","modelCode":"$modelCode","hardwareRevision":"$hardwareRevision","firmwareRevision":"$firmwareRevision","protocolVersion":"noop-band-v1","wrapperRevision":"$wrapperRevision"}"""
     }
 }

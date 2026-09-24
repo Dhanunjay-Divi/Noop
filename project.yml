@@ -122,6 +122,8 @@ targets:
         buildPhase: resources
       - path: TERMS.md
         buildPhase: resources
+      - path: release/supplier/runtime/noop-band-compatibility.json
+        buildPhase: resources
     # Oura BYO-app OAuth credentials. OuraConfig.xcconfig is a tracked wrapper that optionally
     # includes the untracked, gitignored Strand/Oura/OuraSecrets.xcconfig (template at
     # OuraSecrets.example.xcconfig) — absent secrets leave the $(OURA_*) references in the
@@ -304,6 +306,8 @@ targets:
         buildPhase: resources
       - path: TERMS.md
         buildPhase: resources
+      - path: release/supplier/runtime/noop-band-compatibility.json
+        buildPhase: resources
     # iPhone-only wrapper: preserves the Oura wrapper while making the ignored launch verifier
     # available exclusively to this target. Embedded extensions inherit only public policy from the
     # project-level BundleId.xcconfig and must never use this target configuration.
@@ -479,6 +483,10 @@ targets:
       - name: Verify Optional Veepoo iPhoneOS SDK
         script: |
           if [ "${PLATFORM_NAME:-}" = "iphoneos" ] && [ "${NOOP_VEEPOO_SDK_ENABLED:-NO}" = "YES" ]; then
+            if [ "${CONFIGURATION:-}" != "Debug" ] || [ "${ACTION:-}" = "install" ]; then
+              echo "error: supplier SDK builds are limited to Debug device testing" >&2
+              exit 1
+            fi
             "$SRCROOT/Tools/local/configure-veepoo-ios-sdk.py" --build-check
           fi
         basedOnDependencyAnalysis: false
