@@ -37,11 +37,20 @@ Last updated: **2026-09-24**
   groups with zero forbidden mappings. The first exact-head hosted run exposed
   one deterministic Android localization-generation mismatch: the canonical
   nine-locale source contained the printed-band-ID copy, but generated Android
-  resources did not. Regenerating all nine Android app-wide locale files fixes
+  resources did not. Regenerating all nine Android app-wide locale files fixed
   the mismatch. The focused parity test, all 5,053 Full Debug unit tests,
   source-only Full Debug lint, and Full Debug instrumentation compilation pass
-  locally. Replacement exact-SHA hosted checks, normal protected merge,
-  protected-main verification, and exact round-owned cleanup remain.
+  locally. Replacement exact head
+  `ebcbb13acac29b110ee28e923768eba4a15a07a7` passed every hosted context
+  except the iOS production-shell cancellation regression. The hosted fixture
+  deliberately held a synthetic report queued, but cancellation then entered
+  the production authenticated remote-deletion path even though the synthetic
+  report has no remote binding. A DEBUG-only correction now terminally cancels
+  that held fixture through the existing outbox cleanup path; Release behavior
+  is unchanged. The exact focused UI regression passes twice locally with zero
+  failures. Correction commit/push, replacement exact-SHA hosted checks,
+  normal protected merge, protected-main verification, and exact round-owned
+  cleanup remain.
   Supplier redistribution, signing/store review, physical BLE, background
   collection, history retention, haptics, battery, firmware, egress, provider
   delivery, production load, and physiological accuracy remain external or

@@ -374,6 +374,37 @@ firmware, background operation, and physiological accuracy remain unproven.
   protected merge, protected-main verification, and exact round-owned cleanup
   remain.
 
+## Hosted iOS feedback-cancellation remediation
+
+- Replacement exact head
+  `ebcbb13acac29b110ee28e923768eba4a15a07a7` passed every hosted context
+  except the iOS production-shell job. The job executed 39 UI tests with one
+  intentional skip; the only failure was
+  `testAppReportCancellationUsesAccurateRemovalCopy`, whose two assertions
+  expected the terminal `Canceled` state and confirmation that the sealed local
+  ZIP was removed.
+- Root cause: `--demo-feedback-hold-queued` intentionally prevents the
+  synthetic DEBUG report from being uploaded, but cancellation subsequently
+  entered the production background-task and authenticated remote-deletion
+  path. The synthetic fixture has no remote report binding, so it remained
+  nonterminal instead of exercising the local cancellation contract.
+- Correction: while that DEBUG-only hold fixture is active,
+  `FeedbackUploadCoordinator.cancel(id:)` now calls the existing
+  `FeedbackOutbox.markCancelled` transition, records the bounded terminal
+  diagnostic, notifies observers, and returns. That outbox transition performs
+  the same sealed-archive cleanup asserted by the UI. Non-DEBUG and ordinary
+  DEBUG cancellation still use the production background-task cancellation and
+  authenticated remote-deletion flow.
+- Exact focused verification passed twice on the same iPhone 17 Pro simulator
+  with code signing disabled: first 1/1 in 15.008 seconds, then 1/1 in 13.563
+  seconds, both with zero failures. Result bundles are under the round-owned
+  DerivedData path and remain pending exact deletion after hosted replacement
+  evidence and protected integration are durable.
+- No schema, account, network, health-data, formula, supplier-adapter, WHOOP,
+  Release, or distribution behavior changed. Correction commit/push,
+  replacement exact-SHA hosted checks, protected merge, protected-main
+  verification, and exact round-owned cleanup remain.
+
 ## Privacy check
 
 - [x] No credentials, personal names, email addresses, raw health exports,

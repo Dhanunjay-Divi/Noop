@@ -5,7 +5,7 @@
     "customer": 890,
     "fixture": 5679,
     "generated": 21,
-    "historical": 3252,
+    "historical": 3253,
     "import": 871,
     "persisted": 680
   },
@@ -36639,13 +36639,13 @@
       "lineNumbers": [
         18,
         20,
-        106,
-        154,
-        175,
-        319,
-        451,
-        556,
-        560
+        115,
+        163,
+        184,
+        328,
+        460,
+        565,
+        569
       ],
       "occurrenceCount": 9,
       "path": "docs/ops/ACTIVE.md",
@@ -37031,13 +37031,14 @@
         259,
         293,
         316,
-        371
+        371,
+        403
       ],
-      "occurrenceCount": 8,
+      "occurrenceCount": 9,
       "path": "docs/ops/rounds/2026-09-24-pr17-protected-review-remediation.md",
-      "sha256": "50e82f0b7b8075924ffc72d9638cced97f38012a543a828f91d237d15a5b6df7",
+      "sha256": "4609ddababd833eae5e1ce2d6c4f83283a0e7eb24fa161b99186edf45a9eb981",
       "tokenCounts": {
-        "whoop": 7,
+        "whoop": 8,
         "whoop-only": 1
       }
     },
@@ -39363,7 +39364,7 @@
       }
     }
   ],
-  "occurrenceCount": 18146,
+  "occurrenceCount": 18147,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }
