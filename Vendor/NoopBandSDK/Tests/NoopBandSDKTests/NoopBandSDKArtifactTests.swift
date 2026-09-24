@@ -743,6 +743,109 @@ final class NoopBandSDKArtifactTests: XCTestCase {
         })
     }
 
+    func testOperationFailuresValidateCategoriesBeforeMutation() async throws {
+        let diagnostics = BandDiagnosticsRecorder()
+        let (session, generation, _) = try await readySession(
+            diagnostics: diagnostics
+        )
+        let operation = try await session.beginOperation(.battery)
+
+        for category in [
+            BandFailureCategory.closed,
+            .incompatible,
+            .busy,
+            .storage,
+        ] {
+            let eventCount = await diagnostics.snapshot().count
+            do {
+                _ = try await session.failOperation(
+                    operation,
+                    category: category
+                )
+                XCTFail("A non-operation failure category must be rejected")
+            } catch let error as BandFailureCategory {
+                XCTAssertEqual(error, .invalidInput)
+            }
+
+            let unchanged = await session.snapshot()
+            XCTAssertEqual(unchanged.state, .executingCommand)
+            XCTAssertEqual(unchanged.generation, generation)
+            XCTAssertEqual(unchanged.activeOperation, .battery)
+            let events = await diagnostics.snapshot()
+            XCTAssertEqual(
+                Array(events.dropFirst(eventCount)),
+                [
+                    BandDiagnosticEvent(
+                        kind: .command,
+                        outcome: .rejected,
+                        failureCategory: .invalidInput,
+                        operationClass: .battery
+                    ),
+                ]
+            )
+        }
+
+        _ = try await session.failOperation(operation, category: .timeout)
+        let failed = await session.snapshot()
+        XCTAssertEqual(failed.state, .ready)
+
+        let (historySession, _, _) = try await readySession()
+        let historyOperation =
+            try await historySession.beginOperation(.history)
+        _ = try await historySession.failOperation(
+            historyOperation,
+            category: .storage
+        )
+        let historyFailed = await historySession.snapshot()
+        XCTAssertEqual(historyFailed.state, .ready)
+    }
+
+    func testOperationAuthFailuresTerminateLiveInOrder() async throws {
+        for category in [
+            BandFailureCategory.authentication,
+            .securityFailure,
+        ] {
+            let diagnostics = BandDiagnosticsRecorder()
+            let (session, generation, _) = try await readySession(
+                diagnostics: diagnostics
+            )
+            _ = try await session.beginLive()
+            let operation = try await session.beginOperation(.battery)
+            let eventCount = await diagnostics.snapshot().count
+
+            _ = try await session.failOperation(
+                operation,
+                category: category
+            )
+
+            let terminal = await session.snapshot()
+            XCTAssertEqual(
+                terminal.state,
+                category == .securityFailure ? .securityFailure : .rejected
+            )
+            XCTAssertEqual(terminal.generation, generation + 1)
+            XCTAssertNil(terminal.activeOperation)
+            XCTAssertFalse(terminal.liveActive)
+            let events = await diagnostics.snapshot()
+            XCTAssertEqual(
+                Array(events.dropFirst(eventCount)),
+                [
+                    BandDiagnosticEvent(
+                        kind: .live,
+                        outcome: .interrupted,
+                        failureCategory: category
+                    ),
+                    BandDiagnosticEvent(
+                        kind: .command,
+                        outcome: .failed,
+                        failureCategory: category,
+                        operationClass: .battery
+                    ),
+                ]
+            )
+        }
+    }
+
     func testMalformedLiveAndHistoryInputsEmitBoundedRejections() async throws {
         let diagnostics = BandDiagnosticsRecorder()
         let (session, generation, _) = try await readySession(

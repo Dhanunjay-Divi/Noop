@@ -30,6 +30,11 @@ Last updated: **2026-09-24**
   collection, history retention, haptics, battery, firmware, egress, provider
   delivery, production load, and physiological accuracy remain external or
   physical gates.
+- An isolated local follow-up from `60df38a2` confirms the vendored Swift and
+  Kotlin `failOperation` implementations already reject non-operation failure
+  categories before state mutation. Matching app-side regressions pass 2/2 on
+  each platform and preserve the existing authentication/security active
+  operation terminal behavior. The follow-up is local only and unpushed.
 - Historical checkpoint: `NoopBandSDK` PR `#24` merged normally at
   `f20f4ed552328a64a8a598aaac72befa1d481262`. Two independent app-source
   exports from that exact merge are byte-identical. The app's exact ten-file

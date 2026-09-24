@@ -217,6 +217,34 @@ firmware, background operation, and physiological accuracy remain unproven.
 5. Merge normally, verify protected `main`, and delete exact round-owned
    resources after checking active handles.
 
+## Isolated failOperation review follow-up
+
+- Branch: `codex/pr17-sdk-fail-operation-20260924`
+- Start commit: `60df38a2ad3e1a825198909336e75c415459b310`
+- Scope: the vendored Swift and Kotlin `failOperation` category-order finding
+  only; no supplier adapter, app behavior, deployment, or physical claim.
+- Source audit: both pinned production state machines already validate the
+  operation-specific failure allowlist before any operation state transition.
+  Existing authentication and security branches already invalidate the
+  authenticated generation, clear the active operation and live state, and
+  emit bounded terminal evidence.
+- Regression result: app-owned Swift and Kotlin tests prove rejected
+  non-operation categories preserve the exact active operation and generation,
+  operation-specific history storage failure remains valid, and active live
+  authentication/security failures terminate in the required order.
+- Focused Swift command: bounded `swift test` with an external scratch path and
+  filters for the two new `NoopBandSDKArtifactTests`; 2 passed, 0 failed.
+- Focused Kotlin command: bounded single-worker
+  `:app:testFullDebugUnitTest` with the two new
+  `NoopBandSdkIntegrationTest` selectors; 2 passed, 0 failed.
+- Production source change: none. The exact pinned Swift and Kotlin state
+  machines already contained the required pre-mutation whitelist and terminal
+  authentication/security behavior; this follow-up adds direct app-side
+  regression coverage without altering the vendored source revision.
+- Broader verification: intentionally not run under the urgent narrow-test
+  instruction. No push, deployment, supplier binary, or physical-device action
+  occurred.
+
 ## Privacy check
 
 - [x] No credentials, personal names, email addresses, raw health exports,

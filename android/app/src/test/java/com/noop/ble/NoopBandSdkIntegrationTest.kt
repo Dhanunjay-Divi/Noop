@@ -288,6 +288,115 @@ class NoopBandSdkIntegrationTest {
     }
 
     @Test
+    fun operationFailuresValidateCategoriesBeforeMutation() {
+        val diagnostics = BandDiagnosticsRecorder()
+        val (session, generation, _) = readySessionWithStreams(
+            diagnostics = diagnostics,
+            capabilities = setOf(
+                BandCapability.HEART_RATE,
+                BandCapability.BATTERY,
+            ),
+        )
+        val operation = session.beginOperation(BandOperationClass.BATTERY)
+
+        listOf(
+            BandFailureCategory.CLOSED,
+            BandFailureCategory.INCOMPATIBLE,
+            BandFailureCategory.BUSY,
+            BandFailureCategory.STORAGE,
+        ).forEach { category ->
+            val eventCount = diagnostics.snapshot().size
+            val failure = try {
+                session.failOperation(operation, category)
+                null
+            } catch (error: BandException) {
+                error.category
+            }
+
+            assertEquals(BandFailureCategory.INVALID_INPUT, failure)
+            val unchanged = session.snapshot()
+            assertEquals(BandSessionState.EXECUTING_COMMAND, unchanged.state)
+            assertEquals(generation, unchanged.generation)
+            assertEquals(BandOperationClass.BATTERY, unchanged.activeOperation)
+            assertEquals(
+                listOf(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.COMMAND,
+                        BandDiagnosticOutcome.REJECTED,
+                        failureCategory = BandFailureCategory.INVALID_INPUT,
+                        operationClass = BandOperationClass.BATTERY,
+                    ),
+                ),
+                diagnostics.snapshot().drop(eventCount),
+            )
+        }
+
+        session.failOperation(operation, BandFailureCategory.TIMEOUT)
+        assertEquals(BandSessionState.READY, session.snapshot().state)
+
+        val (historySession, _, _) = readySessionWithStreams()
+        val historyOperation =
+            historySession.beginOperation(BandOperationClass.HISTORY)
+        historySession.failOperation(
+            historyOperation,
+            BandFailureCategory.STORAGE,
+        )
+        assertEquals(BandSessionState.READY, historySession.snapshot().state)
+    }
+
+    @Test
+    fun operationAuthFailuresTerminateLiveInOrder() {
+        listOf(
+            BandFailureCategory.AUTHENTICATION,
+            BandFailureCategory.SECURITY_FAILURE,
+        ).forEach { category ->
+            val diagnostics = BandDiagnosticsRecorder()
+            val (session, generation, _) = readySessionWithStreams(
+                diagnostics = diagnostics,
+                capabilities = setOf(
+                    BandCapability.HEART_RATE,
+                    BandCapability.BATTERY,
+                ),
+            )
+            session.beginLive()
+            val operation =
+                session.beginOperation(BandOperationClass.BATTERY)
+            val eventCount = diagnostics.snapshot().size
+
+            session.failOperation(operation, category)
+
+            val terminal = session.snapshot()
+            assertEquals(
+                if (category == BandFailureCategory.SECURITY_FAILURE) {
+                    BandSessionState.SECURITY_FAILURE
+                } else {
+                    BandSessionState.REJECTED
+                },
+                terminal.state,
+            )
+            assertEquals(generation + 1, terminal.generation)
+            assertEquals(null, terminal.activeOperation)
+            assertEquals(false, terminal.liveActive)
+            assertEquals(
+                listOf(
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.LIVE,
+                        BandDiagnosticOutcome.INTERRUPTED,
+                        failureCategory = category,
+                    ),
+                    BandDiagnosticEvent(
+                        BandDiagnosticKind.COMMAND,
+                        BandDiagnosticOutcome.FAILED,
+                        failureCategory = category,
+                        operationClass = BandOperationClass.BATTERY,
+                    ),
+                ),
+                diagnostics.snapshot().drop(eventCount),
+            )
+        }
+    }
+
+    @Test
     fun pendingLiveReceiptMakesEstablishedAuthenticationFailureBusyUntilAcknowledged() {
         val diagnostics = BandDiagnosticsRecorder()
         val (session, generation, connectionToken) = readySessionWithStreams(
@@ -951,6 +1060,8 @@ class NoopBandSdkIntegrationTest {
             setOf(BandStreamKind.HEART_RATE),
         historyStreams: Set<BandStreamKind> =
             setOf(BandStreamKind.HEART_RATE),
+        capabilities: Set<BandCapability> =
+            setOf(BandCapability.HEART_RATE),
     ): Triple<BandSessionMachine, Long, BandConnectionToken> {
         val session = NoopBandSdkBoundary.newSession(diagnostics = diagnostics)
         val scanToken = session.beginScan()
@@ -978,7 +1089,7 @@ class NoopBandSdkIntegrationTest {
                 hardwareRevision = identity.hardwareRevision,
                 firmwareVersion = identity.firmwareVersion,
                 historyDays = 7,
-                capabilities = setOf(BandCapability.HEART_RATE),
+                capabilities = capabilities,
                 liveStreams = liveStreams,
                 historyStreams = historyStreams,
             ),
