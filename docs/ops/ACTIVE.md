@@ -12,41 +12,34 @@ Last updated: **2026-09-24**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current state: `NoopBandSDK` PR `#33` merged normally at
-  `b02808372b7c537f22058c7ebc75d92c750373be`. Two independent source-only
-  exports were byte-identical. The exact ten-file manifest SHA-256 is
-  `6beca829f3b2a367cf7046544e8d06dc74ae9f905e1eefe4bb58ccf41615fd34`;
-  supplier artifacts are absent. Upstream verification passes Swift 106/106,
-  Kotlin/JVM 114/114 plus `installDist`, all 50 shared conformance scenarios,
-  and the 74-file repository gate. The app is being repinned to that exact
-  revision while
-  preserving WHOOP as the default comparison transport and leaving the
-  first-party source factory disabled.
-  Exact-current local app evidence includes the artifact verifier and its
-  9-test adversarial suite, vendored Swift 16/16, macOS boundary 10/10,
-  Android Full and Demo integration 15/15 each, both Android instrumentation
-  source graphs, the unsigned Release iPhone graph with embedded Watch,
-  complication, and widget products, 16 focused macOS app tests, and a
-  21-scenario iPhone visual matrix. A disposable API 35 emulator built,
-  installed, and launched the Demo APK; inspected Today, More, and Friends
-  Review Sample states contained only fictional data, and the app-specific
-  crash/ANR scan was empty. The emulator was then removed from the active
-  process set.
-  Final local review found no P0/P1 blocker and corrected four P2 contract
-  defects in history navigation, Apple's touch target, current-versus-historical
-  handoff wording, and the Android account/cloud guide. The focused trust and
-  terminology matrix passes 69 tests, Apple screen-state contracts pass 15/15,
-  Android Demo compilation plus its presentation contract complete across 46
-  tasks, and the complete repository wall passes 318 tests with one intentional
-  optional Safety smoke skip. Direct release, required-context, trust,
-  artifact, calibration, distribution, privacy, health-claim, localization,
-  operations, shell, Python, and diff controls are green.
-  The local branch now needs its consolidated commit and one push, replacement
-  exact-SHA hosted checks, normal protected merge, exact protected-main
-  verification, and round-owned cleanup.
-  Supplier adapter integration, signing, physical BLE, background collection,
-  disconnected history, haptics, battery, firmware, and physiological
-  accuracy remain separate device/external gates.
+- Current integration state: the active local branch contains committed source
+  through `6ce43f0fe6a9eb5a75098de55e4e51f72e6001b2`; its upstream remains
+  `5978bda7760d6f8378d0c5439ab1788f8e0aa24e`. `NoopBandSDK` PR `#33`
+  merged normally at `b02808372b7c537f22058c7ebc75d92c750373be`.
+  Two independent source-only exports were byte-identical, the checked-in
+  ten-file manifest SHA-256 is
+  `6beca829f3b2a367cf7046544e8d06dc74ae9f905e1eefe4bb58ccf41615fd34`,
+  and supplier artifacts remain absent from Git.
+  The branch now contains optional/default-off Apple and Android supplier
+  adapters, local-only build wiring, the quarantined Android provider,
+  lifecycle compensation/fallback corrections, and source-aware first-run
+  setup. WHOOP remains the default comparison transport; ordinary builds omit
+  supplier source and dependencies when ignored local configuration is absent.
+  Recorded slice evidence includes upstream Swift 106/106, Kotlin/JVM 114/114
+  plus `installDist`, 50/50 conformance, the 74-file SDK gate, the app artifact
+  verifier and 9 adversarial tests, vendored Swift 16/16, Android supplier
+  lifecycle 59/59, supplier provider 7/7 with its Full compile, default-off
+  Full/Demo focused graphs 59/59 each, source-aware Android compilation,
+  focused Apple 22/22, an unsigned iOS Simulator graph with Watch/widget, and
+  complete nine-locale generation/i18n audit.
+  Those results belong to their recorded exact slices or receiving checks; a
+  full combined current-head Apple/Android, visual, localization, policy, and
+  release wall has not run. At the start of this documentation closeout an
+  independently owned uncommitted correction under
+  `Strand/BLE/VeepooBandSource.swift` remained outside the documentation
+  commit. Supplier redistribution, signing, physical BLE, background
+  collection, history retention, haptics, battery, firmware, egress, and
+  physiological accuracy remain device or external gates.
 - Historical checkpoint: `NoopBandSDK` PR `#24` merged normally at
   `f20f4ed552328a64a8a598aaac72befa1d481262`. Two independent app-source
   exports from that exact merge are byte-identical. The app's exact ten-file
@@ -105,7 +98,7 @@ Last updated: **2026-09-24**
   haptic evidence, or physiological-accuracy evidence is included. Both
   repositories reported `PUBLIC`; that historical visibility gate was later
   superseded by the current public, source-only D-056 decision.
-- Current state: supplier-independent implementation and applicable local
+- Historical PR `#16` checkpoint: supplier-independent implementation and applicable local
   platform verification are green. Pull request `#16` candidate `e9b3a380`
   passed 32 hosted jobs, including every Android job (Review Sample,
   production shell, and build-and-test), policy, trust, server, Swift packages,
@@ -445,12 +438,13 @@ Resume from:
   presentation controls, managed Friends parity, macOS viewer foundations,
   evidence-backed UI refinements, and the supplier wrapper handoff.
 - Preserve the current WHOOP compatibility path for physical regression
-  testing. The public `NoopBandSDK` repository now contains the binary-free
-  neutral core and virtual conformance surface, and the app pins that export
-  behind a disabled factory. It still does not contain an executable supplier
-  adapter or firmware flasher. Keep real scanning, possession proof, history,
-  haptics, OTA, and flashing behind the supplier-artifact and physical-device
-  gates.
+  testing. The public `NoopBandSDK` repository contains the binary-free neutral
+  core and virtual conformance surface. The app pins that export and now
+  contains quarantined optional supplier adapters and an Android provider, all
+  default-off without exact ignored local configuration. No supplier binary,
+  firmware flasher, or physical behavior is checked in or proven. Keep real
+  scanning, possession proof, history, haptics, OTA, and flashing behind the
+  supplier-artifact and physical-device gates.
 - Validate every material external finding against current source.
 - Inspect representative current and proposed renders directly.
 - Correct only evidence-backed formula explanation, terminology, loading,
@@ -462,18 +456,28 @@ Resume from:
 
 ## Immediate next actions
 
-1. Push one exact replacement candidate to PR `#17`.
-2. Require all ten exact-SHA
-   contexts, and resolve only reviewed threads covered by matching protected
-   SDK, app source, and tests.
-3. Merge normally only after Apple and Android app compilers/tests are green,
-   verify protected `main`, and remove exact round-owned outputs and logs.
-4. Keep both repositories public under D-056 while preserving the strict
-   exclusion of supplier binaries, firmware, credentials, signing material,
-   private inputs, and user or health data.
-5. Execute the supplier adapter and flashing round only after the exact
-   supplier artifacts, firmware project, rights/SBOM/security evidence, and
-   representative physical units are available.
+1. Finish and review the separately owned
+   `Strand/BLE/VeepooBandSource.swift` correction, then establish a clean exact
+   local source candidate.
+2. Run the Apple supplier/onboarding focused tests and default-off macOS/iOS
+   Simulator builds through `Tools/run-bounded-command.py`, using the exact
+   Xcode commands recorded in the September 24 iOS supplier round.
+3. Run the current-head Android Full/Demo compile, focused tests, lint,
+   instrumentation-source, and APK gates through the bounded runner. Run the
+   supplier-enabled lane only after
+   `Tools/local/verify-android-supplier-sdk.py` passes against the exact ignored
+   local configuration and artifacts.
+4. Localize supplier-enabled customer faces, remove recorded Swift concurrency
+   warnings, and run the combined visual, accessibility, localization,
+   operations, privacy, release-control, and diff gates.
+5. Push one reviewed exact candidate to PR `#17`, require all protected
+   exact-SHA contexts, merge normally, verify protected `main`, and clean exact
+   round-owned outputs and logs.
+6. Keep both repositories public under D-056 while excluding supplier
+   binaries, firmware, credentials, signing material, private inputs, and user
+   or health data. Begin signed physical validation only after the exact
+   supplier rights/SBOM/security inputs and representative devices are
+   available.
 
 ## September 24 exact-head Android correction
 
