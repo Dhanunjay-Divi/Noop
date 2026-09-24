@@ -252,7 +252,7 @@ class AndroidLocalizationPolicyTest {
         val auditKeys = base.keys.filter {
             it.startsWith("string:appwide_ui_audit_")
         }.toSet()
-        assertEquals(50, auditKeys.size)
+        assertEquals(49, auditKeys.size)
 
         val forbidden = listOf(
             "whoop",

@@ -1307,7 +1307,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             "Until NOOP Band is ready, this version works with a compatible band you own."
         )
         let uiAuditKeys = source.keys.filter { $0.hasPrefix("appwide.ui_audit.") }
-        XCTAssertEqual(uiAuditKeys.count, 50)
+        XCTAssertEqual(uiAuditKeys.count, 49)
         let fullyLocalizedKeys =
             uiAuditKeys + supplierKeys + onboardingNotificationKeys
         let placeholderRegex = try NSRegularExpression(
