@@ -5,7 +5,7 @@
     "customer": 890,
     "fixture": 5647,
     "generated": 21,
-    "historical": 3238,
+    "historical": 3240,
     "import": 871,
     "persisted": 680
   },
@@ -36560,18 +36560,18 @@
     {
       "category": "historical",
       "lineNumbers": [
-        26,
-        95,
-        143,
-        164,
-        308,
-        440,
-        553,
-        557
+        24,
+        100,
+        148,
+        169,
+        313,
+        445,
+        550,
+        554
       ],
       "occurrenceCount": 8,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "693f7bd2558b9a3a1f469b146369a73216e1de0aede08382104de25735a3bdcb",
+      "sha256": "3ba5ed5a8e4d791b1e632ff567bd70fb25795d525ebd6a281d4f74ec24a7da58",
       "tokenCounts": {
         "whoop": 5,
         "whoopstore": 3
@@ -36946,18 +36946,20 @@
     {
       "category": "historical",
       "lineNumbers": [
-        20,
-        32,
-        42,
-        88,
-        137,
-        157
+        21,
+        33,
+        43,
+        89,
+        151,
+        155,
+        188,
+        245
       ],
-      "occurrenceCount": 6,
+      "occurrenceCount": 8,
       "path": "docs/ops/rounds/2026-09-24-sdk33-repin-and-supplier-integration.md",
-      "sha256": "7242444fbad38f85853c60e01c01fb3dbbca367546dff77292b438d040195ba7",
+      "sha256": "7823df81831ec4633d62df3a505678706bf702b1f49a9fbb98912731c8aff925",
       "tokenCounts": {
-        "whoop": 6
+        "whoop": 8
       }
     },
     {
@@ -37042,7 +37044,7 @@
       ],
       "occurrenceCount": 11,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "5d2c8ad3c2a864b88d190e1650cb26711c98ef3c271ed36efd623a1d99b855d5",
+      "sha256": "bc46a5bd8f9e64ea1f7636072d579632fcbdaa8a46f2dbe7c0c39a4951aa10ad",
       "tokenCounts": {
         "whoop": 8,
         "whoopstore": 3
@@ -39262,7 +39264,7 @@
       }
     }
   ],
-  "occurrenceCount": 18087,
+  "occurrenceCount": 18089,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

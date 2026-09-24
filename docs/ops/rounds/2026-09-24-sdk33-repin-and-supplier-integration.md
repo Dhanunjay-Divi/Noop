@@ -2,14 +2,15 @@
 
 ## Status
 
-- State: `integration source assembled; combined verification pending`
+- State: `local verification complete; exact-SHA hosted checks and protected merge pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `5978bda7760d6f8378d0c5439ab1788f8e0aa24e`
-- End implementation commit: committed integration source through
-  `6ce43f0fe6a9eb5a75098de55e4e51f72e6001b2`
-- Record commit or PR: application pull request `#17`; this record is updated
-  by a local documentation follow-up
+- End implementation commit:
+  `ddb0315f76d7551916ef8b6bf54de5a2a5653d07`
+- Record commit or PR: application pull request `#17`; the closeout record is
+  carried by the documentation commit immediately after the implementation
+  commit
 - Supplier binaries: local and ignored only; absent from Git
 - Physical-device claims: unchanged and unproven
 
@@ -87,6 +88,19 @@ test transport until physical supplier validation passes.
 - Source-aware first-run setup is integrated through `6ce43f0fe`. Apple and
   Android now use the shared add-device wizard, preserve WHOOP as the default,
   and fail closed on invalid or unavailable registry state.
+- Android supplier Live copy now uses the translated app-wide catalog rather
+  than local English literals. The final source-graph verifier matches the
+  supplier-only manifest and test source sets, and the Apple Live
+  presentation contract follows the current displayed-heart-rate freshness
+  boundary.
+- The reviewed terminology ratchet now records 18,089 classified occurrences
+  across 1,613 path/category groups with zero forbidden mappings. Its two
+  generated files are repinned by the protected required-CI gate.
+- The final current-head verification covers the complete default-off Apple
+  and Android app graphs, all repository policy tests, a fresh synthetic
+  PostgreSQL server wall, and the unchanged GCP plan-only contracts. No
+  supplier binary, credential, public traffic, live health-data transfer, or
+  physical-device result was introduced.
 
 ## Data, privacy, and medical truth
 
@@ -138,7 +152,15 @@ test transport until physical supplier validation passes.
 | Source-aware first-run slice | Android Full compile/focused tests passed in 1m12s; focused macOS XCTest 22/22; unsigned iOS Simulator graph passed with Watch/widget; i18n audit passed | The isolated onboarding slice compiles and its focused contracts pass | A post-integration combined wall or physical pairing |
 | `python3 Tools/validate-ops-rounds.py --all .` | Pass: 90 round records validated | Required headings, operations-doc privacy checks, and all index links pass on the documentation-repair tree | Product compilation or runtime behavior |
 | `git diff --check` | Pass | The documentation repair has no whitespace errors | Product behavior |
-| Combined current-head platform, visual, policy, and release wall | Not run after the final source integration | Nothing further | Current candidate readiness |
+| Complete Android default-off wall | Full and Demo each executed 5,031 tests with 7 intentional skips and 0 failures; compile, lint, APK assembly, and instrumentation-source compilation passed across 137 tasks | Ordinary WHOOP and Demo graphs remain coherent with the supplier source absent; shared UI, localization, persistence, and transport contracts compile and pass together | API 35 execution, physical GATT, background collection, haptics, battery, or supplier behavior |
+| Final Android Live localization rerun | Full and Demo Kotlin compilation plus the localization/UI-audit selectors passed serially | The final translated supplier Live surface compiles in both ordinary variants without the earlier concurrent compiler-memory artifact | Physical locale switching or TalkBack |
+| Complete macOS app wall | 2,248 tests executed, 1 intentional Xiaomi-fixture skip, 0 failures | Shared Apple app, UI, account/cloud, analytics, storage, accessibility-contract, and supplier-default-off source pass together | Signed distribution, physical accessibility, BLE, or live service access |
+| Unsigned Apple product graph | iPhone app, widget, Watch app, and Watch complication build succeeded with 0 compiler warnings and 0 errors | All Apple launch products and shared source compile together from the final implementation tree | Signing, App Store review, Watch connectivity, notifications, or background suspension |
+| Focused Apple supplier contract | 11/11 passed; the corrected Live freshness contract also passed before the complete wall | Default-off supplier lifecycle and displayed-HR presentation contracts remain covered | Physical callbacks, battery semantics, sensor accuracy, or firmware |
+| Repository policy/tool wall | 348 tests passed with 1 intentional skip; direct release controls 9/9; 10 required contexts; trusted self-verification; calibration 12 metrics/3 revisions/13 thresholds/16 guards; distribution, privacy, claims, terminology, SDK artifact, i18n delta, operations, and diff gates passed | The final local source satisfies repository release, privacy, health-claim, localization, terminology, calibration, provenance, and trust contracts | Hosted exact-SHA enforcement, physical localization, or external approvals |
+| Exact SDK artifact verifier | 10 source files verified at upstream revision `b02808372b7c537f22058c7ebc75d92c750373be`; supplier artifacts absent | The checked-in neutral boundary is the approved source-only export and contains no supplier payload | Supplier redistribution rights, local ignored binaries, or runtime behavior |
+| Fresh synthetic PostgreSQL server wall | 816 tests collected; 815 passed, 1 explicitly opt-in provider skip, 0 failures; Ruff, format, and dependency checks passed | Current account, managed-history, Friends, Safety, formula, migration, retention, deletion, retry, and isolation contracts pass against two extension-free disposable databases | Production Cloud SQL, load, provider delivery, real identities/data, or elapsed operations |
+| GCP plan-only wall | Formatting and validation passed; 20 OpenTofu tests passed, 0 failed | Default-off ownership, feedback lifecycle, pinned database credentials, and workload separation remain coherent without apply | Deployed IAM/secrets, drift, public traffic, or production runtime behavior |
 
 ## Resource cleanup
 
@@ -146,6 +168,15 @@ test transport until physical supplier validation passes.
   reviewed, cherry-picked, and reverified.
 - Its clean 418 MiB worktree and round-owned build output were removed. The
   integrated source, focused test results, and this durable record remain.
+- Six obsolete, handle-free Apple DerivedData directories from earlier
+  receiving rounds were exact-deleted after evidence capture, reclaiming about
+  22 GiB and raising Data-volume headroom from 41 GiB to 63 GiB.
+- The final server wall used two extension-free synthetic databases and a
+  round-owned Python 3.12 environment. Both databases and the 116 MiB
+  environment were deleted after the 816-case result was captured.
+- The 243 MiB OpenTofu provider directory and the two final current-head Apple
+  DerivedData directories remain only until the hosted candidate is durable;
+  the final closeout removes them explicitly.
 
 ## Physical device and deployment
 
@@ -163,16 +194,18 @@ test transport until physical supplier validation passes.
 
 - Changed paths: the round spans the exact SDK source export, Apple and Android
   app adapters, local-only supplier wiring/provider source, focused tests,
-  onboarding integration, supporting release/handoff records, and this
-  operations record.
+  onboarding integration, final Live localization/contracts, the generated
+  terminology ratchet, supporting release/handoff records, and this operations
+  record.
 - Commits: SDK repin `ea4634ee1`; Apple wiring/source `e106ff8c1` and
   `ea24354b9`; Android wiring/source `38d556602` and `637d6a987`; lifecycle
   corrections through `43cadcc37`; Android provider `59a7c1aa0`; source-aware
-  onboarding `6ce43f0fe`.
-- Branch and remote state: committed integration source is local on
-  `codex/noop-band-sdk-app-integration-20260921`; upstream remains
-  `5978bda7760d6f8378d0c5439ab1788f8e0aa24e`. This documentation closeout does
-  not push or deploy.
+  onboarding `6ce43f0fe`; final verification correction
+  `ddb0315f76d7551916ef8b6bf54de5a2a5653d07`.
+- Branch and remote state: final implementation and documentation are local on
+  `codex/noop-band-sdk-app-integration-20260921`; PR `#17` still points to
+  `5978bda7760d6f8378d0c5439ab1788f8e0aa24e` until the one consolidated push.
+  No deployment or release occurred.
 - Repository visibility verified: previously verified public on 2026-09-23;
   not reverified by this documentation-only repair.
 - Version/build impact: no application version change.
@@ -195,33 +228,22 @@ Supplier redistribution rights, complete dependency notices/SBOM, signing,
 store review, firmware, physical discovery, printed-ID truth, possession proof,
 password behavior, battery accuracy, live HR accuracy, disconnect/reconnect,
 background execution, on-band retention, haptics, OTA, egress, and battery-life
-evidence remain open.
-
-- The recorded platform results come from exact isolated or receiving slices.
-  A combined current-head Apple/Android, visual, localization, policy, and
-  release wall has not run.
-- Supplier-enabled customer-facing strings remain to be localized before any
-  supplier distribution.
-- Recorded Swift concurrency warnings remain to be removed and reverified.
-- An independently owned uncommitted correction under
-  `Strand/BLE/VeepooBandSource.swift` was present when this documentation
-  closeout began. It is outside this record-only commit.
+evidence remain open. Hosted exact-SHA checks and protected integration also
+remain until the final push completes. No local software, localization,
+policy, server, or plan-only verification gap remains in this round.
 
 ## Next round
 
-1. Finish and review the separately owned Swift supplier correction, then
-   establish a clean exact source candidate.
-2. Run the bounded Apple supplier and onboarding focused tests plus default-off
-   macOS and iOS Simulator builds from the current head.
-3. Run the bounded Android Full/Demo compile, focused tests, lint,
-   instrumentation-source, and APK gates; run the supplier-enabled lane only
-   with the exact ignored configuration and verified artifacts.
-4. Localize supplier-enabled customer faces, remove supplier concurrency
-   warnings, and rerun visual, accessibility, localization, operations, privacy,
-   release-control, and diff gates.
-5. Push one reviewed exact candidate, require all protected exact-SHA contexts,
-   merge normally, verify protected `main`, and only then begin the signed
-   physical-device round.
+1. Commit this closeout record and push the two final local commits once to PR
+   `#17`.
+2. Require every protected exact-SHA context, resolve any current review
+   threads without bypassing checks, and merge normally.
+3. Verify protected `main`, re-run its trust/required-context checks, and remove
+   the remaining exact round-owned DerivedData, OpenTofu provider cache, and
+   temporary logs.
+4. Begin the signed physical-device round only after supplier
+   rights/SBOM/security inputs and representative iPhone, Android, WHOOP, and
+   supplier devices are available.
 
 ## Privacy check
 

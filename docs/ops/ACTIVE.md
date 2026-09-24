@@ -12,34 +12,39 @@ Last updated: **2026-09-24**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current integration state: the active local branch contains committed source
-  through `6ce43f0fe6a9eb5a75098de55e4e51f72e6001b2`; its upstream remains
-  `5978bda7760d6f8378d0c5439ab1788f8e0aa24e`. `NoopBandSDK` PR `#33`
-  merged normally at `b02808372b7c537f22058c7ebc75d92c750373be`.
-  Two independent source-only exports were byte-identical, the checked-in
-  ten-file manifest SHA-256 is
+- Current integration state: implementation commit
+  `ddb0315f76d7551916ef8b6bf54de5a2a5653d07` closes the final local
+  verification gaps after the optional/default-off Apple and Android supplier
+  adapters, local-only build wiring, quarantined Android provider, lifecycle
+  compensation/fallback corrections, and source-aware first-run setup were
+  integrated. `NoopBandSDK` PR `#33` remains pinned at
+  `b02808372b7c537f22058c7ebc75d92c750373be`; the checked-in ten-file
+  source-only export has manifest SHA-256
   `6beca829f3b2a367cf7046544e8d06dc74ae9f905e1eefe4bb58ccf41615fd34`,
-  and supplier artifacts remain absent from Git.
-  The branch now contains optional/default-off Apple and Android supplier
-  adapters, local-only build wiring, the quarantined Android provider,
-  lifecycle compensation/fallback corrections, and source-aware first-run
-  setup. WHOOP remains the default comparison transport; ordinary builds omit
-  supplier source and dependencies when ignored local configuration is absent.
-  Recorded slice evidence includes upstream Swift 106/106, Kotlin/JVM 114/114
-  plus `installDist`, 50/50 conformance, the 74-file SDK gate, the app artifact
-  verifier and 9 adversarial tests, vendored Swift 16/16, Android supplier
-  lifecycle 59/59, supplier provider 7/7 with its Full compile, default-off
-  Full/Demo focused graphs 59/59 each, source-aware Android compilation,
-  focused Apple 22/22, an unsigned iOS Simulator graph with Watch/widget, and
-  complete nine-locale generation/i18n audit.
-  Those results belong to their recorded exact slices or receiving checks; a
-  full combined current-head Apple/Android, visual, localization, policy, and
-  release wall has not run. At the start of this documentation closeout an
-  independently owned uncommitted correction under
-  `Strand/BLE/VeepooBandSource.swift` remained outside the documentation
-  commit. Supplier redistribution, signing, physical BLE, background
-  collection, history retention, haptics, battery, firmware, egress, and
-  physiological accuracy remain device or external gates.
+  and supplier artifacts remain absent from Git. WHOOP remains the default
+  comparison transport and ordinary builds exclude supplier source and
+  dependencies when ignored local configuration is absent.
+  Exact-current local evidence is green: Android Full and Demo each execute
+  5,031 tests with 7 intentional skips plus compile, lint, APK, and
+  instrumentation-source gates across 137 tasks; macOS executes 2,248 tests
+  with 1 intentional skip; the unsigned iPhone, widget, Watch app, and Watch
+  complication graph builds without compiler warnings or errors; the
+  repository tool wall passes 348 tests with 1 skip; the fresh synthetic
+  PostgreSQL wall collects 816 tests and passes 815 with 1 opt-in provider
+  skip; and formatting, validation, and 20/20 GCP plan-only tests pass.
+  Direct release controls, all ten required contexts, trusted self-verification,
+  calibration parity, distribution provenance, private-data, health-claims,
+  terminology, exact SDK artifact, i18n delta, operations-record, and diff
+  gates also pass. The terminology ratchet records 18,089 classified
+  occurrences across 1,613 groups with zero forbidden mappings.
+  PR `#17` still points to upstream
+  `5978bda7760d6f8378d0c5439ab1788f8e0aa24e`; the final implementation and
+  closeout documentation require one consolidated push, exact-SHA hosted
+  checks, normal protected merge, and protected-main verification. Supplier
+  redistribution, signing/store review, physical BLE, background collection,
+  history retention, haptics, battery, firmware, egress, provider delivery,
+  production load, and physiological accuracy remain external or physical
+  gates.
 - Historical checkpoint: `NoopBandSDK` PR `#24` merged normally at
   `f20f4ed552328a64a8a598aaac72befa1d481262`. Two independent app-source
   exports from that exact merge are byte-identical. The app's exact ten-file
@@ -456,24 +461,16 @@ Resume from:
 
 ## Immediate next actions
 
-1. Finish and review the separately owned
-   `Strand/BLE/VeepooBandSource.swift` correction, then establish a clean exact
-   local source candidate.
-2. Run the Apple supplier/onboarding focused tests and default-off macOS/iOS
-   Simulator builds through `Tools/run-bounded-command.py`, using the exact
-   Xcode commands recorded in the September 24 iOS supplier round.
-3. Run the current-head Android Full/Demo compile, focused tests, lint,
-   instrumentation-source, and APK gates through the bounded runner. Run the
-   supplier-enabled lane only after
-   `Tools/local/verify-android-supplier-sdk.py` passes against the exact ignored
-   local configuration and artifacts.
-4. Localize supplier-enabled customer faces, remove recorded Swift concurrency
-   warnings, and run the combined visual, accessibility, localization,
-   operations, privacy, release-control, and diff gates.
-5. Push one reviewed exact candidate to PR `#17`, require all protected
-   exact-SHA contexts, merge normally, verify protected `main`, and clean exact
-   round-owned outputs and logs.
-6. Keep both repositories public under D-056 while excluding supplier
+1. Commit the September 24 closeout documentation after implementation commit
+   `ddb0315f76d7551916ef8b6bf54de5a2a5653d07`.
+2. Push the final two local commits once to PR `#17`; do not send an
+   intermediate hosted candidate.
+3. Require every protected exact-SHA context and resolve review threads without
+   bypassing branch protection, then merge normally.
+4. Verify protected `main` through the trusted and required-context gates, then
+   remove the remaining exact round-owned Apple DerivedData, OpenTofu provider
+   cache, and temporary logs.
+5. Keep both repositories public under D-056 while excluding supplier
    binaries, firmware, credentials, signing material, private inputs, and user
    or health data. Begin signed physical validation only after the exact
    supplier rights/SBOM/security inputs and representative devices are
