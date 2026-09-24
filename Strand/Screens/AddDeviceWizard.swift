@@ -1470,14 +1470,13 @@ struct AddDeviceWizard: View {
     }
 
     private func finishVeepooAdd() {
-        guard let device = veepooSession?.makePairedDevice(
-            nickname: nameDraft
-        ) else {
-            return
+        guard let session = veepooSession else { return }
+        let committed = session.commitPairedDevice(nickname: nameDraft) { device in
+            model.deviceRegistry?.addAndSetActive(device) ?? false
         }
+        guard committed else { return }
         veepooCommitted = true
-        model.registerDevice(device, makeActive: true)
-        veepooSession?.cancel()
+        session.cancel()
         onClose()
     }
 
@@ -1951,7 +1950,11 @@ private struct VeepooPairingFace: View {
 
     private var failure: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("The supplier connection could not be verified.")
+            Text(
+                session.registrationFailed
+                    ? "The band could not be saved. Registration was not reported as complete."
+                    : "The supplier connection could not be verified."
+            )
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.statusWarning)
             Button {

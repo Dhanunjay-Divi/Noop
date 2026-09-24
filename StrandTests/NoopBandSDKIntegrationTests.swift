@@ -1,4 +1,5 @@
 import Combine
+import GRDB
 import XCTest
 import NoopBandSDK
 import WhoopStore
@@ -797,7 +798,56 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testUnavailableSupplierFactoryDoesNotPauseWhoop() async throws {
+    func testFailedSupplierRegistrationRestoresWhoopAndArchivesCandidate() async throws {
+        let store = try await WhoopStore.inMemory()
+        let registry = DeviceRegistry(
+            store: DeviceRegistryStore(dbQueue: store.registryWriter)
+        )
+        registry.reload()
+        let deviceID = "veepoo-registration-failure"
+        try await store.registryWriter.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER reject_supplier_activation
+                BEFORE UPDATE OF status ON pairedDevice
+                WHEN NEW.id = 'veepoo-registration-failure'
+                  AND NEW.status = 'active'
+                BEGIN
+                    SELECT RAISE(ABORT, 'synthetic failure');
+                END
+                """)
+        }
+
+        let committed = registry.addAndSetActive(
+            PairedDevice(
+                id: deviceID,
+                brand: "Veepoo-compatible",
+                model: "Compatible supplier band",
+                peripheralId: UUID().uuidString,
+                sourceKind: .veepoo,
+                capabilities: [.hr],
+                status: .paired,
+                addedAt: 1,
+                lastSeenAt: 1
+            )
+        )
+
+        XCTAssertFalse(committed)
+        XCTAssertEqual(registry.activeDeviceId, "my-whoop")
+        let rows = try DeviceRegistryStore(
+            dbQueue: store.registryWriter
+        ).all()
+        XCTAssertEqual(
+            rows.first(where: { $0.id == "my-whoop" })?.status,
+            .active
+        )
+        XCTAssertEqual(
+            rows.first(where: { $0.id == deviceID })?.status,
+            .archived
+        )
+    }
+
+    @MainActor
+    func testUnavailableSupplierFactoryRestoresWhoopWithoutPausingIt() async throws {
         let store = try await WhoopStore.inMemory()
         let registry = DeviceRegistry(
             store: DeviceRegistryStore(dbQueue: store.registryWriter)
@@ -816,6 +866,8 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
                 lastSeenAt: 1
             )
         )
+        registry.setActive("veepoo-unavailable")
+        XCTAssertEqual(registry.activeDeviceId, "veepoo-unavailable")
 
         var starts = 0
         var stops = 0
@@ -835,6 +887,64 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         coordinator.activeDeviceChanged(to: "veepoo-unavailable")
         XCTAssertEqual(starts, 0)
         XCTAssertEqual(stops, 0)
+        XCTAssertEqual(registry.activeDeviceId, "my-whoop")
+    }
+
+    @MainActor
+    func testUnavailableSupplierRestoresTheTransportStillRunning() async throws {
+        let store = try await WhoopStore.inMemory()
+        let registry = DeviceRegistry(
+            store: DeviceRegistryStore(dbQueue: store.registryWriter)
+        )
+        registry.reload()
+        let runningID = "veepoo-running"
+        let unavailableID = "veepoo-unavailable"
+        for id in [runningID, unavailableID] {
+            registry.add(
+                PairedDevice(
+                    id: id,
+                    brand: "Veepoo-compatible",
+                    model: "Compatible supplier band",
+                    peripheralId: nil,
+                    sourceKind: .veepoo,
+                    capabilities: [.hr],
+                    status: .paired,
+                    addedAt: id == runningID ? 1 : 2,
+                    lastSeenAt: 1
+                )
+            )
+        }
+        registry.setActive(runningID)
+
+        let runningSource = FakeNoopBandSource()
+        var starts = 0
+        var stops = 0
+        let coordinator = SourceCoordinator(
+            registry: registry,
+            live: LiveState(),
+            storeHandle: { nil },
+            startWhoop: { starts += 1 },
+            stopWhoop: { stops += 1 },
+            setWhoopPreferredPeripheral: { _ in },
+            setWhoopActiveDeviceId: { _ in },
+            connectedPeripheralUUID:
+                Empty<String?, Never>().eraseToAnyPublisher(),
+            noopBandSourceFactory: { id in
+                id == runningID ? runningSource : nil
+            }
+        )
+        coordinator.activeDeviceChanged(to: runningID)
+        XCTAssertEqual(runningSource.scans, 1)
+        XCTAssertEqual(stops, 1)
+
+        registry.setActive(unavailableID)
+        coordinator.activeDeviceChanged(to: unavailableID)
+
+        XCTAssertEqual(registry.activeDeviceId, runningID)
+        XCTAssertEqual(runningSource.stops, 0)
+        XCTAssertEqual(runningSource.scans, 1)
+        XCTAssertEqual(starts, 0)
+        XCTAssertEqual(stops, 1)
     }
 
     private func liveBatch(sequence: UInt64) -> BandSampleBatch {

@@ -14,6 +14,10 @@ import WhoopStore
 // here are plain synchronous calls; we keep failures non-fatal and fall back to the seeded defaults.
 @MainActor
 final class DeviceRegistry: ObservableObject {
+    private enum MutationFailure: Error {
+        case verificationFailed
+    }
+
     /// All paired devices (any status), oldest-added first — the store's `all()` ordering.
     @Published private(set) var devices: [PairedDevice] = []
     /// The active device's id. Defaults to "my-whoop" so callers have a safe value before the
@@ -30,10 +34,7 @@ final class DeviceRegistry: ObservableObject {
     /// values are left untouched (keeping the safe "my-whoop" fallback), never crashing.
     func reload() {
         guard let rows = try? store.all() else { return }
-        devices = rows
-        if let active = rows.first(where: { $0.status == .active })?.id {
-            activeDeviceId = active
-        }
+        publish(rows)
     }
 
     // MARK: - UI mutations (Devices screen)
@@ -46,6 +47,83 @@ final class DeviceRegistry: ObservableObject {
     func add(_ device: PairedDevice) {
         try? store.add(device)
         reload()
+    }
+
+    /// Register a newly authenticated source and make it active as one verified operation from the
+    /// app's perspective. The underlying store keeps each database write transactional; this wrapper
+    /// withholds publication until both writes and the authoritative read-back succeed. On failure it
+    /// restores the prior rows and archives a newly inserted candidate so a partial adoption cannot be
+    /// mistaken for an active source.
+    @discardableResult
+    func addAndSetActive(_ device: PairedDevice) -> Bool {
+        let originalRows: [PairedDevice]
+        do {
+            originalRows = try store.all()
+        } catch {
+            return false
+        }
+
+        do {
+            try store.add(device)
+            try store.setActive(device.id)
+            let rows = try store.all()
+            guard rows.first(where: { $0.status == .active })?.id == device.id else {
+                throw MutationFailure.verificationFailed
+            }
+            publish(rows)
+            return true
+        } catch {
+            compensateFailedRegistration(
+                attemptedDeviceID: device.id,
+                originalRows: originalRows
+            )
+            return false
+        }
+    }
+
+    /// Reconcile a supplier row that cannot own transport with the source that is actually still
+    /// running. A known prior transport wins; otherwise the seeded/non-archived WHOOP path is restored.
+    /// Publication happens only after the durable active row is verified.
+    @discardableResult
+    func reconcileUnavailableSupplier(
+        _ unavailableDeviceID: String,
+        preferredTransportDeviceID: String? = nil
+    ) -> Bool {
+        do {
+            let rows = try store.all()
+            guard let active = rows.first(where: { $0.status == .active }) else {
+                return false
+            }
+            guard active.id == unavailableDeviceID else {
+                publish(rows)
+                return true
+            }
+            guard active.sourceKind == .veepoo else { return false }
+
+            let preferred = preferredTransportDeviceID.flatMap { preferredID in
+                rows.first {
+                    $0.id == preferredID
+                        && $0.id != unavailableDeviceID
+                        && $0.status != .archived
+                }
+            }
+            let defaultWhoop = rows.first {
+                $0.id == "my-whoop" && $0.status != .archived
+            } ?? rows.first {
+                Self.isWhoop($0) && $0.status != .archived
+            }
+            guard let fallback = preferred ?? defaultWhoop else { return false }
+
+            try store.setActive(fallback.id)
+            let updatedRows = try store.all()
+            guard updatedRows.first(where: { $0.status == .active })?.id == fallback.id else {
+                throw MutationFailure.verificationFailed
+            }
+            publish(updatedRows)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Make `id` the single active device. The store demotes whatever was active in the same
@@ -116,5 +194,37 @@ final class DeviceRegistry: ObservableObject {
     func touch(_ id: String, at unix: Int = Int(Date().timeIntervalSince1970)) {
         try? store.touch(id, at: unix)
         reload()
+    }
+
+    private func compensateFailedRegistration(
+        attemptedDeviceID: String,
+        originalRows: [PairedDevice]
+    ) {
+        do {
+            if !originalRows.contains(where: { $0.id == attemptedDeviceID }) {
+                try store.archive(attemptedDeviceID)
+            }
+            for row in originalRows {
+                try store.add(row)
+            }
+            if let originalActive = originalRows.first(where: { $0.status == .active }) {
+                try store.setActive(originalActive.id)
+            }
+            publish(try store.all())
+        } catch {
+            reload()
+        }
+    }
+
+    private func publish(_ rows: [PairedDevice]) {
+        devices = rows
+        if let active = rows.first(where: { $0.status == .active })?.id {
+            activeDeviceId = active
+        }
+    }
+
+    private static func isWhoop(_ device: PairedDevice) -> Bool {
+        device.id == "my-whoop"
+            || device.brand.caseInsensitiveCompare("WHOOP") == .orderedSame
     }
 }

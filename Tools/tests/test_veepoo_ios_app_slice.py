@@ -118,16 +118,105 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, diagnostic.lower())
 
+        source = self.read("Strand/BLE/VeepooBandSource.swift")
+        lifecycle = source[
+            source.index("enum VeepooSupplierLifecycleDiagnostics") :
+            source.index("/// Registered-source bridge")
+        ]
+        self.assertEqual(
+            {'"stage"', '"outcome"', '"trigger"', '"failure_kind"'},
+            {
+                token
+                for token in (
+                    '"stage"',
+                    '"outcome"',
+                    '"trigger"',
+                    '"failure_kind"',
+                )
+                if token in lifecycle
+            },
+        )
+        for forbidden in (
+            "deviceid",
+            "identifier",
+            "password",
+            "heartrate",
+            "bpm",
+            "localizeddescription",
+        ):
+            self.assertNotIn(forbidden, lifecycle.lower())
+
     def test_source_factory_is_veepoo_specific_and_fail_closed(self) -> None:
         coordinator = self.read("Strand/BLE/SourceCoordinator.swift")
         self.assertIn("if sourceKind(for: id) == .veepoo", coordinator)
         build = coordinator.index("guard let source = makeSource(for: id)")
         stop = coordinator.index("if !onStrap { stopWhoop() }", build)
         self.assertLess(build, stop)
+        unavailable = coordinator[build:stop]
+        self.assertIn("registry.reconcileUnavailableSupplier(", unavailable)
+        self.assertIn(
+            "preferredTransportDeviceID: actualTransportDeviceID",
+            unavailable,
+        )
+
+        registry = self.read("Strand/Data/DeviceRegistry.swift")
+        reconcile = registry[
+            registry.index("func reconcileUnavailableSupplier(") :
+            registry.index("/// Make `id` the single active device")
+        ]
+        self.assertIn('$0.id == "my-whoop"', reconcile)
+        self.assertIn("Self.isWhoop($0)", reconcile)
+        self.assertIn("$0.status != .archived", reconcile)
+
+        source = self.read("Strand/BLE/VeepooBandSource.swift")
+        rejected = source[
+            source.index("onCredentialRejected: {") :
+            source.index("}\n            )", source.index("onCredentialRejected: {"))
+        ]
+        self.assertIn("credentials.clear(deviceID: deviceID)", rejected)
+        self.assertIn("registry.reconcileUnavailableSupplier(", rejected)
+
+    def test_registration_is_verified_and_compensated(self) -> None:
+        source = self.read("Strand/BLE/VeepooBandSource.swift")
+        commit = source[
+            source.index("func commitPairedDevice(") :
+            source.index("func cancel()", source.index("func commitPairedDevice("))
+        ]
+        save = commit.index("credentials.save(")
+        register = commit.index("guard register(device) else")
+        clear = commit.index("credentials.clear(", register)
+        self.assertLess(save, register)
+        self.assertLess(register, clear)
+        self.assertIn("failRegistration(.registryPersistence)", commit)
+
+        registry = self.read("Strand/Data/DeviceRegistry.swift")
+        registration = registry[
+            registry.index("func addAndSetActive(") :
+            registry.index("func reconcileUnavailableSupplier(")
+        ]
+        self.assertIn("try store.add(device)", registration)
+        self.assertIn("try store.setActive(device.id)", registration)
+        self.assertIn("compensateFailedRegistration(", registration)
+        compensation = registry[
+            registry.index("private func compensateFailedRegistration(") :
+            registry.index("private func publish(")
+        ]
+        self.assertIn("try store.archive(attemptedDeviceID)", compensation)
+        self.assertIn("try store.setActive(originalActive.id)", compensation)
+
+        wizard = self.read("Strand/Screens/AddDeviceWizard.swift")
+        finish = wizard[
+            wizard.index("private func finishVeepooAdd()") :
+            wizard.index("private func ouraCapabilities")
+        ]
+        self.assertIn("session.commitPairedDevice(", finish)
+        self.assertIn("model.deviceRegistry?.addAndSetActive(device)", finish)
+        self.assertLess(finish.index("guard committed else"), finish.index("onClose()"))
+        self.assertNotIn("model.registerDevice", finish)
 
     def test_only_proven_registry_capability_is_exposed(self) -> None:
         source = self.read("Strand/BLE/VeepooBandSource.swift")
-        device = source[source.index("return PairedDevice(") :]
+        device = source[source.index("let device = PairedDevice(") :]
         self.assertIn("capabilities: [.hr]", device)
         profile = self.read("Strand/Screens/DevicesView.swift")
         veepoo_profile = profile[

@@ -7,7 +7,8 @@ import WhoopStore
 protocol VeepooCredentialAccess: AnyObject {
     func load(deviceID: String) -> String?
     func save(_ password: String, deviceID: String) -> Bool
-    func clear(deviceID: String)
+    @discardableResult
+    func clear(deviceID: String) -> Bool
 }
 
 @MainActor
@@ -54,9 +55,11 @@ final class VeepooCredentialStore: VeepooCredentialAccess {
         return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
     }
 
-    func clear(deviceID: String) {
-        guard !deviceID.isEmpty else { return }
-        SecItemDelete(baseQuery(deviceID: deviceID) as CFDictionary)
+    @discardableResult
+    func clear(deviceID: String) -> Bool {
+        guard !deviceID.isEmpty else { return false }
+        let status = SecItemDelete(baseQuery(deviceID: deviceID) as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 
     private func baseQuery(deviceID: String) -> [String: Any] {
@@ -65,6 +68,55 @@ final class VeepooCredentialStore: VeepooCredentialAccess {
             kSecAttrService as String: service,
             kSecAttrAccount as String: deviceID,
         ]
+    }
+}
+
+enum VeepooSupplierLifecycleStage: String {
+    case registration
+    case secureCleanup = "secure_cleanup"
+    case reconciliation
+}
+
+enum VeepooSupplierLifecycleOutcome: String {
+    case began
+    case completed
+    case failed
+}
+
+enum VeepooSupplierLifecycleTrigger: String {
+    case sourceUnavailable = "source_unavailable"
+    case authenticationRejected = "authentication_rejected"
+}
+
+enum VeepooSupplierLifecycleFailure: String {
+    case securePersistence = "secure_persistence"
+    case registryPersistence = "registry_persistence"
+    case cleanupFailed = "cleanup_failed"
+    case fallbackUnavailable = "fallback_unavailable"
+}
+
+@MainActor
+enum VeepooSupplierLifecycleDiagnostics {
+    static func record(
+        stage: VeepooSupplierLifecycleStage,
+        outcome: VeepooSupplierLifecycleOutcome,
+        trigger: VeepooSupplierLifecycleTrigger? = nil,
+        failure: VeepooSupplierLifecycleFailure? = nil
+    ) {
+        var fields = [
+            "stage": stage.rawValue,
+            "outcome": outcome.rawValue,
+        ]
+        if let trigger {
+            fields["trigger"] = trigger.rawValue
+        }
+        if let failure {
+            fields["failure_kind"] = failure.rawValue
+        }
+        AppDiagnosticsRecorder.shared.record(
+            "band.supplier_lifecycle",
+            fields: fields
+        )
     }
 }
 
@@ -147,8 +199,8 @@ final class VeepooBandSource: LiveHRSource {
         case .failed(let stage, let failure):
             if stage == .authentication && failure == .credentialRejected {
                 credentialRejected = true
-                onCredentialRejected()
                 adapter.disconnect()
+                onCredentialRejected()
                 return
             }
             if stage == .connection || stage == .disconnect {
@@ -201,7 +253,22 @@ enum VeepooBandSourceFactory {
                 adapter: adapter,
                 password: password,
                 onCredentialRejected: {
-                    credentials.clear(deviceID: deviceID)
+                    let cleared = credentials.clear(deviceID: deviceID)
+                    VeepooSupplierLifecycleDiagnostics.record(
+                        stage: .secureCleanup,
+                        outcome: cleared ? .completed : .failed,
+                        trigger: .authenticationRejected,
+                        failure: cleared ? nil : .cleanupFailed
+                    )
+                    let reconciled = registry.reconcileUnavailableSupplier(
+                        deviceID
+                    )
+                    VeepooSupplierLifecycleDiagnostics.record(
+                        stage: .reconciliation,
+                        outcome: reconciled ? .completed : .failed,
+                        trigger: .authenticationRejected,
+                        failure: reconciled ? nil : .fallbackUnavailable
+                    )
                 }
             )
         }
@@ -228,6 +295,7 @@ final class VeepooBandPairingSession: ObservableObject {
     @Published private(set) var battery: VeepooBandBatteryReading?
     @Published private(set) var heartRate: VeepooBandHeartRateReading?
     @Published private(set) var lastFailure: VeepooBandAdapterFailure?
+    @Published private(set) var registrationFailed = false
 
     private let adapter: any VeepooBandAdapterControlling
     private let credentials: any VeepooCredentialAccess
@@ -258,6 +326,7 @@ final class VeepooBandPairingSession: ObservableObject {
         battery = nil
         heartRate = nil
         lastFailure = nil
+        registrationFailed = false
         acceptedPassword = ""
         phase = .scanning
         adapter.startDiscovery(targetPeripheralID: nil)
@@ -291,19 +360,21 @@ final class VeepooBandPairingSession: ObservableObject {
         adapter.verifyPassword(value)
     }
 
-    func makePairedDevice(nickname: String?) -> PairedDevice? {
+    func commitPairedDevice(
+        nickname: String?,
+        register: (PairedDevice) -> Bool
+    ) -> Bool {
         guard phase == .ready,
               let selectedCandidate,
               battery != nil,
-              heartRate != nil,
-              credentials.save(acceptedPassword, deviceID: deviceID)
+              heartRate != nil
         else {
-            return nil
+            return false
         }
-        acceptedPassword = ""
+
         let now = Int(Date().timeIntervalSince1970)
         let trimmed = nickname?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return PairedDevice(
+        let device = PairedDevice(
             id: deviceID,
             brand: "Veepoo-compatible",
             model: "Compatible supplier band",
@@ -315,12 +386,54 @@ final class VeepooBandPairingSession: ObservableObject {
             addedAt: now,
             lastSeenAt: now
         )
+
+        registrationFailed = false
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .registration,
+            outcome: .began
+        )
+        guard credentials.save(acceptedPassword, deviceID: deviceID) else {
+            failRegistration(.securePersistence)
+            return false
+        }
+        guard register(device) else {
+            let cleared = credentials.clear(deviceID: deviceID)
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .secureCleanup,
+                outcome: cleared ? .completed : .failed,
+                failure: cleared ? nil : .cleanupFailed
+            )
+            failRegistration(.registryPersistence)
+            return false
+        }
+
+        acceptedPassword = ""
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .registration,
+            outcome: .completed
+        )
+        return true
     }
 
     func cancel() {
         acceptedPassword = ""
         adapter.disconnect()
         phase = .idle
+    }
+
+    private func failRegistration(
+        _ failure: VeepooSupplierLifecycleFailure
+    ) {
+        acceptedPassword = ""
+        adapter.disconnect()
+        registrationFailed = true
+        lastFailure = .internalFailure
+        phase = .failed(.internalFailure)
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .registration,
+            outcome: .failed,
+            failure: failure
+        )
     }
 
     private func handle(_ event: VeepooBandAdapterEvent) {

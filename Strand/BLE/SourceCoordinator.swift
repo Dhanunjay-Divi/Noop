@@ -282,8 +282,20 @@ final class SourceCoordinator: ObservableObject {
         // concrete driver), then bring it up. `.liveAppleWatch` never reaches here — it's short-circuited
         // above — so `makeSource` only ever sees a real BLE source kind.
         guard let source = makeSource(for: id) else {
-            // An optional supplier source must fail closed before disturbing a
-            // working WHOOP or another live source.
+            // An optional supplier source must fail closed before disturbing a working WHOOP or another
+            // live source. Reconcile the durable active row with that still-running transport so reads and
+            // writes cannot remain pointed at a supplier source that has no provider or usable credential.
+            let actualTransportDeviceID = onStrap ? activeStrapId : activeWhoopId
+            let reconciled = registry.reconcileUnavailableSupplier(
+                id,
+                preferredTransportDeviceID: actualTransportDeviceID
+            )
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .reconciliation,
+                outcome: reconciled ? .completed : .failed,
+                trigger: .sourceUnavailable,
+                failure: reconciled ? nil : .fallbackUnavailable
+            )
             return
         }
 
