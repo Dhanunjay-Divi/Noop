@@ -70,8 +70,11 @@ protections.
 
 ## Data, privacy, and medical truth
 
-- Schema or migration impact: pending audit.
-- Existing-data retention impact: pending audit.
+- Schema or migration impact: none; this round changes adapter, registry,
+  presentation, local build wiring, and tests only.
+- Existing-data retention impact: none; supplier live heart rate remains
+  display-only and is explicitly cleared when stale, stopped, disconnected, or
+  failed.
 - Source/provenance or formula impact: supplier live heart rate must remain
   display-only and freshness-bounded; no durable promotion is allowed.
 - Permissions/network disclosure impact: supplier binaries remain ignored and
@@ -89,10 +92,13 @@ protections.
   signed-device round.
 - Existing evidence reused: `band.supplier_adapter`,
   `band.supplier_lifecycle`, registry diagnostics, and exact review threads.
-- New bounded events or operation spans: pending confirmed implementation.
+- New bounded events or operation spans: supplier registration/removal and
+  adapter stages record fixed stage, outcome, trigger, failure-kind, and
+  count-bucket fields only.
 - Redaction, retention, and high-frequency controls: no addresses, printed
   identifiers, passwords, raw errors, health values, or per-sample logs.
-- Cross-platform/backend correlation: pending audit.
+- Cross-platform/backend correlation: not added; this local BLE lifecycle has
+  no server operation and does not emit user, band, address, or sample values.
 - Remaining blind spots: supplier callback behavior, exact printed-label
   mapping, background reconnect, hardware revisions, firmware, egress,
   battery, retention, haptics, and sensor accuracy.
@@ -107,6 +113,9 @@ protections.
 | Supplier-enabled Android Full build | compile, unit test, and APK assembly passed with 7 verified AARs | Android supplier code and binaries compile/package together | Physical BLE behavior |
 | Supplier-enabled generic iPhoneOS build | passed; app embeds ABParTool, FMDB, GRDFUSDK, JLDialUnit, MJExtension, and ZipZap | Apple supplier code and complete dependency bundle compile/link/package together | Signing, installation, or physical BLE behavior |
 | Focused Apple supplier tests | 39 passed, 0 failed | Pairing, reconnect, freshness, registry, and presentation contracts | Vendor callback behavior on hardware |
+| Operations-record validator | 91 records passed, including required branch round change | The replacement record is complete, indexed, and privacy-scanned | Hosted exact-SHA completion |
+| Terminology audit | 18,121 classified occurrences across 1,614 groups; 0 forbidden mappings | Supplier compatibility changes preserve the terminology policy | Customer research or naming preference |
+| Release-control matrix | 204 passed, 0 failed after exact generated-cache cleanup | Reviewed digests, SDK artifact integrity, workflow contracts, and trusted self-verification agree | Hosted exact-SHA completion |
 
 ## Resource cleanup
 
@@ -121,7 +130,8 @@ protections.
   run because no physical phone is attached.
 - Generalized device and OS class: source, simulator, emulator, and hosted
   runner evidence only.
-- Data-preservation result: pending audit.
+- Data-preservation result: registry registration and removal rollback are
+  covered synthetically; physical install/update preservation is unrun.
 - BLE/background/haptic/battery scenarios exercised: not run.
 - Unrun hardware gates: printed-label mapping, possession confirmation,
   password truth, connection/reconnect, background collection, history,
@@ -131,17 +141,21 @@ protections.
 
 - Changed paths: supplier lifecycle/presentation, Apple local SDK wiring,
   Android artifact trust, focused tests, and operations records.
-- Commits: pending.
+- Commits: `4ad0496e7ed0f0bcdc3a7f7a2aa3b6eac89d4637`.
 - Branch and remote state: PR `#17` exact head
-  `1df3e367bc8fe7bd2a563eae38b7afdbde3c25ff` is open, mergeable, and blocked
-  by unresolved protected-review conversations.
+  `4ad0496e7ed0f0bcdc3a7f7a2aa3b6eac89d4637` is pushed and open. Exact-SHA
+  hosted checks and protected review resolution remain before merge.
 - Repository visibility verified: not changed by this round.
-- Version/build impact: none at round start.
-- Release or distribution impact: none.
+- Version/build impact: no version change; verified local supplier
+  configuration now builds the same app target with the complete dependency
+  bundle.
+- Release or distribution impact: no supplier binary is committed or
+  redistributed.
 
 ## Decisions
 
-- Durable decision added or changed: none at round start.
+- Durable decision added or changed: none; existing source-only and
+  local-artifact decisions remain in force.
 - Decision-log entry: existing D-055, D-056, D-059, and D-061 remain
   authoritative unless a confirmed review finding requires an explicit update.
 
@@ -163,3 +177,9 @@ firmware, background operation, and physiological accuracy remain unproven.
    resolve each thread with evidence.
 5. Merge normally, verify protected `main`, and delete exact round-owned
    resources after checking active handles.
+
+## Privacy check
+
+- [x] No credentials, personal names, email addresses, raw health exports,
+      band identifiers, Bluetooth addresses, signing identities, supplier
+      binaries, or absolute private supplier paths are present in this record.
