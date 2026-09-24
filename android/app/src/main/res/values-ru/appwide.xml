@@ -647,6 +647,10 @@
     <string name="appwide_onboarding_device_wizard_whoop_prep_wear">Наденьте Noop Band на запястье и убедитесь, что она активна.</string>
     <string name="appwide_onboarding_device_wizard_whoop_search_hint">Браслет не отображается? Возможно, соединение удерживает другое приложение. Полностью закройте его и повторите поиск.</string>
     <string name="appwide_onboarding_device_wizard_whoop_subtitle">Автоматически обнаруживает совместимый браслет</string>
+    <string name="appwide_onboarding_notifications_background_status_body">Для поддерживаемых Bluetooth-браслетов Android может показывать одно малозаметное постоянное уведомление, пока NOOP собирает данные. Фоновый сбор по-прежнему зависит от системного разрешения и поддержки устройства.</string>
+    <string name="appwide_onboarding_notifications_background_status_subtitle">Уведомления могут показывать состояние подключения, напоминания и включённые вами обновления Safety. Android может требовать постоянный статус, пока работает поддерживаемый фоновый сбор.</string>
+    <string name="appwide_onboarding_notifications_permission_help">Когда Android запросит разрешение, включите уведомления, чтобы NOOP могла показывать состояние подключения и выбранные вами напоминания.</string>
+    <string name="appwide_onboarding_notifications_wrist_alerts">Оповещения на запястье отправляются только тогда, когда подключённый браслет их поддерживает и у NOOP есть активное соединение.</string>
     <string name="appwide_pattern_what_changed">ЧТО ИЗМЕНИЛОСЬ</string>
     <string name="appwide_profile_display_name">Отображаемое имя</string>
     <string name="appwide_range_format">%1$d–%2$d</string>
@@ -818,7 +822,6 @@
     <string name="appwide_ui_audit_notifications_test_app_buzz_format">Проверить вибрацию %1$s</string>
     <string name="appwide_ui_audit_notifications_test_buzz">Отправить тестовую вибрацию сейчас</string>
     <string name="appwide_ui_audit_notifications_test_buzz_hint">NOOP отправляет тестовую вибрацию на Noop Band.</string>
-    <string name="appwide_ui_audit_onboarding_background_pairing">Если Noop Band находится рядом, NOOP поддерживает соединение Bluetooth в фоновом режиме. Пока сопряжение завершается, можно продолжить настройку профиля и импорт.</string>
     <string name="appwide_ui_audit_scoring_guide_intro">NOOP ежедневно рассчитывает три оценки по шкале от 0 до 100. Они основаны на сигналах вашего носимого устройства, используют опубликованные и прошедшие экспертное рецензирование исследования в области спортивной науки и полностью вычисляются на вашем устройстве. Эти оценки независимы и могут не совпадать с оценками других приложений число в число. Источник и уровень достоверности остаются видимыми для прозрачного сравнения.</string>
     <string name="appwide_ui_audit_scoring_guide_overline">Три оценки</string>
     <string name="appwide_ui_audit_settings_background_bluetooth">Работа Bluetooth в фоновом режиме ограничивается операционной системой. iOS может приостановить NOOP, когда приложение не находится на переднем плане, поэтому оставляйте его открытым во время синхронизации Noop Band.</string>

@@ -647,6 +647,10 @@
     <string name="appwide_onboarding_device_wizard_whoop_prep_wear">Put your Noop Band on your wrist and make sure it is awake.</string>
     <string name="appwide_onboarding_device_wizard_whoop_search_hint">Not showing up? Another band app may still hold the connection. Close it completely, then scan again.</string>
     <string name="appwide_onboarding_device_wizard_whoop_subtitle">Automatically detects compatible band hardware</string>
+    <string name="appwide_onboarding_notifications_background_status_body">For supported Bluetooth bands, Android may show one low-priority ongoing notification while NOOP collects. Background collection still depends on system permission and device support.</string>
+    <string name="appwide_onboarding_notifications_background_status_subtitle">Notifications can show connection status, reminders, and Safety updates you enable. Android may require an ongoing status while supported background collection is active.</string>
+    <string name="appwide_onboarding_notifications_permission_help">When Android asks, allow notifications so NOOP can show connection status and the reminders you enable.</string>
+    <string name="appwide_onboarding_notifications_wrist_alerts">Wrist alerts are sent only when the connected band supports them and NOOP has a live link.</string>
     <string name="appwide_pattern_what_changed">WHAT CHANGED</string>
     <string name="appwide_profile_display_name">Display name</string>
     <string name="appwide_range_format">%1$d–%2$d</string>
@@ -818,7 +822,6 @@
     <string name="appwide_ui_audit_notifications_test_app_buzz_format">Test %1$s vibration</string>
     <string name="appwide_ui_audit_notifications_test_buzz">Send a test vibration now</string>
     <string name="appwide_ui_audit_notifications_test_buzz_hint">Sends a test vibration to Noop Band.</string>
-    <string name="appwide_ui_audit_onboarding_background_pairing">If Noop Band is nearby, NOOP keeps the Bluetooth link active in the background. You can continue through profile and import while pairing finishes.</string>
     <string name="appwide_ui_audit_scoring_guide_intro">NOOP gives you three daily scores on a 0 to 100 scale. They are built from your wearable signals using published, peer-reviewed sport science and computed entirely on your device. They are independent scores and may not match other apps number for number. Source and confidence remain visible for honest comparison.</string>
     <string name="appwide_ui_audit_scoring_guide_overline">The three scores</string>
     <string name="appwide_ui_audit_settings_background_bluetooth">Background Bluetooth has operating-system limits. iOS may pause NOOP outside the foreground, so keep it open while syncing Noop Band.</string>

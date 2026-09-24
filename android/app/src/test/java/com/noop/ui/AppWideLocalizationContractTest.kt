@@ -3,6 +3,7 @@ package com.noop.ui
 import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -123,6 +124,19 @@ class AppWideLocalizationContractTest {
                 "This supplier stream is not added to durable health history or formulas.",
             base["appwide_onboarding_device_wizard_supplier_ready_body"],
         )
+        val onboardingNotificationKeys = listOf(
+            "appwide_onboarding_notifications_background_status_body",
+            "appwide_onboarding_notifications_background_status_subtitle",
+            "appwide_onboarding_notifications_permission_help",
+            "appwide_onboarding_notifications_wrist_alerts",
+        )
+        assertFalse(base.containsKey("appwide_ui_audit_onboarding_background_pairing"))
+        assertEquals(
+            "For supported Bluetooth bands, Android may show one low-priority ongoing " +
+                "notification while NOOP collects. Background collection still depends on " +
+                "system permission and device support.",
+            base["appwide_onboarding_notifications_background_status_body"],
+        )
         assertEquals(
             "Recovery scores: %1\$d of %2\$d days. One score per day is used in the average.",
             base["appwide_trends_recovery_coverage_format"],
@@ -177,7 +191,7 @@ class AppWideLocalizationContractTest {
                 )
             }
             if (folder != "values") {
-                for (key in supplierKeys) {
+                for (key in supplierKeys + onboardingNotificationKeys) {
                     assertTrue(
                         "$folder must translate $key",
                         localized.getValue(key) != base.getValue(key),

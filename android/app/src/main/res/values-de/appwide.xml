@@ -647,6 +647,10 @@
     <string name="appwide_onboarding_device_wizard_whoop_prep_wear">Lege deine Noop Band am Handgelenk an und stelle sicher, dass sie aktiv ist.</string>
     <string name="appwide_onboarding_device_wizard_whoop_search_hint">Nicht sichtbar? Eine andere Band-App hält möglicherweise noch die Verbindung. Beende sie vollständig und starte die Suche erneut.</string>
     <string name="appwide_onboarding_device_wizard_whoop_subtitle">Erkennt kompatible Band-Hardware automatisch</string>
+    <string name="appwide_onboarding_notifications_background_status_body">Bei unterstützten Bluetooth-Armbändern kann Android eine unauffällige dauerhafte Benachrichtigung anzeigen, während NOOP Daten erfasst. Die Hintergrundsammlung hängt weiterhin von der Systemberechtigung und Geräteunterstützung ab.</string>
+    <string name="appwide_onboarding_notifications_background_status_subtitle">Benachrichtigungen können den Verbindungsstatus, Erinnerungen und aktivierte Safety-Updates anzeigen. Android kann einen dauerhaften Status verlangen, solange eine unterstützte Hintergrundsammlung aktiv ist.</string>
+    <string name="appwide_onboarding_notifications_permission_help">Erlaube Benachrichtigungen, wenn Android danach fragt, damit NOOP den Verbindungsstatus und die aktivierten Erinnerungen anzeigen kann.</string>
+    <string name="appwide_onboarding_notifications_wrist_alerts">Hinweise am Handgelenk werden nur gesendet, wenn das verbundene Band sie unterstützt und NOOP eine aktive Verbindung hat.</string>
     <string name="appwide_pattern_what_changed">WAS HAT SICH GEÄNDERT</string>
     <string name="appwide_profile_display_name">Anzeigename</string>
     <string name="appwide_range_format">%1$d–%2$d</string>
@@ -818,7 +822,6 @@
     <string name="appwide_ui_audit_notifications_test_app_buzz_format">Vibration von %1$s testen</string>
     <string name="appwide_ui_audit_notifications_test_buzz">Jetzt eine Testvibration senden</string>
     <string name="appwide_ui_audit_notifications_test_buzz_hint">NOOP sendet eine Testvibration an Noop Band.</string>
-    <string name="appwide_ui_audit_onboarding_background_pairing">Wenn Noop Band in der Nähe ist, hält NOOP die Bluetooth-Verbindung im Hintergrund aktiv. Du kannst mit Profil und Import fortfahren, während die Kopplung abgeschlossen wird.</string>
     <string name="appwide_ui_audit_scoring_guide_intro">NOOP gibt dir täglich drei Werte auf einer Skala von 0 bis 100. Sie basieren auf den Signalen deines Wearables, verwenden veröffentlichte und durch Fachkollegen begutachtete sportwissenschaftliche Forschung und werden vollständig auf deinem Gerät berechnet. Die Werte sind voneinander unabhängig und stimmen daher möglicherweise nicht Zahl für Zahl mit anderen Apps überein. Quelle und Konfidenz bleiben für einen transparenten Vergleich sichtbar.</string>
     <string name="appwide_ui_audit_scoring_guide_overline">Die drei Werte</string>
     <string name="appwide_ui_audit_settings_background_bluetooth">Bluetooth im Hintergrund unterliegt den Beschränkungen des Betriebssystems. iOS kann NOOP außerhalb des Vordergrunds anhalten. Lass NOOP daher beim Synchronisieren von Noop Band geöffnet.</string>

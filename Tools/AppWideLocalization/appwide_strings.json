@@ -9030,6 +9030,50 @@
     "zh-Hans": "选择设备",
     "zh-Hant": "選擇裝置"
   },
+  "appwide.onboarding.notifications.background_status_body": {
+    "de": "Bei unterstützten Bluetooth-Armbändern kann Android eine unauffällige dauerhafte Benachrichtigung anzeigen, während NOOP Daten erfasst. Die Hintergrundsammlung hängt weiterhin von der Systemberechtigung und Geräteunterstützung ab.",
+    "en": "For supported Bluetooth bands, Android may show one low-priority ongoing notification while NOOP collects. Background collection still depends on system permission and device support.",
+    "es": "Con bandas Bluetooth compatibles, Android puede mostrar una notificación permanente de baja prioridad mientras NOOP recopila datos. La recopilación en segundo plano sigue dependiendo del permiso del sistema y de la compatibilidad del dispositivo.",
+    "fr": "Avec les bracelets Bluetooth compatibles, Android peut afficher une notification permanente de faible priorité pendant que NOOP collecte des données. La collecte en arrière-plan dépend toujours de l’autorisation système et de la compatibilité de l’appareil.",
+    "it": "Con le fasce Bluetooth compatibili, Android può mostrare una notifica permanente a bassa priorità mentre NOOP raccoglie i dati. La raccolta in background dipende comunque dall’autorizzazione di sistema e dal supporto del dispositivo.",
+    "pt-PT": "Com pulseiras Bluetooth compatíveis, o Android pode mostrar uma notificação contínua de baixa prioridade enquanto a NOOP recolhe dados. A recolha em segundo plano continua a depender da permissão do sistema e do suporte do dispositivo.",
+    "ru": "Для поддерживаемых Bluetooth-браслетов Android может показывать одно малозаметное постоянное уведомление, пока NOOP собирает данные. Фоновый сбор по-прежнему зависит от системного разрешения и поддержки устройства.",
+    "zh-Hans": "对于受支持的蓝牙手环，NOOP 采集数据时，Android 可能会显示一条低优先级常驻通知。后台采集仍取决于系统权限和设备支持。",
+    "zh-Hant": "對於支援的藍牙手環，NOOP 收集資料時，Android 可能會顯示一則低優先級常駐通知。背景收集仍取決於系統權限和裝置支援。"
+  },
+  "appwide.onboarding.notifications.background_status_subtitle": {
+    "de": "Benachrichtigungen können den Verbindungsstatus, Erinnerungen und aktivierte Safety-Updates anzeigen. Android kann einen dauerhaften Status verlangen, solange eine unterstützte Hintergrundsammlung aktiv ist.",
+    "en": "Notifications can show connection status, reminders, and Safety updates you enable. Android may require an ongoing status while supported background collection is active.",
+    "es": "Las notificaciones pueden mostrar el estado de la conexión, los recordatorios y las actualizaciones de Seguridad que actives. Android puede exigir un estado permanente mientras esté activa una recopilación compatible en segundo plano.",
+    "fr": "Les notifications peuvent afficher l’état de la connexion, les rappels et les mises à jour Safety que vous activez. Android peut exiger un état permanent pendant une collecte en arrière-plan compatible.",
+    "it": "Le notifiche possono mostrare lo stato della connessione, i promemoria e gli aggiornamenti Safety che attivi. Android può richiedere uno stato permanente mentre è attiva una raccolta in background supportata.",
+    "pt-PT": "As notificações podem mostrar o estado da ligação, os lembretes e as atualizações Safety que ativares. O Android pode exigir um estado contínuo enquanto estiver ativa uma recolha em segundo plano compatível.",
+    "ru": "Уведомления могут показывать состояние подключения, напоминания и включённые вами обновления Safety. Android может требовать постоянный статус, пока работает поддерживаемый фоновый сбор.",
+    "zh-Hans": "通知可以显示连接状态、提醒和你启用的 Safety 更新。受支持的后台采集运行时，Android 可能要求显示常驻状态。",
+    "zh-Hant": "通知可以顯示連線狀態、提醒和你啟用的 Safety 更新。支援的背景收集運作時，Android 可能要求顯示常駐狀態。"
+  },
+  "appwide.onboarding.notifications.permission_help": {
+    "de": "Erlaube Benachrichtigungen, wenn Android danach fragt, damit NOOP den Verbindungsstatus und die aktivierten Erinnerungen anzeigen kann.",
+    "en": "When Android asks, allow notifications so NOOP can show connection status and the reminders you enable.",
+    "es": "Cuando Android lo solicite, permite las notificaciones para que NOOP muestre el estado de la conexión y los recordatorios que actives.",
+    "fr": "Lorsque Android le demande, autorisez les notifications afin que NOOP puisse afficher l’état de la connexion et les rappels que vous activez.",
+    "it": "Quando Android lo richiede, consenti le notifiche affinché NOOP possa mostrare lo stato della connessione e i promemoria che attivi.",
+    "pt-PT": "Quando o Android pedir, permite as notificações para que a NOOP possa mostrar o estado da ligação e os lembretes que ativares.",
+    "ru": "Когда Android запросит разрешение, включите уведомления, чтобы NOOP могла показывать состояние подключения и выбранные вами напоминания.",
+    "zh-Hans": "Android 请求时，请允许通知，以便 NOOP 显示连接状态和你启用的提醒。",
+    "zh-Hant": "Android 要求時，請允許通知，以便 NOOP 顯示連線狀態和你啟用的提醒。"
+  },
+  "appwide.onboarding.notifications.wrist_alerts": {
+    "de": "Hinweise am Handgelenk werden nur gesendet, wenn das verbundene Band sie unterstützt und NOOP eine aktive Verbindung hat.",
+    "en": "Wrist alerts are sent only when the connected band supports them and NOOP has a live link.",
+    "es": "Las alertas en la muñeca solo se envían si la banda conectada las admite y NOOP mantiene una conexión activa.",
+    "fr": "Les alertes au poignet ne sont envoyées que si le bracelet connecté les prend en charge et si NOOP dispose d’une connexion active.",
+    "it": "Gli avvisi al polso vengono inviati solo se la fascia connessa li supporta e NOOP dispone di una connessione attiva.",
+    "pt-PT": "Os alertas no pulso só são enviados se a pulseira ligada os suportar e a NOOP tiver uma ligação ativa.",
+    "ru": "Оповещения на запястье отправляются только тогда, когда подключённый браслет их поддерживает и у NOOP есть активное соединение.",
+    "zh-Hans": "仅当已连接的手环支持腕部提醒且 NOOP 保持实时连接时，才会发送此类提醒。",
+    "zh-Hant": "僅當已連線的手環支援腕部提醒且 NOOP 保持即時連線時，才會傳送這類提醒。"
+  },
   "appwide.watch.live_hr.checking": {
     "de": "Herzfrequenz wird geprüft",
     "en": "Checking heart rate",
@@ -9832,17 +9876,6 @@
     "ru": "Выберите выше «Вчера» или «2 дня назад», если Noop Band или импортированные данные ещё не сформировали суточный снимок показателей жизненно важных функций.",
     "zh-Hans": "如果 Noop Band 或导入数据尚未生成每日生命体征快照，请尝试选择上方的“昨天”或“2 天前”。",
     "zh-Hant": "如果 Noop Band 或匯入資料尚未產生每日生命徵象快照，請嘗試選擇上方的「昨天」或「2 天前」。"
-  },
-  "appwide.ui_audit.onboarding.background_pairing": {
-    "en": "If Noop Band is nearby, NOOP keeps the Bluetooth link active in the background. You can continue through profile and import while pairing finishes.",
-    "de": "Wenn Noop Band in der Nähe ist, hält NOOP die Bluetooth-Verbindung im Hintergrund aktiv. Du kannst mit Profil und Import fortfahren, während die Kopplung abgeschlossen wird.",
-    "es": "Si Noop Band está cerca, NOOP mantiene activo el enlace Bluetooth en segundo plano. Puedes continuar con el perfil y la importación mientras termina el emparejamiento.",
-    "fr": "Si Noop Band se trouve à proximité, NOOP maintient la liaison Bluetooth active en arrière-plan. Vous pouvez continuer la configuration du profil et l’importation pendant la fin du jumelage.",
-    "it": "Se Noop Band è nelle vicinanze, NOOP mantiene attivo il collegamento Bluetooth in background. Puoi continuare con il profilo e l’importazione mentre l’abbinamento viene completato.",
-    "pt-PT": "Se Noop Band estiver por perto, NOOP mantém a ligação Bluetooth ativa em segundo plano. Pode continuar com o perfil e a importação enquanto o emparelhamento termina.",
-    "ru": "Если Noop Band находится рядом, NOOP поддерживает соединение Bluetooth в фоновом режиме. Пока сопряжение завершается, можно продолжить настройку профиля и импорт.",
-    "zh-Hans": "如果 Noop Band 在附近，NOOP 会在后台保持蓝牙连接。配对完成期间，你可以继续设置个人资料和导入数据。",
-    "zh-Hant": "如果 Noop Band 在附近，NOOP 會在背景保持藍牙連線。配對完成期間，你可以繼續設定個人資料和匯入資料。"
   },
   "appwide.ui_audit.scoring_guide.overline": {
     "en": "The three scores",

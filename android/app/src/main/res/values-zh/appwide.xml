@@ -647,6 +647,10 @@
     <string name="appwide_onboarding_device_wizard_whoop_prep_wear">将 Noop Band 戴在手腕上，并确保它已唤醒。</string>
     <string name="appwide_onboarding_device_wizard_whoop_search_hint">没有显示？其他手环应用可能仍占用连接。请将其完全关闭，然后重新扫描。</string>
     <string name="appwide_onboarding_device_wizard_whoop_subtitle">自动检测兼容的手环硬件</string>
+    <string name="appwide_onboarding_notifications_background_status_body">对于受支持的蓝牙手环，NOOP 采集数据时，Android 可能会显示一条低优先级常驻通知。后台采集仍取决于系统权限和设备支持。</string>
+    <string name="appwide_onboarding_notifications_background_status_subtitle">通知可以显示连接状态、提醒和你启用的 Safety 更新。受支持的后台采集运行时，Android 可能要求显示常驻状态。</string>
+    <string name="appwide_onboarding_notifications_permission_help">Android 请求时，请允许通知，以便 NOOP 显示连接状态和你启用的提醒。</string>
+    <string name="appwide_onboarding_notifications_wrist_alerts">仅当已连接的手环支持腕部提醒且 NOOP 保持实时连接时，才会发送此类提醒。</string>
     <string name="appwide_pattern_what_changed">发生了什么变化</string>
     <string name="appwide_profile_display_name">显示名称</string>
     <string name="appwide_range_format">%1$d–%2$d</string>
@@ -818,7 +822,6 @@
     <string name="appwide_ui_audit_notifications_test_app_buzz_format">测试 %1$s 振动</string>
     <string name="appwide_ui_audit_notifications_test_buzz">立即发送测试振动</string>
     <string name="appwide_ui_audit_notifications_test_buzz_hint">NOOP 会向 Noop Band 发送测试振动。</string>
-    <string name="appwide_ui_audit_onboarding_background_pairing">如果 Noop Band 在附近，NOOP 会在后台保持蓝牙连接。配对完成期间，你可以继续设置个人资料和导入数据。</string>
     <string name="appwide_ui_audit_scoring_guide_intro">NOOP 每天提供三个 0 到 100 分的评分。这些评分根据可穿戴设备的信号，采用已发表并经过同行评审的运动科学研究，在你的设备上完全计算得出。三项评分彼此独立，因此不一定与其他应用逐项一致。数据来源和置信度会始终显示，便于进行透明、客观的比较。</string>
     <string name="appwide_ui_audit_scoring_guide_overline">三项评分</string>
     <string name="appwide_ui_audit_settings_background_bluetooth">后台蓝牙受操作系统限制。iOS 可能会在 NOOP 不处于前台时暂停它，因此同步 Noop Band 时请保持应用打开。</string>

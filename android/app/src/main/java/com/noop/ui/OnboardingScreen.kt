@@ -1844,7 +1844,9 @@ private fun NotificationsStep(
 ) {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_stay_in_the_loop_f54254af),
-        subtitle = "NOOP keeps Noop Band connected in the background. When you continue, allow notifications so it can show that link and reach your wrist.",
+        subtitle = uiString(
+            R.string.appwide_onboarding_notifications_background_status_subtitle,
+        ),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -1856,10 +1858,16 @@ private fun NotificationsStep(
                 icon = Icons.Filled.Bluetooth,
                 tint = Palette.statusPositive,
                 title = uiString(R.string.l10n_onboarding_screen_a_quiet_ongoing_status_97bf2a44),
-                message = "NOOP holds the Bluetooth link open in the background so your data stays current. One low-priority notification shows it's connected. Nothing noisy.",
+                message = uiString(
+                    R.string.appwide_onboarding_notifications_background_status_body,
+                ),
             )
-            Checkline("Wrist alerts (strain nudges and your smart alarm) arrive as notifications too.")
-            Checkline("When Android asks, allow notifications so NOOP can keep you informed.")
+            Checkline(
+                uiString(R.string.appwide_onboarding_notifications_wrist_alerts),
+            )
+            Checkline(
+                uiString(R.string.appwide_onboarding_notifications_permission_help),
+            )
             NoopCard(padding = 18.dp) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),

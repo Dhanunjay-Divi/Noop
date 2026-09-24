@@ -1281,6 +1281,19 @@ final class AppWideLocalizationContractTests: XCTestCase {
             ]?["en"],
             "Live heart rate uses the phone receipt time for display freshness only. This supplier stream is not added to durable health history or formulas."
         )
+        let onboardingNotificationKeys = [
+            "appwide.onboarding.notifications.background_status_body",
+            "appwide.onboarding.notifications.background_status_subtitle",
+            "appwide.onboarding.notifications.permission_help",
+            "appwide.onboarding.notifications.wrist_alerts",
+        ]
+        XCTAssertNil(source["appwide.ui_audit.onboarding.background_pairing"])
+        XCTAssertEqual(
+            source[
+                "appwide.onboarding.notifications.background_status_body"
+            ]?["en"],
+            "For supported Bluetooth bands, Android may show one low-priority ongoing notification while NOOP collects. Background collection still depends on system permission and device support."
+        )
         XCTAssertEqual(
             source["appwide.friends.data_boundary"]?["en"],
             "Only Recovery, Effort, Sleep Score, sleep duration, HRV, and resting heart rate can be shared. Raw streams, locations, journals, routes, workouts, and sleep stages are excluded."
@@ -1295,7 +1308,8 @@ final class AppWideLocalizationContractTests: XCTestCase {
         )
         let uiAuditKeys = source.keys.filter { $0.hasPrefix("appwide.ui_audit.") }
         XCTAssertEqual(uiAuditKeys.count, 50)
-        let fullyLocalizedKeys = uiAuditKeys + supplierKeys
+        let fullyLocalizedKeys =
+            uiAuditKeys + supplierKeys + onboardingNotificationKeys
         let placeholderRegex = try NSRegularExpression(
             pattern: #"%(?:\d+\$)?[a-zA-Z@]"#
         )
