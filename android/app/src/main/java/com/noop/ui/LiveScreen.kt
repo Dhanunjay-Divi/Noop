@@ -102,6 +102,14 @@ internal const val LIVE_TRACKING_SEPARATION_COPY =
 
 @Composable
 fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
+    val supplierDisplay by viewModel.supplierBandDisplay.collectAsStateWithLifecycle()
+    if (
+        supplierDisplay.adapterState != com.noop.ble.veepoo.VeepooAdapterState.IDLE &&
+        supplierDisplay.adapterState != com.noop.ble.veepoo.VeepooAdapterState.STOPPED
+    ) {
+        SupplierBandLiveScreen(supplierDisplay, onManageDevices)
+        return
+    }
     val live by viewModel.live.collectAsStateWithLifecycle()
     // #628: the Oura ring's live wear/charge state (null for WHOOP / before evidence). Preferred by the
     // "Worn" stat below, so removing the ring or putting it on the charger flips it instead of lingering.
@@ -704,6 +712,74 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
             item {
             ConnectionHelp(viewModel, modifier = Modifier.fillMaxWidth())
             }
+        }
+    }
+}
+
+@Composable
+private fun SupplierBandLiveScreen(
+    display: com.noop.ble.veepoo.VeepooDisplayState,
+    onManageDevices: () -> Unit,
+) {
+    ScreenScaffold(
+        title = "Live",
+        subtitle = "NOOP Band",
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Palette.surfaceRaised)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text(
+                        "Heart rate",
+                        style = NoopType.footnote,
+                        color = Palette.textSecondary,
+                    )
+                    Text(
+                        display.heartRate?.toString() ?: "--",
+                        style = NoopType.number(48f),
+                        color = Palette.textPrimary,
+                    )
+                }
+                Icon(
+                    Icons.Filled.MonitorHeart,
+                    contentDescription = null,
+                    tint = Palette.accent,
+                    modifier = Modifier.size(32.dp),
+                )
+            }
+            Text(
+                display.batteryPercent?.let { "Battery $it%" } ?: when (display.adapterState) {
+                    com.noop.ble.veepoo.VeepooAdapterState.CONNECTING -> "Connecting"
+                    com.noop.ble.veepoo.VeepooAdapterState.AUTHENTICATING -> "Authenticating"
+                    com.noop.ble.veepoo.VeepooAdapterState.READING_BATTERY -> "Reading battery"
+                    com.noop.ble.veepoo.VeepooAdapterState.RECONNECTING -> "Reconnecting"
+                    com.noop.ble.veepoo.VeepooAdapterState.FAILED -> "Connection unavailable"
+                    else -> "Waiting for live data"
+                },
+                style = NoopType.body,
+                color = Palette.textSecondary,
+            )
+            Text(
+                "This heart-rate reading uses phone receipt time for display only. It is not saved, scored, or used by formulas.",
+                style = NoopType.footnote,
+                color = Palette.statusWarning,
+            )
+        }
+        OutlinedButton(
+            onClick = onManageDevices,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Manage devices")
         }
     }
 }

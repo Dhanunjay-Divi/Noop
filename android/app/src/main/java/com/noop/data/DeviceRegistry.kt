@@ -96,6 +96,23 @@ class DeviceRegistry(
     /** Add (or update) a device. */
     suspend fun add(row: PairedDeviceRow) = dao.upsertPairedDevice(row)
 
+    /** Insert a newly authenticated device and make it the sole active source in one transaction. */
+    suspend fun addAndSetActive(
+        row: PairedDeviceRow,
+        now: Long = System.currentTimeMillis() / 1000,
+    ) {
+        transactor.run {
+            dao.demoteActive()
+            dao.upsertPairedDevice(
+                row.copy(
+                    status = DeviceStatus.active.name,
+                    lastSeenAt = now,
+                ),
+            )
+            markOwnershipDirty()
+        }
+    }
+
     /**
      * Make [id] the single active device. The demote-old + promote-new pair is ONE transaction so the
      * "exactly one active" invariant (I1) holds even across a crash mid-swap - mirrors the Swift

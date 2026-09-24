@@ -408,6 +408,36 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val ouraWearState: StateFlow<com.noop.oura.OuraWearState?> =
         noopApp.sourceCoordinator.ouraWearState
 
+    val supplierBandAvailable: Boolean get() = noopApp.sourceCoordinator.veepooAvailable
+    val supplierBandCandidates = noopApp.sourceCoordinator.veepooCandidates
+    val supplierBandPairingState = noopApp.sourceCoordinator.veepooPairingState
+    val supplierBandDisplay = noopApp.sourceCoordinator.veepooDisplay
+
+    fun beginSupplierBandPairing(): Boolean = noopApp.sourceCoordinator.beginVeepooPairing()
+
+    fun selectSupplierBandCandidate(
+        handle: com.noop.ble.veepoo.VeepooCandidateHandle,
+    ): Boolean = noopApp.sourceCoordinator.selectVeepooCandidate(handle)
+
+    fun submitSupplierBandPairing(printedId: String, transportPassword: String): Boolean =
+        noopApp.sourceCoordinator.submitVeepooPairing(
+            printedId.toCharArray(),
+            transportPassword.toCharArray(),
+        )
+
+    suspend fun commitSupplierBandPairing(nickname: String?): Boolean {
+        val committed = noopApp.sourceCoordinator.commitVeepooPairing(nickname)
+        if (committed) {
+            val id = noopApp.deviceRegistry.activeDeviceId() ?: return false
+            noopApp.noteActiveDeviceId(id)
+            _selectedDeviceId.value = id
+            refreshActiveDeviceName()
+        }
+        return committed
+    }
+
+    fun cancelSupplierBandPairing() = noopApp.sourceCoordinator.cancelVeepooPairing()
+
     /** #656: a journal day-offset (daysBack; -1 = Tomorrow) the Today journal widget asks the journal
      *  (Insights) to open at, so tapping a SPECIFIC day's bar lands on THAT day instead of always today.
      *  InsightsScreen consumes it on open and clears it via [requestJournalDay]`(null)`. */

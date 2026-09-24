@@ -55,6 +55,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -93,7 +94,7 @@ private enum class DeviceType {
     Whoop5MG, Whoop4, HrStrap, GymEquipment,
     // EXPERIMENTAL tier - best-effort, clean-room, can't be hardware-verified here. Each fails to an
     // honest message and never fabricates data.
-    Amazfit, MiBand, Garmin, Oura;
+    Amazfit, MiBand, Garmin, Oura, SupplierBand;
 
     val isWhoop: Boolean get() = this == Whoop4 || this == Whoop5MG
     val whoopModel: WhoopModel?
@@ -104,7 +105,9 @@ private enum class DeviceType {
         }
 
     /** True for the EXPERIMENTAL tier (shown under a clearly-labelled "Experimental" heading). */
-    val isExperimental: Boolean get() = this == Amazfit || this == MiBand || this == Garmin || this == Oura
+    val isExperimental: Boolean
+        get() = this == Amazfit || this == MiBand || this == Garmin ||
+            this == Oura || this == SupplierBand
 
     /** The experimental-tier brand this type registers as, or null for the non-experimental types
      *  (WHOOP / generic strap / gym). Bridges the type picker to the [com.noop.data.DeviceBrandCatalog]
@@ -115,6 +118,7 @@ private enum class DeviceType {
             MiBand -> ExperimentalBrand.MI_BAND
             Garmin -> ExperimentalBrand.GARMIN
             Oura -> ExperimentalBrand.OURA
+            SupplierBand -> null
             else -> null
         }
 
@@ -127,6 +131,7 @@ private enum class DeviceType {
             MiBand -> "Xiaomi Mi Band"
             Garmin -> "Garmin watch"
             Oura -> "Oura ring"
+            SupplierBand -> "Supplier band preview"
         }
 }
 
@@ -182,6 +187,12 @@ fun AddDeviceWizard(
 
     var nameDraft by remember { mutableStateOf("") }
     var askMakeActive by remember { mutableStateOf(false) }
+    var supplierPrintedId by remember { mutableStateOf("") }
+    var supplierPassword by remember { mutableStateOf("") }
+    var supplierNickname by remember { mutableStateOf("NOOP Band") }
+    var supplierCommitFailed by remember { mutableStateOf(false) }
+    val supplierCandidates by viewModel.supplierBandCandidates.collectAsStateWithLifecycle()
+    val supplierPairingState by viewModel.supplierBandPairingState.collectAsStateWithLifecycle()
 
     // Discovery-only HR source for the strap path (also Garmin Broadcast HR). Never persists, never
     // connects - we only read its `discovered` / `scanning` StateFlows while scanning. Created once.
@@ -201,6 +212,7 @@ fun AddDeviceWizard(
             t == DeviceType.GymEquipment -> ftmsScanner.scan()
             t == DeviceType.Amazfit || t == DeviceType.MiBand -> huamiScanner.scan()
             t == DeviceType.Oura -> ouraScanner.scan()
+            t == DeviceType.SupplierBand -> viewModel.beginSupplierBandPairing()
             else -> hrScanner.scan()   // HrStrap AND Garmin (Broadcast HR is the standard 0x180D path)
         }
     }
@@ -211,6 +223,7 @@ fun AddDeviceWizard(
         ftmsScanner.stopScan()
         huamiScanner.stopScan()
         ouraScanner.stop()
+        viewModel.cancelSupplierBandPairing()
     }
 
     // Belt-and-braces: stop whichever scan is live whenever the wizard leaves composition.
@@ -236,6 +249,11 @@ fun AddDeviceWizard(
                 OuraStep.Adopting, OuraStep.Failed -> { ouraScanner.scan(); pickedOura = null; ouraStep = OuraStep.Pick }
             }
             return
+        }
+        if (type == DeviceType.SupplierBand) {
+            viewModel.cancelSupplierBandPairing()
+            supplierPrintedId = ""
+            supplierPassword = ""
         }
         when (step) {
             WizardStep.Type -> Unit
@@ -506,7 +524,9 @@ fun AddDeviceWizard(
                 )
             } else {
                 when (step) {
-                    WizardStep.Type -> TypeStep(onPick = { t ->
+                    WizardStep.Type -> TypeStep(
+                        supplierAvailable = viewModel.supplierBandAvailable,
+                        onPick = { t ->
                         type = t; nameDraft = ""
                         // Oura enters its own step machine at the gate, not the generic prep step.
                         if (t == DeviceType.Oura) {
@@ -514,7 +534,8 @@ fun AddDeviceWizard(
                         } else {
                             step = WizardStep.Prep
                         }
-                    })
+                        },
+                    )
                     WizardStep.Prep -> type?.let { t ->
                         PrepStep(t, onScan = { startScan(t); step = WizardStep.Pick })
                     }
@@ -552,6 +573,18 @@ fun AddDeviceWizard(
                                 },
                                 onRescan = { huamiScanner.scan() },
                             )
+                            t == DeviceType.SupplierBand -> SupplierBandPickStep(
+                                candidates = supplierCandidates,
+                                onSelect = { candidate ->
+                                    if (viewModel.selectSupplierBandCandidate(candidate.handle)) {
+                                        supplierPrintedId = ""
+                                        supplierPassword = ""
+                                        supplierCommitFailed = false
+                                        step = WizardStep.Confirm
+                                    }
+                                },
+                                onRescan = { viewModel.beginSupplierBandPairing() },
+                            )
                             else -> HrPickStep(
                                 // Heart-rate strap AND Garmin (Broadcast HR is the standard 0x180D path).
                                 scanner = hrScanner,
@@ -566,14 +599,44 @@ fun AddDeviceWizard(
                             )
                         }
                     }
-                    WizardStep.Confirm -> ConfirmStep(
-                        advertisedName = confirmAdvertisedName,
-                        brand = confirmBrand,
-                        rssi = confirmRssi,
-                        name = nameDraft,
-                        onName = { nameDraft = it },
-                        onAdd = { askMakeActive = true },
-                    )
+                    WizardStep.Confirm -> if (type == DeviceType.SupplierBand) {
+                        SupplierBandConfirmStep(
+                            state = supplierPairingState,
+                            printedId = supplierPrintedId,
+                            onPrintedId = { supplierPrintedId = it.filter(Char::isDigit).take(16) },
+                            password = supplierPassword,
+                            onPassword = { supplierPassword = it.filter(Char::isDigit).take(4) },
+                            nickname = supplierNickname,
+                            onNickname = { supplierNickname = it },
+                            commitFailed = supplierCommitFailed,
+                            onAuthenticate = {
+                                supplierCommitFailed = false
+                                val submitted = viewModel.submitSupplierBandPairing(
+                                    supplierPrintedId,
+                                    supplierPassword,
+                                )
+                                if (submitted) {
+                                    supplierPrintedId = ""
+                                    supplierPassword = ""
+                                }
+                            },
+                            onCommit = {
+                                scope.launch {
+                                    val committed = viewModel.commitSupplierBandPairing(supplierNickname)
+                                    if (committed) onClose() else supplierCommitFailed = true
+                                }
+                            },
+                        )
+                    } else {
+                        ConfirmStep(
+                            advertisedName = confirmAdvertisedName,
+                            brand = confirmBrand,
+                            rssi = confirmRssi,
+                            name = nameDraft,
+                            onName = { nameDraft = it },
+                            onAdd = { askMakeActive = true },
+                        )
+                    }
                 }
             }
             }
@@ -698,7 +761,10 @@ private fun ouraHeaderSubtitle(step: OuraStep, advanced: Boolean): String? = whe
 // MARK: - Step 1 - type picker
 
 @Composable
-private fun TypeStep(onPick: (DeviceType) -> Unit) {
+private fun TypeStep(
+    supplierAvailable: Boolean,
+    onPick: (DeviceType) -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         TypeRow(Icons.Filled.Watch, DeviceType.Whoop4.title, "Automatically detects compatible band hardware") {
             onPick(DeviceType.Whoop4)
@@ -725,6 +791,15 @@ private fun TypeStep(onPick: (DeviceType) -> Unit) {
         }
         TypeRow(Icons.Filled.Watch, DeviceType.Garmin.title, "Uses the watch's Broadcast Heart Rate. We'll show you how.") {
             onPick(DeviceType.Garmin)
+        }
+        if (supplierAvailable) {
+            TypeRow(
+                Icons.Filled.GraphicEq,
+                DeviceType.SupplierBand.title,
+                "Live heart rate and battery only. Pairing requires the printed band ID.",
+            ) {
+                onPick(DeviceType.SupplierBand)
+            }
         }
 
         WhoopFirstNote()
@@ -928,6 +1003,144 @@ private fun prepInstructions(type: DeviceType): List<String> = when (type) {
     // Oura runs the factory-reset-and-adopt prep inside OuraFlow (ouraPrepInstructions), so this generic
     // branch is unreached for Oura; kept for the exhaustive when.
     DeviceType.Oura -> ouraPrepInstructions
+    DeviceType.SupplierBand -> listOf(
+        "Wake the band and keep it close to this phone.",
+        "Find the numeric ID printed on the band or its label. You will verify it after choosing a nearby candidate.",
+        "The four-digit password opens the local transport. It is not proof that you own the band.",
+    )
+}
+
+@Composable
+private fun SupplierBandPickStep(
+    candidates: List<com.noop.ble.veepoo.VeepooCandidateRow>,
+    onSelect: (com.noop.ble.veepoo.VeepooCandidateRow) -> Unit,
+    onRescan: () -> Unit,
+) {
+    PickList(searching = true, isEmpty = candidates.isEmpty(), onRescan = onRescan) {
+        candidates.forEach { candidate ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Palette.surfaceRaised)
+                    .clickable { onSelect(candidate) }
+                    .padding(14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Nearby band ${candidate.ordinal}",
+                    style = NoopType.body,
+                    color = Palette.textPrimary,
+                )
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = "Select nearby band ${candidate.ordinal}",
+                    tint = Palette.textSecondary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SupplierBandConfirmStep(
+    state: com.noop.ble.veepoo.VeepooAdapterState,
+    printedId: String,
+    onPrintedId: (String) -> Unit,
+    password: String,
+    onPassword: (String) -> Unit,
+    nickname: String,
+    onNickname: (String) -> Unit,
+    commitFailed: Boolean,
+    onAuthenticate: () -> Unit,
+    onCommit: () -> Unit,
+) {
+    val waitingForInput =
+        state == com.noop.ble.veepoo.VeepooAdapterState.AWAITING_PAIRING_CONFIRMATION
+    val ready = state == com.noop.ble.veepoo.VeepooAdapterState.LIVE_DISPLAY_ONLY
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(
+            when (state) {
+                com.noop.ble.veepoo.VeepooAdapterState.CONNECTING ->
+                    "Connecting to the selected band..."
+                com.noop.ble.veepoo.VeepooAdapterState.AUTHENTICATING ->
+                    "Checking the band response and printed ID..."
+                com.noop.ble.veepoo.VeepooAdapterState.READING_BATTERY ->
+                    "Reading battery before starting live heart rate..."
+                com.noop.ble.veepoo.VeepooAdapterState.LIVE_DISPLAY_ONLY ->
+                    "Band verified. Live heart rate is display-only and is not saved or scored."
+                com.noop.ble.veepoo.VeepooAdapterState.FAILED ->
+                    "Pairing failed. Go back and choose the band again."
+                else ->
+                    "Confirm the pairing prompt on the selected band, then enter its printed ID and transport password."
+            },
+            style = NoopType.body,
+            color = if (state == com.noop.ble.veepoo.VeepooAdapterState.FAILED) {
+                Palette.statusCritical
+            } else {
+                Palette.textSecondary
+            },
+        )
+        OutlinedTextField(
+            value = printedId,
+            onValueChange = onPrintedId,
+            enabled = waitingForInput,
+            label = { Text("Printed band ID") },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+            ),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = password,
+            onValueChange = onPassword,
+            enabled = waitingForInput,
+            label = { Text("Four-digit transport password") },
+            supportingText = { Text("This opens the local transport; it is not ownership proof.") },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = KeyboardType.NumberPassword,
+            ),
+            visualTransformation = PasswordVisualTransformation(),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (ready) {
+            OutlinedTextField(
+                value = nickname,
+                onValueChange = onNickname,
+                label = { Text("Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (commitFailed) {
+            Text(
+                "The verified band could not be saved. No credential was retained.",
+                style = NoopType.footnote,
+                color = Palette.statusCritical,
+            )
+        }
+        TextButton(
+            onClick = if (ready) onCommit else onAuthenticate,
+            enabled = if (ready) {
+                nickname.isNotBlank()
+            } else {
+                waitingForInput && printedId.isNotBlank() && password.length == 4
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Palette.accent),
+        ) {
+            Text(
+                if (ready) "Add verified band" else "Verify and connect",
+                style = NoopType.headline,
+                color = Palette.accentInk,
+            )
+        }
+    }
 }
 
 /** The factory-reset prep checklist for the Oura adopt flow (Step B of the onboarding UX spec). No

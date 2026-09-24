@@ -12,6 +12,8 @@ import com.noop.analytics.RegistryDayOwnerSource
 import com.noop.ble.SourceCoordinator
 import com.noop.ble.WhoopBleClient
 import com.noop.ble.WhoopModel
+import com.noop.ble.veepoo.VeepooBridgeProviderLoader
+import com.noop.ble.veepoo.VeepooCredentialStore
 import com.noop.data.BackupSettingsBridge
 import com.noop.data.DeviceRegistry
 import com.noop.data.WhoopDatabase
@@ -479,6 +481,7 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
      * the other `ble`-flow collectors there (this Application owns no CoroutineScope of its own).
      */
     private val sourceCoordinatorDelegate = lazy {
+        val supplierBridgeProvider = VeepooBridgeProviderLoader.load()
         SourceCoordinator(
             context = applicationContext,
             registry = deviceRegistry,
@@ -501,6 +504,8 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             straplog = { ble.externalLog(it) },
             // A generic strap's standard battery (0x180F) → the same live battery field the WHOOP uses.
             batterySink = { pct -> ble.publishExternalBattery(pct) },
+            veepooBridgeProvider = supplierBridgeProvider,
+            veepooCredentials = supplierBridgeProvider?.let { VeepooCredentialStore(applicationContext) },
         )
     }
     val sourceCoordinator: SourceCoordinator get() = sourceCoordinatorDelegate.value

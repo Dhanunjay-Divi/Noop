@@ -1189,6 +1189,7 @@ private fun deviceIcon(device: PairedDeviceRow): ImageVector = when {
     device.sourceKind == SourceKind.ftms.name -> Icons.AutoMirrored.Filled.DirectionsRun
     device.sourceKind == SourceKind.huami.name -> Icons.Filled.GraphicEq
     device.sourceKind == SourceKind.oura.name -> Icons.Filled.Circle
+    device.sourceKind == SourceKind.veepoo.name -> Icons.Filled.GraphicEq
     SourceCoordinator.isWhoop(device) -> Icons.Filled.Watch
     else -> Icons.Filled.FavoriteBorder
 }

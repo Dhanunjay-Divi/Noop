@@ -7,6 +7,15 @@ import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
 import com.noop.data.StreamBatch
 import com.noop.data.WhoopRepository
+import com.noop.data.DeviceStatus
+import com.noop.ble.veepoo.VeepooAdapterState
+import com.noop.ble.veepoo.VeepooBandSource
+import com.noop.ble.veepoo.VeepooBridgeProvider
+import com.noop.ble.veepoo.VeepooCandidateHandle
+import com.noop.ble.veepoo.VeepooCandidateRow
+import com.noop.ble.veepoo.VeepooCredentialAccess
+import com.noop.ble.veepoo.VeepooDisplayState
+import com.noop.ble.veepoo.VeepooManagedSource
 import com.noop.oura.OuraRingGen
 import com.noop.oura.OuraWearState
 import kotlinx.coroutines.CancellationException
@@ -19,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.UUID
 
 /**
  * Runs exactly ONE device's live BLE at a time, driven by [DeviceRegistry]'s active device id.
@@ -98,6 +108,9 @@ class SourceCoordinator(
      * lifecycle ownership without registering a fake device kind or changing the WHOOP path.
      */
     private val noopBandSourceFactory: ((String, PairedDeviceRow?) -> LiveHrSource?)? = null,
+    /** Optional supplier bridge. Null in normal builds; reflection loads it only in explicitly wired builds. */
+    private val veepooBridgeProvider: VeepooBridgeProvider? = null,
+    private val veepooCredentials: VeepooCredentialAccess? = null,
     /** Push a strap's battery percent into the live state (e.g. `ble::publishExternalBattery`), so a
      *  generic strap / FTMS machine surfaces its charge where the WHOOP strap battery does. Default no-op
      *  keeps existing call sites + JVM tests compiling unchanged. */
@@ -135,9 +148,21 @@ class SourceCoordinator(
     private val _ouraWearState = MutableStateFlow<OuraWearState?>(null)
     val ouraWearState: StateFlow<OuraWearState?> = _ouraWearState.asStateFlow()
 
+    val veepooAvailable: Boolean get() = veepooBridgeProvider != null && veepooCredentials != null
+    private val _veepooCandidates = MutableStateFlow<List<VeepooCandidateRow>>(emptyList())
+    val veepooCandidates: StateFlow<List<VeepooCandidateRow>> = _veepooCandidates.asStateFlow()
+    private val _veepooDisplay = MutableStateFlow(VeepooDisplayState())
+    val veepooDisplay: StateFlow<VeepooDisplayState> = _veepooDisplay.asStateFlow()
+    private val _veepooPairingState = MutableStateFlow(VeepooAdapterState.IDLE)
+    val veepooPairingState: StateFlow<VeepooAdapterState> = _veepooPairingState.asStateFlow()
+
     /** Collects the active Oura source's adoptPhase / needsPairing into the mirrors above; cancelled and
      *  nulled on teardown so a forgotten ring never leaks a stale outcome. */
     private var ouraStateJob: kotlinx.coroutines.Job? = null
+    private var veepooStateJob: kotlinx.coroutines.Job? = null
+    private var veepooPairingSource: VeepooManagedSource? = null
+    private var veepooPairingDeviceId: String? = null
+    private var veepooPairingPausedWhoop = false
 
     /** The single non-WHOOP source currently live — a generic HR strap, FTMS machine, Huami band, or Oura
      *  ring — held behind the [LiveHrSource] interface. null while WHOOP is active or nothing else is
@@ -190,6 +215,104 @@ class SourceCoordinator(
      */
     fun onActiveDeviceChanged(id: String) {
         scope.launch { reconcileLock.withLock { reconcile(id) } }
+    }
+
+    fun beginVeepooPairing(): Boolean {
+        val provider = veepooBridgeProvider ?: return false
+        cancelVeepooPairing()
+        val deviceId = "supplier-${UUID.randomUUID()}"
+        val source = runCatching {
+            VeepooBandSource(
+                deviceId = deviceId,
+                bridge = provider.create(requireNotNull(context)),
+            )
+        }.getOrNull() ?: return false
+        veepooPairingSource = source
+        veepooPairingDeviceId = deviceId
+        mirrorVeepoo(source, pairing = true)
+        source.scan()
+        return true
+    }
+
+    fun selectVeepooCandidate(handle: VeepooCandidateHandle): Boolean {
+        val source = veepooPairingSource ?: return false
+        if (!veepooPairingPausedWhoop) {
+            stopWhoop()
+            veepooPairingPausedWhoop = true
+        }
+        val selected = source.selectCandidate(handle)
+        if (!selected) restoreWhoopAfterPairing()
+        return selected
+    }
+
+    fun submitVeepooPairing(printedId: CharArray, transportPassword: CharArray): Boolean {
+        val source = veepooPairingSource ?: return false
+        return try {
+            source.submitPairing(printedId, transportPassword)
+        } finally {
+            printedId.fill('\u0000')
+            transportPassword.fill('\u0000')
+        }
+    }
+
+    suspend fun commitVeepooPairing(nickname: String?): Boolean {
+        val source = veepooPairingSource ?: return false
+        val deviceId = veepooPairingDeviceId ?: return false
+        val credentialStore = veepooCredentials ?: return false
+        val commit = source.takeProvisioningCommit() ?: return false
+        val saved = commit.saveCredential { credentialStore.save(deviceId, it) }
+        if (!saved) {
+            commit.close()
+            return false
+        }
+        val now = System.currentTimeMillis() / 1000
+        return try {
+            registry.addAndSetActive(
+                PairedDeviceRow(
+                    id = deviceId,
+                    brand = "NOOP",
+                    model = "Supplier band",
+                    nickname = nickname?.trim()?.takeIf(String::isNotEmpty),
+                    peripheralId = commit.peripheralId,
+                    sourceKind = SourceKind.veepoo.name,
+                    capabilities = "hr",
+                    status = DeviceStatus.active.name,
+                    addedAt = now,
+                    lastSeenAt = now,
+                ),
+                now,
+            )
+            commit.close()
+            veepooPairingSource?.stop()
+            veepooPairingSource = null
+            veepooPairingDeviceId = null
+            veepooStateJob?.cancel()
+            _veepooCandidates.value = emptyList()
+            veepooPairingPausedWhoop = false
+            reconcileLock.withLock {
+                lastSeenId = null
+                reconcile(deviceId)
+            }
+            true
+        } catch (_: Throwable) {
+            credentialStore.clear(deviceId)
+            commit.close()
+            restoreWhoopAfterPairing()
+            false
+        }
+    }
+
+    fun cancelVeepooPairing() {
+        val pairingSource = veepooPairingSource ?: return
+        pairingSource.stop()
+        veepooPairingSource = null
+        veepooPairingDeviceId = null
+        veepooStateJob?.cancel()
+        veepooStateJob = null
+        _veepooCandidates.value = emptyList()
+        _veepooPairingState.value = VeepooAdapterState.IDLE
+        if (activeSource !is VeepooManagedSource) _veepooDisplay.value = VeepooDisplayState()
+        restoreWhoopAfterPairing()
     }
 
     /**
@@ -264,9 +387,13 @@ class SourceCoordinator(
             if (isWhoop(id, devices)) switchToWhoop(id, devices) else switchToStrap(id, devices)
         } catch (t: Throwable) {
             lastSeenId = null
-            log("SourceCoordinator: device switch to '$id' failed: ${t.javaClass.simpleName}: ${t.message}")
-            straplog("HR-strap: activating this device failed (${t.javaClass.simpleName}: ${t.message}) - " +
-                "staying on the previous source. Please share this log so we can fix it.")
+            if (devices.firstOrNull { it.id == id }?.sourceKind == SourceKind.veepoo.name) {
+                straplog("Supplier band: activation failed")
+            } else {
+                log("SourceCoordinator: device switch to '$id' failed: ${t.javaClass.simpleName}: ${t.message}")
+                straplog("HR-strap: activating this device failed (${t.javaClass.simpleName}: ${t.message}) - " +
+                    "staying on the previous source. Please share this log so we can fix it.")
+            }
         }
     }
 
@@ -337,22 +464,32 @@ class SourceCoordinator(
      */
     private fun switchToStrap(id: String, devices: List<PairedDeviceRow>) {
         if (activeStrapId == id) return   // already streaming this source → no churn
-        if (!onStrap) stopWhoop()         // leaving WHOOP for the first non-WHOOP source → pause its BLE
+        val row = devices.firstOrNull { it.id == id }
+        if (row?.sourceKind == SourceKind.veepoo.name && !veepooAvailable) {
+            straplog("Supplier band: adapter unavailable in this build")
+            return
+        }
+        // Construct the optional supplier source before pausing WHOOP. Provider or credential failures
+        // therefore leave the default WHOOP link untouched.
+        val supplierSource =
+            if (row?.sourceKind == SourceKind.veepoo.name) makeSource(id, row) else null
+        if (!onStrap && !veepooPairingPausedWhoop) stopWhoop()
+        veepooPairingPausedWhoop = false
         tearDownNonWhoopSource()          // source→source: stop the previous source first
 
-        val row = devices.firstOrNull { it.id == id }
         val address = row?.peripheralId
 
         // Build the isolated source for this device's registered kind (the ONE place that maps a kind to a
         // concrete driver), then bring it up. Adding a brand adds ONE arm in [makeSource] plus a conforming
         // source; nothing else in the coordinator changes.
-        val source = makeSource(id, row)
+        val source = supplierSource ?: makeSource(id, row)
         // CONNECT to the active strap's known BLE address, don't just scan. A bare scan discovers + lists
         // the strap but never connects - so a Polar H10 etc. showed up as "found" yet never streamed
         // (#421). connect(address) connects directly via getRemoteDevice; a bare scan is the fallback only
         // when the registry row has no address.
         if (!address.isNullOrEmpty()) source.connect(address) else source.scan()
         activeSource = source
+        if (source is VeepooManagedSource) mirrorVeepoo(source, pairing = false)
         activeStrapId = id
         onStrap = true
     }
@@ -392,6 +529,22 @@ class SourceCoordinator(
                 )
             }
             SourceKind.oura.name -> makeOuraSource(id, ctx, row)
+            SourceKind.veepoo.name -> {
+                val provider = requireNotNull(veepooBridgeProvider) {
+                    "Supplier adapter is unavailable"
+                }
+                val credentials = requireNotNull(veepooCredentials) {
+                    "Supplier credential store is unavailable"
+                }
+                val password = credentials.load(id)
+                    ?: error("Supplier transport credential is unavailable")
+                VeepooBandSource(
+                    deviceId = id,
+                    bridge = provider.create(ctx),
+                    initialReconnectPassword = password,
+                    onReconnectCredentialRejected = { credentials.clear(id) },
+                )
+            }
             else -> {
                 val repo = requireNotNull(repository) { "SourceCoordinator.repository is required to persist strap samples" }
                 StandardHrSource(
@@ -504,6 +657,12 @@ class SourceCoordinator(
     private fun tearDownNonWhoopSource() {
         activeSource?.stop()
         activeSource = null
+        veepooStateJob?.cancel()
+        veepooStateJob = null
+        if (veepooPairingSource == null) {
+            _veepooDisplay.value = VeepooDisplayState()
+            _veepooPairingState.value = VeepooAdapterState.IDLE
+        }
         // Stop mirroring the (now torn-down) Oura source and clear the mirrors so a stale adopt outcome /
         // needs-pairing message never outlives the source or drives a later wizard transition.
         ouraStateJob?.cancel(); ouraStateJob = null
@@ -514,6 +673,30 @@ class SourceCoordinator(
         // already pushes an empty SensorMetrics, but reset here too so leaving for WHOOP / FTMS / Huami —
         // none of which feed this flow — is clean and immediate).
         _sensorMetrics.value = StandardHrSource.SensorMetrics()
+    }
+
+    private fun mirrorVeepoo(source: VeepooManagedSource, pairing: Boolean) {
+        veepooStateJob?.cancel()
+        veepooStateJob = scope.launch {
+            launch {
+                source.display.collect { _veepooDisplay.value = it }
+            }
+            launch {
+                source.state.collect {
+                    _veepooPairingState.value = it
+                    if (pairing && it == VeepooAdapterState.FAILED) restoreWhoopAfterPairing()
+                }
+            }
+            launch {
+                source.candidates.collect { _veepooCandidates.value = it }
+            }
+        }
+    }
+
+    private fun restoreWhoopAfterPairing() {
+        if (!veepooPairingPausedWhoop) return
+        veepooPairingPausedWhoop = false
+        startWhoop()
     }
 
     companion object {
