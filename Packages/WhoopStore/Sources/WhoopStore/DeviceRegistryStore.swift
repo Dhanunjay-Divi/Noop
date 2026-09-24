@@ -15,6 +15,10 @@ import WhoopProtocol
 /// `DatabasePool` (#755) AND a plain `DatabaseQueue` (in-memory tests) unchanged: both expose the
 /// same synchronous `.read`/`.write` API used below.
 public struct DeviceRegistryStore: Sendable {
+    private enum MutationFailure: Error {
+        case archiveVerificationFailed
+    }
+
     let dbQueue: any DatabaseWriter
     public init(dbQueue: any DatabaseWriter) { self.dbQueue = dbQueue }
 
@@ -66,21 +70,54 @@ public struct DeviceRegistryStore: Sendable {
     }
 
     public func archive(_ id: String) throws {
+        _ = try archiveVerified(id)
+    }
+
+    /// Archive the registry row, verify the durable status, clear its ownership
+    /// overrides, and invalidate analysis in one SQLite transaction. Returning
+    /// false means the row did not exist. Any failed write or verification rolls
+    /// the complete transaction back, including `dayOwnership`.
+    @discardableResult
+    public func archiveVerified(_ id: String) throws -> Bool {
         try dbQueue.write { db in
             guard let status = try String.fetchOne(
                 db,
                 sql: "SELECT status FROM pairedDevice WHERE id = ?",
                 arguments: [id]
-            ),
-            status != DeviceStatus.archived.rawValue else {
-                return
+            ) else { return false }
+            if status != DeviceStatus.archived.rawValue {
+                try db.execute(
+                    sql: "UPDATE pairedDevice SET status = 'archived' WHERE id = ?",
+                    arguments: [id]
+                )
             }
-            try db.execute(sql: "UPDATE pairedDevice SET status = 'archived' WHERE id = ?", arguments: [id])
+            guard try String.fetchOne(
+                db,
+                sql: "SELECT status FROM pairedDevice WHERE id = ?",
+                arguments: [id]
+            ) == DeviceStatus.archived.rawValue else {
+                throw MutationFailure.archiveVerificationFailed
+            }
             try db.execute(
                 sql: "DELETE FROM dayOwnership WHERE deviceId = ?",
                 arguments: [id]
             )
+            guard try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM dayOwnership WHERE deviceId = ?",
+                arguments: [id]
+            ) == 0 else {
+                throw MutationFailure.archiveVerificationFailed
+            }
+            guard try String.fetchOne(
+                db,
+                sql: "SELECT status FROM pairedDevice WHERE id = ?",
+                arguments: [id]
+            ) == DeviceStatus.archived.rawValue else {
+                throw MutationFailure.archiveVerificationFailed
+            }
             try AnalysisOwnershipInvalidation.mark(db)
+            return true
         }
     }
 

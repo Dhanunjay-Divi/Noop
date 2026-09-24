@@ -70,6 +70,7 @@ object AppVeepooDiagnosticSink : VeepooDiagnosticSink {
 
 enum class VeepooSupplierLifecycleStage {
     ADOPTION,
+    SECURE_READ,
     SECURE_CLEANUP,
     RECONCILIATION,
     REMOVAL,
@@ -89,6 +90,7 @@ enum class VeepooSupplierLifecycleTrigger {
 
 enum class VeepooSupplierLifecycleFailure {
     SECURE_PERSISTENCE,
+    SECURE_READ_UNAVAILABLE,
     REGISTRY_PERSISTENCE,
     CLEANUP_FAILED,
     FALLBACK_UNAVAILABLE,

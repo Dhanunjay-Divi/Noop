@@ -30,6 +30,9 @@ import OuraProtocol
 /// the BLE engine — `connectedPeripheralUUID` — arrives as a plain publisher, not the manager itself.
 @MainActor
 final class SourceCoordinator: ObservableObject {
+    struct SupplierPairingLease: Equatable {
+        fileprivate let generation: UInt64
+    }
 
     /// Source-aware teardown chosen before a registry row is archived. The old Devices path forwarded
     /// only an optional peripheral id to BLEManager; nil (Apple Watch/import/legacy rows) was therefore
@@ -103,6 +106,11 @@ final class SourceCoordinator: ObservableObject {
     private var activeStrapId: String?
     /// Ownership token for callbacks that can outlive a graceful source teardown.
     private var sourceGeneration: UInt64 = 0
+    /// The supplier SDK owns a process-wide manager. Pairing leases that manager
+    /// here, rather than in the view, so registry publications cannot start a
+    /// competing supplier source before the pairing adapter has disconnected.
+    private var supplierPairingLease: SupplierPairingLease?
+    private var supplierPairingLeaseGeneration: UInt64 = 0
     /// True once we've transitioned onto a generic strap. While false (the default / WHOOP-active
     /// state), switching to WHOOP is a pure no-op — we never issue a redundant WHOOP (re)scan.
     private var onStrap = false
@@ -184,6 +192,13 @@ final class SourceCoordinator: ObservableObject {
     ///   • WHOOP active after a strap → stop the strap source + resume WHOOP.
     ///   • A generic strap → pause WHOOP + (re)start `StandardHRSource` for that strap's id.
     func activeDeviceChanged(to id: String) {
+        if supplierPairingLease != nil {
+            if let device = activeDevice(for: id),
+               device.sourceKind == .veepoo {
+                return
+            }
+        }
+
         // The Apple Watch is a HealthKit source with `peripheralId: nil` (see `AppleWatchDevice`): there is
         // no BLE peripheral to connect, and the M1 live read happens entirely in `HealthKitBridge`'s
         // observers + sync, off this BLE coordinator. Short-circuit BEFORE the WHOOP branch so we never
@@ -477,6 +492,77 @@ final class SourceCoordinator: ObservableObject {
         activeStrapId = nil
     }
 
+    /// Lease the supplier SDK's process-wide manager to the pairing session.
+    /// A currently active supplier source is stopped before the lease is
+    /// returned. Other source families keep their independent transports.
+    func acquireSupplierPairingLease() -> SupplierPairingLease? {
+        guard supplierPairingLease == nil else { return nil }
+
+        if let active = activeDevice(for: registry.activeDeviceId),
+           active.sourceKind == .veepoo {
+            if activeStrapId == active.id {
+                tearDownNonWhoopSource()
+                activeStrapId = nil
+            } else if activeStrapId != nil || activeSource != nil {
+                return nil
+            }
+        }
+
+        supplierPairingLeaseGeneration &+= 1
+        let lease = SupplierPairingLease(
+            generation: supplierPairingLeaseGeneration
+        )
+        supplierPairingLease = lease
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .managerLease,
+            outcome: .began
+        )
+        return lease
+    }
+
+    /// Release a cancelled pairing lease after the pairing adapter has
+    /// disconnected. The current durable owner wins over the device that was
+    /// active when pairing began.
+    @discardableResult
+    func cancelSupplierPairingLease(_ lease: SupplierPairingLease) -> Bool {
+        releaseSupplierPairingLease(lease)
+    }
+
+    /// Commit a pairing lease after registration and pairing-adapter teardown.
+    /// The method is generation-fenced so an obsolete wizard cannot release a
+    /// newer pairing session or start its source.
+    @discardableResult
+    func commitSupplierPairingLease(_ lease: SupplierPairingLease) -> Bool {
+        releaseSupplierPairingLease(lease)
+    }
+
+    private func releaseSupplierPairingLease(
+        _ lease: SupplierPairingLease
+    ) -> Bool {
+        guard supplierPairingLease == lease else {
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .managerLease,
+                outcome: .failed,
+                failure: .staleLease
+            )
+            return false
+        }
+
+        supplierPairingLease = nil
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .managerLease,
+            outcome: .completed
+        )
+
+        guard let current = activeDevice(for: registry.activeDeviceId),
+              current.sourceKind == .veepoo
+        else {
+            return true
+        }
+        activeDeviceChanged(to: current.id)
+        return true
+    }
+
     // MARK: - Identity adoption
 
     /// The BLE engine connected to a WHOOP peripheral (`uuid`). Persist that stable identity onto the
@@ -546,6 +632,12 @@ final class SourceCoordinator: ObservableObject {
     /// `.oura` → OuraLiveSource, anything else → StandardHRSource).
     private func sourceKind(for id: String) -> SourceKind? {
         registry.devices.first(where: { $0.id == id })?.sourceKind
+    }
+
+    private func activeDevice(for id: String) -> PairedDevice? {
+        registry.devices.first {
+            $0.id == id && $0.status == .active
+        }
     }
 
     /// The stored `model` string for a device id ("Oura Ring 3/4/5"), if the registry knows it. Used to

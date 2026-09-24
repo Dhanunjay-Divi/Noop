@@ -182,11 +182,29 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
 
         source = self.read("Strand/BLE/VeepooBandSource.swift")
         rejected = source[
-            source.index("onCredentialRejected: {") :
-            source.index("}\n            )", source.index("onCredentialRejected: {"))
+            source.index("let reconcileAuthenticationRejection = {") :
+            source.index(
+                "let reconcileBatteryFailure = {",
+                source.index("let reconcileAuthenticationRejection = {"),
+            )
         ]
         self.assertIn("credentials.clear(deviceID: deviceID)", rejected)
         self.assertIn("registry.reconcileUnavailableSupplier(", rejected)
+        self.assertLess(
+            rejected.index("credentials.clear(deviceID: deviceID)"),
+            rejected.index("registry.reconcileUnavailableSupplier("),
+        )
+        factory_switch = source[
+            source.index("switch credentials.load(deviceID: deviceID)") :
+            source.index("private static func credentialAvailability(")
+        ]
+        self.assertEqual(
+            2,
+            factory_switch.count(
+                "onCredentialRejected:\n"
+                "                        reconcileAuthenticationRejection"
+            ),
+        )
 
     def test_registration_is_verified_and_compensated(self) -> None:
         source = self.read("Strand/BLE/VeepooBandSource.swift")

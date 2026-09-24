@@ -82,13 +82,19 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
         )
         return framework
 
-    def test_constants_pin_the_owner_supplied_artifact(self) -> None:
+    def test_layout_is_owner_independent_and_pins_relative_artifact(self) -> None:
+        sdk_root = Path(
+            "/Users/example/SDK/iOS_Ble_SDK-master/iOS_sdk_source"
+        )
+        layout = MODULE.sdk_layout(sdk_root)
         self.assertEqual(
-            MODULE.EXPECTED_FRAMEWORK_PATH,
-            Path(
-                "/Users/divii/Downloads/SDK/iOS_Ble_SDK-master/iOS_sdk_source/"
-                "Framework/2.2.XX.15/VeepooBleSDK.framework"
-            ),
+            MODULE.DEFAULT_SDK_ROOT,
+            Path.home()
+            / "Downloads/SDK/iOS_Ble_SDK-master/iOS_sdk_source",
+        )
+        self.assertEqual(
+            layout.framework_path,
+            sdk_root / "Framework/2.2.XX.15/VeepooBleSDK.framework",
         )
         self.assertEqual(
             MODULE.EXPECTED_BINARY_SHA256,
@@ -98,6 +104,44 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             MODULE.TRUST_RELATIVE_PATH,
             Path("release/supplier/ios-artifact-trust.json"),
         )
+        source = TOOL.read_text(encoding="utf-8")
+        example = (
+            ROOT / "Config" / "VeepooLocalSDK.example.xcconfig"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("/Users/divii", source)
+        self.assertNotIn("/Users/divii", example)
+
+    def test_external_sdk_root_validation_rejects_relative_internal_and_linked_roots(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            external_root = Path(temporary).resolve() / "iOS_sdk_source"
+            external_root.mkdir()
+            self.assertEqual(
+                MODULE.validated_sdk_root(external_root, ROOT),
+                external_root,
+            )
+            with self.assertRaisesRegex(
+                MODULE.VerificationError,
+                "absolute path",
+            ):
+                MODULE.validated_sdk_root(
+                    Path("relative/iOS_sdk_source"),
+                    ROOT,
+                )
+            with self.assertRaisesRegex(
+                MODULE.VerificationError,
+                "outside the repository",
+            ):
+                MODULE.validated_sdk_root(ROOT / "Tools", ROOT)
+
+            linked_root = external_root.parent / "linked-sdk"
+            linked_root.symlink_to(external_root, target_is_directory=True)
+            with self.assertRaisesRegex(
+                MODULE.VerificationError,
+                "must not contain symlinks",
+            ):
+                MODULE.validated_sdk_root(linked_root, ROOT)
 
     def test_tracked_manifest_pins_all_frameworks_and_inputs(self) -> None:
         trust_root = MODULE.load_trust_root(
@@ -447,6 +491,10 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
                 )
 
     def test_build_check_requires_exact_physical_device_settings(self) -> None:
+        sdk_root = Path(
+            "/Users/example/SDK/iOS_Ble_SDK-master/iOS_sdk_source"
+        )
+        layout = MODULE.sdk_layout(sdk_root)
         approved = {
             "ACTION": "build",
             "CONFIGURATION": "Debug",
@@ -454,63 +502,106 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             "SDK_NAME": "iphoneos26.5",
             "NOOP_VEEPOO_SDK_ENABLED": "YES",
             "NOOP_VEEPOO_FRAMEWORK_DIR": str(
-                MODULE.EXPECTED_FRAMEWORK_PATH.parent
+                layout.framework_path.parent
             ),
             "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR": str(
-                MODULE.EXPECTED_VENDOR_FRAMEWORK_DIR
+                layout.vendor_framework_dir
             ),
             "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR": str(
-                MODULE.EXPECTED_FMDB_FRAMEWORK_DIR
+                layout.fmdb_framework_dir
             ),
             "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR": str(
-                MODULE.EXPECTED_MJEXTENSION_FRAMEWORK_DIR
+                layout.mjextension_framework_dir
             ),
             "NOOP_VEEPOO_LINK_FLAGS": MODULE.EXPECTED_LINK_FLAGS,
             "NOOP_VEEPOO_SWIFT_CONDITION": (
                 "NOOP_SUPPLIER_VEEPOO NOOP_SUPPLIER_QUALIFICATION"
             ),
         }
-        MODULE.verify_build_environment(approved)
+        MODULE.verify_build_environment(approved, sdk_root=sdk_root)
+        self.assertEqual(
+            MODULE._sdk_root_candidate(
+                argument=None,
+                build_check=True,
+                environment=approved,
+            ),
+            sdk_root,
+        )
         simulator = dict(approved, PLATFORM_NAME="iphonesimulator")
         with self.assertRaisesRegex(
             MODULE.VerificationError,
             "PLATFORM_NAME",
         ):
-            MODULE.verify_build_environment(simulator)
+            MODULE.verify_build_environment(
+                simulator,
+                sdk_root=sdk_root,
+            )
         with self.assertRaisesRegex(
             MODULE.VerificationError,
             "CONFIGURATION",
         ):
             MODULE.verify_build_environment(
-                dict(approved, CONFIGURATION="Release")
+                dict(approved, CONFIGURATION="Release"),
+                sdk_root=sdk_root,
             )
         with self.assertRaisesRegex(
             MODULE.VerificationError,
             "ACTION",
         ):
-            MODULE.verify_build_environment(dict(approved, ACTION="install"))
+            MODULE.verify_build_environment(
+                dict(approved, ACTION="install"),
+                sdk_root=sdk_root,
+            )
 
     def test_generated_config_matches_the_tracked_example(self) -> None:
+        example_root = Path(
+            "/absolute/path/to/iOS_Ble_SDK-master/iOS_sdk_source"
+        )
         example = (
             ROOT / "Config" / "VeepooLocalSDK.example.xcconfig"
         ).read_text(encoding="utf-8")
-        self.assertEqual(MODULE.render_local_config(), example)
+        self.assertEqual(MODULE.render_local_config(example_root), example)
         self.assertEqual(example.count("[sdk=iphoneos*]"), 7)
         self.assertEqual(example.count("[config=Debug]"), 7)
         self.assertNotIn("NOOP_VEEPOO_SDK_ENABLED = YES", example)
+
+    def test_generated_config_quotes_paths_with_spaces_and_rejects_injection(
+        self,
+    ) -> None:
+        sdk_root = Path(
+            "/Users/example/Owner SDK/iOS_Ble_SDK-master/iOS_sdk_source"
+        )
+        rendered = MODULE.render_local_config(sdk_root)
+        self.assertIn(
+            'NOOP_VEEPOO_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = '
+            '"/Users/example/Owner SDK/iOS_Ble_SDK-master/iOS_sdk_source/'
+            'Framework/2.2.XX.15"',
+            rendered,
+        )
+        with self.assertRaisesRegex(
+            MODULE.VerificationError,
+            "unsupported xcconfig characters",
+        ):
+            MODULE.render_local_config(
+                Path("/Users/example/$(PROJECT_DIR)/iOS_sdk_source")
+            )
 
     def test_writer_creates_only_the_local_config(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary).resolve()
             (repository / "Config").mkdir()
-            destination = MODULE.write_local_config(repository)
+            sdk_root = Path("/external/iOS_sdk_source")
+            destination = MODULE.write_local_config(
+                repository,
+                sdk_root=sdk_root,
+            )
             self.assertEqual(
                 destination,
                 repository / "Config" / "VeepooLocalSDK.xcconfig",
             )
             self.assertEqual(
                 destination.read_text(encoding="utf-8"),
-                MODULE.render_local_config(),
+                MODULE.render_local_config(sdk_root),
             )
             self.assertFalse(
                 any(repository.rglob("VeepooBleSDK.framework"))

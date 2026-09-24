@@ -2,35 +2,59 @@ import Combine
 import Foundation
 import Security
 import WhoopStore
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @MainActor
 protocol VeepooCredentialAccess: AnyObject {
-    func load(deviceID: String) -> String?
+    func load(deviceID: String) -> VeepooCredentialLoadResult
     func save(_ password: String, deviceID: String) -> Bool
     @discardableResult
     func clear(deviceID: String) -> Bool
+}
+
+enum VeepooCredentialLoadResult: Equatable {
+    case available(String)
+    case missing
+    case malformed
+    case unavailable
 }
 
 @MainActor
 final class VeepooCredentialStore: VeepooCredentialAccess {
     static let shared = VeepooCredentialStore()
     private let service = "com.noop.supplier-band.transport-password"
+    private let copyMatching:
+        (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+    private let deleteItem: (CFDictionary) -> OSStatus
 
-    func load(deviceID: String) -> String? {
-        guard !deviceID.isEmpty else { return nil }
+    init(
+        copyMatching: @escaping (
+            CFDictionary,
+            UnsafeMutablePointer<CFTypeRef?>?
+        ) -> OSStatus = SecItemCopyMatching,
+        deleteItem: @escaping (CFDictionary) -> OSStatus = SecItemDelete
+    ) {
+        self.copyMatching = copyMatching
+        self.deleteItem = deleteItem
+    }
+
+    func load(deviceID: String) -> VeepooCredentialLoadResult {
+        guard !deviceID.isEmpty else { return .missing }
         var query = baseQuery(deviceID: deviceID)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
+        let status = copyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return .missing }
+        guard status == errSecSuccess else { return .unavailable }
+        guard let data = result as? Data,
               let value = String(data: data, encoding: .utf8),
-              VeepooBandAdapterCore.isValidPassword(value)
-        else {
-            clear(deviceID: deviceID)
-            return nil
+              VeepooBandAdapterCore.isValidPassword(value) else {
+            return clear(deviceID: deviceID) ? .malformed : .unavailable
         }
-        return value
+        return .available(value)
     }
 
     func save(_ password: String, deviceID: String) -> Bool {
@@ -58,7 +82,7 @@ final class VeepooCredentialStore: VeepooCredentialAccess {
     @discardableResult
     func clear(deviceID: String) -> Bool {
         guard !deviceID.isEmpty else { return false }
-        let status = SecItemDelete(baseQuery(deviceID: deviceID) as CFDictionary)
+        let status = deleteItem(baseQuery(deviceID: deviceID) as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
     }
 
@@ -75,6 +99,8 @@ enum VeepooSupplierLifecycleStage: String {
     case registration
     case removal
     case secureCleanup = "secure_cleanup"
+    case secureRead = "secure_read"
+    case managerLease = "manager_lease"
     case reconciliation
 }
 
@@ -87,14 +113,18 @@ enum VeepooSupplierLifecycleOutcome: String {
 enum VeepooSupplierLifecycleTrigger: String {
     case sourceUnavailable = "source_unavailable"
     case authenticationRejected = "authentication_rejected"
+    case terminalBatteryFailure = "terminal_battery_failure"
+    case protectedDataAvailable = "protected_data_available"
 }
 
 enum VeepooSupplierLifecycleFailure: String {
     case securePersistence = "secure_persistence"
+    case secureReadUnavailable = "secure_read_unavailable"
     case registryPersistence = "registry_persistence"
     case cleanupFailed = "cleanup_failed"
     case credentialRestore = "credential_restore"
     case fallbackUnavailable = "fallback_unavailable"
+    case staleLease = "stale_lease"
 }
 
 @MainActor
@@ -129,11 +159,24 @@ enum VeepooSupplierRemoval {
         credentials: any VeepooCredentialAccess,
         archive: () -> Bool
     ) -> Bool {
-        let priorCredential = credentials.load(deviceID: deviceID)
         VeepooSupplierLifecycleDiagnostics.record(
             stage: .removal,
             outcome: .began
         )
+        let priorCredential: String?
+        switch credentials.load(deviceID: deviceID) {
+        case .available(let credential):
+            priorCredential = credential
+        case .missing, .malformed:
+            priorCredential = nil
+        case .unavailable:
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .removal,
+                outcome: .failed,
+                failure: .secureReadUnavailable
+            )
+            return false
+        }
         guard credentials.clear(deviceID: deviceID) else {
             VeepooSupplierLifecycleDiagnostics.record(
                 stage: .removal,
@@ -169,17 +212,28 @@ final class VeepooBandSource: LiveHRSource {
 
     private let live: LiveState
     private let adapter: any VeepooBandAdapterControlling
-    private let password: String
+    private var password: String?
+    private let credentialLoader: (() -> VeepooCredentialLoadResult)?
+    private let protectedDataAvailablePublisher: AnyPublisher<Void, Never>
+    private let credentialRetryDelaysNanoseconds: [UInt64]
     private let onCredentialRejected: () -> Void
+    private let onCredentialPermanentlyUnavailable: () -> Void
+    private let onTerminalBatteryFailure: () -> Bool
     private let displayFreshnessInterval: TimeInterval
     private let reconnectDelaysNanoseconds: [UInt64]
     private let reconnectDiscoveryTimeoutNanoseconds: UInt64
     private let now: () -> Date
     private var targetPeripheralID: UUID?
     private var reconnectTask: Task<Void, Never>?
+    private var credentialRetryTask: Task<Void, Never>?
+    private var protectedDataCancellable: AnyCancellable?
     private var displayFreshnessTask: Task<Void, Never>?
     private var reconnectAttempt = 0
+    private var credentialRetryAttempt = 0
     private var credentialRejected = false
+    private var credentialWaitRecorded = false
+    private var permanentCredentialFailureHandled = false
+    private var terminalBatteryFailureHandled = false
     private var stopped = false
 
     init(
@@ -187,6 +241,7 @@ final class VeepooBandSource: LiveHRSource {
         adapter: any VeepooBandAdapterControlling,
         password: String,
         onCredentialRejected: @escaping () -> Void,
+        onTerminalBatteryFailure: @escaping () -> Bool = { true },
         displayFreshnessInterval: TimeInterval = displayFreshnessInterval,
         reconnectDelaysNanoseconds: [UInt64] = [
             2_000_000_000,
@@ -199,7 +254,56 @@ final class VeepooBandSource: LiveHRSource {
         self.live = live
         self.adapter = adapter
         self.password = password
+        self.credentialLoader = nil
+        self.protectedDataAvailablePublisher =
+            Empty<Void, Never>().eraseToAnyPublisher()
+        self.credentialRetryDelaysNanoseconds = []
         self.onCredentialRejected = onCredentialRejected
+        self.onCredentialPermanentlyUnavailable = {}
+        self.onTerminalBatteryFailure = onTerminalBatteryFailure
+        self.displayFreshnessInterval = displayFreshnessInterval
+        self.reconnectDelaysNanoseconds = reconnectDelaysNanoseconds
+        self.reconnectDiscoveryTimeoutNanoseconds =
+            reconnectDiscoveryTimeoutNanoseconds
+        self.now = now
+        adapter.eventHandler = { [weak self] event in self?.handle(event) }
+    }
+
+    init(
+        live: LiveState,
+        adapter: any VeepooBandAdapterControlling,
+        credentialLoader: @escaping () -> VeepooCredentialLoadResult,
+        protectedDataAvailablePublisher: AnyPublisher<Void, Never>? = nil,
+        credentialRetryDelaysNanoseconds: [UInt64] = [
+            1_000_000_000,
+            5_000_000_000,
+            15_000_000_000,
+        ],
+        onCredentialRejected: @escaping () -> Void,
+        onCredentialPermanentlyUnavailable: @escaping () -> Void,
+        onTerminalBatteryFailure: @escaping () -> Bool = { true },
+        displayFreshnessInterval: TimeInterval = displayFreshnessInterval,
+        reconnectDelaysNanoseconds: [UInt64] = [
+            2_000_000_000,
+            5_000_000_000,
+            15_000_000_000,
+        ],
+        reconnectDiscoveryTimeoutNanoseconds: UInt64 = 12_000_000_000,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.live = live
+        self.adapter = adapter
+        self.password = nil
+        self.credentialLoader = credentialLoader
+        self.protectedDataAvailablePublisher =
+            protectedDataAvailablePublisher
+                ?? VeepooBandSource.systemProtectedDataAvailablePublisher()
+        self.credentialRetryDelaysNanoseconds =
+            credentialRetryDelaysNanoseconds
+        self.onCredentialRejected = onCredentialRejected
+        self.onCredentialPermanentlyUnavailable =
+            onCredentialPermanentlyUnavailable
+        self.onTerminalBatteryFailure = onTerminalBatteryFailure
         self.displayFreshnessInterval = displayFreshnessInterval
         self.reconnectDelaysNanoseconds = reconnectDelaysNanoseconds
         self.reconnectDiscoveryTimeoutNanoseconds =
@@ -210,15 +314,22 @@ final class VeepooBandSource: LiveHRSource {
 
     func scan() {
         guard !stopped, let targetPeripheralID else { return }
-        adapter.startDiscovery(targetPeripheralID: targetPeripheralID)
+        startTransportWhenCredentialAvailable(
+            targetPeripheralID: targetPeripheralID
+        )
     }
 
     func connect(_ id: UUID) {
         guard !stopped else { return }
+        reconnectTask?.cancel()
+        reconnectTask = nil
         targetPeripheralID = id
         reconnectAttempt = 0
+        credentialRetryAttempt = 0
         credentialRejected = false
-        adapter.startDiscovery(targetPeripheralID: id)
+        permanentCredentialFailureHandled = false
+        terminalBatteryFailureHandled = false
+        startTransportWhenCredentialAvailable(targetPeripheralID: id)
     }
 
     func stop() {
@@ -226,6 +337,10 @@ final class VeepooBandSource: LiveHRSource {
         stopped = true
         reconnectTask?.cancel()
         reconnectTask = nil
+        credentialRetryTask?.cancel()
+        credentialRetryTask = nil
+        protectedDataCancellable?.cancel()
+        protectedDataCancellable = nil
         displayFreshnessTask?.cancel()
         displayFreshnessTask = nil
         adapter.disconnect()
@@ -243,6 +358,15 @@ final class VeepooBandSource: LiveHRSource {
             reconnectTask = nil
             adapter.reconnect(candidateHandle: candidate.handle)
         case .state(.connected):
+            terminalBatteryFailureHandled = false
+            guard let password else {
+                adapter.disconnect()
+                retryCredentialAfterTransientFailure(
+                    resetBudget: false,
+                    trigger: nil
+                )
+                return
+            }
             adapter.verifyPassword(password)
         case .battery(let reading):
             if let percent = reading.percent {
@@ -271,18 +395,36 @@ final class VeepooBandSource: LiveHRSource {
             live.connected = false
             live.batteryPct = nil
             live.clearBiometrics()
-            if !credentialRejected { scheduleReconnect() }
+            if !credentialRejected && !terminalBatteryFailureHandled {
+                scheduleReconnect()
+            }
         case .failed(let stage, let failure):
             if stage == .authentication && failure == .credentialRejected {
+                guard !credentialRejected else { return }
                 credentialRejected = true
                 adapter.disconnect()
                 onCredentialRejected()
+                return
+            }
+            if stage == .battery {
+                guard !terminalBatteryFailureHandled else { return }
+                terminalBatteryFailureHandled = true
+                reconnectTask?.cancel()
+                reconnectTask = nil
+                live.batteryPct = nil
+                publishNonStreamingDisplayState()
+                adapter.disconnect()
+                if !onTerminalBatteryFailure() {
+                    scheduleReconnect()
+                }
                 return
             }
             if stage == .live {
                 publishNonStreamingDisplayState()
             }
             if stage == .connection || stage == .disconnect {
+                reconnectTask?.cancel()
+                reconnectTask = nil
                 scheduleReconnect()
             }
         case .liveStopped:
@@ -290,6 +432,127 @@ final class VeepooBandSource: LiveHRSource {
         case .state, .authenticated, .liveStarted:
             break
         }
+    }
+
+    private func startTransportWhenCredentialAvailable(
+        targetPeripheralID: UUID
+    ) {
+        guard !stopped else { return }
+        if password != nil {
+            startBoundedDiscovery(
+                targetPeripheralID: targetPeripheralID,
+                delayNanoseconds: 0
+            )
+            return
+        }
+        retryCredentialAfterTransientFailure(
+            resetBudget: false,
+            trigger: nil
+        )
+    }
+
+    private func retryCredentialAfterTransientFailure(
+        resetBudget: Bool,
+        trigger: VeepooSupplierLifecycleTrigger?
+    ) {
+        guard !stopped,
+              !permanentCredentialFailureHandled,
+              let credentialLoader
+        else {
+            return
+        }
+        if resetBudget {
+            credentialRetryAttempt = 0
+        }
+
+        switch credentialLoader() {
+        case .available(let credential):
+            guard VeepooBandAdapterCore.isValidPassword(credential) else {
+                handlePermanentlyUnavailableCredential()
+                return
+            }
+            password = credential
+            credentialRetryTask?.cancel()
+            credentialRetryTask = nil
+            protectedDataCancellable?.cancel()
+            protectedDataCancellable = nil
+            credentialRetryAttempt = 0
+            if credentialWaitRecorded {
+                VeepooSupplierLifecycleDiagnostics.record(
+                    stage: .secureRead,
+                    outcome: .completed,
+                    trigger: trigger
+                )
+                credentialWaitRecorded = false
+            }
+            guard let targetPeripheralID else { return }
+            startBoundedDiscovery(
+                targetPeripheralID: targetPeripheralID,
+                delayNanoseconds: 0
+            )
+        case .missing, .malformed:
+            handlePermanentlyUnavailableCredential()
+        case .unavailable:
+            if !credentialWaitRecorded {
+                credentialWaitRecorded = true
+                VeepooSupplierLifecycleDiagnostics.record(
+                    stage: .secureRead,
+                    outcome: .failed,
+                    failure: .secureReadUnavailable
+                )
+            }
+            installProtectedDataRetryIfNeeded()
+            scheduleCredentialRetry()
+        }
+    }
+
+    private func installProtectedDataRetryIfNeeded() {
+        guard protectedDataCancellable == nil else { return }
+        protectedDataCancellable = protectedDataAvailablePublisher
+            .sink { [weak self] in
+                guard let self else { return }
+                self.credentialRetryTask?.cancel()
+                self.credentialRetryTask = nil
+                self.retryCredentialAfterTransientFailure(
+                    resetBudget: true,
+                    trigger: .protectedDataAvailable
+                )
+            }
+    }
+
+    private func scheduleCredentialRetry() {
+        guard !stopped,
+              credentialRetryTask == nil,
+              credentialRetryAttempt <
+                credentialRetryDelaysNanoseconds.count
+        else {
+            return
+        }
+        let delay =
+            credentialRetryDelaysNanoseconds[credentialRetryAttempt]
+        credentialRetryAttempt += 1
+        credentialRetryTask = Task { @MainActor [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+            }
+            guard !Task.isCancelled, let self, !self.stopped else { return }
+            self.credentialRetryTask = nil
+            self.retryCredentialAfterTransientFailure(
+                resetBudget: false,
+                trigger: nil
+            )
+        }
+    }
+
+    private func handlePermanentlyUnavailableCredential() {
+        guard !permanentCredentialFailureHandled else { return }
+        permanentCredentialFailureHandled = true
+        credentialRetryTask?.cancel()
+        credentialRetryTask = nil
+        protectedDataCancellable?.cancel()
+        protectedDataCancellable = nil
+        adapter.disconnect()
+        onCredentialPermanentlyUnavailable()
     }
 
     private func scheduleReconnect() {
@@ -302,9 +565,20 @@ final class VeepooBandSource: LiveHRSource {
         }
         reconnectAttempt += 1
         let delay = reconnectDelaysNanoseconds[reconnectAttempt - 1]
+        startBoundedDiscovery(
+            targetPeripheralID: targetPeripheralID,
+            delayNanoseconds: delay
+        )
+    }
+
+    private func startBoundedDiscovery(
+        targetPeripheralID: UUID,
+        delayNanoseconds: UInt64
+    ) {
+        guard !stopped, reconnectTask == nil else { return }
         reconnectTask = Task { @MainActor [weak self] in
-            if delay > 0 {
-                try? await Task.sleep(nanoseconds: delay)
+            if delayNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: delayNanoseconds)
             }
             guard !Task.isCancelled, let self, !self.stopped else { return }
             self.adapter.startDiscovery(targetPeripheralID: targetPeripheralID)
@@ -362,6 +636,20 @@ final class VeepooBandSource: LiveHRSource {
         clearDisplayHeartRate()
         live.connected = false
     }
+
+    private static func systemProtectedDataAvailablePublisher()
+        -> AnyPublisher<Void, Never>
+    {
+        #if canImport(UIKit)
+        return NotificationCenter.default.publisher(
+            for: UIApplication.protectedDataDidBecomeAvailableNotification
+        )
+        .map { _ in () }
+        .eraseToAnyPublisher()
+        #else
+        return Empty<Void, Never>().eraseToAnyPublisher()
+        #endif
+    }
 }
 
 @MainActor
@@ -371,11 +659,21 @@ enum VeepooBandSourceFactory {
         credentials: any VeepooCredentialAccess,
         adapterAvailable: Bool = VeepooBandAdapterFactory.productionEnabled
     ) -> Bool {
-        usablePassword(
+        guard let availability = credentialAvailability(
             for: device,
             credentials: credentials,
             adapterAvailable: adapterAvailable
-        ) != nil
+        ) else {
+            return false
+        }
+        switch availability {
+        case .available(let password):
+            return VeepooBandAdapterCore.isValidPassword(password)
+        case .unavailable:
+            return true
+        case .missing, .malformed:
+            return false
+        }
     }
 
     static func productionFactory(
@@ -387,57 +685,108 @@ enum VeepooBandSourceFactory {
         let credentials = credentials ?? VeepooCredentialStore.shared
         return { deviceID in
             guard let row = registry.devices.first(where: { $0.id == deviceID }),
-                  let password = usablePassword(
-                    for: row,
-                    credentials: credentials,
-                    adapterAvailable: true
-                  ),
+                  isStructurallyUsable(row, adapterAvailable: true),
                   let adapter =
                     VeepooBandAdapterFactory.makeForApprovedLocalDeviceBuild()
             else {
                 return nil
             }
-            return VeepooBandSource(
-                live: live,
-                adapter: adapter,
-                password: password,
-                onCredentialRejected: {
-                    let cleared = credentials.clear(deviceID: deviceID)
-                    VeepooSupplierLifecycleDiagnostics.record(
-                        stage: .secureCleanup,
-                        outcome: cleared ? .completed : .failed,
-                        trigger: .authenticationRejected,
-                        failure: cleared ? nil : .cleanupFailed
-                    )
-                    let reconciled = registry.reconcileUnavailableSupplier(
-                        deviceID
-                    )
-                    VeepooSupplierLifecycleDiagnostics.record(
-                        stage: .reconciliation,
-                        outcome: reconciled ? .completed : .failed,
-                        trigger: .authenticationRejected,
-                        failure: reconciled ? nil : .fallbackUnavailable
-                    )
-                }
-            )
+
+            let reconcilePermanentCredentialFailure = {
+                let reconciled = registry.reconcileUnavailableSupplier(
+                    deviceID
+                )
+                VeepooSupplierLifecycleDiagnostics.record(
+                    stage: .reconciliation,
+                    outcome: reconciled ? .completed : .failed,
+                    trigger: .sourceUnavailable,
+                    failure: reconciled ? nil : .fallbackUnavailable
+                )
+            }
+            let reconcileAuthenticationRejection = {
+                let cleared = credentials.clear(deviceID: deviceID)
+                VeepooSupplierLifecycleDiagnostics.record(
+                    stage: .secureCleanup,
+                    outcome: cleared ? .completed : .failed,
+                    trigger: .authenticationRejected,
+                    failure: cleared ? nil : .cleanupFailed
+                )
+                let reconciled = registry.reconcileUnavailableSupplier(
+                    deviceID
+                )
+                VeepooSupplierLifecycleDiagnostics.record(
+                    stage: .reconciliation,
+                    outcome: reconciled ? .completed : .failed,
+                    trigger: .authenticationRejected,
+                    failure: reconciled ? nil : .fallbackUnavailable
+                )
+            }
+            let reconcileBatteryFailure = {
+                let reconciled = registry.reconcileUnavailableSupplier(
+                    deviceID
+                )
+                VeepooSupplierLifecycleDiagnostics.record(
+                    stage: .reconciliation,
+                    outcome: reconciled ? .completed : .failed,
+                    trigger: .terminalBatteryFailure,
+                    failure: reconciled ? nil : .fallbackUnavailable
+                )
+                return reconciled
+            }
+
+            switch credentials.load(deviceID: deviceID) {
+            case .available(let password)
+                where VeepooBandAdapterCore.isValidPassword(password):
+                return VeepooBandSource(
+                    live: live,
+                    adapter: adapter,
+                    password: password,
+                    onCredentialRejected:
+                        reconcileAuthenticationRejection,
+                    onTerminalBatteryFailure: reconcileBatteryFailure
+                )
+            case .unavailable:
+                return VeepooBandSource(
+                    live: live,
+                    adapter: adapter,
+                    credentialLoader: {
+                        credentials.load(deviceID: deviceID)
+                    },
+                    onCredentialRejected:
+                        reconcileAuthenticationRejection,
+                    onCredentialPermanentlyUnavailable:
+                        reconcilePermanentCredentialFailure,
+                    onTerminalBatteryFailure: reconcileBatteryFailure
+                )
+            case .available, .missing, .malformed:
+                return nil
+            }
         }
     }
 
-    private static func usablePassword(
+    private static func credentialAvailability(
         for device: PairedDevice,
         credentials: any VeepooCredentialAccess,
         adapterAvailable: Bool
-    ) -> String? {
-        guard adapterAvailable,
-              device.sourceKind == .veepoo,
-              device.peripheralId.flatMap(UUID.init(uuidString:)) != nil,
-              let password = credentials.load(deviceID: device.id),
-              VeepooBandAdapterCore.isValidPassword(password)
-        else {
+    ) -> VeepooCredentialLoadResult? {
+        guard isStructurallyUsable(
+            device,
+            adapterAvailable: adapterAvailable
+        ) else {
             return nil
         }
-        return password
+        return credentials.load(deviceID: device.id)
     }
+
+    private static func isStructurallyUsable(
+        _ device: PairedDevice,
+        adapterAvailable: Bool
+    ) -> Bool {
+        adapterAvailable
+            && device.sourceKind == .veepoo
+            && device.peripheralId.flatMap(UUID.init(uuidString:)) != nil
+    }
+
 }
 
 @MainActor

@@ -10,13 +10,23 @@ import org.junit.Test
 class VeepooCredentialStoreTest {
     private class MemoryBackend : VeepooCredentialBackend {
         val values = mutableMapOf<String, Any>()
+        var failReads = false
+        var removeCalls = 0
+        var removeResult = true
+        var throwOnRemove = false
         override fun contains(key: String): Boolean = key in values
-        override fun readString(key: String): String? = values[key] as? String
+        override fun readString(key: String): String? {
+            if (failReads) error("injected encrypted read failure")
+            return values[key] as? String
+        }
         override fun writeString(key: String, value: String): Boolean {
             values[key] = value
             return true
         }
         override fun remove(key: String): Boolean {
+            removeCalls += 1
+            if (throwOnRemove) error("injected encrypted removal failure")
+            if (!removeResult) return false
             values.remove(key)
             return true
         }
@@ -66,6 +76,57 @@ class VeepooCredentialStoreTest {
 
         assertNull(store.load("supplier-1"))
         assertFalse("incomplete credential must be removed", backend.values.isNotEmpty())
+    }
+
+    @Test
+    fun malformedRecordRemovalFailureReturnsUnavailableAndRetainsMaterial() {
+        val key = "transport_password_supplier-1"
+        val backend = MemoryBackend().apply {
+            values[key] = "v1|0007|"
+            removeResult = false
+        }
+        val store = VeepooCredentialStore(backend)
+
+        assertEquals(
+            VeepooCredentialRead.Unavailable,
+            store.readForRetention("supplier-1"),
+        )
+        assertEquals("v1|0007|", backend.values[key])
+        assertEquals(1, backend.removeCalls)
+    }
+
+    @Test
+    fun malformedRecordRemovalExceptionReturnsUnavailableAndRetainsMaterial() {
+        val key = "transport_password_supplier-1"
+        val backend = MemoryBackend().apply {
+            values[key] = "v1|0007|"
+            throwOnRemove = true
+        }
+        val store = VeepooCredentialStore(backend)
+
+        assertEquals(
+            VeepooCredentialRead.Unavailable,
+            store.readForRetention("supplier-1"),
+        )
+        assertEquals("v1|0007|", backend.values[key])
+        assertEquals(1, backend.removeCalls)
+    }
+
+    @Test
+    fun encryptedReadFailureDoesNotDeleteStoredCredential() {
+        val backend = MemoryBackend()
+        val store = VeepooCredentialStore(backend)
+        val binding = requireNotNull(VeepooRevisionBinding.from("hw-1", "fw-1"))
+        assertTrue(store.save("supplier-1", "0007".toCharArray(), binding))
+        val encoded = backend.values.getValue("transport_password_supplier-1")
+        backend.failReads = true
+
+        assertEquals(
+            VeepooCredentialRead.Unavailable,
+            store.readForRetention("supplier-1"),
+        )
+        assertEquals(encoded, backend.values["transport_password_supplier-1"])
+        assertEquals(0, backend.removeCalls)
     }
 
     @Test

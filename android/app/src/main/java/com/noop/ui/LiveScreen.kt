@@ -104,6 +104,12 @@ internal const val LIVE_TRACKING_SEPARATION_COPY =
 internal const val SUPPLIER_HEART_RATE_MAX_EXPIRY_DELAY_MS =
     LiveHeartRateNotificationPolicy.FRESHNESS_MS + 1L
 
+internal fun visibleSupplierBatteryPercent(
+    display: com.noop.ble.veepoo.VeepooDisplayState,
+): Int? = display.batteryPercent.takeIf {
+    display.adapterState == com.noop.ble.veepoo.VeepooAdapterState.LIVE_DISPLAY_ONLY
+}
+
 @Composable
 fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     val supplierDisplay by viewModel.supplierBandDisplay.collectAsStateWithLifecycle()
@@ -754,6 +760,7 @@ private fun SupplierBandLiveScreen(
         display = display,
         nowMillis = nowMillis,
     )
+    val visibleBatteryPercent = visibleSupplierBatteryPercent(display)
 
     ScreenScaffold(
         title = uiString(R.string.nav_live),
@@ -792,7 +799,7 @@ private fun SupplierBandLiveScreen(
                 )
             }
             Text(
-                display.batteryPercent?.let {
+                visibleBatteryPercent?.let {
                     uiString(R.string.l10n_devices_screen_battery_clamped_2494c8c9, it)
                 } ?: when (display.adapterState) {
                     com.noop.ble.veepoo.VeepooAdapterState.CONNECTING ->

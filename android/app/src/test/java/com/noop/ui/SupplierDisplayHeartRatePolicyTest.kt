@@ -106,4 +106,20 @@ class SupplierDisplayHeartRatePolicyTest {
         assertTrue(supplierScreen.contains("visibleHeartRate?.toString()"))
         assertFalse(supplierScreen.contains("display.heartRate?.toString()"))
     }
+
+    @Test
+    fun supplierBatteryIsHiddenUntilTheConnectionIsLive() {
+        assertNull(
+            visibleSupplierBatteryPercent(
+                liveDisplay.copy(
+                    adapterState = VeepooAdapterState.RECONNECTING,
+                    batteryPercent = 81,
+                ),
+            ),
+        )
+        assertEquals(
+            81,
+            visibleSupplierBatteryPercent(liveDisplay.copy(batteryPercent = 81)),
+        )
+    }
 }

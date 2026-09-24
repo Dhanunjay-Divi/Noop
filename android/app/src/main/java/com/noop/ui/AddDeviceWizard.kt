@@ -228,7 +228,9 @@ fun AddDeviceWizard(
             t == DeviceType.GymEquipment -> ftmsScanner.scan()
             t == DeviceType.Amazfit || t == DeviceType.MiBand -> huamiScanner.scan()
             t == DeviceType.Oura -> ouraScanner.scan()
-            t == DeviceType.SupplierBand -> viewModel.beginSupplierBandPairing()
+            t == DeviceType.SupplierBand -> scope.launch {
+                viewModel.beginSupplierBandPairing()
+            }
             else -> hrScanner.scan()   // HrStrap AND Garmin (Broadcast HR is the standard 0x180D path)
         }
     }
@@ -651,12 +653,15 @@ fun AddDeviceWizard(
                             t == DeviceType.SupplierBand -> SupplierBandPickStep(
                                 candidates = supplierCandidates,
                                 onSelect = { candidate ->
-                                    if (viewModel.selectSupplierBandCandidate(candidate.handle)) {
-                                        supplierPassword = ""
-                                        step = WizardStep.Confirm
-                                    }
+                                    viewModel.selectSupplierBandCandidate(candidate.handle)
                                 },
-                                onRescan = { viewModel.beginSupplierBandPairing() },
+                                onSelected = {
+                                    supplierPassword = ""
+                                    step = WizardStep.Confirm
+                                },
+                                onRescan = {
+                                    viewModel.beginSupplierBandPairing()
+                                },
                             )
                             else -> HrPickStep(
                                 // Heart-rate strap AND Garmin (Broadcast HR is the standard 0x180D path).
@@ -1170,17 +1175,44 @@ private fun prepInstructions(type: DeviceType): List<String> = when (type) {
 @Composable
 private fun SupplierBandPickStep(
     candidates: List<com.noop.ble.veepoo.VeepooCandidateRow>,
-    onSelect: (com.noop.ble.veepoo.VeepooCandidateRow) -> Unit,
-    onRescan: () -> Unit,
+    onSelect: suspend (com.noop.ble.veepoo.VeepooCandidateRow) -> Boolean,
+    onSelected: () -> Unit,
+    onRescan: suspend () -> Unit,
 ) {
-    PickList(searching = true, isEmpty = candidates.isEmpty(), onRescan = onRescan) {
+    var actionBusy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    PickList(
+        searching = true,
+        isEmpty = candidates.isEmpty(),
+        onRescan = {
+            if (!actionBusy) {
+                actionBusy = true
+                scope.launch {
+                    try {
+                        onRescan()
+                    } finally {
+                        actionBusy = false
+                    }
+                }
+            }
+        },
+    ) {
         candidates.forEach { candidate ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
                     .background(Palette.surfaceRaised)
-                    .clickable { onSelect(candidate) }
+                    .clickable(enabled = !actionBusy) {
+                        actionBusy = true
+                        scope.launch {
+                            try {
+                                if (onSelect(candidate)) onSelected()
+                            } finally {
+                                actionBusy = false
+                            }
+                        }
+                    }
                     .padding(14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,

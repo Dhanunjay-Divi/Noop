@@ -17,6 +17,7 @@ import com.noop.ble.veepoo.VeepooCandidateHandle
 import com.noop.ble.veepoo.VeepooCandidateRow
 import com.noop.ble.veepoo.VeepooCompatibilityPolicy
 import com.noop.ble.veepoo.VeepooCredentialAccess
+import com.noop.ble.veepoo.VeepooCredentialRead
 import com.noop.ble.veepoo.VeepooDisplayState
 import com.noop.ble.veepoo.VeepooManagedSource
 import com.noop.ble.veepoo.VeepooProvisioningCommit
@@ -31,7 +32,9 @@ import com.noop.oura.OuraWearState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,6 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 internal class VeepooPairingAdoption(
     private val registry: DeviceRegistry,
@@ -197,9 +201,14 @@ class SourceCoordinator(
     private val veepooBridgeProvider: VeepooBridgeProvider? = null,
     /** Plain-JVM seam for pairing lifecycle tests. Production always leaves this null. */
     private val veepooPairingSourceFactory: ((String) -> VeepooManagedSource)? = null,
+    /** Plain-JVM seam for persisted supplier activation after secure credential validation. */
+    private val veepooActiveSourceFactory:
+        ((String, com.noop.ble.veepoo.VeepooStoredCredential) -> LiveHrSource)? = null,
     private val veepooCredentials: VeepooCredentialAccess? = null,
     private val veepooLifecycleDiagnostics: VeepooSupplierLifecycleDiagnosticSink =
         AppVeepooSupplierLifecycleDiagnosticSink,
+    private val supplierCredentialRetryDelaysMillis: List<Long> =
+        listOf(1_000L, 5_000L, 15_000L),
     /** Publish a verified registry correction through the process-wide active-source projection. */
     private val onDurableActiveDeviceChanged: (String) -> Unit = {},
     /** Push a strap's battery percent into the live state (e.g. `ble::publishExternalBattery`), so a
@@ -270,6 +279,8 @@ class SourceCoordinator(
     private var veepooPairingStateJob: kotlinx.coroutines.Job? = null
     private var veepooPairingSource: VeepooManagedSource? = null
     private var veepooPairingDeviceId: String? = null
+    private val veepooPairingRequestGeneration = AtomicLong()
+    private val veepooPairingGeneration = AtomicLong()
     private sealed interface PausedTransport {
         val deviceId: String
 
@@ -278,6 +289,9 @@ class SourceCoordinator(
     }
 
     private var veepooPairingPausedTransport: PausedTransport? = null
+    private var pendingReconcileId: String? = null
+    private var supplierCredentialRetryJob: Job? = null
+    private var supplierCredentialRetryDeviceId: String? = null
 
     /** The single non-WHOOP source currently live — a generic HR strap, FTMS machine, Huami band, or Oura
      *  ring — held behind the [LiveHrSource] interface. null while WHOOP is active or nothing else is
@@ -332,34 +346,56 @@ class SourceCoordinator(
         scope.launch { reconcileLock.withLock { reconcile(id) } }
     }
 
-    fun beginVeepooPairing(): Boolean {
+    suspend fun beginVeepooPairing(): Boolean {
         if (!veepooAvailable) return false
-        cancelVeepooPairing()
-        val deviceId = "supplier-${UUID.randomUUID()}"
-        val source = veepooPairingSourceFactory?.invoke(deviceId) ?: run {
-            val provider = veepooBridgeProvider ?: return false
-            runCatching {
-                VeepooBandSource(
-                    deviceId = deviceId,
-                    bridge = provider.create(requireNotNull(context)),
-                    compatibilityPolicy = veepooCompatibilityPolicy,
+        val requestGeneration = veepooPairingRequestGeneration.incrementAndGet()
+        return reconcileLock.withLock {
+            if (veepooPairingRequestGeneration.get() != requestGeneration) {
+                return@withLock false
+            }
+            cancelSupplierCredentialRetry()
+            val generation = veepooPairingGeneration.incrementAndGet()
+            clearVeepooPairingLocked(restoreTransport = false)
+            if (!pauseActiveTransportForPairing()) return@withLock false
+            val deviceId = "supplier-${UUID.randomUUID()}"
+            val source = runCatching {
+                veepooPairingSourceFactory?.invoke(deviceId) ?: run {
+                    val provider = requireNotNull(veepooBridgeProvider)
+                    VeepooBandSource(
+                        deviceId = deviceId,
+                        bridge = provider.create(requireNotNull(context)),
+                        compatibilityPolicy = veepooCompatibilityPolicy,
+                    )
+                }
+            }.getOrNull() ?: run {
+                restorePausedTransportAfterPairingLocked()
+                return@withLock false
+            }
+            veepooPairingSource = source
+            veepooPairingDeviceId = deviceId
+            mirrorVeepooPairing(source, generation)
+            val scanStarted = runCatching {
+                source.scan()
+                true
+            }.getOrDefault(false)
+            if (!scanStarted) {
+                clearVeepooPairingLocked(
+                    restoreTransport = true,
+                    expectedGeneration = generation,
                 )
-            }.getOrNull() ?: return false
+                return@withLock false
+            }
+            true
         }
-        veepooPairingSource = source
-        veepooPairingDeviceId = deviceId
-        mirrorVeepooPairing(source)
-        source.scan()
-        return true
     }
 
-    fun selectVeepooCandidate(handle: VeepooCandidateHandle): Boolean {
-        val source = veepooPairingSource ?: return false
-        if (!pauseActiveTransportForPairing()) return false
-        val selected = source.selectCandidate(handle)
-        if (!selected) restorePausedTransportAfterPairing()
-        return selected
-    }
+    suspend fun selectVeepooCandidate(handle: VeepooCandidateHandle): Boolean =
+        reconcileLock.withLock {
+            val source = veepooPairingSource ?: return@withLock false
+            val selected = source.selectCandidate(handle)
+            if (!selected) clearVeepooPairingLocked(restoreTransport = true)
+            selected
+        }
 
     fun submitVeepooPairing(transportPassword: CharArray): Boolean {
         val source = veepooPairingSource ?: return false
@@ -370,55 +406,60 @@ class SourceCoordinator(
         }
     }
 
-    suspend fun commitVeepooPairing(nickname: String?): Boolean {
-        val source = veepooPairingSource ?: return false
-        val deviceId = veepooPairingDeviceId ?: return false
-        val credentialStore = veepooCredentials
-        if (credentialStore == null) {
-            veepooLifecycleDiagnostics.recordSafely(
-                stage = VeepooSupplierLifecycleStage.ADOPTION,
-                outcome = VeepooSupplierLifecycleOutcome.FAILED,
-                failure = VeepooSupplierLifecycleFailure.SECURE_PERSISTENCE,
-            )
-            cancelVeepooPairing()
-            return false
-        }
-        val commit = source.takeProvisioningCommit() ?: return false
-        val now = System.currentTimeMillis() / 1000
-        val adopted = VeepooPairingAdoption(
-            registry = registry,
-            credentials = credentialStore,
-            diagnostics = veepooLifecycleDiagnostics,
-        ).commit(
-            deviceId = deviceId,
-            nickname = nickname,
-            provisioning = commit,
-            now = now,
-        )
-        if (!adopted) {
-            cancelVeepooPairing()
-            return false
-        }
-
-        runCatching { source.stop() }
-        veepooPairingSource = null
-        veepooPairingDeviceId = null
-        veepooPairingStateJob?.cancel()
-        veepooPairingStateJob = null
-        _veepooCandidates.value = emptyList()
-        _veepooPairingState.value = VeepooAdapterState.IDLE
-        runCatching { onDurableActiveDeviceChanged(deviceId) }
+    suspend fun commitVeepooPairing(nickname: String?): Boolean =
         reconcileLock.withLock {
+            val generation = veepooPairingGeneration.get()
+            val source = veepooPairingSource ?: return@withLock false
+            val deviceId = veepooPairingDeviceId ?: return@withLock false
+            val credentialStore = veepooCredentials
+            if (credentialStore == null) {
+                veepooLifecycleDiagnostics.recordSafely(
+                    stage = VeepooSupplierLifecycleStage.ADOPTION,
+                    outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                    failure = VeepooSupplierLifecycleFailure.SECURE_PERSISTENCE,
+                )
+                clearVeepooPairingLocked(
+                    restoreTransport = true,
+                    expectedGeneration = generation,
+                )
+                return@withLock false
+            }
+            val commit = source.takeProvisioningCommit() ?: return@withLock false
+            val now = System.currentTimeMillis() / 1000
+            val adopted = VeepooPairingAdoption(
+                registry = registry,
+                credentials = credentialStore,
+                diagnostics = veepooLifecycleDiagnostics,
+            ).commit(
+                deviceId = deviceId,
+                nickname = nickname,
+                provisioning = commit,
+                now = now,
+            )
+            if (!adopted) {
+                clearVeepooPairingLocked(
+                    restoreTransport = true,
+                    expectedGeneration = generation,
+                )
+                return@withLock false
+            }
+
+            clearVeepooPairingLocked(
+                restoreTransport = false,
+                expectedGeneration = generation,
+            )
+            pendingReconcileId = null
+            veepooPairingPausedTransport = null
+            runCatching { onDurableActiveDeviceChanged(deviceId) }
             lastSeenId = null
             reconcile(deviceId)
+            true
         }
-        return true
-    }
 
     /**
-     * Stop and archive a supplier row as one compensated lifecycle. The active source is stopped before
-     * secure cleanup, the credential is cleared before the registry archive, and an archive failure restores
-     * the credential and reconciles the still-active row before returning false.
+     * Stop and archive a supplier row as one compensated lifecycle. Credential retention is verified before
+     * the active source is stopped, the credential is cleared before the registry archive, and an archive
+     * failure restores the credential and reconciles the still-active row before returning false.
      */
     suspend fun archiveVeepooDevice(id: String): Boolean = reconcileLock.withLock {
         val row = runCatching { registry.all().firstOrNull { it.id == id } }.getOrNull()
@@ -436,16 +477,6 @@ class SourceCoordinator(
             trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
         )
 
-        val wasDurablyActive = row.status == DeviceStatus.active.name
-        val stoppedActiveSource = wasDurablyActive && activeStrapId == id
-        if (stoppedActiveSource) {
-            tearDownNonWhoopSource()
-            activeStrapId = null
-            // Keep onStrap true until the archive commits. WHOOP remains paused and must be resumed if this
-            // removal is rolled back or reconciled to a fallback.
-            onStrap = true
-        }
-
         val credentialStore = veepooCredentials
         if (credentialStore == null) {
             veepooLifecycleDiagnostics.recordSafely(
@@ -460,10 +491,36 @@ class SourceCoordinator(
                 trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
                 failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
             )
-            if (stoppedActiveSource) reconcileCurrentDurableSource()
             return@withLock false
         }
-        val retainedCredential = runCatching { credentialStore.load(id) }.getOrNull()
+        val retainedCredential = when (val read = credentialStore.readForRetention(id)) {
+            is VeepooCredentialRead.Available -> read.credential
+            VeepooCredentialRead.Missing -> null
+            VeepooCredentialRead.Unavailable -> {
+                veepooLifecycleDiagnostics.recordSafely(
+                    stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
+                    outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                    trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
+                    failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
+                )
+                veepooLifecycleDiagnostics.recordSafely(
+                    stage = VeepooSupplierLifecycleStage.REMOVAL,
+                    outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                    trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
+                    failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
+                )
+                return@withLock false
+            }
+        }
+        val wasDurablyActive = row.status == DeviceStatus.active.name
+        val stoppedActiveSource = wasDurablyActive && activeStrapId == id
+        if (stoppedActiveSource) {
+            tearDownNonWhoopSource()
+            activeStrapId = null
+            // Keep onStrap true until the archive commits. WHOOP remains paused and must be resumed if this
+            // removal is rolled back or reconciled to a fallback.
+            onStrap = true
+        }
         try {
             val cleared = runCatching { credentialStore.clear(id) }.getOrDefault(false)
             veepooLifecycleDiagnostics.recordSafely(
@@ -477,6 +534,23 @@ class SourceCoordinator(
                 failure = if (cleared) null else VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
             )
             if (!cleared) {
+                val restored = retainedCredential?.let {
+                    runCatching {
+                        credentialStore.save(
+                            deviceId = id,
+                            password = it.password,
+                            revisionBinding = it.revisionBinding,
+                        )
+                    }.getOrDefault(false)
+                } ?: true
+                if (!restored) {
+                    veepooLifecycleDiagnostics.recordSafely(
+                        stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
+                        outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                        trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
+                        failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
+                    )
+                }
                 veepooLifecycleDiagnostics.recordSafely(
                     stage = VeepooSupplierLifecycleStage.REMOVAL,
                     outcome = VeepooSupplierLifecycleOutcome.FAILED,
@@ -539,36 +613,74 @@ class SourceCoordinator(
     }
 
     fun cancelVeepooPairing() {
-        runCatching { veepooPairingSource?.stop() }
-        veepooPairingSource = null
-        veepooPairingDeviceId = null
-        veepooPairingStateJob?.cancel()
-        veepooPairingStateJob = null
-        _veepooCandidates.value = emptyList()
-        _veepooPairingState.value = VeepooAdapterState.IDLE
-        restorePausedTransportAfterPairing()
-    }
-
-    internal fun onVeepooAuthenticationRejected(id: String) {
-        val credentialStore = veepooCredentials
-        val cleared = credentialStore?.let {
-            runCatching { it.clear(id) }.getOrDefault(false)
-        } ?: false
-        veepooLifecycleDiagnostics.recordSafely(
-            stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
-            outcome = if (cleared) {
-                VeepooSupplierLifecycleOutcome.COMPLETED
-            } else {
-                VeepooSupplierLifecycleOutcome.FAILED
-            },
-            trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
-            failure = if (cleared) null else VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
-        )
+        veepooPairingRequestGeneration.incrementAndGet()
+        val generation = veepooPairingGeneration.get()
+        if (reconcileLock.tryLock()) {
+            try {
+                clearVeepooPairingLocked(
+                    restoreTransport = true,
+                    expectedGeneration = generation,
+                )
+            } finally {
+                reconcileLock.unlock()
+            }
+            return
+        }
         scope.launch {
             reconcileLock.withLock {
+                clearVeepooPairingLocked(
+                    restoreTransport = true,
+                    expectedGeneration = generation,
+                )
+            }
+        }
+    }
+
+    internal fun onVeepooAuthenticationRejected(id: String, source: LiveHrSource) {
+        scope.launch {
+            reconcileLock.withLock {
+                if (activeStrapId == id) {
+                    if (activeSource === source) {
+                        detachTerminalSupplierSource(source)
+                    } else {
+                        // Removal rollback may have recreated this id while the rejection waited for the lock.
+                        // That replacement uses the same rejected credential and must be stopped normally.
+                        tearDownNonWhoopSource()
+                        activeStrapId = null
+                        onStrap = true
+                    }
+                }
+                val credentialStore = veepooCredentials
+                val cleared = credentialStore?.let {
+                    runCatching { it.clear(id) }.getOrDefault(false)
+                } ?: false
+                veepooLifecycleDiagnostics.recordSafely(
+                    stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
+                    outcome = if (cleared) {
+                        VeepooSupplierLifecycleOutcome.COMPLETED
+                    } else {
+                        VeepooSupplierLifecycleOutcome.FAILED
+                    },
+                    trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
+                    failure = if (cleared) null else VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
+                )
                 reconcileUnavailableSupplier(
                     id = id,
                     trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
+                    preferredTransportDeviceId = null,
+                )
+            }
+        }
+    }
+
+    internal fun onVeepooRuntimeUnavailable(id: String, source: LiveHrSource) {
+        scope.launch {
+            reconcileLock.withLock {
+                if (activeStrapId != id || activeSource !== source) return@withLock
+                detachTerminalSupplierSource(source)
+                reconcileUnavailableSupplier(
+                    id = id,
+                    trigger = VeepooSupplierLifecycleTrigger.SOURCE_UNAVAILABLE,
                     preferredTransportDeviceId = null,
                 )
             }
@@ -632,6 +744,15 @@ class SourceCoordinator(
     }
 
     private suspend fun reconcile(id: String) {
+        if (supplierCredentialRetryDeviceId != null &&
+            supplierCredentialRetryDeviceId != id
+        ) {
+            cancelSupplierCredentialRetry()
+        }
+        if (veepooPairingSource != null) {
+            pendingReconcileId = id
+            return
+        }
         if (id == lastSeenId) return
         lastSeenId = id
         val devices = try {
@@ -762,6 +883,17 @@ class SourceCoordinator(
         // durable active row is reconciled back to it.
         val source = try {
             makeSource(id, row)
+        } catch (_: SupplierCredentialTemporarilyUnavailable) {
+            quiesceCurrentTransportForSupplierRetry()
+            lastSeenId = null
+            veepooLifecycleDiagnostics.recordSafely(
+                stage = VeepooSupplierLifecycleStage.SECURE_READ,
+                outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                trigger = VeepooSupplierLifecycleTrigger.SOURCE_UNAVAILABLE,
+                failure = VeepooSupplierLifecycleFailure.SECURE_READ_UNAVAILABLE,
+            )
+            scheduleSupplierCredentialRetry(id)
+            return
         } catch (failure: Throwable) {
             if (!supplier) throw failure
             straplog("Supplier band: adapter unavailable in this build")
@@ -813,6 +945,18 @@ class SourceCoordinator(
             activeWhoopId
         }
         return current?.takeUnless { it == excluding }
+    }
+
+    private fun quiesceCurrentTransportForSupplierRetry() {
+        if (onStrap) {
+            tearDownNonWhoopSource()
+            activeStrapId = null
+        } else {
+            stopWhoop()
+        }
+        // The durable active id already points at the supplier. No previous transport may continue
+        // publishing while its samples would be attributed to that supplier id.
+        onStrap = true
     }
 
     private suspend fun reconcileUnavailableSupplier(
@@ -872,17 +1016,15 @@ class SourceCoordinator(
      */
     private fun makeSource(id: String, row: PairedDeviceRow?): LiveHrSource {
         noopBandSourceFactory?.invoke(id, row)?.let { return it }
-        // Non-null in production (set at the composition root); only the JVM-test paths that never reach a
-        // strap switch leave it null. Fail loudly rather than silently no-op if that invariant breaks.
-        val ctx = requireNotNull(context) { "SourceCoordinator.context is required to run a strap source" }
         return when (row?.sourceKind) {
             SourceKind.ftms.name -> FtmsSource(
-                context = ctx,
+                context = requireSourceContext(),
                 liveSink = { hr -> liveSink(hr, emptyList()) },  // machine HR → the existing live recorder
                 onBattery = batterySink,                          // machine battery → the same live state
                 log = straplog,
             )
             SourceKind.huami.name -> {
+                val ctx = requireSourceContext()
                 val repo = requireNotNull(repository) { "SourceCoordinator.repository is required to persist Huami samples" }
                 HuamiHrSource(
                     context = ctx,
@@ -895,30 +1037,45 @@ class SourceCoordinator(
                     onBattery = batterySink,
                 )
             }
-            SourceKind.oura.name -> makeOuraSource(id, ctx, row)
+            SourceKind.oura.name -> makeOuraSource(
+                id,
+                requireSourceContext(),
+                row,
+            )
             SourceKind.veepoo.name -> {
-                val provider = requireNotNull(veepooBridgeProvider) {
-                    "Supplier adapter is unavailable"
-                }
                 val credentials = requireNotNull(veepooCredentials) {
                     "Supplier credential store is unavailable"
                 }
-                val credential = credentials.load(id)
-                    ?: error("Supplier transport credential is unavailable")
+                val credential = when (val read = credentials.readForRetention(id)) {
+                    is VeepooCredentialRead.Available -> read.credential
+                    VeepooCredentialRead.Missing ->
+                        error("Supplier transport credential is unavailable")
+                    VeepooCredentialRead.Unavailable ->
+                        throw SupplierCredentialTemporarilyUnavailable()
+                }
                 try {
-                    VeepooBandSource(
-                        deviceId = id,
-                        bridge = provider.create(ctx),
-                        initialReconnectPassword = credential.password,
-                        initialReconnectRevisionBinding = credential.revisionBinding,
-                        compatibilityPolicy = veepooCompatibilityPolicy,
-                        onReconnectCredentialRejected = { onVeepooAuthenticationRejected(id) },
-                    )
+                    veepooActiveSourceFactory?.invoke(id, credential)
+                        ?: VeepooBandSource(
+                            deviceId = id,
+                            bridge = requireNotNull(veepooBridgeProvider) {
+                                "Supplier adapter is unavailable"
+                            }.create(requireSourceContext()),
+                            initialReconnectPassword = credential.password,
+                            initialReconnectRevisionBinding = credential.revisionBinding,
+                            compatibilityPolicy = veepooCompatibilityPolicy,
+                            onReconnectCredentialRejected = { source ->
+                                onVeepooAuthenticationRejected(id, source)
+                            },
+                            onRuntimeUnavailable = { source ->
+                                onVeepooRuntimeUnavailable(id, source)
+                            },
+                        )
                 } finally {
                     credential.close()
                 }
             }
             else -> {
+                val ctx = requireSourceContext()
                 val repo = requireNotNull(repository) { "SourceCoordinator.repository is required to persist strap samples" }
                 StandardHrSource(
                     context = ctx,
@@ -939,6 +1096,11 @@ class SourceCoordinator(
             }
         }
     }
+
+    private fun requireSourceContext(): Context =
+        requireNotNull(context) {
+            "SourceCoordinator.context is required to run a strap source"
+        }
 
     /**
      * Build the EXPERIMENTAL Oura ring source (gen3 / gen4 / gen5) for [id]. Also wires the adopt-outcome
@@ -1045,6 +1207,19 @@ class SourceCoordinator(
         _sensorMetrics.value = StandardHrSource.SensorMetrics()
     }
 
+    private fun detachTerminalSupplierSource(source: LiveHrSource) {
+        if (activeSource !== source) return
+        activeSource = null
+        activeStrapId = null
+        veepooActiveDisplayJob?.cancel()
+        veepooActiveDisplayJob = null
+        _veepooDisplay.value = VeepooDisplayState()
+        _sensorMetrics.value = StandardHrSource.SensorMetrics()
+        // WHOOP remains paused until durable fallback succeeds. If fallback is unavailable,
+        // keeping this edge marked as a strap allows a same-device retry without redundant WHOOP churn.
+        onStrap = true
+    }
+
     private fun mirrorVeepooActiveDisplay(source: VeepooManagedSource) {
         veepooActiveDisplayJob?.cancel()
         veepooActiveDisplayJob = scope.launch {
@@ -1052,14 +1227,29 @@ class SourceCoordinator(
         }
     }
 
-    private fun mirrorVeepooPairing(source: VeepooManagedSource) {
+    private fun mirrorVeepooPairing(
+        source: VeepooManagedSource,
+        generation: Long,
+    ) {
         veepooPairingStateJob?.cancel()
         veepooPairingStateJob = scope.launch {
             launch {
                 source.state.collect {
                     _veepooPairingState.value = it
                     if (it == VeepooAdapterState.FAILED) {
-                        restorePausedTransportAfterPairing()
+                        scope.launch {
+                            reconcileLock.withLock {
+                                if (
+                                    veepooPairingGeneration.get() == generation &&
+                                    veepooPairingSource === source
+                                ) {
+                                    clearVeepooPairingLocked(
+                                        restoreTransport = true,
+                                        expectedGeneration = generation,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1072,8 +1262,12 @@ class SourceCoordinator(
     private fun pauseActiveTransportForPairing(): Boolean {
         if (veepooPairingPausedTransport != null) return true
         return if (onStrap) {
-            val id = activeStrapId ?: return false
-            if (activeSource == null) return false
+            val id = activeStrapId
+            if (id == null || activeSource == null) {
+                // A supplier credential retry intentionally leaves the durable supplier selected with no
+                // live transport. Pairing a replacement must still be possible from that honest idle state.
+                return true
+            }
             veepooPairingPausedTransport = PausedTransport.Strap(id)
             tearDownNonWhoopSource()
             activeStrapId = null
@@ -1087,9 +1281,98 @@ class SourceCoordinator(
         }
     }
 
-    private fun restorePausedTransportAfterPairing() {
-        val paused = veepooPairingPausedTransport ?: return
+    private fun clearVeepooPairingLocked(
+        restoreTransport: Boolean,
+        expectedGeneration: Long? = null,
+    ) {
+        if (
+            expectedGeneration != null &&
+            veepooPairingGeneration.get() != expectedGeneration
+        ) {
+            return
+        }
+        val hadPairing =
+            veepooPairingSource != null ||
+                veepooPairingStateJob != null ||
+                veepooPairingPausedTransport != null
+        runCatching { veepooPairingSource?.stop() }
+        veepooPairingSource = null
+        veepooPairingDeviceId = null
+        veepooPairingStateJob?.cancel()
+        veepooPairingStateJob = null
+        _veepooCandidates.value = emptyList()
+        _veepooPairingState.value = VeepooAdapterState.IDLE
+        if (restoreTransport && hadPairing) restorePausedTransportAfterPairingLocked()
+    }
+
+    private fun scheduleSupplierCredentialRetry(id: String) {
+        if (supplierCredentialRetryJob?.isActive == true &&
+            supplierCredentialRetryDeviceId == id
+        ) {
+            return
+        }
+        cancelSupplierCredentialRetry()
+        supplierCredentialRetryDeviceId = id
+        supplierCredentialRetryJob = scope.launch {
+            try {
+                for (delayMillis in supplierCredentialRetryDelaysMillis) {
+                    if (delayMillis > 0) delay(delayMillis)
+                    reconcileLock.withLock {
+                        if (registry.activeDeviceId() != id) return@launch
+                        lastSeenId = null
+                        reconcile(id)
+                        if (activeStrapId == id && activeSource != null) {
+                            veepooLifecycleDiagnostics.recordSafely(
+                                stage = VeepooSupplierLifecycleStage.SECURE_READ,
+                                outcome = VeepooSupplierLifecycleOutcome.COMPLETED,
+                                trigger = VeepooSupplierLifecycleTrigger.SOURCE_UNAVAILABLE,
+                            )
+                            return@launch
+                        }
+                    }
+                }
+            } finally {
+                if (supplierCredentialRetryDeviceId == id) {
+                    supplierCredentialRetryDeviceId = null
+                    supplierCredentialRetryJob = null
+                }
+            }
+        }
+    }
+
+    private fun cancelSupplierCredentialRetry() {
+        supplierCredentialRetryJob?.cancel()
+        supplierCredentialRetryJob = null
+        supplierCredentialRetryDeviceId = null
+    }
+
+    private fun restorePausedTransportAfterPairingLocked() {
+        val pending = pendingReconcileId
+        pendingReconcileId = null
+        val paused = veepooPairingPausedTransport
         veepooPairingPausedTransport = null
+        if (pending != null) {
+            lastSeenId = null
+            scope.launch {
+                reconcileLock.withLock {
+                    reconcile(pending)
+                }
+            }
+            return
+        }
+        if (paused == null) {
+            // Pairing can start while a durable supplier is waiting on a transient secure-store read and
+            // therefore has no transport to pause. Resume that durable selection after cancellation/failure.
+            scope.launch {
+                val current = runCatching { registry.activeDeviceId() }.getOrNull()
+                    ?: return@launch
+                reconcileLock.withLock {
+                    lastSeenId = null
+                    reconcile(current)
+                }
+            }
+            return
+        }
         when (paused) {
             is PausedTransport.Whoop -> startWhoop()
             is PausedTransport.Strap -> scope.launch {
@@ -1119,4 +1402,6 @@ class SourceCoordinator(
             device.id == WhoopBleClient.DEFAULT_DEVICE_ID ||
                 device.brand.equals("WHOOP", ignoreCase = true)
     }
+
+    private class SupplierCredentialTemporarilyUnavailable : Exception()
 }

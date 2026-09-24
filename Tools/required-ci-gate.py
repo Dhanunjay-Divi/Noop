@@ -44,7 +44,7 @@ RELEASE_SOURCE_DIGESTS = {
         "75020df9587cc34387f41b3b9482bd71187639e39a79a3db97cb1dfd13552719"
     ),
     ".github/workflows/release-controls.yml": (
-        "630e0555bf18a18878187d5b9d74bffe6a04f10521f4aadb5c99c67ce2e9ab70"
+        "07ad8fe7364cd154e3efc04f779eb5a364d23922fc1f151c49d8cffe7c7789eb"
     ),
     ".github/workflows/release.yml": (
         "08751fb8e82e0c14fdb4630f45262892077b42e644d740219e7750494c34c01b"
@@ -71,7 +71,7 @@ RELEASE_SOURCE_DIGESTS = {
         "84ff7cc3025685fe50f01d48af844ee290e7fa85fe63db3b1719f54b33916116"
     ),
     "release/terminology/legacy-inventory.json": (
-        "fcf13b1d3f1d9dc0d6b5096dffd2ec9d8b40f0021f528494a9f307d030e9221b"
+        "94926d84903ef71939a550775403b734f56efbd6877c99e4a6f476b6b665a697"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"

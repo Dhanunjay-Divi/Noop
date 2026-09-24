@@ -31,11 +31,12 @@ prove.
   because the candidate SDK exposes an API or the app compiles.
 - The current working-tree candidate for app PR `#17` consumes the
   supplier-neutral SDK at reviewed merge
-  `50a16fbc75f9ae604e773ff6608c87f0b96b67f7` while retaining WHOOP as the
-  default comparison transport and leaving the first-party source factory
-  disabled. A device-connected agent must not expect a supplier band to pair
-  until the quarantined exact-model adapter and approved supplier artifacts are
-  integrated and enabled for that test build.
+  `b02808372b7c537f22058c7ebc75d92c750373be` while retaining WHOOP as the
+  default comparison transport. The quarantined exact-model Apple and Android
+  adapters are integrated only when the approved external supplier artifacts
+  are verified and a Debug physical-device build is configured as documented
+  below. Clean, simulator, Release, and Archive builds remain supplier-disabled;
+  source integration does not prove physical pairing or sensor behavior.
 
 ## 1.1 Immediate device-connected continuation
 
@@ -94,16 +95,31 @@ git rev-parse HEAD
 git status --short
 ```
 
-For iOS, configure only the gitignored local signing file, regenerate the
-project, and identify the connected device locally:
+For iOS, configure only the gitignored local signing file and the verified
+external supplier bundle, regenerate the project, and identify the connected
+device locally:
 
 ```bash
 cp -n Config/BundleIdSecrets.example.xcconfig \
   Config/BundleIdSecrets.xcconfig
 # Set the local BUNDLE_ID_PREFIX and DEVELOPMENT_TEAM values.
+
+VEEPOO_IOS_SDK_ROOT="<absolute path to the approved iOS_sdk_source directory>"
+python3 Tools/local/configure-veepoo-ios-sdk.py \
+  --sdk-root "${VEEPOO_IOS_SDK_ROOT}" \
+  --write-config
+git check-ignore Config/VeepooLocalSDK.xcconfig
+
 xcodegen generate
 xcrun devicectl list devices
 ```
+
+The configurator must report that the protected manifest, build inputs, and all
+fixed and generated framework bundles match before it writes the ignored
+`Config/VeepooLocalSDK.xcconfig`. Do not copy supplier frameworks into the
+repository or commit the generated config. The generated settings enable only
+Debug iPhoneOS builds; Release and Archive remain blocked from supplier
+embedding.
 
 Keep the device identifier out of Git and shared logs. Xcode's `NOOPiOS`
 scheme may be used interactively, or the same signed development build can be
@@ -134,15 +150,67 @@ Select the same team for the app, widget, Watch app, and complication targets.
 Record the app commit, bundle family, marketing/build version, and generalized
 iPhone/OS class. Do not publish or upload the archive from this step.
 
-For Android, build and install the full transport flavor rather than the
-fictional Review Sample:
+For Android, generate the ignored local configuration directly from the
+protected artifact trust root, verify every external AAR, then build and install
+the full transport flavor rather than the fictional Review Sample:
 
 ```bash
-cd android
-./gradlew --no-daemon --no-parallel :app:assembleFullDebug
+ANDROID_SUPPLIER_SDK_ROOT="<absolute path to the approved Android SDK root>"
+export ANDROID_SUPPLIER_SDK_ROOT
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+sdk_root = Path(os.environ["ANDROID_SUPPLIER_SDK_ROOT"])
+if not sdk_root.is_absolute():
+    raise SystemExit("ANDROID_SUPPLIER_SDK_ROOT must be absolute")
+trust = json.loads(
+    Path("release/supplier/android-artifact-trust.json").read_text(
+        encoding="utf-8"
+    )
+)
+artifacts = trust["artifacts"]
+lines = [
+    "enabled=true",
+    f"sdk.root={sdk_root}",
+    f"artifact.count={len(artifacts)}",
+]
+for index, artifact in enumerate(artifacts):
+    prefix = f"artifact.{index}"
+    lines.extend(
+        [
+            f"{prefix}.path={artifact['path']}",
+            f"{prefix}.sha256={artifact['sha256']}",
+            (
+                f"{prefix}.requiredClasses="
+                + ",".join(artifact["requiredClasses"])
+            ),
+            f"{prefix}.nativeAbis=" + ",".join(artifact["nativeAbis"]),
+            (
+                f"{prefix}.nativeLibraries="
+                + ",".join(artifact["nativeLibraries"])
+            ),
+        ]
+    )
+Path("android/noop-supplier-sdk.properties").write_text(
+    "\n".join(lines) + "\n",
+    encoding="utf-8",
+)
+PY
+git check-ignore android/noop-supplier-sdk.properties
+python3 Tools/local/verify-android-supplier-sdk.py \
+  --repo-root . \
+  --config android/noop-supplier-sdk.properties
+(
+  cd android
+  ./gradlew -q :app:noopSupplierSdkStatus :app:verifyNoopSupplierSdk
+  ./gradlew --no-daemon --no-parallel :app:assembleFullDebug
+)
+
 adb devices -l
-adb install -r app/build/outputs/apk/full/debug/app-full-debug.apk
-shasum -a 256 app/build/outputs/apk/full/debug/app-full-debug.apk
+adb install -r android/app/build/outputs/apk/full/debug/app-full-debug.apk
+shasum -a 256 android/app/build/outputs/apk/full/debug/app-full-debug.apk
 
 PACKAGE_ID="com.noop.whoop.debug"
 adb logcat -c
@@ -150,6 +218,10 @@ adb shell am start -W -n "${PACKAGE_ID}/com.noop.IconDefault"
 adb logcat -d -v brief | \
   grep -E "FATAL EXCEPTION|ANR in ${PACKAGE_ID}|Process: ${PACKAGE_ID}" || true
 ```
+
+The verifier and Gradle status task must both report supplier enablement and the
+exact protected artifact inventory before installation. Do not commit the local
+properties file or any AAR, JAR, native library, APK, or supplier SDK directory.
 
 Record the exact APK SHA-256, app commit, version/build, and generalized
 phone/OS class. A successful install is only the start of the physical matrix;

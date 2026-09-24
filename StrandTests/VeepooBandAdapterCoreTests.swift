@@ -1,4 +1,5 @@
 import Combine
+import Security
 import XCTest
 @testable import Strand
 import WhoopStore
@@ -102,6 +103,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         private(set) var reconnects: [UInt64] = []
         var onDiscovery: (() -> Void)?
         var onStopDiscovery: (() -> Void)?
+        var onDisconnect: (() -> Void)?
 
         func startDiscovery(targetPeripheralID: UUID?) {
             discoveries.append(targetPeripheralID)
@@ -122,7 +124,10 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         func reconnect(candidateHandle: UInt64) {
             reconnects.append(candidateHandle)
         }
-        func disconnect() { disconnectCount += 1 }
+        func disconnect() {
+            disconnectCount += 1
+            onDisconnect?()
+        }
         func verifyPassword(_ password: String) {}
         func startLiveHeartRate() { liveStartCount += 1 }
         func stopLiveHeartRate() {}
@@ -137,11 +142,14 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         var saveSucceeds = true
         var clearSucceeds = true
         var values: [String: String] = [:]
+        var loadOverride: VeepooCredentialLoadResult?
         private(set) var saveCount = 0
         private(set) var clearCount = 0
 
-        func load(deviceID: String) -> String? {
-            values[deviceID]
+        func load(deviceID: String) -> VeepooCredentialLoadResult {
+            if let loadOverride { return loadOverride }
+            return values[deviceID].map(VeepooCredentialLoadResult.available)
+                ?? .missing
         }
 
         func save(_ password: String, deviceID: String) -> Bool {
@@ -304,6 +312,57 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         XCTAssertFalse(VeepooBandAdapterCore.isValidPassword("12x4"))
         XCTAssertFalse(VeepooBandAdapterCore.isValidPassword("１２３４"))
         XCTAssertFalse(VeepooBandAdapterCore.isValidPassword("١٢٣٤"))
+    }
+
+    @MainActor
+    func testTransientKeychainReadFailureDoesNotDeleteCredential() {
+        var deleteCount = 0
+        let store = VeepooCredentialStore(
+            copyMatching: { _, _ in errSecInteractionNotAllowed },
+            deleteItem: { _ in
+                deleteCount += 1
+                return errSecSuccess
+            }
+        )
+
+        XCTAssertEqual(store.load(deviceID: "supplier"), .unavailable)
+        XCTAssertEqual(deleteCount, 0)
+    }
+
+    @MainActor
+    func testMalformedKeychainCredentialIsClassifiedAndDeleted() {
+        var deleteCount = 0
+        let store = VeepooCredentialStore(
+            copyMatching: { _, result in
+                result?.pointee = Data("12x4".utf8) as CFData
+                return errSecSuccess
+            },
+            deleteItem: { _ in
+                deleteCount += 1
+                return errSecSuccess
+            }
+        )
+
+        XCTAssertEqual(store.load(deviceID: "supplier"), .malformed)
+        XCTAssertEqual(deleteCount, 1)
+    }
+
+    @MainActor
+    func testMalformedKeychainCredentialDeletionFailureIsUnavailable() {
+        var deleteCount = 0
+        let store = VeepooCredentialStore(
+            copyMatching: { _, result in
+                result?.pointee = Data("12x4".utf8) as CFData
+                return errSecSuccess
+            },
+            deleteItem: { _ in
+                deleteCount += 1
+                return errSecInteractionNotAllowed
+            }
+        )
+
+        XCTAssertEqual(store.load(deviceID: "supplier"), .unavailable)
+        XCTAssertEqual(deleteCount, 1)
     }
 
     @MainActor
@@ -706,6 +765,15 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
                 adapterAvailable: false
             )
         )
+        credentials.loadOverride = .unavailable
+        XCTAssertTrue(
+            VeepooBandSourceFactory.hasUsableRegistration(
+                for: device,
+                credentials: credentials,
+                adapterAvailable: true
+            )
+        )
+        credentials.loadOverride = nil
         credentials.values[device.id] = "12x4"
         XCTAssertFalse(
             VeepooBandSourceFactory.hasUsableRegistration(
@@ -762,7 +830,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     }
 
     @MainActor
-    func testReconnectDiscoveryTimesOutAndStopsAfterBoundedAttempts() async {
+    func testInitialActivationDiscoveryUsesBoundedReconnectPolicy() async {
         let adapter = FakeAdapter()
         let source = VeepooBandSource(
             live: LiveState(),
@@ -773,11 +841,10 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             reconnectDiscoveryTimeoutNanoseconds: 0
         )
         source.connect(UUID())
-        adapter.emit(.disconnected)
 
         for _ in 0..<100 {
             if adapter.discoveries.count == 4,
-               adapter.stopDiscoveryCount == 3
+               adapter.stopDiscoveryCount == 4
             {
                 break
             }
@@ -785,7 +852,40 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         }
 
         XCTAssertEqual(adapter.discoveries.count, 4)
-        XCTAssertEqual(adapter.stopDiscoveryCount, 3)
+        XCTAssertEqual(adapter.stopDiscoveryCount, 4)
+        source.stop()
+    }
+
+    @MainActor
+    func testTerminalBatteryFailureClearsStateAndReconcilesOnce() {
+        let live = LiveState()
+        live.setBattery(80)
+        live.setDisplayOnlyHeartRate(72, receivedAt: Date())
+        live.connected = true
+        let adapter = FakeAdapter()
+        var reconciliationCount = 0
+        var disconnectCountAtReconciliation = 0
+        let source = VeepooBandSource(
+            live: live,
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {},
+            onTerminalBatteryFailure: {
+                reconciliationCount += 1
+                disconnectCountAtReconciliation = adapter.disconnectCount
+                return true
+            }
+        )
+
+        adapter.emit(.failed(stage: .battery, failure: .invalidBattery))
+        adapter.emit(.failed(stage: .battery, failure: .invalidBattery))
+
+        XCTAssertNil(live.batteryPct)
+        XCTAssertNil(live.displayOnlyHeartRate)
+        XCTAssertNil(live.displayOnlyHeartRateReceivedAt)
+        XCTAssertFalse(live.connected)
+        XCTAssertEqual(reconciliationCount, 1)
+        XCTAssertEqual(disconnectCountAtReconciliation, 1)
         source.stop()
     }
 
@@ -875,6 +975,27 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         }
 
         XCTAssertFalse(removed)
+        XCTAssertEqual(archiveCalls, 0)
+        XCTAssertEqual(credentials.values["supplier"], "2468")
+    }
+
+    @MainActor
+    func testSupplierRemovalStopsWhenCredentialReadIsUnavailable() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        credentials.loadOverride = .unavailable
+        var archiveCalls = 0
+
+        let removed = VeepooSupplierRemoval.remove(
+            deviceID: "supplier",
+            credentials: credentials
+        ) {
+            archiveCalls += 1
+            return true
+        }
+
+        XCTAssertFalse(removed)
+        XCTAssertEqual(credentials.clearCount, 0)
         XCTAssertEqual(archiveCalls, 0)
         XCTAssertEqual(credentials.values["supplier"], "2468")
     }

@@ -67,6 +67,12 @@ enum class VeepooAdapterState {
     STOPPED,
 }
 
+private enum class VeepooTransportOwnership {
+    ACTIVE,
+    RELEASED_AFTER_FAILURE,
+    RELEASED_AFTER_STOP,
+}
+
 data class VeepooCandidateRow(
     val handle: VeepooCandidateHandle,
     val ordinal: Int,
@@ -139,7 +145,8 @@ class VeepooBandSource(
         VeepooCompatibilityPolicy.invalid(),
     private val diagnostics: VeepooDiagnosticSink = AppVeepooDiagnosticSink,
     private val session: BandSessionMachine = NoopBandSdkBoundary.newSession(),
-    private val onReconnectCredentialRejected: () -> Unit = {},
+    private val onReconnectCredentialRejected: (VeepooBandSource) -> Unit = {},
+    private val onRuntimeUnavailable: (VeepooBandSource) -> Unit = {},
     private val reconnectScheduler: VeepooReconnectScheduler =
         ExecutorVeepooReconnectScheduler(),
 ) : VeepooManagedSource, VeepooBridge.Listener {
@@ -165,10 +172,12 @@ class VeepooBandSource(
     private var reconnectPassword: CharArray? = initialReconnectPassword?.copyOf()
     private var reconnectRevisionBinding: VeepooRevisionBinding? =
         initialReconnectRevisionBinding
+    private var reconnectAddress: String? = null
     private var provisioningCommit: VeepooProvisioningCommit? = null
     private var reconnectCancellation: VeepooReconnectCancellation? = null
     private var reconnectAttemptCount = 0
-    private var stopped = false
+    private var transportOwnership = VeepooTransportOwnership.ACTIVE
+    private var transportReleaseComplete = false
     private var staleReported = false
     private var invalidLiveReported = false
     private val bridgeReady: Boolean
@@ -180,7 +189,7 @@ class VeepooBandSource(
 
     @Synchronized
     override fun scan() {
-        if (stopped) return
+        if (transportOwnership != VeepooTransportOwnership.ACTIVE) return
         if (!bridgeReady) {
             failAttempt(VeepooDiagnosticCategory.DISCOVERY, VeepooDiagnosticFailure.UNAVAILABLE)
             return
@@ -206,7 +215,7 @@ class VeepooBandSource(
 
     @Synchronized
     override fun connect(address: String) {
-        if (stopped) return
+        if (transportOwnership != VeepooTransportOwnership.ACTIVE) return
         if (!bridgeReady) {
             failAttempt(VeepooDiagnosticCategory.RECONNECT, VeepooDiagnosticFailure.UNAVAILABLE)
             return
@@ -218,6 +227,8 @@ class VeepooBandSource(
                 VeepooDiagnosticCategory.RECONNECT,
                 if (address.isBlank()) VeepooDiagnosticFailure.INVALID_INPUT
                 else VeepooDiagnosticFailure.AUTHENTICATION,
+                reportRuntimeUnavailable =
+                    address.isBlank() || password == null,
             )
             if (address.isNotBlank() && password != null && revisionBinding == null) {
                 notifyReconnectCredentialRejected()
@@ -227,6 +238,7 @@ class VeepooBandSource(
         cancelReconnectSchedule()
         reconnectAttemptCount = 0
         resetAttemptMaterial(clearReconnectPassword = false)
+        reconnectAddress = address
         val scan = runSession { session.beginScan() } ?: return failAttempt(
             VeepooDiagnosticCategory.RECONNECT,
             VeepooDiagnosticFailure.INVALID_STATE,
@@ -258,7 +270,11 @@ class VeepooBandSource(
                 bridge.connect(VeepooConnectionTarget.KnownAddress(address), current, intent)
             }
         ) {
-            failAttempt(VeepooDiagnosticCategory.CONNECTION, VeepooDiagnosticFailure.INTERNAL)
+            scheduleReconnect(
+                failure = VeepooDiagnosticFailure.INTERNAL,
+                currentAttempt = current,
+                address = address,
+            )
         }
     }
 
@@ -311,7 +327,7 @@ class VeepooBandSource(
     @Synchronized
     override fun submitPairing(transportPassword: CharArray): Boolean {
         if (
-            stopped ||
+            transportOwnership != VeepooTransportOwnership.ACTIVE ||
             intent != VeepooConnectionIntent.PAIRING ||
             mutableState.value != VeepooAdapterState.AWAITING_PAIRING_CONFIRMATION ||
             !validPassword(transportPassword)
@@ -337,9 +353,17 @@ class VeepooBandSource(
 
     @Synchronized
     override fun stop() {
-        if (stopped) return
-        stopped = true
-        terminalCleanup(VeepooDiagnosticOutcome.COMPLETED, null)
+        when (transportOwnership) {
+            VeepooTransportOwnership.RELEASED_AFTER_STOP -> return
+            VeepooTransportOwnership.ACTIVE -> {
+                transportOwnership = VeepooTransportOwnership.RELEASED_AFTER_STOP
+                releaseTransport(VeepooDiagnosticOutcome.COMPLETED, null)
+            }
+            VeepooTransportOwnership.RELEASED_AFTER_FAILURE -> {
+                // The coordinator is dropping an already-released terminal source.
+                transportOwnership = VeepooTransportOwnership.RELEASED_AFTER_STOP
+            }
+        }
         publishState(VeepooAdapterState.STOPPED)
     }
 
@@ -379,7 +403,11 @@ class VeepooBandSource(
         } else {
             val password = reconnectPassword
             if (password == null) {
-                failAttempt(VeepooDiagnosticCategory.AUTHENTICATION, VeepooDiagnosticFailure.AUTHENTICATION)
+                failAttempt(
+                    VeepooDiagnosticCategory.AUTHENTICATION,
+                    VeepooDiagnosticFailure.AUTHENTICATION,
+                    reportRuntimeUnavailable = false,
+                )
                 notifyReconnectCredentialRejected()
                 return
             }
@@ -420,7 +448,6 @@ class VeepooBandSource(
                         VeepooDiagnosticFailure.UNSUPPORTED
                     },
                 )
-                if (reconnect) notifyReconnectCredentialRejected()
                 return
             }
         }
@@ -444,7 +471,11 @@ class VeepooBandSource(
             intent == VeepooConnectionIntent.RECONNECT &&
             reconnectRevisionBinding != observedRevisionBinding
         ) {
-            failAttempt(VeepooDiagnosticCategory.RECONNECT, VeepooDiagnosticFailure.REJECTED)
+            failAttempt(
+                VeepooDiagnosticCategory.RECONNECT,
+                VeepooDiagnosticFailure.REJECTED,
+                reportRuntimeUnavailable = false,
+            )
             notifyReconnectCredentialRejected()
             return
         }
@@ -466,8 +497,6 @@ class VeepooBandSource(
                 VeepooDiagnosticFailure.INVALID_STATE,
             )
             reconnectToken = null
-            cancelReconnectSchedule()
-            reconnectAttemptCount = 0
         } else {
             if (connection == null) {
                 failAttempt(VeepooDiagnosticCategory.AUTHENTICATION, VeepooDiagnosticFailure.INVALID_STATE)
@@ -493,6 +522,7 @@ class VeepooBandSource(
             this.binding = binding
             establishedIdentity = identity
             establishedCapabilities = capabilities
+            reconnectAddress = binding.peripheralId
         }
         if (intent == VeepooConnectionIntent.PAIRING) {
             val password = pendingPassword ?: return failAttempt(
@@ -523,8 +553,25 @@ class VeepooBandSource(
     ) {
         if (!accept(attempt) || authenticationToken !== authentication) return stale()
         authenticationToken = null
-        val reconcileCredential = intent == VeepooConnectionIntent.RECONNECT
-        failAttempt(VeepooDiagnosticCategory.AUTHENTICATION, failure.toDiagnostic())
+        if (
+            intent == VeepooConnectionIntent.RECONNECT &&
+            (reconnectToken != null || connectionToken != null) &&
+            failure.isTransientReconnectFailure()
+        ) {
+            scheduleReconnect(
+                failure = failure.toDiagnostic(),
+                currentAttempt = attempt,
+            )
+            return
+        }
+        val reconcileCredential =
+            intent == VeepooConnectionIntent.RECONNECT &&
+                failure in setOf(VeepooFailure.AUTHENTICATION, VeepooFailure.REJECTED)
+        failAttempt(
+            VeepooDiagnosticCategory.AUTHENTICATION,
+            failure.toDiagnostic(),
+            reportRuntimeUnavailable = !reconcileCredential,
+        )
         if (reconcileCredential) notifyReconnectCredentialRejected()
     }
 
@@ -541,6 +588,8 @@ class VeepooBandSource(
             return
         }
         operationToken = null
+        cancelReconnectSchedule()
+        reconnectAttemptCount = 0
         mutableDisplay.value = mutableDisplay.value.copy(batteryPercent = reading.percent)
         record(VeepooDiagnosticCategory.BATTERY, VeepooDiagnosticOutcome.COMPLETED)
         startLive()
@@ -568,10 +617,27 @@ class VeepooBandSource(
 
     @Synchronized
     override fun onConnectionDropped(attempt: VeepooAttemptToken) {
-        if (!accept(attempt) || stopped) return
+        if (
+            !accept(attempt) ||
+            transportOwnership != VeepooTransportOwnership.ACTIVE
+        ) return
+        if (
+            intent == VeepooConnectionIntent.RECONNECT &&
+            reconnectToken == null &&
+            binding == null &&
+            connectionToken != null
+        ) {
+            scheduleReconnect(
+                failure = VeepooDiagnosticFailure.DISCONNECTED,
+                currentAttempt = attempt,
+            )
+            return
+        }
         if (reconnectToken != null && intent == VeepooConnectionIntent.RECONNECT) {
-            this.attempt = null
-            scheduleReconnect(VeepooDiagnosticFailure.DISCONNECTED)
+            scheduleReconnect(
+                failure = VeepooDiagnosticFailure.DISCONNECTED,
+                currentAttempt = attempt,
+            )
             return
         }
         val connection = connectionToken ?: return failAttempt(
@@ -591,14 +657,14 @@ class VeepooBandSource(
         reconnectToken = reconnect
         connectionToken = null
         operationToken = null
-        this.attempt = null
-        contained(VeepooDiagnosticCategory.LIVE_DISPLAY) { bridge.stopLiveHeartRate(attempt) }
         intent = VeepooConnectionIntent.RECONNECT
         publishState(VeepooAdapterState.RECONNECTING)
         record(VeepooDiagnosticCategory.RECONNECT, VeepooDiagnosticOutcome.BEGAN)
         scheduleReconnect(
-            VeepooDiagnosticFailure.DISCONNECTED,
-            currentBinding.peripheralId,
+            failure = VeepooDiagnosticFailure.DISCONNECTED,
+            currentAttempt = attempt,
+            address = currentBinding.peripheralId,
+            stopLive = true,
         )
     }
 
@@ -606,19 +672,39 @@ class VeepooBandSource(
     override fun onFailure(attempt: VeepooAttemptToken, failure: VeepooFailure) {
         if (!accept(attempt)) return
         if (
+            mutableState.value == VeepooAdapterState.READING_BATTERY &&
+            failure.isTransientReconnectFailure() &&
+            beginBatteryReconnect(attempt, failure.toDiagnostic())
+        ) {
+            return
+        }
+        if (
+            mutableState.value == VeepooAdapterState.LIVE_DISPLAY_ONLY &&
+            failure.isTransientReconnectFailure() &&
+            beginLiveReconnect(failure.toDiagnostic())
+        ) {
+            return
+        }
+        if (
             intent == VeepooConnectionIntent.RECONNECT &&
-            reconnectToken != null &&
+            (reconnectToken != null || connectionToken != null) &&
             failure.isTransientReconnectFailure()
         ) {
-            this.attempt = null
-            scheduleReconnect(failure.toDiagnostic())
+            scheduleReconnect(
+                failure = failure.toDiagnostic(),
+                currentAttempt = attempt,
+            )
             return
         }
         val reconcileCredential =
             intent == VeepooConnectionIntent.RECONNECT &&
                 mutableState.value == VeepooAdapterState.AUTHENTICATING &&
                 failure in setOf(VeepooFailure.AUTHENTICATION, VeepooFailure.REJECTED)
-        failAttempt(categoryForState(), failure.toDiagnostic())
+        failAttempt(
+            categoryForState(),
+            failure.toDiagnostic(),
+            reportRuntimeUnavailable = !reconcileCredential,
+        )
         if (reconcileCredential) notifyReconnectCredentialRejected()
     }
 
@@ -627,15 +713,19 @@ class VeepooBandSource(
         val connection = connectionToken
         if (reconnectToken == null) {
             if (connection == null) return false
-            if (runSession {
-                    session.beginAuthentication(connection, session.snapshot().generation)
-                } == null
+            if (
+                session.snapshot().state != com.noop.bandsdk.BandSessionState.AUTHENTICATING
             ) {
-                failAttempt(
-                    VeepooDiagnosticCategory.AUTHENTICATION,
-                    VeepooDiagnosticFailure.INVALID_STATE,
-                )
-                return false
+                if (runSession {
+                        session.beginAuthentication(connection, session.snapshot().generation)
+                    } == null
+                ) {
+                    failAttempt(
+                        VeepooDiagnosticCategory.AUTHENTICATION,
+                        VeepooDiagnosticFailure.INVALID_STATE,
+                    )
+                    return false
+                }
             }
         }
         val auth = VeepooAuthenticationToken.create()
@@ -648,16 +738,71 @@ class VeepooBandSource(
         }
         privateCopy.fill('\u0000')
         if (!invoked) {
-            failAttempt(VeepooDiagnosticCategory.AUTHENTICATION, VeepooDiagnosticFailure.INTERNAL)
+            authenticationToken = null
+            if (intent == VeepooConnectionIntent.RECONNECT) {
+                scheduleReconnect(
+                    failure = VeepooDiagnosticFailure.INTERNAL,
+                    currentAttempt = current,
+                )
+            } else {
+                failAttempt(
+                    VeepooDiagnosticCategory.AUTHENTICATION,
+                    VeepooDiagnosticFailure.INTERNAL,
+                )
+            }
         }
         return invoked
     }
 
+    private fun beginBatteryReconnect(
+        currentAttempt: VeepooAttemptToken,
+        failure: VeepooDiagnosticFailure,
+    ): Boolean {
+        val token = operationToken ?: return false
+        val reconnect = runSession {
+            session.failOperation(token, BandFailureCategory.DISCONNECTED)
+        } ?: return false
+        reconnectToken = reconnect
+        connectionToken = null
+        operationToken = null
+        intent = VeepooConnectionIntent.RECONNECT
+        record(VeepooDiagnosticCategory.BATTERY, VeepooDiagnosticOutcome.FAILED, failure)
+        scheduleReconnect(
+            failure = failure,
+            currentAttempt = currentAttempt,
+        )
+        return true
+    }
+
+    private fun beginLiveReconnect(failure: VeepooDiagnosticFailure): Boolean {
+        val currentAttempt = attempt ?: return false
+        val connection = connectionToken ?: return false
+        val currentBinding = binding ?: return false
+        val reconnect = runSession {
+            session.interruptForReconnect(connection, session.snapshot().generation)
+        } ?: return false
+        reconnectToken = reconnect
+        connectionToken = null
+        operationToken = null
+        intent = VeepooConnectionIntent.RECONNECT
+        record(VeepooDiagnosticCategory.LIVE_DISPLAY, VeepooDiagnosticOutcome.FAILED, failure)
+        scheduleReconnect(
+            failure = failure,
+            currentAttempt = currentAttempt,
+            address = currentBinding.peripheralId,
+            stopLive = true,
+        )
+        return true
+    }
+
     private fun scheduleReconnect(
         failure: VeepooDiagnosticFailure,
-        address: String? = binding?.peripheralId,
+        currentAttempt: VeepooAttemptToken,
+        address: String? = reconnectAddress ?: binding?.peripheralId,
+        stopLive: Boolean = false,
     ) {
-        if (stopped) return
+        if (transportOwnership != VeepooTransportOwnership.ACTIVE) return
+        disconnectAttemptForRetry(currentAttempt, stopLive)
         val targetAddress = address ?: return failAttempt(
             VeepooDiagnosticCategory.RECONNECT,
             VeepooDiagnosticFailure.INVALID_STATE,
@@ -673,7 +818,10 @@ class VeepooBandSource(
         record(VeepooDiagnosticCategory.RECONNECT, VeepooDiagnosticOutcome.BEGAN)
         reconnectCancellation = reconnectScheduler.schedule(delay) {
             synchronized(this) {
-                if (!stopped && reconnectToken != null) {
+                if (
+                    transportOwnership == VeepooTransportOwnership.ACTIVE &&
+                    (reconnectToken != null || connectionToken != null)
+                ) {
                     reconnectCancellation = null
                     startReconnectAttempt(targetAddress)
                 }
@@ -693,8 +841,11 @@ class VeepooBandSource(
                 )
             }
         ) {
-            attempt = null
-            scheduleReconnect(VeepooDiagnosticFailure.INTERNAL, address)
+            scheduleReconnect(
+                failure = VeepooDiagnosticFailure.INTERNAL,
+                currentAttempt = nextAttempt,
+                address = address,
+            )
         }
     }
 
@@ -704,7 +855,11 @@ class VeepooBandSource(
     }
 
     private fun notifyReconnectCredentialRejected() {
-        runCatching { onReconnectCredentialRejected() }
+        runCatching { onReconnectCredentialRejected(this) }
+    }
+
+    private fun notifyRuntimeUnavailable() {
+        runCatching { onRuntimeUnavailable(this) }
     }
 
     private fun startBatteryThenLive(capabilities: VeepooCapabilities) {
@@ -720,7 +875,12 @@ class VeepooBandSource(
             record(VeepooDiagnosticCategory.BATTERY, VeepooDiagnosticOutcome.BEGAN)
             val current = attempt ?: return
             if (!contained(VeepooDiagnosticCategory.BATTERY) { bridge.readBattery(current) }) {
-                failAttempt(VeepooDiagnosticCategory.BATTERY, VeepooDiagnosticFailure.INTERNAL)
+                if (!beginBatteryReconnect(current, VeepooDiagnosticFailure.INTERNAL)) {
+                    failAttempt(
+                        VeepooDiagnosticCategory.BATTERY,
+                        VeepooDiagnosticFailure.INTERNAL,
+                    )
+                }
             }
         } else if (capabilities.liveHeartRate) {
             startLive()
@@ -765,16 +925,22 @@ class VeepooBandSource(
     private fun failAttempt(
         category: VeepooDiagnosticCategory,
         failure: VeepooDiagnosticFailure,
+        reportRuntimeUnavailable: Boolean = true,
     ) {
-        terminalCleanup(VeepooDiagnosticOutcome.FAILED, failure)
+        if (transportOwnership != VeepooTransportOwnership.ACTIVE) return
+        transportOwnership = VeepooTransportOwnership.RELEASED_AFTER_FAILURE
+        releaseTransport(VeepooDiagnosticOutcome.FAILED, failure)
         publishState(VeepooAdapterState.FAILED)
         record(category, VeepooDiagnosticOutcome.FAILED, failure)
+        if (reportRuntimeUnavailable) notifyRuntimeUnavailable()
     }
 
-    private fun terminalCleanup(
+    private fun releaseTransport(
         outcome: VeepooDiagnosticOutcome,
         failure: VeepooDiagnosticFailure?,
     ) {
+        if (transportReleaseComplete) return
+        transportReleaseComplete = true
         cancelReconnectSchedule()
         reconnectScheduler.close()
         val current = attempt
@@ -802,6 +968,7 @@ class VeepooBandSource(
         reconnectPassword?.fill('\u0000')
         reconnectPassword = null
         reconnectRevisionBinding = null
+        reconnectAddress = null
         scanToken = null
         connectionToken = null
         reconnectToken = null
@@ -814,6 +981,22 @@ class VeepooBandSource(
         mutableCandidates.value = emptyList()
         mutableDisplay.value = VeepooDisplayState()
         record(VeepooDiagnosticCategory.CLEANUP, outcome, failure)
+    }
+
+    private fun disconnectAttemptForRetry(
+        currentAttempt: VeepooAttemptToken,
+        stopLive: Boolean = false,
+    ) {
+        if (attempt === currentAttempt) attempt = null
+        authenticationToken = null
+        if (stopLive) {
+            contained(VeepooDiagnosticCategory.LIVE_DISPLAY) {
+                bridge.stopLiveHeartRate(currentAttempt)
+            }
+        }
+        contained(VeepooDiagnosticCategory.RECONNECT) {
+            bridge.disconnect(currentAttempt)
+        }
     }
 
     private fun resetAttemptMaterial(clearReconnectPassword: Boolean = true) {
@@ -862,6 +1045,8 @@ class VeepooBandSource(
         mutableState.value = value
         mutableDisplay.value = mutableDisplay.value.copy(
             adapterState = value,
+            batteryPercent = mutableDisplay.value.batteryPercent
+                .takeUnless { value == VeepooAdapterState.RECONNECTING },
             active = value != VeepooAdapterState.IDLE &&
                 value != VeepooAdapterState.STOPPED &&
                 value != VeepooAdapterState.FAILED,

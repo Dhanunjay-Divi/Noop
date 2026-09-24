@@ -13,7 +13,20 @@ interface VeepooCredentialAccess {
     ): Boolean
 
     fun load(deviceId: String): VeepooStoredCredential?
+    fun readForRetention(deviceId: String): VeepooCredentialRead =
+        try {
+            load(deviceId)?.let(VeepooCredentialRead::Available)
+                ?: VeepooCredentialRead.Missing
+        } catch (_: Throwable) {
+            VeepooCredentialRead.Unavailable
+        }
     fun clear(deviceId: String): Boolean
+}
+
+sealed interface VeepooCredentialRead {
+    data class Available(val credential: VeepooStoredCredential) : VeepooCredentialRead
+    data object Missing : VeepooCredentialRead
+    data object Unavailable : VeepooCredentialRead
 }
 
 class VeepooRevisionBinding private constructor(
@@ -111,11 +124,24 @@ class VeepooCredentialStore internal constructor(
         return backend.writeString("$KEY_PREFIX$deviceId", record)
     }
 
-    override fun load(deviceId: String): VeepooStoredCredential? {
-        if (!validDeviceId(deviceId)) return null
+    override fun load(deviceId: String): VeepooStoredCredential? =
+        when (val result = readForRetention(deviceId)) {
+            is VeepooCredentialRead.Available -> result.credential
+            VeepooCredentialRead.Missing,
+            VeepooCredentialRead.Unavailable,
+            -> null
+        }
+
+    override fun readForRetention(deviceId: String): VeepooCredentialRead {
+        if (!validDeviceId(deviceId)) return VeepooCredentialRead.Missing
         val key = "$KEY_PREFIX$deviceId"
-        if (!backend.contains(key)) return null
-        val parts = backend.readString(key)?.split(RECORD_SEPARATOR)
+        val encoded = try {
+            if (!backend.contains(key)) return VeepooCredentialRead.Missing
+            backend.readString(key)
+        } catch (_: Throwable) {
+            return VeepooCredentialRead.Unavailable
+        }
+        val parts = encoded?.split(RECORD_SEPARATOR)
         val password = parts
             ?.takeIf { it.size == 3 && it[0] == RECORD_VERSION }
             ?.get(1)
@@ -123,10 +149,9 @@ class VeepooCredentialStore internal constructor(
         val binding = parts?.getOrNull(2)?.let(VeepooRevisionBinding::parse)
         if (password == null || !validPassword(password) || binding == null) {
             password?.fill('\u0000')
-            backend.remove(key)
-            return null
+            return removeMalformedCredential(key)
         }
-        return VeepooStoredCredential(password, binding)
+        return VeepooCredentialRead.Available(VeepooStoredCredential(password, binding))
     }
 
     override fun clear(deviceId: String): Boolean =
@@ -138,11 +163,29 @@ class VeepooCredentialStore internal constructor(
     private fun validPassword(value: CharArray): Boolean =
         value.size == PASSWORD_LENGTH && value.all { it in '0'..'9' }
 
+    private fun removeMalformedCredential(key: String): VeepooCredentialRead {
+        val removed = try {
+            backend.remove(key)
+        } catch (_: Throwable) {
+            return VeepooCredentialRead.Unavailable
+        }
+        return if (removed) {
+            VeepooCredentialRead.Missing
+        } else {
+            // A failed durable removal means the malformed secret may still exist.
+            VeepooCredentialRead.Unavailable
+        }
+    }
+
     private class SecurePrefsBackend(context: Context) : VeepooCredentialBackend {
         private val prefs: SharedPreferences = SecurePrefs.of(context, FILE_NAME)
         override fun contains(key: String): Boolean = prefs.contains(key)
         override fun readString(key: String): String? =
-            runCatching { prefs.getString(key, null) }.getOrNull()
+            try {
+                prefs.getString(key, null)
+            } catch (_: ClassCastException) {
+                null
+            }
         override fun writeString(key: String, value: String): Boolean =
             prefs.edit().putString(key, value).commit()
         override fun remove(key: String): Boolean = prefs.edit().remove(key).commit()

@@ -18,21 +18,25 @@ from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 
-EXPECTED_SDK_ROOT = Path(
-    "/Users/divii/Downloads/SDK/iOS_Ble_SDK-master/iOS_sdk_source"
+DEFAULT_SDK_ROOT = (
+    Path.home() / "Downloads/SDK/iOS_Ble_SDK-master/iOS_sdk_source"
 )
-EXPECTED_FRAMEWORK_PATH = (
-    EXPECTED_SDK_ROOT / "Framework/2.2.XX.15/VeepooBleSDK.framework"
+FRAMEWORK_RELATIVE_PATH = Path(
+    "Framework/2.2.XX.15/VeepooBleSDK.framework"
 )
-EXPECTED_DEMO_ROOT = Path(
-    EXPECTED_SDK_ROOT / "Demo/VeepooBleSDKDemo"
+DEMO_RELATIVE_PATH = Path("Demo/VeepooBleSDKDemo")
+VENDOR_FRAMEWORK_DIR_RELATIVE_PATH = (
+    DEMO_RELATIVE_PATH / "VeepooBleSDKDemo"
 )
-EXPECTED_VENDOR_FRAMEWORK_DIR = EXPECTED_DEMO_ROOT / "VeepooBleSDKDemo"
-EXPECTED_PODS_PROJECT = EXPECTED_DEMO_ROOT / "Pods" / "Pods.xcodeproj"
-EXPECTED_PODS_BUILD_ROOT = EXPECTED_DEMO_ROOT / "build"
-EXPECTED_PODS_PRODUCTS_ROOT = EXPECTED_PODS_BUILD_ROOT / "Debug-iphoneos"
-EXPECTED_FMDB_FRAMEWORK_DIR = EXPECTED_PODS_PRODUCTS_ROOT / "FMDB"
-EXPECTED_MJEXTENSION_FRAMEWORK_DIR = EXPECTED_PODS_PRODUCTS_ROOT / "MJExtension"
+PODS_PROJECT_RELATIVE_PATH = DEMO_RELATIVE_PATH / "Pods" / "Pods.xcodeproj"
+PODS_BUILD_ROOT_RELATIVE_PATH = DEMO_RELATIVE_PATH / "build"
+PODS_PRODUCTS_ROOT_RELATIVE_PATH = (
+    PODS_BUILD_ROOT_RELATIVE_PATH / "Debug-iphoneos"
+)
+FMDB_FRAMEWORK_DIR_RELATIVE_PATH = PODS_PRODUCTS_ROOT_RELATIVE_PATH / "FMDB"
+MJEXTENSION_FRAMEWORK_DIR_RELATIVE_PATH = (
+    PODS_PRODUCTS_ROOT_RELATIVE_PATH / "MJExtension"
+)
 EXPECTED_BINARY_SHA256 = (
     "22e9d0154c5fecddbd3a21ef309fb3d33d734ec5f8e671787fa9ee8564d13d35"
 )
@@ -146,8 +150,44 @@ class TreeInventory(NamedTuple):
     sha256: str
 
 
+class SDKLayout(NamedTuple):
+    root: Path
+    framework_path: Path
+    demo_root: Path
+    vendor_framework_dir: Path
+    pods_project: Path
+    pods_build_root: Path
+    fmdb_framework_dir: Path
+    mjextension_framework_dir: Path
+
+
 def _absolute(path: Path) -> Path:
     return Path(os.path.abspath(path))
+
+
+def sdk_layout(sdk_root: Path) -> SDKLayout:
+    root = _absolute(sdk_root)
+    return SDKLayout(
+        root=root,
+        framework_path=root / FRAMEWORK_RELATIVE_PATH,
+        demo_root=root / DEMO_RELATIVE_PATH,
+        vendor_framework_dir=root / VENDOR_FRAMEWORK_DIR_RELATIVE_PATH,
+        pods_project=root / PODS_PROJECT_RELATIVE_PATH,
+        pods_build_root=root / PODS_BUILD_ROOT_RELATIVE_PATH,
+        fmdb_framework_dir=root / FMDB_FRAMEWORK_DIR_RELATIVE_PATH,
+        mjextension_framework_dir=(
+            root / MJEXTENSION_FRAMEWORK_DIR_RELATIVE_PATH
+        ),
+    )
+
+
+def xcconfig_path(path: Path) -> str:
+    value = str(path)
+    if any(character in value for character in ("\0", "\r", "\n", '"', "$", "\\")):
+        raise VerificationError(
+            "supplier SDK path contains unsupported xcconfig characters"
+        )
+    return f'"{value}"'
 
 
 def _reject_symlinked_path(
@@ -168,6 +208,26 @@ def _reject_symlinked_path(
             raise VerificationError(f"{label} path is not inspectable") from error
         if stat.S_ISLNK(mode):
             raise VerificationError(f"{label} path must not contain symlinks")
+
+
+def validated_sdk_root(sdk_root: Path, repository_root: Path) -> Path:
+    if not sdk_root.is_absolute():
+        raise VerificationError("supplier SDK root must be an absolute path")
+    root = _absolute(sdk_root)
+    _reject_symlinked_path(root, "supplier SDK root")
+    try:
+        root_stat = root.lstat()
+    except OSError as error:
+        raise VerificationError("supplier SDK root is not readable") from error
+    if not stat.S_ISDIR(root_stat.st_mode):
+        raise VerificationError("supplier SDK root must be a directory")
+
+    repository = _absolute(repository_root)
+    if root == repository or repository in root.parents:
+        raise VerificationError(
+            "supplier SDK root must remain outside the repository"
+        )
+    return root
 
 
 def _regular_file(path: Path, *, maximum_bytes: int, label: str) -> int:
@@ -573,7 +633,7 @@ def _verify_tree(path: Path, expected: TreeTrust, *, label: str) -> None:
 def verify_build_inputs(
     trust_root: IOSSupplierTrustRoot,
     *,
-    sdk_root: Path = EXPECTED_SDK_ROOT,
+    sdk_root: Path,
 ) -> None:
     sdk_root = _absolute(sdk_root)
     _reject_symlinked_path(sdk_root, "approved supplier SDK root")
@@ -630,9 +690,9 @@ def _lipo_architectures(binary_path: Path) -> tuple[str, ...]:
 
 
 def verify_framework(
-    framework_path: Path = EXPECTED_FRAMEWORK_PATH,
+    framework_path: Path,
     *,
-    expected_path: Path = EXPECTED_FRAMEWORK_PATH,
+    expected_path: Path,
     expected_sha256: str = EXPECTED_BINARY_SHA256,
     architecture_reader: Callable[[Path], tuple[str, ...]] = _lipo_architectures,
 ) -> dict[str, object]:
@@ -763,7 +823,7 @@ def _verify_companion_framework(
 def _verify_framework_trust(
     expected: GeneratedFrameworkTrust,
     *,
-    sdk_root: Path = EXPECTED_SDK_ROOT,
+    sdk_root: Path,
     architecture_reader: Callable[
         [Path], tuple[str, ...]
     ] = _lipo_architectures,
@@ -826,7 +886,7 @@ def _verify_framework_trust(
 def _verify_fixed_framework(
     expected: GeneratedFrameworkTrust,
     *,
-    sdk_root: Path = EXPECTED_SDK_ROOT,
+    sdk_root: Path,
     architecture_reader: Callable[
         [Path], tuple[str, ...]
     ] = _lipo_architectures,
@@ -860,22 +920,27 @@ def _verify_fixed_framework(
     return result
 
 
-def build_pod_frameworks(trust_root: IOSSupplierTrustRoot) -> None:
-    verify_build_inputs(trust_root)
-    _reject_symlinked_path(EXPECTED_PODS_PROJECT, "approved Pods project")
+def build_pod_frameworks(
+    trust_root: IOSSupplierTrustRoot,
+    *,
+    sdk_root: Path,
+) -> None:
+    layout = sdk_layout(sdk_root)
+    verify_build_inputs(trust_root, sdk_root=layout.root)
+    _reject_symlinked_path(layout.pods_project, "approved Pods project")
     command = [
         "/usr/bin/xcrun",
         "xcodebuild",
         "-project",
-        str(EXPECTED_PODS_PROJECT),
+        str(layout.pods_project),
         "-scheme",
         "Pods-VeepooBleSDKDemo",
         "-configuration",
         "Debug",
         "-destination",
         "generic/platform=iOS",
-        f"SYMROOT={EXPECTED_PODS_BUILD_ROOT}",
-        f"OBJROOT={EXPECTED_PODS_BUILD_ROOT / 'Intermediates'}",
+        f"SYMROOT={layout.pods_build_root}",
+        f"OBJROOT={layout.pods_build_root / 'Intermediates'}",
         "IPHONEOS_DEPLOYMENT_TARGET=17.0",
         "ARCHS=arm64",
         "ONLY_ACTIVE_ARCH=YES",
@@ -887,7 +952,7 @@ def build_pod_frameworks(trust_root: IOSSupplierTrustRoot) -> None:
         result = subprocess.run(
             command,
             check=False,
-            cwd=EXPECTED_DEMO_ROOT,
+            cwd=layout.demo_root,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -905,19 +970,21 @@ def build_pod_frameworks(trust_root: IOSSupplierTrustRoot) -> None:
         raise VerificationError(
             "FMDB and MJExtension dependency build failed:\n" + output
         )
-    verify_build_inputs(trust_root)
+    verify_build_inputs(trust_root, sdk_root=layout.root)
 
 
 def verify_frameworks(
     trust_root: IOSSupplierTrustRoot,
+    *,
+    sdk_root: Path,
 ) -> dict[str, object]:
     primary_result: dict[str, object] | None = None
     for expected in trust_root.fixed_frameworks:
-        result = _verify_fixed_framework(expected)
+        result = _verify_fixed_framework(expected, sdk_root=sdk_root)
         if result is not None:
             primary_result = result
     for expected in trust_root.generated_frameworks:
-        _verify_framework_trust(expected)
+        _verify_framework_trust(expected, sdk_root=sdk_root)
     if primary_result is None:
         raise VerificationError(
             "iOS supplier primary framework trust is unavailable"
@@ -925,7 +992,8 @@ def verify_frameworks(
     return primary_result
 
 
-def render_local_config() -> str:
+def render_local_config(sdk_root: Path) -> str:
+    layout = sdk_layout(sdk_root)
     return (
         "// Generated only after Tools/local/configure-veepoo-ios-sdk.py verifies the\n"
         "// protected iOS supplier manifest and local bundle. Do not copy supplier\n"
@@ -934,13 +1002,13 @@ def render_local_config() -> str:
         "// Release/Archive builds retain the default-off settings.\n"
         "NOOP_VEEPOO_SDK_ENABLED[config=Debug][sdk=iphoneos*] = YES\n"
         "NOOP_VEEPOO_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "
-        f"{EXPECTED_FRAMEWORK_PATH.parent}\n"
+        f"{xcconfig_path(layout.framework_path.parent)}\n"
         "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "
-        f"{EXPECTED_VENDOR_FRAMEWORK_DIR}\n"
+        f"{xcconfig_path(layout.vendor_framework_dir)}\n"
         "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "
-        f"{EXPECTED_FMDB_FRAMEWORK_DIR}\n"
+        f"{xcconfig_path(layout.fmdb_framework_dir)}\n"
         "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "
-        f"{EXPECTED_MJEXTENSION_FRAMEWORK_DIR}\n"
+        f"{xcconfig_path(layout.mjextension_framework_dir)}\n"
         "NOOP_VEEPOO_LINK_FLAGS[config=Debug][sdk=iphoneos*] = "
         f"{EXPECTED_LINK_FLAGS}\n"
         "NOOP_VEEPOO_SWIFT_CONDITION[config=Debug][sdk=iphoneos*] = "
@@ -948,7 +1016,7 @@ def render_local_config() -> str:
     )
 
 
-def write_local_config(repository_root: Path) -> Path:
+def write_local_config(repository_root: Path, *, sdk_root: Path) -> Path:
     repository_root = _absolute(repository_root)
     config_directory = repository_root / LOCAL_CONFIG_RELATIVE_PATH.parent
     try:
@@ -968,7 +1036,7 @@ def write_local_config(repository_root: Path) -> Path:
             label="local SDK config",
         )
 
-    encoded = render_local_config().encode("utf-8")
+    encoded = render_local_config(sdk_root).encode("utf-8")
     file_descriptor, temporary_name = tempfile.mkstemp(
         prefix=".VeepooLocalSDK.",
         suffix=".tmp",
@@ -992,21 +1060,26 @@ def write_local_config(repository_root: Path) -> Path:
     return destination
 
 
-def verify_build_environment(environment: Mapping[str, str]) -> None:
+def verify_build_environment(
+    environment: Mapping[str, str],
+    *,
+    sdk_root: Path,
+) -> None:
+    layout = sdk_layout(sdk_root)
     required_values = {
         "ACTION": "build",
         "CONFIGURATION": "Debug",
         "PLATFORM_NAME": EXPECTED_PLATFORM_NAME,
         "NOOP_VEEPOO_SDK_ENABLED": "YES",
-        "NOOP_VEEPOO_FRAMEWORK_DIR": str(EXPECTED_FRAMEWORK_PATH.parent),
+        "NOOP_VEEPOO_FRAMEWORK_DIR": str(layout.framework_path.parent),
         "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR": str(
-            EXPECTED_VENDOR_FRAMEWORK_DIR
+            layout.vendor_framework_dir
         ),
         "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR": str(
-            EXPECTED_FMDB_FRAMEWORK_DIR
+            layout.fmdb_framework_dir
         ),
         "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR": str(
-            EXPECTED_MJEXTENSION_FRAMEWORK_DIR
+            layout.mjextension_framework_dir
         ),
         "NOOP_VEEPOO_LINK_FLAGS": EXPECTED_LINK_FLAGS,
         "NOOP_VEEPOO_SWIFT_CONDITION": (
@@ -1022,6 +1095,35 @@ def verify_build_environment(environment: Mapping[str, str]) -> None:
 
 def _repository_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _sdk_root_candidate(
+    *,
+    argument: Path | None,
+    build_check: bool,
+    environment: Mapping[str, str],
+) -> Path:
+    if argument is not None:
+        return argument
+    if build_check:
+        framework_directory = environment.get(
+            "NOOP_VEEPOO_FRAMEWORK_DIR",
+            "",
+        )
+        if not framework_directory:
+            raise VerificationError(
+                "build setting NOOP_VEEPOO_FRAMEWORK_DIR is not approved"
+            )
+        path = Path(framework_directory)
+        if not path.is_absolute() or len(path.parents) < 2:
+            raise VerificationError(
+                "build setting NOOP_VEEPOO_FRAMEWORK_DIR is not approved"
+            )
+        return path.parents[1]
+    override = environment.get("NOOP_VEEPOO_IOS_SDK_ROOT", "")
+    if override:
+        return Path(override)
+    return DEFAULT_SDK_ROOT
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1041,22 +1143,41 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also require the exact physical-device Xcode build settings",
     )
+    parser.add_argument(
+        "--sdk-root",
+        type=Path,
+        help=(
+            "absolute external iOS_sdk_source root; defaults to "
+            "$NOOP_VEEPOO_IOS_SDK_ROOT or the current user's Downloads layout"
+        ),
+    )
     arguments = parser.parse_args(argv)
 
     try:
         repository_root = _repository_root()
+        sdk_root = validated_sdk_root(
+            _sdk_root_candidate(
+                argument=arguments.sdk_root,
+                build_check=arguments.build_check,
+                environment=os.environ,
+            ),
+            repository_root,
+        )
         verify_repository_boundary(repository_root)
         trust_root = load_trust_root(
             repository_root / TRUST_RELATIVE_PATH
         )
         if arguments.build_check:
-            verify_build_environment(os.environ)
-        verify_build_inputs(trust_root)
+            verify_build_environment(os.environ, sdk_root=sdk_root)
+        verify_build_inputs(trust_root, sdk_root=sdk_root)
         if arguments.write_config:
-            build_pod_frameworks(trust_root)
-        result = verify_frameworks(trust_root)
+            build_pod_frameworks(trust_root, sdk_root=sdk_root)
+        result = verify_frameworks(trust_root, sdk_root=sdk_root)
         if arguments.write_config:
-            destination = write_local_config(repository_root)
+            destination = write_local_config(
+                repository_root,
+                sdk_root=sdk_root,
+            )
             print(f"wrote {destination.relative_to(repository_root)}")
         print(
             "verified Veepoo iPhoneOS bundle: "

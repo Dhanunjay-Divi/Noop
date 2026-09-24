@@ -421,9 +421,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val supplierBandPairingState = noopApp.sourceCoordinator.veepooPairingState
     val supplierBandDisplay = noopApp.sourceCoordinator.veepooDisplay
 
-    fun beginSupplierBandPairing(): Boolean = noopApp.sourceCoordinator.beginVeepooPairing()
+    suspend fun beginSupplierBandPairing(): Boolean =
+        noopApp.sourceCoordinator.beginVeepooPairing()
 
-    fun selectSupplierBandCandidate(
+    suspend fun selectSupplierBandCandidate(
         handle: com.noop.ble.veepoo.VeepooCandidateHandle,
     ): Boolean = noopApp.sourceCoordinator.selectVeepooCandidate(handle)
 

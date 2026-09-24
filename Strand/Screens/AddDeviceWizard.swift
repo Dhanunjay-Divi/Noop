@@ -3,6 +3,48 @@ import StrandDesign
 import WhoopStore
 import OuraProtocol
 
+@MainActor
+struct VeepooPairingTransportHandoff {
+    private(set) var lease: SourceCoordinator.SupplierPairingLease?
+
+    mutating func begin(
+        acquireLease: () -> SourceCoordinator.SupplierPairingLease?,
+        makeSession: () -> VeepooBandPairingSession?,
+        cancelLease: (SourceCoordinator.SupplierPairingLease) -> Void
+    ) -> VeepooBandPairingSession? {
+        guard lease == nil, let acquiredLease = acquireLease() else {
+            return nil
+        }
+        lease = acquiredLease
+
+        guard let session = makeSession() else {
+            lease = nil
+            cancelLease(acquiredLease)
+            return nil
+        }
+        return session
+    }
+
+    mutating func endPairing(
+        cancelPairing: () -> Void,
+        cancelLease: (SourceCoordinator.SupplierPairingLease) -> Void
+    ) {
+        cancelPairing()
+        guard let lease else { return }
+        self.lease = nil
+        cancelLease(lease)
+    }
+
+    mutating func commitReplacement(
+        commitLease: (SourceCoordinator.SupplierPairingLease) -> Bool
+    ) -> Bool {
+        guard let lease else { return false }
+        guard commitLease(lease) else { return false }
+        self.lease = nil
+        return true
+    }
+}
+
 // MARK: - Add a device — guided, branching wizard
 //
 // Different bands pair COMPLETELY differently, so this wizard asks the device TYPE first, then gives
@@ -177,6 +219,8 @@ struct AddDeviceWizard: View {
     @State private var ouraScanner: OuraLiveSource?
     @State private var veepooSession: VeepooBandPairingSession?
     @State private var veepooCommitted = false
+    @State private var veepooHandoff = VeepooPairingTransportHandoff()
+    @State private var veepooFailure: VeepooPairingFailurePresentation?
 
     /// - Parameter startAt: DEBUG-only deep-link into a specific (type, step) so a seeded simulator build
     ///   can screenshot one wizard step deterministically (e.g. the Oura onboarding gate) without tapping
@@ -235,7 +279,6 @@ struct AddDeviceWizard: View {
         // per-transition stops below) so neither central keeps scanning after dismiss.
         .onDisappear {
             stopAllScans()
-            if !veepooCommitted { veepooSession?.cancel() }
         }
         // After adding, offer to make the new device active (generic non-Oura paths only).
         .alert("Make this your active device?",
@@ -1176,12 +1219,23 @@ struct AddDeviceWizard: View {
                 } onRescan: {
                     startScan(for: type)
                 }
-            } else if type == .veepoo, let veepooSession {
-                VeepooPairingFace(
-                    session: veepooSession,
-                    nameDraft: $nameDraft,
-                    onAdd: finishVeepooAdd
-                )
+            } else if type == .veepoo {
+                if let veepooFailure {
+                    VeepooPairingFailureFace(
+                        registrationFailed: veepooFailure == .registration,
+                        onRetry: { startScan(for: .veepoo) }
+                    )
+                } else if let veepooSession {
+                    VeepooPairingFace(
+                        session: veepooSession,
+                        nameDraft: $nameDraft,
+                        onAdd: finishVeepooAdd,
+                        onRetry: { startScan(for: .veepoo) },
+                        onFailure: handleVeepooFailure
+                    )
+                } else {
+                    scanNotStarted(for: type)
+                }
             } else if let hrScanner {
                 // Heart-rate strap AND Garmin (Broadcast HR is the standard 0x180D path).
                 HRPickList(scanner: hrScanner) { strap in
@@ -1366,10 +1420,28 @@ struct AddDeviceWizard: View {
         case .amazfit, .miBand:  ensureHuamiScanner().scan()
         case .oura:              ensureOuraScanner().scan()
         case .veepoo:
-            let session =
-                VeepooBandPairingSession.makeForApprovedLocalDeviceBuild()
+            endVeepooPairing()
+            veepooFailure = nil
+            let session = veepooHandoff.begin(
+                acquireLease: {
+                    model.sourceCoordinator?
+                        .acquireSupplierPairingLease()
+                },
+                makeSession: {
+                    VeepooBandPairingSession
+                        .makeForApprovedLocalDeviceBuild()
+                },
+                cancelLease: { lease in
+                    _ = model.sourceCoordinator?
+                        .cancelSupplierPairingLease(lease)
+                }
+            )
             veepooSession = session
-            session?.start()
+            guard let session else {
+                veepooFailure = .connection
+                return
+            }
+            session.start()
         // Heart-rate strap AND Garmin both use the standard 0x180D scanner (Garmin Broadcast HR).
         case .hrStrap, .garmin:  ensureHRScanner().scan()
         }
@@ -1420,7 +1492,7 @@ struct AddDeviceWizard: View {
         ftmsScanner?.stopScan()
         huamiScanner?.stopScan()
         ouraScanner?.stop()
-        if !veepooCommitted { veepooSession?.cancel() }
+        endVeepooPairing()
     }
 
     /// Build the right `PairedDevice` for the chosen path, register it, optionally activate, then close.
@@ -1556,8 +1628,38 @@ struct AddDeviceWizard: View {
             model.deviceRegistry?.addAndSetActive(device) ?? false
         }
         guard committed else { return }
+        guard veepooHandoff.commitReplacement(
+            commitLease: { lease in
+                model.sourceCoordinator?
+                    .commitSupplierPairingLease(lease) ?? false
+            }
+        ) else {
+            veepooFailure = .connection
+            return
+        }
         veepooCommitted = true
+        veepooFailure = nil
+        veepooSession = nil
         onClose()
+    }
+
+    private func handleVeepooFailure(registrationFailed: Bool) {
+        guard !veepooCommitted else { return }
+        veepooFailure = registrationFailed ? .registration : .connection
+        endVeepooPairing()
+    }
+
+    private func endVeepooPairing() {
+        guard !veepooCommitted else { return }
+        let session = veepooSession
+        veepooSession = nil
+        veepooHandoff.endPairing(
+            cancelPairing: { session?.cancel() },
+            cancelLease: { lease in
+                _ = model.sourceCoordinator?
+                    .cancelSupplierPairingLease(lease)
+            }
+        )
     }
 
     /// Map the protocol package's per-gen `OuraMetric` set onto the app's `Metric` set for registration.
@@ -1850,10 +1952,17 @@ private struct OuraPickList: View {
     }
 }
 
+private enum VeepooPairingFailurePresentation {
+    case connection
+    case registration
+}
+
 private struct VeepooPairingFace: View {
     @ObservedObject var session: VeepooBandPairingSession
     @Binding var nameDraft: String
     let onAdd: () -> Void
+    let onRetry: () -> Void
+    let onFailure: (Bool) -> Void
 
     @State private var printedIdentifier = ""
     @State private var password = ""
@@ -1883,8 +1992,19 @@ private struct VeepooPairingFace: View {
             case .ready:
                 ready
             case .failed:
-                failure
+                VeepooPairingFailureFace(
+                    registrationFailed: session.registrationFailed,
+                    onRetry: onRetry
+                )
             }
+        }
+        .onChangeCompat(of: session.phase) { phase in
+            guard case .failed = phase else { return }
+            onFailure(session.registrationFailed)
+        }
+        .onAppear {
+            guard case .failed = session.phase else { return }
+            onFailure(session.registrationFailed)
         }
     }
 
@@ -2095,10 +2215,24 @@ private struct VeepooPairingFace: View {
         }
     }
 
-    private var failure: some View {
+    private func progress(_ title: LocalizedStringKey) -> some View {
+        HStack(spacing: 12) {
+            ProgressView().tint(StrandPalette.accent)
+            Text(title)
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textSecondary)
+        }
+    }
+}
+
+private struct VeepooPairingFailureFace: View {
+    let registrationFailed: Bool
+    let onRetry: () -> Void
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Group {
-                if session.registrationFailed {
+                if registrationFailed {
                     Text(
                         "appwide.onboarding.device_wizard.supplier_registration_failed"
                     )
@@ -2111,9 +2245,7 @@ private struct VeepooPairingFace: View {
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.statusWarning)
             Button {
-                printedIdentifier = ""
-                password = ""
-                session.start()
+                onRetry()
             } label: {
                 Label(
                     "appwide.onboarding.device_wizard.supplier_try_again",
@@ -2127,14 +2259,6 @@ private struct VeepooPairingFace: View {
         }
     }
 
-    private func progress(_ title: LocalizedStringKey) -> some View {
-        HStack(spacing: 12) {
-            ProgressView().tint(StrandPalette.accent)
-            Text(title)
-                .font(StrandFont.body)
-                .foregroundStyle(StrandPalette.textSecondary)
-        }
-    }
 }
 
 // MARK: - Shared pick-step pieces

@@ -134,22 +134,17 @@ final class DeviceRegistry: ObservableObject {
         reload()
     }
 
-    /// Archive (remove) a device: NOOP stops connecting to it, but its recorded data is kept. If the
-    /// archived device was the active one, `activeDeviceId` is left as-is here — the caller decides the
-    /// next active device (or leaves none active) and calls `setActive` explicitly.
+    /// Archive (remove) a device: NOOP stops connecting to it, but its recorded data is kept. The store
+    /// verifies the status change and clears day ownership in one transaction, so a failed archive leaves
+    /// both the registry row and every ownership override unchanged. If the archived device was active,
+    /// `activeDeviceId` is left as-is here; the caller decides the next active device.
     @discardableResult
     func archive(_ id: String) -> Bool {
-        guard let originalRows = try? store.all() else { return false }
         do {
-            try store.archive(id)
-            let rows = try store.all()
-            guard rows.first(where: { $0.id == id })?.status == .archived else {
-                throw MutationFailure.verificationFailed
-            }
-            publish(rows)
+            guard try store.archiveVerified(id) else { return false }
+            reload()
             return true
         } catch {
-            restore(originalRows)
             return false
         }
     }
@@ -216,20 +211,6 @@ final class DeviceRegistry: ObservableObject {
             if !originalRows.contains(where: { $0.id == attemptedDeviceID }) {
                 try store.archive(attemptedDeviceID)
             }
-            for row in originalRows {
-                try store.add(row)
-            }
-            if let originalActive = originalRows.first(where: { $0.status == .active }) {
-                try store.setActive(originalActive.id)
-            }
-            publish(try store.all())
-        } catch {
-            reload()
-        }
-    }
-
-    private func restore(_ originalRows: [PairedDevice]) {
-        do {
             for row in originalRows {
                 try store.add(row)
             }

@@ -51,7 +51,7 @@ jobs:
           CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
           git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
             > "$CHANGED_FILES"
-          if grep -Eq '^(android/|Vendor/NoopBandSDK/|Tools/(android-managed-device-retry|run-bounded-command)\.py$|\.github/workflows/android\.yml$)' \
+          if grep -Eq '^(android/|Vendor/NoopBandSDK/|release/supplier/runtime/noop-band-compatibility\.json$|Tools/(android-managed-device-retry|run-bounded-command)\.py$|\.github/workflows/android\.yml$)' \
              "$CHANGED_FILES"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else

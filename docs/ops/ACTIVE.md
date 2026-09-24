@@ -21,9 +21,10 @@ Last updated: **2026-09-24**
   5/MG reachability, operation failure parity, and iOS artifact trust findings
   are corrected. Supplier binaries remain ignored and absent from Git. The
   generic iPhoneOS app and Android Full APK build successfully; focused Apple,
-  Android, Swift SDK, and local trust tests pass. All protected-review
-  conversations are resolved. The final qualification slice adds one shared
-  exact product-compatibility manifest and rejects
+  Android, Swift SDK, and local trust tests pass. Earlier protected-review
+  conversations through that qualification checkpoint were resolved. The final
+  qualification slice adds one shared exact product-compatibility manifest and
+  rejects
   malformed or unapproved model, hardware, firmware, protocol, and wrapper
   tuples before battery or live data. Because the supplied hardware tuple is
   not yet physically known, only verified local Debug builds permit unlisted
@@ -63,6 +64,36 @@ Last updated: **2026-09-24**
   collection, history retention, haptics, battery, firmware, egress, provider
   delivery, production load, and physiological accuracy remain external or
   physical gates.
+- Final September 24 local replacement review is green and remains unpushed.
+  Apple now restores supplier transport after early pairing failure, binds
+  handoff to the exact current registry owner, and removes stale day ownership
+  even when a device row was already archived. Android serializes pairing and
+  reconciliation, records transient live failure as recovering, compensates a
+  mutating credential-clear failure before reconnect, and ignores delayed
+  callbacks from replaced sources. Apple local SDK paths are root-derived,
+  quoted for spaces, and reject xcconfig injection characters. Focused Apple
+  tests pass 41/41. The final Android follow-up distinguishes a missing
+  credential from a transient encrypted-store read failure, quiesces WHOOP
+  before a supplier retry can inherit its source identity, serializes
+  reconciliation and pairing, generation-fences queued pairing requests, and
+  restores the durable source after pairing scan failure or cancellation.
+  Coordinator regressions pass 31/31 and the complete supplier-focused Android
+  slice passes 73/73. The complete Android Full wall passes 5,085 tests with
+  seven intentional skips; `WhoopStore`
+  passes 539/539; the macOS app passes 2,287 tests with one intentional fixture
+  skip; and the unsigned Release iOS graph builds the phone app with embedded
+  Watch, Watch complications, and widget products. The complete
+  Tools wall passes 362 tests with one intentional skip. Direct release,
+  required-CI, trusted-control, calibration, terminology, provenance,
+  private-data, health-claim, localization, workflow, and shell gates pass.
+  Terminology records 18,248 classified occurrences across 1,618 groups with
+  zero forbidden mappings. Remote PR head
+  `22318af43bc42cee7f0fcccb764771113a4dcb70` remains the previous all-green
+  candidate. Its first 100 review threads are resolved; the final paginated
+  page has 20 unresolved threads, 19 current and one outdated, whose fixes are
+  in the local tree. One consolidated replacement commit/push, exact-SHA hosted
+  checks, evidence-backed thread resolution, protected merge/main verification,
+  and exact round-owned cleanup remain.
 - An isolated local follow-up from `60df38a2` confirms the vendored Swift and
   Kotlin `failOperation` implementations already reject non-operation failure
   categories before state mutation. Matching app-side regressions pass 2/2 on
