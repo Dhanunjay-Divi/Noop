@@ -344,6 +344,36 @@ firmware, background operation, and physiological accuracy remain unproven.
   background behavior, history, battery, haptics, firmware compatibility, and
   sensor accuracy remain physical-device gates.
 
+## Hosted Android localization remediation
+
+- Exact hosted head
+  `25b239a9cca9b5f5da15bc882d51fc344fe122b0` built the Full Debug APK but
+  failed one of 5,053 unit tests:
+  `AppWideLocalizationContractTest.appWideResourcesHaveExactNineLocaleParity`.
+- Root cause: the canonical nine-locale source already contained
+  `appwide.onboarding.device_wizard.supplier_android_identifier_field` and the
+  current printed-ID copy, but the generated Android `appwide.xml` resources
+  had not been regenerated after that source update.
+- Correction: reran `Tools/AppWideLocalization/generate.rb`. The resulting
+  tracked diff is limited to the nine generated Android locale files and adds
+  the missing printed-band-ID key while synchronizing the four related
+  supplier-pairing strings in every supported locale.
+- Focused parity verification passed after first reproducing the hosted
+  failure locally.
+- Full local Android verification passed:
+  - `testFullDebugUnitTest`: 5,053 tests completed with zero failures and seven
+    intentional skips.
+  - `lintFullDebug`: passed in the exact source-only configuration used by
+    GitHub.
+  - `compileFullDebugAndroidTestKotlin`: passed in the exact source-only
+    configuration used by GitHub.
+- The ignored private supplier configuration was restored after each
+  source-only command. The previously verified supplier-enabled APK and WHOOP
+  path are unchanged by this generated-resource correction.
+- This commit contains the correction. Replacement exact-SHA hosted checks,
+  protected merge, protected-main verification, and exact round-owned cleanup
+  remain.
+
 ## Privacy check
 
 - [x] No credentials, personal names, email addresses, raw health exports,

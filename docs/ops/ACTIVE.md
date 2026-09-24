@@ -12,21 +12,18 @@ Last updated: **2026-09-24**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Current integration state: PR `#17` remains remote at
-  `e6f0f46f558e23a74c97589450d23c0c5183c34f`; a final qualification
-  replacement is prepared locally. The same Full/iPhone app build keeps WHOOP and the
-  verified local supplier adapter available together. Apple terminal live
-  state, supplier-only Live presentation, usable-registration onboarding,
-  Android live fallback/freshness, WHOOP 5/MG reachability, operation failure
-  parity, and iOS artifact trust findings are corrected. Supplier binaries
-  remain ignored and absent from Git. The generic iPhoneOS app and Android
-  Full APK build successfully; focused Apple, Android, Swift SDK, and local
-  trust tests pass. The complete release-control matrix passes 204/204, all
-  91 operations records validate, all ten required CI contexts validate, and
-  the reviewed terminology ratchet records 18,138 classified occurrences
-  across 1,616 groups with zero forbidden mappings. Eight protected-review
-  conversations remain to resolve after the replacement push. The final local
-  slice adds one shared exact product-compatibility manifest and rejects
+- Current integration state: PR `#17` includes the supplier qualification
+  candidate whose first hosted run used exact head
+  `25b239a9cca9b5f5da15bc882d51fc344fe122b0`. The same Full/iPhone app
+  build keeps WHOOP and the verified local supplier adapter available
+  together. Apple terminal live state, supplier-only Live presentation,
+  usable-registration onboarding, Android live fallback/freshness, WHOOP
+  5/MG reachability, operation failure parity, and iOS artifact trust findings
+  are corrected. Supplier binaries remain ignored and absent from Git. The
+  generic iPhoneOS app and Android Full APK build successfully; focused Apple,
+  Android, Swift SDK, and local trust tests pass. All protected-review
+  conversations are resolved. The final qualification slice adds one shared
+  exact product-compatibility manifest and rejects
   malformed or unapproved model, hardware, firmware, protocol, and wrapper
   tuples before battery or live data. Because the supplied hardware tuple is
   not yet physically known, only verified local Debug builds permit unlisted
@@ -37,9 +34,14 @@ Last updated: **2026-09-24**
   complete Tools wall passes 360 tests with one intentional skip, required CI
   validates all ten contexts, all 91 operations records validate, and the
   terminology snapshot records 18,145 classified occurrences across 1,616
-  groups with zero forbidden mappings. Exact-SHA
-  hosted checks, normal protected merge, protected-main verification, and
-  exact round-owned cleanup remain.
+  groups with zero forbidden mappings. The first exact-head hosted run exposed
+  one deterministic Android localization-generation mismatch: the canonical
+  nine-locale source contained the printed-band-ID copy, but generated Android
+  resources did not. Regenerating all nine Android app-wide locale files fixes
+  the mismatch. The focused parity test, all 5,053 Full Debug unit tests,
+  source-only Full Debug lint, and Full Debug instrumentation compilation pass
+  locally. Replacement exact-SHA hosted checks, normal protected merge,
+  protected-main verification, and exact round-owned cleanup remain.
   Supplier redistribution, signing/store review, physical BLE, background
   collection, history retention, haptics, battery, firmware, egress, provider
   delivery, production load, and physiological accuracy remain external or
