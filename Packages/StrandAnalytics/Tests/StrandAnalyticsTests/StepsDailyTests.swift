@@ -15,8 +15,8 @@ final class StepsDailyTests: XCTestCase {
     private let dayUtc = "2026-01-02"
     private let noonUtc = 1_767_355_200
 
-    private func step(_ tsOffsetSec: Int, _ counter: Int) -> StepSample {
-        StepSample(ts: noonUtc + tsOffsetSec, counter: counter)
+    private func step(_ tsOffsetSec: Int, _ counter: Int, activityClass: Int? = nil) -> StepSample {
+        StepSample(ts: noonUtc + tsOffsetSec, counter: counter, activityClass: activityClass)
     }
 
     private func stepsFor(_ samples: [StepSample]) -> Int? {
@@ -142,11 +142,27 @@ final class StepsDailyTests: XCTestCase {
         XCTAssertEqual(stepsFor(s, ticksPerStep: 0.1), 240)
     }
 
-    func testDailyEffortIncludesOrdinaryWalkingWithoutExerciseHR() {
+    func testDailyStationaryClassedBurstDoesNotBecomeSteps() {
+        let samples = (0...10).map {
+            step($0 * 60, $0 * 400, activityClass: 0)
+        }
+
+        let result = AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            steps: samples,
+            profile: profile
+        )
+
+        XCTAssertNil(result.daily.steps)
+    }
+
+    func testDailyNoHRWalkClassStepsStillCount() {
         // 1,715 calibrated steps and no HR stream: the daily movement floor should keep Effort from
         // reading zero, while the same calibrated total remains visible on the Steps metric.
         let counters = [100, 400, 700, 1_000, 1_300, 1_600, 1_815]
-        let samples = counters.enumerated().map { step($0.offset * 60, $0.element) }
+        let samples = counters.enumerated().map {
+            step($0.offset * 60, $0.element, activityClass: 1)
+        }
         let result = AnalyticsEngine.analyzeDay(
             day: dayUtc,
             steps: samples,

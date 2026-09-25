@@ -307,6 +307,8 @@ struct JournalLogCard: View {
                     renaming = nil
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(StrandPalette.accent)
+                .foregroundStyle(StrandPalette.accentInk)
             }
         }
         .padding(NoopMetrics.space4)

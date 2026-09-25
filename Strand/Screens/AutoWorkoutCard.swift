@@ -117,6 +117,7 @@ struct AutoWorkoutCard: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(StrandPalette.accent)
+                    .foregroundStyle(StrandPalette.accentInk)
                     .disabled(saving)
 
                     Button("Not a workout") { dismiss(w) }
@@ -157,6 +158,7 @@ struct AutoWorkoutCard: View {
                     Button("Keep") { keep(review) }
                         .buttonStyle(.borderedProminent)
                         .tint(StrandPalette.accent)
+                        .foregroundStyle(StrandPalette.accentInk)
                         .disabled(saving)
 
                     Button("Not a workout", role: .destructive) { undo(review) }

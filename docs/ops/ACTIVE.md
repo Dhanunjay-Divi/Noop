@@ -99,6 +99,48 @@ Last updated: **2026-09-25**
   commit/push, exact-SHA hosted checks, evidence-backed thread resolution,
   protected merge/main verification, and final exact round-owned cleanup
   remain.
+- The September 25 first-run and supported-band milestone is also locally
+  green and unpushed. Apple and Android now use the same eight-stage first-run
+  sequence, with account before band setup and no Home surface mounted under
+  incomplete onboarding. Normal customer entry points say `Connect band` and
+  list only pairable launch transports: the supplier `NOOP Band` appears only
+  when its native adapter is available, while compatible 5/MG and 4.0 remain
+  explicit qualification transports. Experimental devices remain behind the
+  internal all-device scope. Dynamic accent fills use paired inverse ink, and
+  Android light surfaces resolve to dark text and icons. Exact evidence is
+  green: iOS UI 2/2, complete macOS 2,312 with one intentional skip, Android
+  Full 5,099 with seven intentional skips plus APK/lint/instrumentation
+  compile, API 35 visual hierarchy inspection, 365 Tools tests with one
+  intentional skip, 50 root localization-parser tests, and the full direct
+  policy wall. The terminology ratchet records 18,330 occurrences across 1,621
+  groups with zero forbidden mappings. The API 35 emulator was shut down and
+  the exact 5.7-GiB round-owned Apple DerivedData tree was removed.
+  Consolidated commit/push, replacement exact-SHA hosted checks, normal
+  protected integration, and physical BLE remain.
+- The September 25 step-motion false-positive correction is locally implemented
+  with platform verification green and remains unpushed. Apple and Android now
+  retain WHOOP-style counter deltas only when the available activity class says
+  walk or run; still, unknown, invalid, zero, and sync-gap deltas are rejected.
+  Heart rate remains wear/effort context rather than gait proof, and fully
+  unclassified legacy rows keep the existing labelled motion estimate. Focused
+  evidence passes Swift 45/45 and Android 44/44. The complete shared analytics
+  wall passes 1,497 tests with seven intentional private-data skips; Android
+  Full passes 5,121 with seven intentional skips plus APK, lint, and
+  instrumentation compilation; macOS passes 2,317 with one intentional skip;
+  and the unsigned Release iPhone graph embeds Watch, complications, and
+  widgets without source warnings. The first macOS wall exposed one stale
+  failure-injection fixture for the newer atomic registration transaction; the
+  corrected focused case and complete rerun pass. The first Tools wall exposed
+  an Xcode-generated vendored-SDK `.swiftpm` directory, the corresponding stale
+  source-shape contract, and the intentionally pending terminology refresh.
+  Exact cleanup plus focused SDK 9/9 and supplier app-slice 8/8 tests pass.
+  The reviewed terminology snapshot and source digests are current, and the
+  complete Tools wall passes 365 tests with one intentional dependency skip.
+  Release controls, required CI, trusted self-check, calibration, distribution
+  provenance, private-data, health claims, localization, operations records,
+  parser tests, workflow/shell validation, changed-Python compilation, and diff
+  hygiene are green. Consolidated commit/push, exact-SHA hosted checks, normal
+  protected integration, and physical step validation remain.
 - An isolated local follow-up from `60df38a2` confirms the vendored Swift and
   Kotlin `failOperation` implementations already reject non-operation failure
   categories before state mutation. Matching app-side regressions pass 2/2 on

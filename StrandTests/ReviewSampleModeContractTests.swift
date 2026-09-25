@@ -53,8 +53,29 @@ final class ReviewSampleModeContractTests: XCTestCase {
         XCTAssertTrue(root.contains("ReviewSampleDisclosureView("))
         XCTAssertTrue(root.contains("ReviewSampleRootView("))
         XCTAssertTrue(root.contains("!reviewSampleBlocksStandardLaunch"))
+        XCTAssertTrue(root.contains("!demoBypass && forceReviewSample"))
+        XCTAssertFalse(
+            root.contains(
+                "forceReviewSample || acceptedTerms != Terms.currentVersion"
+            ),
+            "Ordinary first launch must not be intercepted by the App Review sample chooser."
+        )
         XCTAssertTrue(root.contains("activateStandardLaunchIfNeeded()"))
         XCTAssertTrue(root.contains("guard !reviewSampleBlocksStandardLaunch else { return }"))
+        let forceReviewSample = try slice(
+            root,
+            from: "private var forceReviewSample: Bool",
+            to: "private var hasLaunchAccess: Bool"
+        )
+        XCTAssertTrue(
+            forceReviewSample.contains(
+                "CommandLine.arguments.contains(\"--review-sample\")"
+            )
+        )
+        XCTAssertFalse(
+            forceReviewSample.contains("#if DEBUG"),
+            "The explicit App Review launch argument must remain usable in the Release binary."
+        )
 
         let sampleEntry = try XCTUnwrap(root.range(of: "ReviewSampleEntryView(")?.lowerBound)
         let operationalMount = try XCTUnwrap(root.range(of: "RootTabView()")?.lowerBound)
@@ -69,6 +90,27 @@ final class ReviewSampleModeContractTests: XCTestCase {
         let source = try text("StrandiOS/App/StrandiOSApp.swift")
         XCTAssertTrue(source.contains("let reviewSampleFixtureRequested = CommandLine.arguments.contains(\"--review-sample\")"))
         XCTAssertTrue(source.contains("&& !reviewSampleFixtureRequested"))
+    }
+
+    func testFreshInstallDoesNotMountOperationalTabShellBehindOnboarding() throws {
+        let source = try text("StrandiOS/App/StrandiOSApp.swift")
+        let root = try slice(
+            source,
+            from: "private var shell: some View",
+            to: "/// DEBUG: launched with --demo-seed"
+        )
+        let tabMount = try slice(
+            root,
+            from: "if hasLaunchAccess",
+            to: "RootTabView()"
+        )
+
+        XCTAssertTrue(
+            tabMount.contains("&& (onboarded || demoBypass)"),
+            "The operational tab shell must not exist until first-run setup completes."
+        )
+        XCTAssertTrue(root.contains("&& !onboarded"))
+        XCTAssertTrue(root.contains("OnboardingWizard(onFinished:"))
     }
 
     private func text(_ relativePath: String) throws -> String {

@@ -53,6 +53,8 @@ private struct DevicesContent: View {
 
     // Sheets / alerts
     @State private var showAddWizard = false
+    @State private var addWizardStartAt:
+        (type: AddDeviceWizard.DeviceType, step: AddDeviceWizard.Step)?
     @State private var switchTarget: PairedDevice?
     @State private var renameTarget: PairedDevice?
     @State private var renameDraft = ""
@@ -177,10 +179,18 @@ private struct DevicesContent: View {
 
             whoopFirstFooter
         }
-        // Add a device — guided, branching wizard (asks the device TYPE first, then runs the right
-        // scan/register path: WHOOP present-scan for WHOOP families, StandardHRSource for HR straps).
-        .sheet(isPresented: $showAddWizard) {
-            AddDeviceWizard(live: live) { showAddWizard = false }
+        // Connect a supported band through the source-aware wizard. The full experimental catalog stays
+        // out of this customer path; it remains available only to explicit development/test entry points.
+        .sheet(
+            isPresented: $showAddWizard,
+            onDismiss: { addWizardStartAt = nil }
+        ) {
+            AddDeviceWizard(
+                live: live,
+                onClose: { showAddWizard = false },
+                selectionScope: .launchBands,
+                startAt: addWizardStartAt
+            )
                 .environmentObject(model)
                 .environmentObject(live)
         }
@@ -191,7 +201,10 @@ private struct DevicesContent: View {
                presenting: switchTarget) { device in
             Button("Cancel", role: .cancel) { switchTarget = nil }
             Button("Make active") {
-                registry.setActive(device.id)
+                _ = AppModel.activateDeviceDirectlyIfAllowed(
+                    device,
+                    in: registry
+                )
                 switchTarget = nil
             }
         } message: { device in
@@ -300,7 +313,12 @@ private struct DevicesContent: View {
             // I-1: import sources (Oura cloud import, file imports) are excluded — they're data
             // partitions, not live devices, and must never be offered as an active-strap candidate.
             ForEach(activatableDevices) { device in
-                Button(device.displayName) { registry.setActive(device.id) }
+                Button(device.displayName) {
+                    _ = AppModel.activateDeviceDirectlyIfAllowed(
+                        device,
+                        in: registry
+                    )
+                }
             }
             Button("Leave none active", role: .cancel) { }
         } message: {
@@ -311,10 +329,15 @@ private struct DevicesContent: View {
     // MARK: Pieces
 
     private var addButton: some View {
-        NoopButton("Add a device", systemImage: "plus", kind: .primary, fullWidth: true) {
-            showAddWizard = true
+        NoopButton(
+            "appwide.devices.connect_action",
+            systemImage: "wave.3.right",
+            kind: .primary,
+            fullWidth: true
+        ) {
+            presentAddWizard()
         }
-        .accessibilityLabel("Add a device")
+        .accessibilityLabel(Text("appwide.devices.connect_action"))
     }
 
     /// A real zero-device state. A blank section plus a detached Add button looked like the registry had
@@ -333,11 +356,11 @@ private struct DevicesContent: View {
                 }
 
                 VStack(spacing: 6) {
-                    Text("Add your first device")
+                    Text("appwide.devices.empty_title")
                         .font(StrandFont.title2)
                         .foregroundStyle(StrandPalette.textPrimary)
                         .multilineTextAlignment(.center)
-                    Text("Connect a Noop Band, Apple Watch, heart-rate strap, ring, or supported gym machine. NOOP will show only the signals that device actually provides.")
+                    Text("appwide.devices.empty_body")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .multilineTextAlignment(.center)
@@ -345,10 +368,15 @@ private struct DevicesContent: View {
                         .frame(maxWidth: 430)
                 }
 
-                NoopButton("Add a device", systemImage: "plus", kind: .primary, fullWidth: true) {
-                    showAddWizard = true
+                NoopButton(
+                    "appwide.devices.connect_action",
+                    systemImage: "wave.3.right",
+                    kind: .primary,
+                    fullWidth: true
+                ) {
+                    presentAddWizard()
                 }
-                .accessibilityHint("Opens the guided device setup")
+                .accessibilityHint("Shows bands this build can connect")
             }
             .frame(maxWidth: .infinity)
         }
@@ -367,7 +395,7 @@ private struct DevicesContent: View {
                     onMakeActive: { switchTarget = device },
                     onRename: { renameDraft = device.nickname ?? device.displayName; renameTarget = device },
                     onRemove: nil,
-                    onReAdd: { registry.setActive(device.id) },
+                    onReAdd: { reAdd(device) },
                     onDeleteData: { deleteDataTarget = device })
             }
         }
@@ -378,7 +406,7 @@ private struct DevicesContent: View {
             Image(systemName: "info.circle")
                 .foregroundStyle(StrandPalette.textSecondary)
                 .accessibilityHidden(true)
-            Text("Noop Band is NOOP's fully supported band. Other heart-rate straps can stream live heart rate and HRV, but they do not provide the deeper nightly signals available from Noop Band.")
+            Text("appwide.devices.supported_footer")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -403,6 +431,34 @@ private struct DevicesContent: View {
 
     private var currentActiveName: String {
         registry.devices.first(where: { $0.status == .active })?.displayName ?? String(localized: "Your current wearable")
+    }
+
+    private func presentAddWizard(
+        startAt: (type: AddDeviceWizard.DeviceType, step: AddDeviceWizard.Step)? = nil
+    ) {
+        addWizardStartAt = startAt
+        showAddWizard = true
+    }
+
+    private func reAdd(_ device: PairedDevice) {
+        guard let current = registry.devices.first(where: { $0.id == device.id }) else {
+            return
+        }
+        switch AppModel.activationRoute(for: current) {
+        case .direct:
+            _ = AppModel.activateDeviceDirectlyIfAllowed(
+                current,
+                in: registry
+            )
+        case .supplierPairing:
+            guard AddDeviceWizard
+                .supplierPairingAvailableForCurrentBuild else {
+                return
+            }
+            presentAddWizard(startAt: (.veepoo, .prep))
+        case .unavailable:
+            break
+        }
     }
 
     /// Archive the device, then — if it was the active one and other non-archived devices remain —
@@ -449,6 +505,34 @@ struct DevicePillState: Equatable {
         if bondRefused { return DevicePillState(label: "Connected · not paired", tone: .warning) }
         if isLiveConnected { return DevicePillState(label: "Active · Live", tone: .positive, pulsing: true) }
         return DevicePillState(label: "Active", tone: .positive)
+    }
+}
+
+enum DeviceActivationAffordance: Equatable {
+    case makeActive
+    case addDevice
+
+    static func resolve(
+        device: PairedDevice,
+        isActive: Bool,
+        hasReAddAction: Bool,
+        supplierPairingAvailable: Bool
+    ) -> DeviceActivationAffordance? {
+        switch AppModel.activationRoute(for: device) {
+        case .unavailable:
+            return nil
+        case .supplierPairing:
+            return device.status == .archived
+                && hasReAddAction
+                && supplierPairingAvailable
+                ? .addDevice
+                : nil
+        case .direct:
+            if device.status == .archived {
+                return hasReAddAction ? .makeActive : nil
+            }
+            return isActive ? nil : .makeActive
+        }
     }
 }
 
@@ -704,24 +788,35 @@ private struct DeviceCard: View {
         cardContent
     }
 
-    /// The card's primary tap action, or nil when there isn't one. A paired-but-not-active band → make it
-    /// active; a removed band → re-add it as active. The active band and any card without those callbacks
-    /// have no whole-card tap (their controls live entirely in the ⋮ menu). I-1: an import source (Oura
-    /// cloud import, file imports) never offers activation — it's a data partition, not a live device;
-    /// making it "active" would demote whatever live device drives BLE routing + day-owner priority 0.
+    private var activationAffordance: DeviceActivationAffordance? {
+        DeviceActivationAffordance.resolve(
+            device: device,
+            isActive: isActive,
+            hasReAddAction: onReAdd != nil,
+            supplierPairingAvailable:
+                AddDeviceWizard
+                    .supplierPairingAvailableForCurrentBuild
+        )
+    }
+
+    /// The card's primary tap action, or nil when there isn't one. An archived supplier is routed to Add
+    /// Device because removal cleared its credential; every other eligible archived row can reactivate
+    /// directly. Import-only rows and the active row have no activation action.
     private var primaryAction: (() -> Void)? {
-        if device.isImportSource { return nil }
-        if device.status == .archived { return onReAdd }
-        if !isActive { return onMakeActive }
-        return nil
+        guard activationAffordance != nil else { return nil }
+        return device.status == .archived ? onReAdd : onMakeActive
     }
 
     /// Short accent label for the explicit primary action. nil when the card has no primary action.
-    private var primaryActionHint: String? {
-        if device.isImportSource { return nil }
-        if device.status == .archived { return onReAdd == nil ? nil : String(localized: "Make active") }
-        if !isActive { return String(localized: "Make active") }
-        return nil
+    private var primaryActionHint: LocalizedStringKey? {
+        switch activationAffordance {
+        case .some(.makeActive):
+            return "Make active"
+        case .some(.addDevice):
+            return "appwide.devices.pair_again"
+        case .none:
+            return nil
+        }
     }
 
     /// The live battery as a liquid tube (fills to the charge, coloured by band) with a trailing percent.
@@ -766,9 +861,25 @@ private struct DeviceCard: View {
         Menu {
             if device.status == .archived {
                 // I-1: a removed import source (e.g. Oura cloud import, archived on Disconnect) never
-                // offers "Make active" reactivation - it's a data partition, not a live device.
-                if let onReAdd, !device.isImportSource {
-                    Button { onReAdd() } label: { Label("Make active", systemImage: "bolt.fill") }
+                // offers activation - it's a data partition, not a live device. A removed supplier has
+                // also lost its credential, so its affordance re-enters Add Device instead of setting the
+                // archived registry row active.
+                if let onReAdd {
+                    switch activationAffordance {
+                    case .some(.makeActive):
+                        Button { onReAdd() } label: {
+                            Label("Make active", systemImage: "bolt.fill")
+                        }
+                    case .some(.addDevice):
+                        Button { onReAdd() } label: {
+                            Label(
+                                "appwide.devices.pair_again",
+                                systemImage: "arrow.clockwise"
+                            )
+                        }
+                    case .none:
+                        EmptyView()
+                    }
                 }
                 Button { onRename() } label: { Label("Rename", systemImage: "pencil") }
                 if let onDeleteData {
@@ -939,10 +1050,18 @@ struct DeviceCapabilityProfile {
         }
         if d.sourceKind == .veepoo {
             return DeviceCapabilityProfile(
-                displayModel: String(localized: "Compatible supplier band (experimental)"),
-                captures: String(localized: "Heart rate (live display) · Battery"),
-                powers: String(localized: "Powers the current live display only"),
-                footnote: String(localized: "Experimental iPhone-only transport. Live heart rate is not stored or used for Effort, Recovery, Sleep, HRV, or other health formulas."))
+                displayModel: String(
+                    localized: "appwide.devices.supplier_display_model"
+                ),
+                captures: String(
+                    localized: "appwide.devices.supplier_captures"
+                ),
+                powers: String(
+                    localized: "appwide.devices.supplier_powers"
+                ),
+                footnote: String(
+                    localized: "appwide.devices.supplier_footnote"
+                ))
         }
         // EXPERIMENTAL locally-adopted Oura ring (gen 3/4/5). The gen is carried on `model` ("Oura Ring
         // 3/4/5") and recovered with OuraRingGen.from(model:). NOOP reads the ring's OWN raw signals + open

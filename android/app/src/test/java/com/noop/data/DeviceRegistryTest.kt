@@ -235,6 +235,49 @@ class DeviceRegistryTest {
     }
 
     @Test
+    fun addCommitsOnlyAfterVerifiedReadBack() = runBlocking {
+        val dao = seededDao()
+        val reg = registryWith(dao)
+        val paired = PairedDeviceRow(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            model = "Compatible band 5.0 / MG",
+            nickname = null,
+            peripheralId = "opaque-whoop",
+            sourceKind = SourceKind.liveBLE.name,
+            capabilities = "hr,hrv",
+            status = DeviceStatus.paired.name,
+            addedAt = 200,
+            lastSeenAt = 200,
+        )
+
+        assertTrue(reg.add(paired))
+        assertEquals(paired, dao.devices["whoop-test-band"])
+    }
+
+    @Test
+    fun addRollsBackAndReportsFailureWhenPersistenceFails() = runBlocking {
+        val dao = seededDao().apply { failUpsertFor = "whoop-test-band" }
+        val reg = registryWith(dao)
+        val paired = PairedDeviceRow(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            model = "Compatible band 5.0 / MG",
+            nickname = null,
+            peripheralId = "opaque-whoop",
+            sourceKind = SourceKind.liveBLE.name,
+            capabilities = "hr,hrv",
+            status = DeviceStatus.paired.name,
+            addedAt = 200,
+            lastSeenAt = 200,
+        )
+
+        assertFalse(reg.add(paired))
+        assertFalse(dao.devices.containsKey("whoop-test-band"))
+        assertEquals("my-whoop", reg.activeDeviceId())
+    }
+
+    @Test
     fun setActiveDemotesPreviousAndKeepsExactlyOneActive() = runBlocking {
         val dao = seededDao()
         val reg = registryWith(dao)

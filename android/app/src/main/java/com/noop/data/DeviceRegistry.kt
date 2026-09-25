@@ -99,8 +99,21 @@ class DeviceRegistry(
     /** The single active device id, or null if none. */
     suspend fun activeDeviceId(): String? = dao.activeDeviceId()
 
-    /** Add (or update) a device. */
-    suspend fun add(row: PairedDeviceRow) = dao.upsertPairedDevice(row)
+    /**
+     * Add (or update) a non-active device and verify the authoritative row before reporting success.
+     * A false result means the transaction threw or the committed row did not match [row].
+     */
+    suspend fun add(row: PairedDeviceRow): Boolean = try {
+        transactor.run {
+            dao.upsertPairedDevice(row)
+            if (dao.pairedDevices().firstOrNull { it.id == row.id } != row) {
+                throw MutationVerificationFailure()
+            }
+        }
+        true
+    } catch (_: Throwable) {
+        false
+    }
 
     /**
      * Insert a newly authenticated device and make it the sole active source in one transaction.

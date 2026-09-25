@@ -336,7 +336,13 @@ class UiAuditPresentationContractTest {
             .substringBefore("style = NoopType.subhead")
         assertFalse(rebootProbeCall.contains("+"))
         assertTrue(devices.contains("""displayModel = "Heart-rate strap""""))
-        assertTrue(devices.contains("Other heart-rate straps can stream live heart"))
+        assertTrue(devices.contains("appwide_devices_connect_action"))
+        assertTrue(devices.contains("appwide_devices_supported_footer"))
+        assertTrue(
+            devices.contains(
+                "selectionScope = AddDeviceSelectionScope.ClaimEligibleBands",
+            ),
+        )
 
         val logExport = source("src/main/java/com/noop/ui/LogExport.kt")
         assertFalse(logExport.contains("connect to your strap"))

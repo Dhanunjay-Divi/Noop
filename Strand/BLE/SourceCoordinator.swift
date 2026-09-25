@@ -293,10 +293,15 @@ final class SourceCoordinator: ObservableObject {
 
         guard activeStrapId != id else { return }   // already streaming this strap → no churn
 
-        // Build the isolated source for this device's registered kind (the ONE place that maps a kind to a
-        // concrete driver), then bring it up. `.liveAppleWatch` never reaches here — it's short-circuited
-        // above — so `makeSource` only ever sees a real BLE source kind.
-        guard let source = makeSource(for: id) else {
+        let sourceKind = sourceKind(for: id)
+        let preflightedSupplierSource: (any LiveHRSource)?
+        if sourceKind == .veepoo {
+            preflightedSupplierSource = noopBandSourceFactory?(id)
+        } else {
+            preflightedSupplierSource = nil
+        }
+
+        if sourceKind == .veepoo, preflightedSupplierSource == nil {
             // An optional supplier source must fail closed before disturbing a working WHOOP or another
             // live source. Reconcile the durable active row with that still-running transport so reads and
             // writes cannot remain pointed at a supplier source that has no provider or usable credential.
@@ -318,7 +323,16 @@ final class SourceCoordinator: ObservableObject {
         if !onStrap { stopWhoop() }
 
         // Switching source→source: stop the previous non-WHOOP source before starting the new one.
+        // This also advances `sourceGeneration` before constructing Oura, so its delayed-callback owner
+        // token is current from the first callback. Supplier construction remains above this edge because
+        // its optional factory must fail closed without disturbing the transport that is still running.
         tearDownNonWhoopSource(clearMonitoringExpectation: false)
+
+        // Build ordinary sources only after teardown/ownership advancement. The supplier source was
+        // preflighted above and is reused here without exposing vendor types to the coordinator.
+        guard let source = preflightedSupplierSource ?? makeSource(for: id) else {
+            return
+        }
 
         // Publish ownership before entering source code. A supplier source can synchronously reconcile a
         // permanently unavailable credential from connect(), which re-enters activeDeviceChanged; that
@@ -346,14 +360,14 @@ final class SourceCoordinator: ObservableObject {
     /// nothing else in the coordinator changes. Each arm keeps its own bespoke construction (persist / log /
     /// onBattery closures, plus Oura's ringGen / authKey / adoptIntent). Returns the source WITHOUT
     /// connecting — the caller (`switchToStrap`) does the connect-by-identifier-else-scan bring-up.
+    /// Supplier sources are preflighted separately before teardown so an unavailable optional adapter
+    /// cannot interrupt the transport already running.
     private func makeSource(for id: String) -> (any LiveHRSource)? {
-        if sourceKind(for: id) == .veepoo {
-            return noopBandSourceFactory?(id)
-        }
         switch sourceKind(for: id) {
         case .ftms:  return makeFTMSSource(id: id)
         case .huami: return makeHuamiSource(id: id)
         case .oura:  return makeOuraSource(id: id)
+        case .veepoo: return nil
         default:     return makeStandardSource(id: id)
         }
     }
@@ -471,6 +485,13 @@ final class SourceCoordinator: ObservableObject {
     /// active. Per OURA_PROTOCOL.md s3.2 the install is a one-time, consent-gated provisioning write.
     func requestOuraAdopt(deviceId: String) {
         pendingAdoptDeviceId = deviceId
+    }
+
+    /// Revoke a still-pending adopt intent when durable device registration fails. The device-id check
+    /// prevents an obsolete wizard attempt from cancelling a newer ring's consent.
+    func cancelOuraAdopt(deviceId: String) {
+        guard pendingAdoptDeviceId == deviceId else { return }
+        pendingAdoptDeviceId = nil
     }
 
     /// Stop the live non-WHOOP source (standard strap, FTMS machine, Huami device, or Oura ring) and drop

@@ -3488,7 +3488,7 @@ private fun DailyPlanCheckInOption(
                 Icon(
                     Icons.Filled.Check,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = Palette.accentInk,
                     modifier = Modifier.size(14.dp),
                 )
             }
@@ -3811,7 +3811,7 @@ private fun WorkoutInProgressCard(
                     onClick = onReturn,
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
+                        containerColor = Palette.accent, contentColor = Palette.accentInk,
                     ),
                 ) {
                     Text(uiString(R.string.l10n_today_screen_return_to_workout_30dc5509), style = NoopType.captionNumber)
@@ -7097,7 +7097,7 @@ private fun DashboardCardsEditorDialog(
                         enabled = items.any { it.enabled },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.accent,
-                            contentColor = Palette.surfaceBase,
+                            contentColor = Palette.accentInk,
                         ),
                     ) { Text(uiString(R.string.l10n_today_screen_done_e9b450d1), style = NoopType.captionNumber) }
                 }
@@ -7440,7 +7440,7 @@ private fun TodayLayoutEditorDialog(
                         onClick = { onSave(listOf(TodaySection.HERO) + items.toList()) },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.accent,
-                            contentColor = Palette.surfaceBase,
+                            contentColor = Palette.accentInk,
                         ),
                     ) { Text(uiString(R.string.l10n_today_screen_done_e9b450d1), style = NoopType.captionNumber) }
                 }

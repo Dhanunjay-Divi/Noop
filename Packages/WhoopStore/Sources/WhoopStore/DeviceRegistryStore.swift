@@ -17,6 +17,7 @@ import WhoopProtocol
 public struct DeviceRegistryStore: Sendable {
     private enum MutationFailure: Error {
         case archiveVerificationFailed
+        case registrationVerificationFailed
     }
 
     let dbQueue: any DatabaseWriter
@@ -36,6 +37,46 @@ public struct DeviceRegistryStore: Sendable {
 
     public func add(_ d: PairedDevice) throws {
         try dbQueue.write { db in try Self.upsert(db, d) }
+    }
+
+    /// Insert or update a newly authenticated device and make it the sole active source in one
+    /// transaction. Returning the complete authoritative rows lets the app publish only a verified
+    /// commit; a crash or write failure cannot leave a paired-only partial registration behind.
+    public func addAndSetActive(
+        _ device: PairedDevice,
+        at unix: Int = Int(Date().timeIntervalSince1970)
+    ) throws -> [PairedDevice] {
+        try dbQueue.write { db in
+            let previous = try String.fetchOne(
+                db,
+                sql: "SELECT id FROM pairedDevice WHERE status = 'active' LIMIT 1"
+            )
+            var activeDevice = device
+            activeDevice.status = .active
+            activeDevice.lastSeenAt = unix
+
+            try db.execute(
+                sql: "UPDATE pairedDevice SET status = 'paired' WHERE status = 'active'"
+            )
+            try Self.upsert(db, activeDevice)
+            if previous != device.id {
+                try AnalysisOwnershipInvalidation.mark(db)
+            }
+
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM pairedDevice ORDER BY addedAt ASC"
+            ).map(Self.decode)
+            guard rows.filter({ $0.status == .active }).count == 1,
+                  let saved = rows.first(where: { $0.id == device.id }),
+                  Self.matchesRegistration(
+                    saved,
+                    requested: activeDevice
+                  ) else {
+                throw MutationFailure.registrationVerificationFailed
+            }
+            return rows
+        }
     }
 
     /// I1: promoting one device demotes whatever was active, atomically (single write transaction).
@@ -296,6 +337,25 @@ public struct DeviceRegistryStore: Sendable {
         device.brand.caseInsensitiveCompare("WHOOP") == .orderedSame
             || device.id == "my-whoop"
             || device.id.lowercased().hasPrefix("whoop-")
+    }
+
+    private static func matchesRegistration(
+        _ saved: PairedDevice,
+        requested: PairedDevice
+    ) -> Bool {
+        let expectedCapabilities = isWhoop(requested)
+            ? WhoopLiveCapabilities.withoutCalibratedSpo2(
+                requested.capabilities
+            )
+            : requested.capabilities
+        return saved.brand == requested.brand
+            && saved.model == requested.model
+            && saved.nickname == requested.nickname
+            && saved.peripheralId == requested.peripheralId
+            && saved.sourceKind == requested.sourceKind
+            && saved.capabilities == expectedCapabilities
+            && saved.status == .active
+            && saved.lastSeenAt == requested.lastSeenAt
     }
 
     private static func updateModel(_ db: Database, id: String, model: String) throws {

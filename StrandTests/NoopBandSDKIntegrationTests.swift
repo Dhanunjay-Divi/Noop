@@ -798,7 +798,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testFailedSupplierRegistrationRestoresWhoopAndArchivesCandidate() async throws {
+    func testFailedSupplierRegistrationRestoresWhoopWithoutPartialCandidate() async throws {
         let store = try await WhoopStore.inMemory()
         let registry = DeviceRegistry(
             store: DeviceRegistryStore(dbQueue: store.registryWriter)
@@ -808,7 +808,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
         try await store.registryWriter.write { db in
             try db.execute(sql: """
                 CREATE TRIGGER reject_supplier_activation
-                BEFORE UPDATE OF status ON pairedDevice
+                BEFORE INSERT ON pairedDevice
                 WHEN NEW.id = 'veepoo-registration-failure'
                   AND NEW.status = 'active'
                 BEGIN
@@ -840,10 +840,7 @@ final class NoopBandSDKIntegrationTests: XCTestCase {
             rows.first(where: { $0.id == "my-whoop" })?.status,
             .active
         )
-        XCTAssertEqual(
-            rows.first(where: { $0.id == deviceID })?.status,
-            .archived
-        )
+        XCTAssertFalse(rows.contains(where: { $0.id == deviceID }))
     }
 
     @MainActor

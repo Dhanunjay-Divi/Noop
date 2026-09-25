@@ -777,7 +777,8 @@ object AnalyticsEngine {
         // conservative low-intensity floor; calendar-day gravity is the fallback on hardware without
         // a step counter. max, not addition, prevents workout HR and workout steps being counted twice.
         // Gravity alone cannot prove wear (a charging/off-wrist band can still be moved). Require the
-        // sparse-HR sample floor before gravity may stand in for steps; a real step counter needs no HR gate.
+        // sparse-HR sample floor before gravity may stand in for steps. The class-aware counter path stays
+        // independent of HR: heart rate is wear/effort context, not evidence that a wrist motion was gait.
         val hasWornMotionEvidence = (dayHr ?: hr)
             .asSequence()
             .filter { tsInDay(it.ts) && it.bpm > 0 }

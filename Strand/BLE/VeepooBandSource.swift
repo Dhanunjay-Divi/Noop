@@ -371,13 +371,17 @@ final class VeepooBandSource: LiveHRSource {
     private let displayFreshnessInterval: TimeInterval
     private let reconnectDelaysNanoseconds: [UInt64]
     private let reconnectDiscoveryTimeoutNanoseconds: UInt64
+    private let liveRestartDelaysNanoseconds: [UInt64]
+    private let liveRestartTailDelayNanoseconds: UInt64
     private let now: () -> Date
     private var targetPeripheralID: UUID?
     private var reconnectTask: Task<Void, Never>?
+    private var liveRestartTask: Task<Void, Never>?
     private var credentialRetryTask: Task<Void, Never>?
     private var protectedDataCancellable: AnyCancellable?
     private var displayFreshnessTask: Task<Void, Never>?
     private var reconnectAttempt = 0
+    private var liveRestartAttempt = 0
     private var credentialRetryAttempt = 0
     private var credentialRejected = false
     private var credentialWaitRecorded = false
@@ -398,6 +402,12 @@ final class VeepooBandSource: LiveHRSource {
             15_000_000_000,
         ],
         reconnectDiscoveryTimeoutNanoseconds: UInt64 = 12_000_000_000,
+        liveRestartDelaysNanoseconds: [UInt64] = [
+            2_000_000_000,
+            5_000_000_000,
+            15_000_000_000,
+        ],
+        liveRestartTailDelayNanoseconds: UInt64 = 60_000_000_000,
         now: @escaping () -> Date = Date.init
     ) {
         self.live = live
@@ -414,6 +424,9 @@ final class VeepooBandSource: LiveHRSource {
         self.reconnectDelaysNanoseconds = reconnectDelaysNanoseconds
         self.reconnectDiscoveryTimeoutNanoseconds =
             reconnectDiscoveryTimeoutNanoseconds
+        self.liveRestartDelaysNanoseconds = liveRestartDelaysNanoseconds
+        self.liveRestartTailDelayNanoseconds =
+            liveRestartTailDelayNanoseconds
         self.now = now
         adapter.eventHandler = { [weak self] event in self?.handle(event) }
     }
@@ -438,6 +451,12 @@ final class VeepooBandSource: LiveHRSource {
             15_000_000_000,
         ],
         reconnectDiscoveryTimeoutNanoseconds: UInt64 = 12_000_000_000,
+        liveRestartDelaysNanoseconds: [UInt64] = [
+            2_000_000_000,
+            5_000_000_000,
+            15_000_000_000,
+        ],
+        liveRestartTailDelayNanoseconds: UInt64 = 60_000_000_000,
         now: @escaping () -> Date = Date.init
     ) {
         self.live = live
@@ -457,6 +476,9 @@ final class VeepooBandSource: LiveHRSource {
         self.reconnectDelaysNanoseconds = reconnectDelaysNanoseconds
         self.reconnectDiscoveryTimeoutNanoseconds =
             reconnectDiscoveryTimeoutNanoseconds
+        self.liveRestartDelaysNanoseconds = liveRestartDelaysNanoseconds
+        self.liveRestartTailDelayNanoseconds =
+            liveRestartTailDelayNanoseconds
         self.now = now
         adapter.eventHandler = { [weak self] event in self?.handle(event) }
     }
@@ -486,6 +508,7 @@ final class VeepooBandSource: LiveHRSource {
         stopped = true
         reconnectTask?.cancel()
         reconnectTask = nil
+        cancelLiveRestart(resetAttempt: true)
         credentialRetryTask?.cancel()
         credentialRetryTask = nil
         protectedDataCancellable?.cancel()
@@ -521,6 +544,7 @@ final class VeepooBandSource: LiveHRSource {
             if let percent = reading.percent {
                 live.setBattery(Double(percent))
             }
+            cancelLiveRestart(resetAttempt: true)
             adapter.startLiveHeartRate()
         case .heartRate(let reading):
             guard Self.freshnessRemaining(
@@ -531,6 +555,7 @@ final class VeepooBandSource: LiveHRSource {
                 clearDisplayHeartRate()
                 return
             }
+            cancelLiveRestart(resetAttempt: true)
             reconnectAttempt = 0
             live.setDisplayOnlyHeartRate(
                 reading.bpm,
@@ -539,6 +564,7 @@ final class VeepooBandSource: LiveHRSource {
             live.connected = true
             scheduleDisplayExpiry(for: reading.receivedAt)
         case .disconnected:
+            cancelLiveRestart(resetAttempt: true)
             displayFreshnessTask?.cancel()
             displayFreshnessTask = nil
             live.connected = false
@@ -551,6 +577,7 @@ final class VeepooBandSource: LiveHRSource {
             if stage == .authentication && failure == .credentialRejected {
                 guard !credentialRejected else { return }
                 credentialRejected = true
+                cancelLiveRestart(resetAttempt: true)
                 adapter.disconnect()
                 onCredentialRejected()
                 return
@@ -558,6 +585,7 @@ final class VeepooBandSource: LiveHRSource {
             if stage == .battery {
                 guard !terminalBatteryFailureHandled else { return }
                 terminalBatteryFailureHandled = true
+                cancelLiveRestart(resetAttempt: true)
                 reconnectTask?.cancel()
                 reconnectTask = nil
                 live.batteryPct = nil
@@ -570,15 +598,21 @@ final class VeepooBandSource: LiveHRSource {
             }
             if stage == .live {
                 publishNonStreamingDisplayState()
+                if failure == .notWorn || failure == .busy {
+                    scheduleLiveRestart()
+                }
             }
             if stage == .connection || stage == .disconnect {
+                cancelLiveRestart(resetAttempt: true)
                 reconnectTask?.cancel()
                 reconnectTask = nil
                 scheduleReconnect()
             }
         case .liveStopped:
             publishNonStreamingDisplayState()
-        case .state, .authenticated, .liveStarted:
+        case .liveStarted:
+            cancelLiveRestart(resetAttempt: false)
+        case .state, .authenticated:
             break
         }
     }
@@ -696,6 +730,7 @@ final class VeepooBandSource: LiveHRSource {
     private func handlePermanentlyUnavailableCredential() {
         guard !permanentCredentialFailureHandled else { return }
         permanentCredentialFailureHandled = true
+        cancelLiveRestart(resetAttempt: true)
         credentialRetryTask?.cancel()
         credentialRetryTask = nil
         protectedDataCancellable?.cancel()
@@ -718,6 +753,33 @@ final class VeepooBandSource: LiveHRSource {
             targetPeripheralID: targetPeripheralID,
             delayNanoseconds: delay
         )
+    }
+
+    private func scheduleLiveRestart() {
+        guard !stopped, liveRestartTask == nil else { return }
+        let delay: UInt64
+        if liveRestartAttempt < liveRestartDelaysNanoseconds.count {
+            delay = liveRestartDelaysNanoseconds[liveRestartAttempt]
+            liveRestartAttempt += 1
+        } else {
+            delay = liveRestartTailDelayNanoseconds
+        }
+        liveRestartTask = Task { @MainActor [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+            }
+            guard !Task.isCancelled, let self, !self.stopped else { return }
+            self.liveRestartTask = nil
+            self.adapter.startLiveHeartRate()
+        }
+    }
+
+    private func cancelLiveRestart(resetAttempt: Bool) {
+        liveRestartTask?.cancel()
+        liveRestartTask = nil
+        if resetAttempt {
+            liveRestartAttempt = 0
+        }
     }
 
     private func startBoundedDiscovery(

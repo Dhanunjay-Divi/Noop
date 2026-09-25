@@ -1817,21 +1817,61 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertFalse(androidViewModel.contains("FallResponseStateMachine("))
     }
 
-    func testSafetySetupIsPartOfOnboardingBeforeAppearance() throws {
+    func testConciseOnboardingDefersSafetyAndAppearanceToReachableAppSurfaces() throws {
         let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
-        let notifications = try XCTUnwrap(
-            onboarding.range(of: "notifications, safetyContacts,")
+        let androidOnboarding = try source(
+            "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt"
         )
-        let appearance = try XCTUnwrap(
-            onboarding.range(of: "appearance, dailyRhythm, plan, done")
+        let iosShell = try source("StrandiOS/App/RootTabView.swift")
+        let androidShell = try source(
+            "android/app/src/main/java/com/noop/ui/AppRoot.kt"
         )
-        XCTAssertLessThan(notifications.lowerBound, appearance.lowerBound)
-        XCTAssertTrue(onboarding.contains(
-            "case .safetyContacts: SafetyContactsStep()"
-        ))
-        XCTAssertTrue(onboarding.contains(
-            "SafetyContactsSetupView(service: service)"
-        ))
+
+        let appleSteps = try XCTUnwrap(
+            onboarding.range(
+                of: "static func onboardingSteps(ownershipConfigured _: Bool) -> [Step]"
+            )
+        )
+        let appleRestore = try XCTUnwrap(
+            onboarding.range(
+                of: "static func restoredOnboardingStep(",
+                range: appleSteps.upperBound..<onboarding.endIndex
+            )
+        )
+        let appleActiveSteps = onboarding[
+            appleSteps.lowerBound..<appleRestore.lowerBound
+        ]
+        XCTAssertFalse(appleActiveSteps.contains(".safetyContacts"))
+        XCTAssertFalse(appleActiveSteps.contains(".appearance"))
+        XCTAssertFalse(appleActiveSteps.contains(".notifications"))
+        XCTAssertFalse(appleActiveSteps.contains(".dailyRhythm"))
+
+        let androidSteps = try XCTUnwrap(
+            androidOnboarding.range(of: "internal fun onboardingPages(")
+        )
+        let androidSetupSource = try XCTUnwrap(
+            androidOnboarding.range(
+                of: "internal fun onboardingCompletedDeviceSetupSource(",
+                range: androidSteps.upperBound..<androidOnboarding.endIndex
+            )
+        )
+        let androidActiveSteps = androidOnboarding[
+            androidSteps.lowerBound..<androidSetupSource.lowerBound
+        ]
+        XCTAssertFalse(androidActiveSteps.contains("OnboardingPage.SafetyContacts"))
+        XCTAssertFalse(androidActiveSteps.contains("OnboardingPage.Appearance"))
+        XCTAssertFalse(androidActiveSteps.contains("OnboardingPage.Notifications"))
+        XCTAssertFalse(androidActiveSteps.contains("OnboardingPage.DailyRhythm"))
+
+        XCTAssertTrue(iosShell.contains("MoreRow(\"Safety\""))
+        XCTAssertTrue(iosShell.contains("case .safety:          SafetyCenterView()"))
+        XCTAssertTrue(iosShell.contains("private var appearanceQuickMenu: some View"))
+        XCTAssertTrue(
+            androidShell.contains(
+                "composable(Destination.Safety.route) { SafetyCenterScreen() }"
+            )
+        )
+        XCTAssertTrue(androidShell.contains("AppearanceMode.entries.forEach"))
     }
 
     func testFloatingQuickActionLauncherKeepsNineActionsAndVisualQAEntryPoint() throws {

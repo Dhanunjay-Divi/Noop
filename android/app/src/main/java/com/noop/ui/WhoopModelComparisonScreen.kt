@@ -231,7 +231,7 @@ private fun Footer(onClose: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.End) {
         Button(
             onClick = onClose,
-            colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+            colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.accentInk),
         ) {
             Text(uiString(R.string.l10n_whoop_model_comparison_screen_done_e9b450d1), modifier = Modifier.padding(horizontal = 24.dp))
         }

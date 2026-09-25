@@ -15,8 +15,8 @@ final class StepsEstimateEngineTraceTests: XCTestCase {
     private let dayUtc = "2026-01-02"
     private let noonUtc = 1_767_355_200
 
-    private func step(_ tsOffsetSec: Int, _ counter: Int) -> StepSample {
-        StepSample(ts: noonUtc + tsOffsetSec, counter: counter)
+    private func step(_ tsOffsetSec: Int, _ counter: Int, activityClass: Int? = nil) -> StepSample {
+        StepSample(ts: noonUtc + tsOffsetSec, counter: counter, activityClass: activityClass)
     }
 
     // MARK: - 5/MG raw-counter trace
@@ -34,6 +34,7 @@ final class StepsEstimateEngineTraceTests: XCTestCase {
         XCTAssertTrue(totalLine!.contains("scaledSteps=\(production!)"),
                       "trace scaledSteps must equal analyzeDay steps, got \(totalLine!)")
         XCTAssertTrue(totalLine!.contains("rawTicks=120"))
+        XCTAssertTrue(lines[0].contains("mode=legacyRawMotion"))
     }
 
     func testWrapAwareDeltaIsReportedAndCounted() {
@@ -43,7 +44,7 @@ final class StepsEstimateEngineTraceTests: XCTestCase {
         XCTAssertEqual(production, 66 + 60)
         let lines = StepsEstimateEngine.rawCounterTrace(
             daySteps: samples, dayKey: dayUtc, tzOffsetSeconds: 0, ticksPerStep: profile.stepTicksPerStep)
-        XCTAssertTrue(lines.contains { $0.contains("stepsRaw deltas kept=2 dropped=0") })
+        XCTAssertTrue(lines.contains { $0.contains("kept=2") && $0.contains("rejectedGap=0") })
         XCTAssertTrue(lines.first { $0.hasPrefix("stepsRaw total ") }!.contains("scaledSteps=\(production!)"))
         XCTAssertFalse(lines.contains { $0.contains("\u{2014}") })
     }
@@ -55,7 +56,7 @@ final class StepsEstimateEngineTraceTests: XCTestCase {
         XCTAssertEqual(production, 100)   // 50 + 50, the 850 jump excluded
         let lines = StepsEstimateEngine.rawCounterTrace(
             daySteps: samples, dayKey: dayUtc, tzOffsetSeconds: 0, ticksPerStep: profile.stepTicksPerStep)
-        XCTAssertTrue(lines.contains { $0.contains("stepsRaw deltas kept=2 dropped=1") })
+        XCTAssertTrue(lines.contains { $0.contains("kept=2") && $0.contains("rejectedGap=1") })
         XCTAssertTrue(lines.first { $0.hasPrefix("stepsRaw total ") }!.contains("scaledSteps=\(production!)"))
     }
 
@@ -90,7 +91,7 @@ final class StepsEstimateEngineTraceTests: XCTestCase {
             daySteps: [step(0, 100)], dayKey: dayUtc, tzOffsetSeconds: 0, ticksPerStep: 1.0)
         XCTAssertEqual(lines.count, 1)
         XCTAssertTrue(lines[0].contains("counterSamples=1"))
-        XCTAssertTrue(lines[0].contains("need >=2"))
+        XCTAssertTrue(lines[0].contains("status=insufficientSamples"))
     }
 
     func testEmptyCounterReportsNoRawCounterNotBroken() {
@@ -102,9 +103,8 @@ final class StepsEstimateEngineTraceTests: XCTestCase {
             daySteps: [], dayKey: dayUtc, tzOffsetSeconds: 0, ticksPerStep: 1.0)
         XCTAssertEqual(lines.count, 1)
         XCTAssertTrue(lines[0].contains("counterSamples=0"))
-        XCTAssertTrue(lines[0].contains("noRawCounter"))
-        XCTAssertTrue(lines[0].contains("motion-estimated"))
-        XCTAssertFalse(lines[0].contains("need >=2"))  // not the misleading "broken" line
+        XCTAssertTrue(lines[0].contains("status=noRawCounter"))
+        XCTAssertFalse(lines[0].contains("insufficientSamples"))
         XCTAssertFalse(lines[0].contains("\u{2014}"))   // no em-dash
     }
 
@@ -117,7 +117,7 @@ final class StepsEstimateEngineTraceTests: XCTestCase {
         let lines = StepsEstimateEngine.rawCounterTrace(
             daySteps: otherDay, dayKey: dayUtc, tzOffsetSeconds: 0, ticksPerStep: 1.0)
         XCTAssertEqual(lines.count, 1)
-        XCTAssertTrue(lines[0].contains("noRawCounter"))
+        XCTAssertTrue(lines[0].contains("status=noRawCounter"))
     }
 
     func testDSTCivilBoundsKeepTraceEqualToProductionTotal() {
@@ -152,6 +152,41 @@ final class StepsEstimateEngineTraceTests: XCTestCase {
             lines.first { $0.hasPrefix("stepsRaw total ") }?
                 .contains("scaledSteps=20") == true
         )
+    }
+
+    func testClassFilteringTraceIsBoundedAndReusesAnalysis() {
+        let samples = [
+            step(0, 100, activityClass: 0),
+            step(60, 300, activityClass: 0),
+            step(120, 450, activityClass: nil),
+            step(180, 550, activityClass: 1),
+            step(240, 1_200, activityClass: 1),
+        ]
+        let analysis = StepsCounter.analyze(samples)
+        let production = AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            steps: samples,
+            profile: profile
+        ).daily.steps
+        let lines = StepsEstimateEngine.rawCounterTrace(
+            daySteps: samples,
+            dayKey: dayUtc,
+            tzOffsetSeconds: 0,
+            ticksPerStep: profile.stepTicksPerStep
+        )
+
+        XCTAssertEqual(production, analysis.steps)
+        XCTAssertEqual(
+            lines,
+            [
+                "stepsRaw analysis status=analyzed mode=activityClassFiltered counterSamples=5 "
+                    + "deltaCount=4 kept=1 rejectedStill=1 rejectedUnknown=1 rejectedGap=1 zero=0",
+                "stepsRaw total rawTicks=100 scaledSteps=100",
+            ]
+        )
+        XCTAssertFalse(lines.contains { $0.contains("day=") })
+        XCTAssertFalse(lines.contains { $0.contains("firstCounter=") || $0.contains("lastCounter=") })
+        XCTAssertFalse(lines.contains { $0.contains("ticksPerStep=") || $0.contains("keptRange") })
     }
 
     // MARK: - WHOOP-4 calibration trace
@@ -203,7 +238,7 @@ final class StepsEstimateEngineTraceTests: XCTestCase {
     // MARK: - Readout parsers
 
     func testStepsReadoutParsesScaledSteps() {
-        let tail = ["[steps] stepsRaw total rawTicks=120 ticksPerStep=1.0 scaledSteps=120 (steps_est for the day)"]
+        let tail = ["[steps] stepsRaw total rawTicks=120 scaledSteps=120"]
         XCTAssertEqual(StepsReadout.stepsToday(taggedTail: tail), 120)
     }
 

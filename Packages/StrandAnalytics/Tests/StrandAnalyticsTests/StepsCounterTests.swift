@@ -8,7 +8,9 @@ import WhoopProtocol
 /// the caller's `stepTicksPerStep` calibration). Mirrors the Android StepsCounterTest vectors value-for-value.
 final class StepsCounterTests: XCTestCase {
 
-    private func step(_ ts: Int, _ counter: Int) -> StepSample { StepSample(ts: ts, counter: counter) }
+    private func step(_ ts: Int, _ counter: Int, _ activityClass: Int? = nil) -> StepSample {
+        StepSample(ts: ts, counter: counter, activityClass: activityClass)
+    }
 
     func testSumsPositiveConsecutiveDeltas() {
         // counters 100 -> 150 -> 220 => deltas 50 + 70 = 120
@@ -46,5 +48,87 @@ final class StepsCounterTests: XCTestCase {
         // Exactly maxStepDelta (512) is dropped; 511 counts.
         XCTAssertEqual(StepsCounter.stepsInWindow([step(0, 0), step(60, 512)]), nil)   // 512 dropped => no movement
         XCTAssertEqual(StepsCounter.stepsInWindow([step(0, 0), step(60, 511)]), 511)   // 511 kept
+    }
+
+    func testClassZeroStationaryFourThousandTickBurstIsRejected() {
+        // Ten individually plausible 400-tick deltas must not evade maxStepDelta when every later sample
+        // says the wrist is still.
+        let samples = (0...10).map { step($0 * 60, $0 * 400, 0) }
+        let analysis = StepsCounter.analyze(samples)
+
+        XCTAssertEqual(analysis.filterMode, .activityClassFiltered)
+        XCTAssertEqual(analysis.deltaCount, 10)
+        XCTAssertEqual(analysis.keptDeltaCount, 0)
+        XCTAssertEqual(analysis.rejectedStillDeltaCount, 10)
+        XCTAssertEqual(analysis.rawTicks, 0)
+        XCTAssertNil(analysis.steps)
+        XCTAssertNil(StepsCounter.stepsInWindow(samples))
+    }
+
+    func testMixedStillAndWalkRetainsOnlyWalkDeltas() {
+        let samples = [
+            step(0, 100, 0),
+            step(60, 300, 0),   // +200 still: reject
+            step(120, 450, 1),  // +150 walk: keep
+            step(180, 550, 0),  // +100 still: reject
+            step(240, 700, 2),  // +150 run: keep
+        ]
+        let analysis = StepsCounter.analyze(samples)
+
+        XCTAssertEqual(analysis.rawTicks, 300)
+        XCTAssertEqual(analysis.keptDeltaCount, 2)
+        XCTAssertEqual(analysis.rejectedStillDeltaCount, 2)
+        XCTAssertEqual(StepsCounter.stepsInWindow(samples), 300)
+    }
+
+    func testUnknownDeltaIsRejectedInsideClassedWindow() {
+        let samples = [
+            step(0, 100, 0),
+            step(60, 150, nil), // +50 unknown: reject because the window has class evidence
+            step(120, 220, 1),  // +70 walk: keep
+        ]
+        let analysis = StepsCounter.analyze(samples)
+
+        XCTAssertEqual(analysis.filterMode, .activityClassFiltered)
+        XCTAssertEqual(analysis.rawTicks, 70)
+        XCTAssertEqual(analysis.keptDeltaCount, 1)
+        XCTAssertEqual(analysis.rejectedUnknownDeltaCount, 1)
+        XCTAssertEqual(StepsCounter.stepsInWindow(samples), 70)
+    }
+
+    func testInvalidActivityClassCountsAsUnknown() {
+        let analysis = StepsCounter.analyze([
+            step(0, 100, 1),
+            step(60, 180, 7),
+        ])
+
+        XCTAssertEqual(analysis.rawTicks, 0)
+        XCTAssertEqual(analysis.rejectedUnknownDeltaCount, 1)
+        XCTAssertNil(analysis.steps)
+    }
+
+    func testAllNilActivityClassesRetainLegacyRawMotionBehavior() {
+        let samples = (0...10).map { step($0 * 60, $0 * 400) }
+        let analysis = StepsCounter.analyze(samples)
+
+        XCTAssertEqual(analysis.filterMode, .legacyRawMotion)
+        XCTAssertEqual(analysis.keptDeltaCount, 10)
+        XCTAssertEqual(analysis.rawTicks, 4_000)
+        XCTAssertEqual(StepsCounter.stepsInWindow(samples), 4_000)
+    }
+
+    func testClassedWindowRetainsWrapAndGapBehavior() {
+        let samples = [
+            step(0, 65_500, 1),
+            step(60, 20, 1),      // wrap-aware +56: keep
+            step(120, 1_000, 1),  // +980 gap: reject
+            step(180, 1_060, 2),  // +60 run: keep
+        ]
+        let analysis = StepsCounter.analyze(samples)
+
+        XCTAssertEqual(analysis.rawTicks, 116)
+        XCTAssertEqual(analysis.keptDeltaCount, 2)
+        XCTAssertEqual(analysis.rejectedGapDeltaCount, 1)
+        XCTAssertEqual(StepsCounter.stepsInWindow(samples), 116)
     }
 }

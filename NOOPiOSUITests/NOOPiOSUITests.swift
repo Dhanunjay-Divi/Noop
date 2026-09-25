@@ -817,29 +817,31 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "terms-readable-primary-action")
     }
 
-    func testOnboardingDeviceSetupLeadsWithGenericNoopBand() {
+    func testOnboardingDeviceSetupShowsOnlyAvailableLaunchBands() {
         let app = launchDemoScreen(
             "onboarding",
             extraArguments: ["--demo-onboarding-page", "scan"]
         )
 
         let chooseDevice = app.buttons["noop.onboarding.choose-device"]
-        let legacyModelLabels = ["WHOOP 4.0", "WHOOP 5.0 / MG"]
         XCTAssertTrue(chooseDevice.waitForExistence(timeout: 20))
-        XCTAssertEqual(chooseDevice.label, "Choose band or device")
-        XCTAssertFalse(app.staticTexts["Which strap are you pairing?"].exists)
-        for label in legacyModelLabels {
-            XCTAssertFalse(app.staticTexts[label].exists)
-        }
+        XCTAssertEqual(chooseDevice.label, "Connect band")
+        XCTAssertFalse(app.staticTexts["Compatible band 5.0 / MG"].exists)
+        XCTAssertFalse(app.staticTexts["Compatible band 4.0"].exists)
         chooseDevice.tap()
 
-        let noopBand = app.buttons["noop.device-wizard.type.noop-band"]
-        XCTAssertTrue(noopBand.waitForExistence(timeout: 10))
-        XCTAssertTrue(noopBand.label.hasPrefix("Noop Band."))
-        for label in legacyModelLabels {
-            XCTAssertFalse(app.staticTexts[label].exists)
-        }
-        keepScreenshot(app, name: "onboarding-source-aware-noop-band")
+        let whoop5 = app.buttons["noop.device-wizard.type.whoop-5-mg"]
+        let whoop4 = app.buttons["noop.device-wizard.type.whoop-4"]
+        XCTAssertTrue(whoop5.waitForExistence(timeout: 10))
+        XCTAssertTrue(whoop4.waitForExistence(timeout: 5))
+        XCTAssertTrue(whoop5.label.hasPrefix("Compatible band 5.0 / MG."))
+        XCTAssertTrue(whoop4.label.hasPrefix("Compatible band 4.0."))
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.supplier-band"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.heart-rate-strap"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.gym-equipment"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.oura"].exists)
+        XCTAssertFalse(app.staticTexts["Experimental"].exists)
+        keepScreenshot(app, name: "onboarding-supported-band-picker")
     }
 
     func testOnboardingDeviceSetupClearsFooterAtAccessibilitySize() {
@@ -851,35 +853,27 @@ final class NOOPiOSUITests: XCTestCase {
         let primaryAction = app.buttons["noop.onboarding.primary"]
         let footer = app.descendants(matching: .any)["noop.onboarding.footer"]
         let chooseDevice = app.buttons["noop.onboarding.choose-device"]
-        let continueWithoutBand = app.staticTexts[
-            "noop.onboarding.continue-without-band-note"
-        ]
         XCTAssertTrue(primaryAction.waitForExistence(timeout: 20))
         XCTAssertTrue(footer.waitForExistence(timeout: 5))
         XCTAssertTrue(chooseDevice.waitForExistence(timeout: 5))
-        XCTAssertTrue(continueWithoutBand.waitForExistence(timeout: 5))
-        XCTAssertFalse(
-            chooseDevice.isHittable && chooseDevice.frame.intersects(footer.frame),
-            "Visible device setup must not be exposed underneath the fixed onboarding footer."
-        )
 
         for _ in 0..<8
-            where !continueWithoutBand.isHittable
-                || continueWithoutBand.frame.maxY + 12 > footer.frame.minY {
+            where !chooseDevice.isHittable
+                || chooseDevice.frame.maxY + 12 > footer.frame.minY {
             app.swipeUp()
         }
 
         XCTAssertTrue(
-            continueWithoutBand.isHittable,
-            "The final device-setup guidance must be reachable above the fixed onboarding footer."
+            chooseDevice.isHittable,
+            "The Connect band action must remain reachable at large text sizes."
         )
         XCTAssertLessThanOrEqual(
-            continueWithoutBand.frame.maxY + 12,
+            chooseDevice.frame.maxY + 12,
             footer.frame.minY,
-            "The fixed onboarding footer must not cover the device-setup guidance."
+            "The fixed onboarding footer must not cover the Connect band action."
         )
-        XCTAssertFalse(continueWithoutBand.frame.intersects(footer.frame))
-        XCTAssertFalse(continueWithoutBand.frame.intersects(primaryAction.frame))
+        XCTAssertFalse(chooseDevice.frame.intersects(footer.frame))
+        XCTAssertFalse(chooseDevice.frame.intersects(primaryAction.frame))
         keepScreenshot(app, name: "se-accessibility-device-setup-clear-footer")
     }
 

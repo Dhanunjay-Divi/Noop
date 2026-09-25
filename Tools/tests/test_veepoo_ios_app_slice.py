@@ -160,16 +160,26 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
 
     def test_source_factory_is_veepoo_specific_and_fail_closed(self) -> None:
         coordinator = self.read("Strand/BLE/SourceCoordinator.swift")
-        self.assertIn("if sourceKind(for: id) == .veepoo", coordinator)
-        build = coordinator.index("guard let source = makeSource(for: id)")
-        stop = coordinator.index("if !onStrap { stopWhoop() }", build)
-        self.assertLess(build, stop)
-        unavailable = coordinator[build:stop]
+        preflight = coordinator.index(
+            "let preflightedSupplierSource: (any LiveHRSource)?"
+        )
+        stop = coordinator.index("if !onStrap { stopWhoop() }", preflight)
+        unavailable = coordinator[preflight:stop]
+        self.assertIn("if sourceKind == .veepoo", unavailable)
+        self.assertIn(
+            "preflightedSupplierSource = noopBandSourceFactory?(id)",
+            unavailable,
+        )
         self.assertIn("registry.reconcileUnavailableSupplier(", unavailable)
         self.assertIn(
             "preferredTransportDeviceID: actualTransportDeviceID",
             unavailable,
         )
+        build = coordinator.index(
+            "guard let source = preflightedSupplierSource ?? makeSource(for: id)",
+            stop,
+        )
+        self.assertLess(stop, build)
 
         registry = self.read("Strand/Data/DeviceRegistry.swift")
         reconcile = registry[
@@ -206,7 +216,7 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
             ),
         )
 
-    def test_registration_is_verified_and_compensated(self) -> None:
+    def test_registration_is_verified_and_atomic(self) -> None:
         source = self.read("Strand/BLE/VeepooBandSource.swift")
         commit = source[
             source.index("func commitPairedDevice(") :
@@ -224,15 +234,24 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
             registry.index("func addAndSetActive(") :
             registry.index("func reconcileUnavailableSupplier(")
         ]
-        self.assertIn("try store.add(device)", registration)
-        self.assertIn("try store.setActive(device.id)", registration)
-        self.assertIn("compensateFailedRegistration(", registration)
-        compensation = registry[
-            registry.index("private func compensateFailedRegistration(") :
-            registry.index("private func publish(")
+        self.assertIn("publish(try store.addAndSetActive(device))", registration)
+        self.assertIn("catch", registration)
+        self.assertIn("return false", registration)
+        self.assertNotIn("try store.add(device)", registration)
+        self.assertNotIn("try store.setActive(device.id)", registration)
+        self.assertNotIn("compensateFailedRegistration(", registration)
+
+        store = self.read(
+            "Packages/WhoopStore/Sources/WhoopStore/DeviceRegistryStore.swift"
+        )
+        atomic = store[
+            store.index("public func addAndSetActive(") :
+            store.index("public func setActive(", store.index("public func addAndSetActive("))
         ]
-        self.assertIn("try store.archive(attemptedDeviceID)", compensation)
-        self.assertIn("try store.setActive(originalActive.id)", compensation)
+        self.assertIn("try dbQueue.write", atomic)
+        self.assertIn("Self.upsert(db, activeDevice)", atomic)
+        self.assertIn("rows.filter({ $0.status == .active }).count == 1", atomic)
+        self.assertIn("MutationFailure.registrationVerificationFailed", atomic)
 
         wizard = self.read("Strand/Screens/AddDeviceWizard.swift")
         finish = wizard[
@@ -241,7 +260,10 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
         ]
         self.assertIn("session.commitPairedDevice(", finish)
         self.assertIn("model.deviceRegistry?.addAndSetActive(device)", finish)
-        self.assertLess(finish.index("guard committed else"), finish.index("onClose()"))
+        self.assertLess(
+            finish.index("guard committed, let addedDevice else"),
+            finish.index("onClose()"),
+        )
         self.assertNotIn("model.registerDevice", finish)
 
     def test_only_proven_registry_capability_is_exposed(self) -> None:
@@ -253,8 +275,20 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
             profile.index("if d.sourceKind == .veepoo") :
             profile.index("if d.sourceKind == .oura")
         ]
-        self.assertIn("Heart rate (live display) · Battery", veepoo_profile)
-        self.assertIn("current live display only", veepoo_profile)
+        self.assertIn(
+            'localized: "appwide.devices.supplier_captures"',
+            veepoo_profile,
+        )
+        self.assertIn(
+            'localized: "appwide.devices.supplier_powers"',
+            veepoo_profile,
+        )
+        localized = self.read("Tools/AppWideLocalization/appwide_strings.json")
+        self.assertIn("Heart rate (live display only) · Battery", localized)
+        self.assertIn(
+            "Live display only. No history or scores are stored from this source.",
+            localized,
+        )
         for unsupported in (
             ".hrv",
             ".spo2",

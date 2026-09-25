@@ -61,40 +61,46 @@ final class DeviceRegistry: ObservableObject {
     // `activeDeviceId` reflect the change and the UI updates. Best-effort: a store failure leaves the
     // published state untouched (we never crash the UI on a write error).
 
-    /// Add or upsert a paired device (the Add wizard's chosen strap). Refreshes the published list.
-    func add(_ device: PairedDevice) {
-        try? store.add(device)
-        reload()
-    }
-
-    /// Register a newly authenticated source and make it active as one verified operation from the
-    /// app's perspective. The underlying store keeps each database write transactional; this wrapper
-    /// withholds publication until both writes and the authoritative read-back succeed. On failure it
-    /// restores the prior rows and archives a newly inserted candidate so a partial adoption cannot be
-    /// mistaken for an active source.
+    /// Add or upsert a paired device (the Add wizard's chosen strap), then verify the authoritative
+    /// read-back before publishing success. A swallowed store failure must never let onboarding claim
+    /// that a band was saved when it will disappear on relaunch.
     @discardableResult
-    func addAndSetActive(_ device: PairedDevice) -> Bool {
-        let originalRows: [PairedDevice]
-        do {
-            originalRows = try store.all()
-        } catch {
-            return false
-        }
-
+    func add(_ device: PairedDevice) -> Bool {
         do {
             try store.add(device)
-            try store.setActive(device.id)
             let rows = try store.all()
-            guard rows.first(where: { $0.status == .active })?.id == device.id else {
-                throw MutationFailure.verificationFailed
+            guard let saved = rows.first(where: { $0.id == device.id }),
+                  saved.brand == device.brand,
+                  saved.model == device.model,
+                  saved.nickname == device.nickname,
+                  saved.peripheralId == device.peripheralId,
+                  saved.sourceKind == device.sourceKind,
+                  saved.capabilities
+                    == (Self.isWhoop(device)
+                        ? WhoopLiveCapabilities.withoutCalibratedSpo2(
+                            device.capabilities
+                        )
+                        : device.capabilities),
+                  saved.status == device.status,
+                  saved.lastSeenAt == device.lastSeenAt else {
+                return false
             }
             publish(rows)
             return true
         } catch {
-            compensateFailedRegistration(
-                attemptedDeviceID: device.id,
-                originalRows: originalRows
-            )
+            return false
+        }
+    }
+
+    /// Register a newly authenticated source and make it active as one verified database transaction.
+    /// The store returns the authoritative rows only after the complete selected device and the
+    /// single-active invariant are verified, so onboarding cannot publish a partial adoption.
+    @discardableResult
+    func addAndSetActive(_ device: PairedDevice) -> Bool {
+        do {
+            publish(try store.addAndSetActive(device))
+            return true
+        } catch {
             return false
         }
     }
@@ -219,26 +225,6 @@ final class DeviceRegistry: ObservableObject {
     func touch(_ id: String, at unix: Int = Int(Date().timeIntervalSince1970)) {
         try? store.touch(id, at: unix)
         reload()
-    }
-
-    private func compensateFailedRegistration(
-        attemptedDeviceID: String,
-        originalRows: [PairedDevice]
-    ) {
-        do {
-            if !originalRows.contains(where: { $0.id == attemptedDeviceID }) {
-                try store.archive(attemptedDeviceID)
-            }
-            for row in originalRows {
-                try store.add(row)
-            }
-            if let originalActive = originalRows.first(where: { $0.status == .active }) {
-                try store.setActive(originalActive.id)
-            }
-            publish(try store.all())
-        } catch {
-            reload()
-        }
     }
 
     private func publish(_ rows: [PairedDevice]) {

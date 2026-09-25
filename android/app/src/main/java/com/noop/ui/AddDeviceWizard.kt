@@ -73,7 +73,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// MARK: - Add a device - guided, branching wizard (MW-4)
+// MARK: - Connect a band - guided, branching wizard (MW-4)
 //
 // Different bands pair COMPLETELY differently, so this wizard asks the device TYPE first, then gives
 // type-specific prep guidance and runs the RIGHT scan/connect for that type:
@@ -86,9 +86,9 @@ import kotlinx.coroutines.withContext
 //
 // Registration goes through [AppViewModel.registerDevice] → DeviceRegistry; the SourceCoordinator reacts
 // to the active-device change and connects (pinning the WHOOP / starting the strap source). The wizard
-// never touches the BLE client directly - only the AppViewModel pass-throughs. WHOOP-FIRST: WHOOP is the
-// primary band; the type list shows it first and a footer reiterates it. Renders cleanly with nothing
-// nearby (the type picker, every prep step, and the searching/empty pick state all need no hardware).
+// never touches the BLE client directly - only the AppViewModel pass-throughs. Customer-facing launch
+// paths constrain this catalog to adapters the current build can actually use. Renders cleanly with
+// nothing nearby (the type picker, every prep step, and the searching/empty pick state need no hardware).
 // Faithful Kotlin twin of Strand/Screens/AddDeviceWizard.swift.
 
 /** What the user is adding. Drives the prep copy AND which scan/register path runs. */
@@ -126,7 +126,14 @@ private enum class DeviceType {
 
     val title: String
         get() = when (this) {
-            Whoop5MG, Whoop4 -> WhoopModel.CUSTOMER_NAME
+            Whoop5MG ->
+                uiString(
+                    R.string.appwide_onboarding_device_wizard_compatible_5_title,
+                )
+            Whoop4 ->
+                uiString(
+                    R.string.appwide_onboarding_device_wizard_compatible_4_title,
+                )
             HrStrap -> "Heart-rate strap"
             GymEquipment -> "Gym equipment"
             Amazfit -> "Amazfit / Zepp"
@@ -134,7 +141,7 @@ private enum class DeviceType {
             Garmin -> "Garmin watch"
             Oura -> "Oura ring"
             SupplierBand ->
-                uiString(R.string.appwide_onboarding_device_wizard_supplier_android_title)
+                uiString(R.string.appwide_devices_supplier_display_model)
     }
 }
 
@@ -150,6 +157,40 @@ private fun AddDeviceSelectionScope.allows(type: DeviceType): Boolean = when (th
 }
 
 private enum class WizardStep { Type, Prep, Pick, Confirm }
+
+internal class DeferredScanner<T>(
+    factory: () -> T,
+) {
+    private val scanner = lazy(LazyThreadSafetyMode.NONE, factory)
+
+    fun get(): T = scanner.value
+
+    fun ifInitialized(action: (T) -> Unit) {
+        if (scanner.isInitialized()) action(scanner.value)
+    }
+}
+
+enum class AddDeviceStart {
+    DevicePicker,
+    SupplierBandPairing,
+}
+
+internal fun resolvedAddDeviceStart(
+    requested: AddDeviceStart,
+    supplierAvailable: Boolean,
+): AddDeviceStart =
+    if (requested == AddDeviceStart.SupplierBandPairing && !supplierAvailable) {
+        AddDeviceStart.DevicePicker
+    } else {
+        requested
+    }
+
+private fun WhoopModel.registrationLabel(): String = when (this) {
+    WhoopModel.WHOOP4 ->
+        uiString(R.string.appwide_onboarding_device_wizard_compatible_4_title)
+    WhoopModel.WHOOP5_MG ->
+        uiString(R.string.appwide_onboarding_device_wizard_compatible_5_title)
+}
 
 /**
  * The Oura factory-reset-and-adopt sub-flow (section 2 of the onboarding UX spec). The Oura type does NOT
@@ -167,17 +208,37 @@ private enum class OuraStep { Gate, Prep, Pick, Confirm, Adopting, Failed }
 fun AddDeviceWizard(
     viewModel: AppViewModel,
     onClose: () -> Unit,
+    onAddedSource: (SourceKind) -> Unit = {},
     /** Routes to the non-destructive file-import lane (Data Sources). The Oura gate's "Keep the Oura app
      *  instead (import a file)" link and every honest Oura failure offer this, so the destructive takeover
      *  is never the only door. Defaults to a plain close so existing call sites keep compiling. */
     onUseFileImport: () -> Unit = onClose,
-    selectionScope: AddDeviceSelectionScope =
-        AddDeviceSelectionScope.AllDevices,
+    selectionScope: AddDeviceSelectionScope,
+    start: AddDeviceStart = AddDeviceStart.DevicePicker,
+    allowSupplierBand: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
+    val supplierAvailable = allowSupplierBand && viewModel.supplierBandAvailable
+    val resolvedStart = resolvedAddDeviceStart(start, supplierAvailable)
 
-    var step by remember { mutableStateOf(WizardStep.Type) }
-    var type by remember { mutableStateOf<DeviceType?>(null) }
+    var step by remember(resolvedStart) {
+        mutableStateOf(
+            if (resolvedStart == AddDeviceStart.SupplierBandPairing) {
+                WizardStep.Prep
+            } else {
+                WizardStep.Type
+            },
+        )
+    }
+    var type by remember(resolvedStart) {
+        mutableStateOf<DeviceType?>(
+            if (resolvedStart == AddDeviceStart.SupplierBandPairing) {
+                DeviceType.SupplierBand
+            } else {
+                null
+            },
+        )
+    }
 
     // --- Oura factory-reset-and-adopt sub-flow (the Oura type drives its own step machine; section 2 of
     // docs/superpowers/specs/2026-06-29-oura-onboarding-ux.md). Inert for every other device type. ---
@@ -210,37 +271,44 @@ fun AddDeviceWizard(
     val supplierCandidates by viewModel.supplierBandCandidates.collectAsStateWithLifecycle()
     val supplierPairingState by viewModel.supplierBandPairingState.collectAsStateWithLifecycle()
 
-    // Discovery-only HR source for the strap path (also Garmin Broadcast HR). Never persists, never
-    // connects - we only read its `discovered` / `scanning` StateFlows while scanning. Created once.
-    val hrScanner = remember { viewModel.makeStrapScanner() }
-    // Discovery-only FTMS source for the gym-equipment path. Same throwaway contract.
-    val ftmsScanner = remember { viewModel.makeFtmsScanner() }
-    // Discovery-only EXPERIMENTAL Huami scanner (Amazfit / Zepp / Mi Band).
-    val huamiScanner = remember { viewModel.makeHuamiScanner() }
+    // Discovery-only scanners are acquired by the selected family's Scan action. Opening or closing a
+    // launch-only picker must not construct hidden experimental Bluetooth clients.
+    val hrScanner = remember(viewModel) {
+        DeferredScanner { viewModel.makeStrapScanner() }
+    }
+    val ftmsScanner = remember(viewModel) {
+        DeferredScanner { viewModel.makeFtmsScanner() }
+    }
+    val huamiScanner = remember(viewModel) {
+        DeferredScanner { viewModel.makeHuamiScanner() }
+    }
     // Discovery-only EXPERIMENTAL Oura scanner: a throwaway, isolated [OuraLiveSource] (its OWN scanner +
     // GATT, never the WHOOP client; no-op persist/live, null key). The wizard reads only its `discovered` /
     // `scanning` flows; the SourceCoordinator owns the real connect once the adopted ring becomes active.
-    val ouraScanner = remember { viewModel.makeOuraScanner() }
+    val ouraScanner = remember(viewModel) {
+        DeferredScanner { viewModel.makeOuraScanner() }
+    }
 
     fun startScan(t: DeviceType) {
         when {
             t.isWhoop -> viewModel.presentWhoopScan(t.whoopModel ?: WhoopModel.WHOOP4)
-            t == DeviceType.GymEquipment -> ftmsScanner.scan()
-            t == DeviceType.Amazfit || t == DeviceType.MiBand -> huamiScanner.scan()
-            t == DeviceType.Oura -> ouraScanner.scan()
-            t == DeviceType.SupplierBand -> scope.launch {
+            t == DeviceType.GymEquipment -> ftmsScanner.get().scan()
+            t == DeviceType.Amazfit || t == DeviceType.MiBand -> huamiScanner.get().scan()
+            t == DeviceType.Oura -> ouraScanner.get().scan()
+            t == DeviceType.SupplierBand && supplierAvailable -> scope.launch {
                 viewModel.beginSupplierBandPairing()
             }
-            else -> hrScanner.scan()   // HrStrap AND Garmin (Broadcast HR is the standard 0x180D path)
+            t == DeviceType.SupplierBand -> Unit
+            else -> hrScanner.get().scan() // HrStrap AND Garmin use the standard 0x180D path.
         }
     }
 
     fun stopAllScans() {
         viewModel.stopWhoopScan()
-        hrScanner.stopScan()
-        ftmsScanner.stopScan()
-        huamiScanner.stopScan()
-        ouraScanner.stop()
+        hrScanner.ifInitialized { it.stopScan() }
+        ftmsScanner.ifInitialized { it.stopScan() }
+        huamiScanner.ifInitialized { it.stopScan() }
+        ouraScanner.ifInitialized { it.stop() }
         viewModel.cancelSupplierBandPairing()
     }
 
@@ -274,7 +342,7 @@ fun AddDeviceWizard(
     }
 
     // Belt-and-braces: stop whichever scan is live whenever the wizard leaves composition.
-    DisposableEffect(Unit) { onDispose { stopAllScans() } }
+    DisposableEffect(viewModel) { onDispose { stopAllScans() } }
 
     fun goBack() {
         // The Oura type runs its own step machine; back walks that, falling out to the type list from Gate.
@@ -287,13 +355,19 @@ fun AddDeviceWizard(
                 OuraStep.Prep -> ouraStep = OuraStep.Gate
                 // The standard path came from Prep (factory-reset step); the Advanced path came straight
                 // from the Gate key field. Back returns to wherever the scan was launched from.
-                OuraStep.Pick -> { ouraScanner.stop(); pickedOura = null; ouraStep = if (ouraAdvanced) OuraStep.Gate else OuraStep.Prep }
+                OuraStep.Pick -> {
+                    ouraScanner.ifInitialized { it.stop() }
+                    pickedOura = null
+                    ouraStep = if (ouraAdvanced) OuraStep.Gate else OuraStep.Prep
+                }
                 OuraStep.Confirm -> {
                     // Re-enter the pick step and rescan so the user can choose a different ring.
-                    ouraScanner.scan(); pickedOura = null; ouraStep = OuraStep.Pick
+                    ouraScanner.get().scan(); pickedOura = null; ouraStep = OuraStep.Pick
                 }
                 // Adopting / Failed have no meaningful back; return to the pick step to try again.
-                OuraStep.Adopting, OuraStep.Failed -> { ouraScanner.scan(); pickedOura = null; ouraStep = OuraStep.Pick }
+                OuraStep.Adopting, OuraStep.Failed -> {
+                    ouraScanner.get().scan(); pickedOura = null; ouraStep = OuraStep.Pick
+                }
             }
             return
         }
@@ -315,7 +389,7 @@ fun AddDeviceWizard(
     }
 
     val confirmAdvertisedName = run {
-        pickedWhoop?.let { return@run WhoopModel.CUSTOMER_NAME }
+        pickedWhoop?.let { return@run it.model.registrationLabel() }
         pickedStrap?.let { return@run CustomerFacingBrand.text(it.name) }
         pickedMachine?.let { return@run CustomerFacingBrand.text(it.name) }
         pickedHuami?.let { return@run CustomerFacingBrand.text(it.name) }
@@ -417,12 +491,17 @@ fun AddDeviceWizard(
             else -> null
         }
         if (device == null) { onClose(); return }
+        val committedSource = SourceKind.entries.first {
+            it.name == device.sourceKind
+        }
         launchDurableRegistration(
             mutation = {
                 viewModel.registerDevice(device, makeActive = makeActive)
-                true
             },
-            onSuccess = onClose,
+            onSuccess = {
+                onAddedSource(committedSource)
+                onClose()
+            },
         )
     }
 
@@ -483,9 +562,9 @@ fun AddDeviceWizard(
         launchDurableRegistration(
             mutation = {
                 viewModel.registerDevice(device, makeActive = true)
-                true
             },
             onSuccess = {
+                onAddedSource(SourceKind.oura)
                 if (closeAfter) onClose()
             },
         )
@@ -556,7 +635,7 @@ fun AddDeviceWizard(
                     advanced = ouraAdvanced,
                     consent = ouraConsent,
                     keyDraft = ouraKeyDraft,
-                    scanner = ouraScanner,
+                    scanner = ouraScanner::get,
                     gen = ouraGen,
                     name = nameDraft,
                     // The live adopt-failure reason, so the honest Failed step shows it (Swift parity).
@@ -570,17 +649,17 @@ fun AddDeviceWizard(
                     // key field the user scans straight through to the pick step (no factory-reset prep,
                     // because the supplied key authenticates without resetting the ring).
                     onAdvanced = { ouraAdvanced = true; ouraStep = OuraStep.Gate },
-                    onScan = { ouraScanner.scan(); ouraStep = OuraStep.Pick },
+                    onScan = { ouraScanner.get().scan(); ouraStep = OuraStep.Pick },
                     onPick = { ring ->
                         pickedOura = ring
                         // Confirm the generation from the picked ring's best-effort detection, defaulting to
                         // gen3 (the verified-corpus generation) when the name carries no generation marker.
                         ouraGen = ring.detectedGen ?: OuraRingGen.GEN3
                         nameDraft = "Oura ring"
-                        ouraScanner.stopScan()
+                        ouraScanner.get().stopScan()
                         ouraStep = OuraStep.Confirm
                     },
-                    onRescan = { ouraScanner.scan() },
+                    onRescan = { ouraScanner.get().scan() },
                     onAdopt = {
                         // The standard adopt is destructive (it installs NOOP's key on the ring), so it
                         // gates behind the final "Take over this ring?" alert. The Advanced key path is
@@ -590,15 +669,20 @@ fun AddDeviceWizard(
                         if (ouraAdvanced) finishAddOura(closeAfter = true)
                         else ouraConfirmAdopt = true
                     },
-                    onTryAgain = { ouraScanner.scan(); pickedOura = null; ouraStep = OuraStep.Pick },
+                    onTryAgain = {
+                        ouraScanner.get().scan(); pickedOura = null; ouraStep = OuraStep.Pick
+                    },
                 )
             } else {
                 when (step) {
                     WizardStep.Type -> TypeStep(
-                        supplierAvailable = viewModel.supplierBandAvailable,
+                        supplierAvailable = supplierAvailable,
                         selectionScope = selectionScope,
                         onPick = { t ->
-                            if (selectionScope.allows(t)) {
+                            if (
+                                selectionScope.allows(t) &&
+                                (t != DeviceType.SupplierBand || supplierAvailable)
+                            ) {
                                 type = t
                                 nameDraft = ""
                                 // Oura enters its own step machine at the gate, not the generic prep step.
@@ -622,33 +706,33 @@ fun AddDeviceWizard(
                                 viewModel = viewModel,
                                 onSelect = { strap ->
                                     pickedWhoop = strap; pickedStrap = null; pickedMachine = null; pickedHuami = null
-                                    nameDraft = WhoopModel.CUSTOMER_NAME
+                                    nameDraft = strap.model.registrationLabel()
                                     viewModel.stopWhoopScan()
                                     step = WizardStep.Confirm
                                 },
                                 onRescan = { viewModel.presentWhoopScan(t.whoopModel ?: WhoopModel.WHOOP4) },
                             )
                             t == DeviceType.GymEquipment -> FtmsPickStep(
-                                scanner = ftmsScanner,
+                                scanner = ftmsScanner.get(),
                                 onSelect = { machine ->
                                     pickedMachine = machine
                                     pickedWhoop = null; pickedStrap = null; pickedHuami = null
                                     nameDraft = CustomerFacingBrand.text(machine.name)
-                                    ftmsScanner.stopScan()
+                                    ftmsScanner.get().stopScan()
                                     step = WizardStep.Confirm
                                 },
-                                onRescan = { ftmsScanner.scan() },
+                                onRescan = { ftmsScanner.get().scan() },
                             )
                             t == DeviceType.Amazfit || t == DeviceType.MiBand -> HuamiPickStep(
-                                scanner = huamiScanner,
+                                scanner = huamiScanner.get(),
                                 onSelect = { dev ->
                                     pickedHuami = dev
                                     pickedWhoop = null; pickedStrap = null; pickedMachine = null
                                     nameDraft = CustomerFacingBrand.text(dev.name)
-                                    huamiScanner.stopScan()
+                                    huamiScanner.get().stopScan()
                                     step = WizardStep.Confirm
                                 },
-                                onRescan = { huamiScanner.scan() },
+                                onRescan = { huamiScanner.get().scan() },
                             )
                             t == DeviceType.SupplierBand -> SupplierBandPickStep(
                                 candidates = supplierCandidates,
@@ -665,15 +749,15 @@ fun AddDeviceWizard(
                             )
                             else -> HrPickStep(
                                 // Heart-rate strap AND Garmin (Broadcast HR is the standard 0x180D path).
-                                scanner = hrScanner,
+                                scanner = hrScanner.get(),
                                 onSelect = { strap ->
                                     pickedStrap = strap
                                     pickedWhoop = null; pickedMachine = null; pickedHuami = null
                                     nameDraft = CustomerFacingBrand.text(strap.name)
-                                    hrScanner.stopScan()
+                                    hrScanner.get().stopScan()
                                     step = WizardStep.Confirm
                                 },
-                                onRescan = { hrScanner.scan() },
+                                onRescan = { hrScanner.get().scan() },
                             )
                         }
                     }
@@ -699,7 +783,10 @@ fun AddDeviceWizard(
                                             supplierNickname,
                                         )
                                     },
-                                    onSuccess = onClose,
+                                    onSuccess = {
+                                        onAddedSource(SourceKind.veepoo)
+                                        onClose()
+                                    },
                                 )
                             },
                         )
@@ -908,19 +995,30 @@ private fun TypeStep(
     onPick: (DeviceType) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (supplierAvailable) {
+            TypeRow(
+                Icons.Filled.GraphicEq,
+                DeviceType.SupplierBand.title,
+                uiString(
+                    R.string.appwide_onboarding_device_wizard_supplier_android_subtitle,
+                ),
+            ) {
+                onPick(DeviceType.SupplierBand)
+            }
+        }
+        TypeRow(
+            Icons.Filled.Watch,
+            DeviceType.Whoop5MG.title,
+            uiString(R.string.appwide_onboarding_device_wizard_whoop_subtitle),
+        ) {
+            onPick(DeviceType.Whoop5MG)
+        }
         TypeRow(
             Icons.Filled.Watch,
             DeviceType.Whoop4.title,
             uiString(R.string.appwide_onboarding_device_wizard_whoop_subtitle),
         ) {
             onPick(DeviceType.Whoop4)
-        }
-        TypeRow(
-            Icons.Filled.Watch,
-            DeviceType.Whoop5MG.title,
-            uiString(R.string.l10n_add_device_wizard_whoop_5_0_mg_support_is_e452e686),
-        ) {
-            onPick(DeviceType.Whoop5MG)
         }
         if (selectionScope == AddDeviceSelectionScope.AllDevices) {
             TypeRow(Icons.Filled.FavoriteBorder, DeviceType.HrStrap.title, "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast") {
@@ -947,18 +1045,6 @@ private fun TypeStep(
                 onPick(DeviceType.Garmin)
             }
         }
-        if (supplierAvailable) {
-            TypeRow(
-                Icons.Filled.GraphicEq,
-                DeviceType.SupplierBand.title,
-                uiString(
-                    R.string.appwide_onboarding_device_wizard_supplier_android_subtitle,
-                ),
-            ) {
-                onPick(DeviceType.SupplierBand)
-            }
-        }
-
         if (selectionScope == AddDeviceSelectionScope.AllDevices) {
             WhoopFirstNote()
         }
@@ -1373,7 +1459,7 @@ private fun WhoopPickStep(
     PickList(searching = true, isEmpty = found.isEmpty(), onRescan = onRescan) {
         found.sortedByDescending { it.rssi }.forEach { strap ->
             DiscoveredRow(
-                name = WhoopModel.CUSTOMER_NAME,
+                name = strap.model.registrationLabel(),
                 subtitle = uiString(
                     R.string.appwide_onboarding_device_wizard_compatible_band,
                 ),
@@ -1458,7 +1544,7 @@ private fun OuraFlow(
     advanced: Boolean,
     consent: Boolean,
     keyDraft: String,
-    scanner: OuraLiveSource,
+    scanner: () -> OuraLiveSource,
     gen: OuraRingGen,
     name: String,
     failureReason: String?,
@@ -1478,7 +1564,7 @@ private fun OuraFlow(
         OuraStep.Gate -> if (advanced) OuraAdvancedKeyStep(keyDraft, onKeyDraft, onScan)
         else OuraGateStep(consent, onConsent, onContinue, onUseFileImport, onAdvanced)
         OuraStep.Prep -> OuraPrepStep(advanced, onScan)
-        OuraStep.Pick -> OuraPickStep(scanner, onPick, onRescan)
+        OuraStep.Pick -> OuraPickStep(scanner(), onPick, onRescan)
         OuraStep.Confirm -> OuraConfirmStep(advanced, gen, name, onName, onAdopt)
         OuraStep.Adopting -> OuraAdoptingStep()
         OuraStep.Failed -> OuraFailedStep(failureReason, onTryAgain, onUseFileImport)

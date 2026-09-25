@@ -1,6 +1,6 @@
 # NOOP — Terms of Use & Acknowledgment
 
-**Version 2.5**
+**Version 2.6**
 
 > **This is not legal advice.** This document was drafted with the help of an AI tool, not a lawyer.
 > It is offered honestly and in good faith, but the NOOP maintainers are not lawyers and nothing here
@@ -24,9 +24,11 @@ The current source is offered under `LICENSE` for permitted non-commercial
 purposes. That public license does not grant third parties commercial-use
 rights. The repository owner separately controls NOOP's release authorization.
 
-**NOOP Band is in development and is not available yet.** Until NOOP Band is announced ready,
-current direct-band support interoperates with compatible third-party wearable hardware owned by the
-user. The app will identify NOOP Band explicitly when first-party hardware support is ready.
+Direct-band support depends on the exact build and compatible hardware. Builds
+that include the approved supplier SDK may connect supported **NOOP Band**
+hardware. WHOOP remains a separate compatibility-testing transport. The app
+must identify the selected transport accurately and reject unsupported or
+unapproved hardware.
 
 Some features deliberately send selected data to a destination you enable or invoke. These include a
 self-hosted server, Friends sharing, Oura import, an AI provider, Apple Health, and files or share-sheet
@@ -46,8 +48,8 @@ third-party trademarks belong to their respective owners.
 
 ## 3. Use at your own risk and third-party service terms
 
-While current third-party band support is active, you may use NOOP **only with a compatible
-device you own**, to read **your own data.**
+You may use NOOP **only with a compatible device you own**, to read **your own
+data.**
 
 **Direct compatibility may affect another app's connection, account services, device support, or
 warranty.** Whether to use NOOP and any resulting consequences are **your responsibility and your
@@ -55,9 +57,13 @@ decision alone.** NOOP does not require or encourage you to break any agreement 
 into; how you use hardware you own is up to you. You are responsible for reviewing the agreements
 and laws that apply to you, and for your own compliance with them.
 
-You accept that NOOP is **experimental software that talks to your device's firmware over an
-unofficial, reverse-engineered protocol.** As with any such tool, there is a residual risk to the
-device, its data, and its connection to official services. **You assume that risk.**
+The WHOOP compatibility transport is **experimental software that talks to the
+device's firmware over an unofficial, reverse-engineered protocol.** NOOP Band
+support uses approved supplier SDK artifacts when those artifacts are present
+in the build. Both paths still require compatible hardware and qualification.
+As with any early-access device integration, there is a residual risk to the
+device, its data, and its connection to other services. **You assume that
+risk.**
 
 ## 4. Source provenance and proprietary material
 
@@ -123,8 +129,9 @@ you accept that this allocation of risk is reasonable.
 On first launch (and again if these terms materially change), NOOP asks you to confirm several
 statements **individually** before you can continue. By ticking each box you confirm that:
 
-- **you understand NOOP Band is not available yet, this version currently connects to compatible
-  hardware you own, and you will use only your own band and your own data;**
+- **you understand band support depends on this build and compatible hardware,
+  and you will connect only a band you own and use only your own band and your
+  own data;**
 - **you understand NOOP is early-access wellness software, provided "as is", and is not a medical
   device or medical advice;** and
 - **you have read and accept these Terms of Use, including the warranty and liability limits allowed
@@ -136,11 +143,14 @@ materially affects your rights, NOOP will ask you to acknowledge the new version
 
 ## 8. Product transition and third-party independence
 
-NOOP Band is planned as NOOP's own product. Until it is announced ready, references to supported
-direct-band hardware describe third-party devices. Nothing in NOOP suggests that the app or its
-planned hardware originates from, is sponsored by, or is endorsed by another manufacturer. Current
-interoperability exists to let people read their own device's data on their own device; it is not
-intended to disrupt or damage third-party products or services.
+NOOP Band is NOOP's own product path and is available only in builds that
+contain the approved supplier SDK and pass the applicable hardware,
+compatibility, signing, and release gates. WHOOP remains a separate
+third-party compatibility-testing transport. Nothing in NOOP suggests that the
+app or its hardware originates from, is sponsored by, or is endorsed by
+another manufacturer. Current third-party interoperability exists to let
+people read their own device's data on their own device; it is not intended to
+disrupt or damage third-party products or services.
 
 ## 9. Changes, governing law, and severance
 

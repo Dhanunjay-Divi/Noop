@@ -6,6 +6,7 @@ import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
 import com.noop.ownership.OwnershipPhase
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -24,7 +25,43 @@ class OnboardingOwnershipStepSelectionTest {
     }
 
     @Test
-    fun accountCopyBranchesBetweenConfiguredAndExplorationModes() {
+    fun supplierBandRequiresBothOwnershipConfigurationAndAdapter() {
+        assertTrue(
+            supplierBandOnboardingAvailable(
+                adapterAvailable = true,
+                ownershipConfigured = true,
+            ),
+        )
+        assertFalse(
+            supplierBandOnboardingAvailable(
+                adapterAvailable = true,
+                ownershipConfigured = false,
+            ),
+        )
+        assertFalse(
+            supplierBandOnboardingAvailable(
+                adapterAvailable = false,
+                ownershipConfigured = true,
+            ),
+        )
+        assertEquals(
+            AddDeviceStart.DevicePicker,
+            resolvedAddDeviceStart(
+                requested = AddDeviceStart.SupplierBandPairing,
+                supplierAvailable = false,
+            ),
+        )
+        assertEquals(
+            AddDeviceStart.SupplierBandPairing,
+            resolvedAddDeviceStart(
+                requested = AddDeviceStart.SupplierBandPairing,
+                supplierAvailable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun accountCopyPreservesConfiguredAndLocalFirstBoundaries() {
         assertEquals(
             OnboardingAccountCopy(
                 dataBoundaryTitle =
@@ -50,171 +87,207 @@ class OnboardingOwnershipStepSelectionTest {
     }
 
     @Test
-    fun configuredOwnershipIncludesAccountStepWithoutConstructingRuntimeService() {
-        val pages = onboardingPages(ownershipConfigured = true)
+    fun activeFlowIsTheConciseEightStageAccountFirstSequence() {
+        val expected = listOf(
+            OnboardingPage.Welcome,
+            OnboardingPage.Account,
+            OnboardingPage.Bluetooth,
+            OnboardingPage.Connect,
+            OnboardingPage.Ownership,
+            OnboardingPage.Profile,
+            OnboardingPage.Plan,
+            OnboardingPage.Done,
+        )
 
-        assertTrue(pages.contains(OnboardingPage.Ownership))
-        assertEquals(
-            pages.indexOf(OnboardingPage.Bonded) + 1,
-            pages.indexOf(OnboardingPage.Ownership),
-        )
-        assertEquals(
-            pages.indexOf(OnboardingPage.Ownership) + 1,
-            pages.indexOf(OnboardingPage.Profile),
-        )
+        assertEquals(expected, onboardingPages(ownershipConfigured = true))
+        assertEquals(expected, onboardingPages(ownershipConfigured = false))
     }
 
     @Test
-    fun unconfiguredCoreModeKeepsAccountStepVisibleBeforeProfile() {
+    fun newProgressSchemaRejectsLegacyOrMalformedCheckpoints() {
         val pages = onboardingPages(ownershipConfigured = false)
+        val welcome = pages.indexOf(OnboardingPage.Welcome)
 
-        assertTrue(pages.contains(OnboardingPage.Ownership))
-        assertTrue(pages.contains(OnboardingPage.Profile))
-        assertEquals(
-            pages.indexOf(OnboardingPage.Bonded) + 1,
-            pages.indexOf(OnboardingPage.Ownership),
-        )
-        assertEquals(
-            pages.indexOf(OnboardingPage.Ownership) + 1,
-            pages.indexOf(OnboardingPage.Profile),
-        )
+        listOf(
+            null,
+            "profile",
+            "1:profile",
+            "2:not-a-page",
+            "3:profile",
+        ).forEach { stored ->
+            assertEquals(
+                stored,
+                welcome,
+                restoredOnboardingPageIndex(stored, pages),
+            )
+        }
     }
 
     @Test
-    fun unconfiguredCoreModeResumesSavedAccountStepExactly() {
+    fun currentProgressSchemaCanResumeOnlyAnActivePage() {
         val pages = onboardingPages(ownershipConfigured = false)
 
+        pages.forEachIndexed { expectedIndex, page ->
+            assertEquals(
+                page.name,
+                expectedIndex,
+                restoredOnboardingPageIndex(
+                    storedPage = encodedOnboardingProgress(page),
+                    pages = pages,
+                ),
+            )
+        }
         assertEquals(
-            pages.indexOf(OnboardingPage.Ownership),
+            pages.indexOf(OnboardingPage.Welcome),
             restoredOnboardingPageIndex(
-                storedPage = OnboardingPage.Ownership.storageValue,
+                storedPage = encodedOnboardingProgress(OnboardingPage.Import),
                 pages = pages,
             ),
         )
     }
 
     @Test
-    fun activeCheckpointsResumeAtTheirExactPage() {
-        listOf(true, false).forEach { ownershipConfigured ->
-            val pages = onboardingPages(ownershipConfigured)
+    fun configuredAccountGateStopsUntilAnAccountCanProceed() {
+        val ready = setOf(
+            OwnershipPhase.ACCOUNT_READY,
+            OwnershipPhase.POSSESSION_UNAVAILABLE,
+            OwnershipPhase.CLAIMING,
+            OwnershipPhase.CLAIMED,
+            OwnershipPhase.COMPLETE,
+            OwnershipPhase.REPLACEMENT_REQUIRED,
+            OwnershipPhase.AUTHORIZING_REPLACEMENT,
+        )
 
-            pages.forEachIndexed { expectedIndex, page ->
-                assertEquals(
-                    "$page with ownershipConfigured=$ownershipConfigured",
-                    expectedIndex,
-                    restoredOnboardingPageIndex(
-                        storedPage = page.storageValue,
-                        pages = pages,
-                    ),
-                )
-            }
+        OwnershipPhase.entries.forEach { phase ->
+            assertEquals(
+                phase.name,
+                phase in ready,
+                accountStepCanContinue(
+                    ownershipConfigured = true,
+                    reconciliationComplete = true,
+                    phase = phase,
+                ),
+            )
         }
-    }
-
-    @Test
-    fun transientOwnershipBootstrapDoesNotResolveOrPersistRedirect() {
-        OnboardingPage.entries
-            .filter(OnboardingPage::requiresCurrentOwnershipClaim)
-            .forEach { page ->
-                assertNull(
-                    "$page must stay restored until bootstrap reconciliation settles",
-                    resolvedOnboardingOwnershipDestination(
-                        requested = page,
-                        ownershipConfigured = true,
-                        reconciliationComplete = false,
-                        phase = OwnershipPhase.SIGNED_OUT,
-                    ),
-                )
-            }
-    }
-
-    @Test
-    fun resolvedUnclaimedOwnershipRedirectsPostOwnershipPages() {
-        OnboardingPage.entries
-            .filter(OnboardingPage::requiresCurrentOwnershipClaim)
-            .forEach { page ->
-                assertEquals(
-                    OnboardingPage.Ownership,
-                    resolvedOnboardingOwnershipDestination(
-                        requested = page,
-                        ownershipConfigured = true,
-                        reconciliationComplete = true,
-                        phase = OwnershipPhase.SIGNED_OUT,
-                    ),
-                )
-            }
-    }
-
-    @Test
-    fun resolvedClaimedOwnershipPreservesPostOwnershipPages() {
-        listOf(OwnershipPhase.CLAIMED, OwnershipPhase.COMPLETE).forEach { phase ->
-            OnboardingPage.entries
-                .filter(OnboardingPage::requiresCurrentOwnershipClaim)
-                .forEach { page ->
-                    assertEquals(
-                        page,
-                        resolvedOnboardingOwnershipDestination(
-                            requested = page,
-                            ownershipConfigured = true,
-                            reconciliationComplete = true,
-                            phase = phase,
-                        ),
-                    )
-                }
-        }
-    }
-
-    @Test
-    fun unconfiguredCoreModeNeverWaitsForOwnershipReconciliation() {
-        assertEquals(
-            OnboardingPage.Done,
-            resolvedOnboardingOwnershipDestination(
-                requested = OnboardingPage.Done,
-                ownershipConfigured = false,
-                reconciliationComplete = false,
-                phase = OwnershipPhase.UNAVAILABLE,
-            ),
-        )
-    }
-
-    @Test
-    fun unconfiguredAccountStepContinuesWithoutClaimOrReconciliation() {
-        assertTrue(
-            ownershipStepCanContinue(
-                ownershipConfigured = false,
-                reconciliationComplete = false,
-                phase = OwnershipPhase.UNAVAILABLE,
-            ),
-        )
-    }
-
-    @Test
-    fun unconfiguredScanNamesTheOfflinePathExplicitly() {
-        assertTrue(
-            onboardingContinuesWithoutBand(
-                ownershipConfigured = false,
-                deviceSetupComplete = false,
-            ),
-        )
-        assertTrue(
-            !onboardingContinuesWithoutBand(
+        assertFalse(
+            accountStepCanContinue(
                 ownershipConfigured = true,
-                deviceSetupComplete = false,
+                reconciliationComplete = false,
+                phase = OwnershipPhase.COMPLETE,
             ),
         )
         assertTrue(
-            !onboardingContinuesWithoutBand(
+            accountStepCanContinue(
                 ownershipConfigured = false,
-                deviceSetupComplete = true,
+                reconciliationComplete = false,
+                phase = OwnershipPhase.UNAVAILABLE,
             ),
         )
     }
 
     @Test
-    fun untouchedSeedAndImportsDoNotCompleteDeviceSetup() {
-        val seed = pairedDevice(
-            id = "my-whoop",
-            peripheralId = null,
+    fun restoredPostSetupPageReconcilesThroughAccountThenBand() {
+        assertEquals(
+            OnboardingPage.Account,
+            destination(
+                requested = OnboardingPage.Profile,
+                configured = true,
+                phase = OwnershipPhase.SIGNED_OUT,
+                setupComplete = false,
+            ),
+        )
+        assertEquals(
+            OnboardingPage.Connect,
+            destination(
+                requested = OnboardingPage.Profile,
+                configured = true,
+                phase = OwnershipPhase.ACCOUNT_READY,
+                setupComplete = false,
+            ),
+        )
+        assertEquals(
+            OnboardingPage.Connect,
+            destination(
+                requested = OnboardingPage.Profile,
+                configured = false,
+                phase = OwnershipPhase.UNAVAILABLE,
+                setupComplete = false,
+            ),
+        )
+    }
+
+    @Test
+    fun unsettledConfiguredAccountDoesNotPersistAReconciledRedirect() {
+        assertNull(
+            resolvedOnboardingDestination(
+                requested = OnboardingPage.Profile,
+                ownershipConfigured = true,
+                reconciliationComplete = false,
+                phase = OwnershipPhase.SIGNED_OUT,
+                deviceSetupComplete = false,
+                supplierClaimRequired = false,
+            ),
+        )
+    }
+
+    @Test
+    fun whoopSetupDoesNotRequireSupplierOwnershipClaim() {
+        assertTrue(
+            claimStepCanContinue(
+                supplierClaimRequired = false,
+                claimed = false,
+                reconciliationComplete = true,
+            ),
+        )
+        assertEquals(
+            OnboardingPage.Profile,
+            destination(
+                requested = OnboardingPage.Profile,
+                configured = true,
+                phase = OwnershipPhase.ACCOUNT_READY,
+                setupComplete = true,
+                supplierClaimRequired = false,
+            ),
+        )
+    }
+
+    @Test
+    fun supplierSetupRequiresASettledClaimBeforeProfile() {
+        assertFalse(
+            claimStepCanContinue(
+                supplierClaimRequired = true,
+                claimed = false,
+                reconciliationComplete = true,
+            ),
+        )
+        assertEquals(
+            OnboardingPage.Ownership,
+            destination(
+                requested = OnboardingPage.Profile,
+                configured = true,
+                phase = OwnershipPhase.ACCOUNT_READY,
+                setupComplete = true,
+                supplierClaimRequired = true,
+            ),
+        )
+        assertEquals(
+            OnboardingPage.Profile,
+            destination(
+                requested = OnboardingPage.Profile,
+                configured = true,
+                phase = OwnershipPhase.CLAIMED,
+                setupComplete = true,
+                supplierClaimRequired = true,
+            ),
+        )
+    }
+
+    @Test
+    fun onlySupportedWhoopOrSupplierRowsCompleteLaunchSetup() {
+        val generic = pairedDevice(
+            id = "polar-h10",
+            brand = "Polar",
+            peripheralId = "opaque-generic",
             sourceKind = SourceKind.liveBLE,
             status = DeviceStatus.active,
         )
@@ -224,170 +297,199 @@ class OnboardingOwnershipStepSelectionTest {
             sourceKind = SourceKind.fileImport,
             status = DeviceStatus.paired,
         )
-        val activityFile = pairedDevice(
-            id = "activity-file",
+        val untouchedSeed = pairedDevice(
+            id = "my-whoop",
+            brand = "WHOOP",
             peripheralId = null,
-            sourceKind = SourceKind.activityFile,
-            status = DeviceStatus.paired,
-        )
-
-        assertNull(
-            onboardingCompletedDeviceSetupSource(
-                devices = listOf(seed, imported, activityFile),
-                requiresClaimEligibleBand = true,
-                supplierAvailable = false,
-            ),
-        )
-    }
-
-    @Test
-    fun genericLiveBleOnlyCompletesOptionalDeviceSetup() {
-        val genericStrap = pairedDevice(
-            id = "polar-h10",
-            brand = "Polar",
-            peripheralId = "opaque-peripheral",
             sourceKind = SourceKind.liveBLE,
             status = DeviceStatus.active,
         )
 
         assertNull(
             onboardingCompletedDeviceSetupSource(
-                devices = listOf(genericStrap),
-                requiresClaimEligibleBand = true,
-                supplierAvailable = false,
+                devices = listOf(generic, imported, untouchedSeed),
+                supplierAvailable = true,
             ),
+        )
+
+        val whoop = pairedDevice(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            peripheralId = "opaque-whoop",
+            sourceKind = SourceKind.liveBLE,
+            status = DeviceStatus.active,
         )
         assertEquals(
             SourceKind.liveBLE,
             onboardingCompletedDeviceSetupSource(
-                devices = listOf(genericStrap),
-                requiresClaimEligibleBand = false,
+                devices = listOf(whoop),
                 supplierAvailable = false,
             ),
         )
     }
 
     @Test
-    fun supplierRegistryCommitCompletesConfiguredBandSetup() {
+    fun supplierRowRequiresTheSupplierAdapter() {
         val supplier = pairedDevice(
             id = "supplier-band",
-            brand = "Supplier",
-            peripheralId = "opaque-peripheral",
+            brand = "NOOP",
+            peripheralId = "opaque-supplier",
             sourceKind = SourceKind.veepoo,
             status = DeviceStatus.active,
+        )
+
+        assertNull(
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(supplier),
+                supplierAvailable = false,
+            ),
+        )
+        assertEquals(
+            SourceKind.veepoo,
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(supplier),
+                supplierAvailable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun registryFallbackPrefersTheActiveSupportedBand() {
+        val oldWhoop = pairedDevice(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            peripheralId = "opaque-whoop",
+            sourceKind = SourceKind.liveBLE,
+            status = DeviceStatus.active,
+            lastSeenAt = 100,
+        )
+        val newSupplier = pairedDevice(
+            id = "supplier-band",
+            brand = "NOOP",
+            peripheralId = "opaque-supplier",
+            sourceKind = SourceKind.veepoo,
+            status = DeviceStatus.paired,
+            lastSeenAt = 200,
+        )
+
+        assertEquals(
+            SourceKind.liveBLE,
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(oldWhoop, newSupplier),
+                supplierAvailable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun unavailableActiveSupplierDoesNotFallBackToAnOlderPairedBand() {
+        val supplier = pairedDevice(
+            id = "supplier-band",
+            brand = "NOOP",
+            peripheralId = "opaque-supplier",
+            sourceKind = SourceKind.veepoo,
+            status = DeviceStatus.active,
+            lastSeenAt = 200,
+        )
+        val oldWhoop = pairedDevice(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            peripheralId = "opaque-whoop",
+            sourceKind = SourceKind.liveBLE,
+            status = DeviceStatus.paired,
+            lastSeenAt = 100,
+        )
+
+        assertNull(
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(oldWhoop, supplier),
+                supplierAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun newestPairedSupportedBandIsUsedOnlyWhenNoActiveRowExists() {
+        val oldWhoop = pairedDevice(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            peripheralId = "opaque-whoop",
+            sourceKind = SourceKind.liveBLE,
+            status = DeviceStatus.paired,
+            lastSeenAt = 100,
+        )
+        val newSupplier = pairedDevice(
+            id = "supplier-band",
+            brand = "NOOP",
+            peripheralId = "opaque-supplier",
+            sourceKind = SourceKind.veepoo,
+            status = DeviceStatus.paired,
+            lastSeenAt = 200,
         )
 
         assertEquals(
             SourceKind.veepoo,
             onboardingCompletedDeviceSetupSource(
-                devices = listOf(supplier),
-                requiresClaimEligibleBand = true,
+                devices = listOf(oldWhoop, newSupplier),
                 supplierAvailable = true,
-            ),
-        )
-        assertNull(
-            onboardingCompletedDeviceSetupSource(
-                devices = listOf(supplier),
-                requiresClaimEligibleBand = true,
-                supplierAvailable = false,
             ),
         )
     }
 
     @Test
-    fun canonicalWhoopRowCompletesConfiguredBandSetup() {
-        val whoop = pairedDevice(
-            id = "whoop-test-band",
+    fun pairedSupportedBandWinsOverTheEmptyLegacyActiveSeed() {
+        val emptySeed = pairedDevice(
+            id = "my-whoop",
             brand = "WHOOP",
-            peripheralId = "opaque-peripheral",
+            peripheralId = null,
             sourceKind = SourceKind.liveBLE,
             status = DeviceStatus.active,
+            lastSeenAt = 100,
+        )
+        val pairedBand = pairedDevice(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            peripheralId = "opaque-whoop",
+            sourceKind = SourceKind.liveBLE,
+            status = DeviceStatus.paired,
+            lastSeenAt = 200,
         )
 
         assertEquals(
             SourceKind.liveBLE,
             onboardingCompletedDeviceSetupSource(
-                devices = listOf(whoop),
-                requiresClaimEligibleBand = true,
+                devices = listOf(emptySeed, pairedBand),
                 supplierAvailable = false,
             ),
         )
     }
 
     @Test
-    fun configuredSetupRejectsMismatchedWhoopMetadataAndBlankIdentity() {
-        val mismatched = pairedDevice(
-            id = "not-a-band",
-            brand = "WHOOP",
-            peripheralId = "opaque-peripheral",
-            sourceKind = SourceKind.ftms,
-            status = DeviceStatus.active,
-        )
-        val blankIdentity = pairedDevice(
-            id = "whoop-test-band",
-            brand = "WHOOP",
-            peripheralId = " ",
-            sourceKind = SourceKind.liveBLE,
-            status = DeviceStatus.paired,
-        )
-
-        assertNull(
-            onboardingCompletedDeviceSetupSource(
-                devices = listOf(mismatched, blankIdentity),
-                requiresClaimEligibleBand = true,
-                supplierAvailable = true,
-            ),
-        )
+    fun postConnectPagesRequireADurableRegistryRefresh() {
+        assertFalse(onboardingNeedsDeviceSetupRead(OnboardingPage.Welcome))
+        assertFalse(onboardingNeedsDeviceSetupRead(OnboardingPage.Account))
+        assertFalse(onboardingNeedsDeviceSetupRead(OnboardingPage.Bluetooth))
+        assertTrue(onboardingNeedsDeviceSetupRead(OnboardingPage.Connect))
+        assertTrue(onboardingNeedsDeviceSetupRead(OnboardingPage.Ownership))
+        assertTrue(onboardingNeedsDeviceSetupRead(OnboardingPage.Profile))
+        assertTrue(onboardingNeedsDeviceSetupRead(OnboardingPage.Plan))
+        assertTrue(onboardingNeedsDeviceSetupRead(OnboardingPage.Done))
     }
 
-    @Test
-    fun configuredAccountStepRequiresSettledClaimOrCompletion() {
-        assertTrue(
-            !ownershipStepCanContinue(
-                ownershipConfigured = true,
-                reconciliationComplete = true,
-                phase = OwnershipPhase.SIGNED_OUT,
-            ),
-        )
-        assertTrue(
-            !ownershipStepCanContinue(
-                ownershipConfigured = true,
-                reconciliationComplete = false,
-                phase = OwnershipPhase.CLAIMED,
-            ),
-        )
-        assertTrue(
-            !ownershipStepCanContinue(
-                ownershipConfigured = true,
-                reconciliationComplete = true,
-                phase = OwnershipPhase.ACCOUNT_READY,
-            ),
-        )
-        listOf(OwnershipPhase.CLAIMED, OwnershipPhase.COMPLETE).forEach { phase ->
-            assertTrue(
-                ownershipStepCanContinue(
-                    ownershipConfigured = true,
-                    reconciliationComplete = true,
-                    phase = phase,
-                ),
-            )
-        }
-    }
-
-    @Test
-    fun absentOrUnrecognizedCheckpointStartsAtWelcome() {
-        val pages = onboardingPages(ownershipConfigured = false)
-        val welcomeIndex = pages.indexOf(OnboardingPage.Welcome)
-
-        assertEquals(
-            welcomeIndex,
-            restoredOnboardingPageIndex(storedPage = null, pages = pages),
-        )
-        assertEquals(
-            welcomeIndex,
-            restoredOnboardingPageIndex(storedPage = "not-a-page", pages = pages),
-        )
-    }
+    private fun destination(
+        requested: OnboardingPage,
+        configured: Boolean,
+        phase: OwnershipPhase,
+        setupComplete: Boolean,
+        supplierClaimRequired: Boolean = false,
+    ): OnboardingPage? = resolvedOnboardingDestination(
+        requested = requested,
+        ownershipConfigured = configured,
+        reconciliationComplete = true,
+        phase = phase,
+        deviceSetupComplete = setupComplete,
+        supplierClaimRequired = supplierClaimRequired,
+    )
 
     private fun pairedDevice(
         id: String,
@@ -395,6 +497,7 @@ class OnboardingOwnershipStepSelectionTest {
         peripheralId: String?,
         sourceKind: SourceKind,
         status: DeviceStatus,
+        lastSeenAt: Long = 1,
     ): PairedDeviceRow = PairedDeviceRow(
         id = id,
         brand = brand,
@@ -405,6 +508,6 @@ class OnboardingOwnershipStepSelectionTest {
         capabilities = "hr",
         status = status.name,
         addedAt = 1,
-        lastSeenAt = 1,
+        lastSeenAt = lastSeenAt,
     )
 }

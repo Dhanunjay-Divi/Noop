@@ -493,7 +493,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                     enabled = liveHrConnection,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
+                        containerColor = Palette.accent, contentColor = Palette.accentInk,
                     ),
                 ) {
                     Text(
@@ -600,7 +600,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Palette.accent,
-                    contentColor = Palette.surfaceBase,
+                    contentColor = Palette.accentInk,
                 ),
             ) {
                 Icon(
@@ -1079,7 +1079,7 @@ private fun OfflineConnectCallout(scanning: Boolean, onConnect: () -> Unit) {
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Palette.accent,
-                    contentColor = Palette.surfaceBase,
+                    contentColor = Palette.accentInk,
                 ),
             ) {
                 Icon(

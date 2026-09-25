@@ -1930,10 +1930,10 @@ final class Repository: ObservableObject {
         return byTs.values.sorted { $0.ts < $1.ts }
     }
 
-    /// Raw strap step TICKS over `[from, to]` for a manual-workout summary (#398): the wrap-aware
-    /// `step_motion_counter@57` delta-sum (shared `StepsCounter` kernel) from the FIRST id that has a
-    /// countable window — the active strap wins, mirroring `stepActivityClassLatest`. Never MERGED across
-    /// ids: two devices' cumulative counters must not be interleaved (that would fabricate huge deltas).
+    /// Retained strap step TICKS over `[from, to]` for a manual-workout summary (#398): the wrap-aware,
+    /// activity-class-aware `step_motion_counter@57` result (shared `StepsCounter` kernel) from the FIRST id
+    /// that has a countable window — the active strap wins, mirroring `stepActivityClassLatest`. Never MERGED
+    /// across ids: two devices' cumulative counters must not be interleaved (that would fabricate huge deltas).
     /// `nil` when no strap counter covers the window — a WHOOP 4.0 (no @57 counter) or an MG/5.0 that hasn't
     /// offloaded the window yet. The caller applies `stepTicksPerStep` and reconciles with the phone pedometer.
     func strapStepTicks(from: Int, to: Int) async -> Int? {

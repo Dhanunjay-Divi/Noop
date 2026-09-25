@@ -62,6 +62,13 @@ struct AdaptiveDayEvaluationGenerationGate {
     }
 }
 
+/// Apple app policy for a Devices-screen activation request.
+enum DeviceActivationRoute: Equatable, Sendable {
+    case direct
+    case supplierPairing
+    case unavailable
+}
+
 /// Root app state: owns the live BLE connection state and the CoreBluetooth engine.
 /// More subsystems (Repository, AnalyticsEngine, ImportCoordinator) get wired in here
 /// in later milestones.
@@ -1966,6 +1973,33 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Decide whether a Devices-screen activation can use the existing registration directly. Removing a
+    /// supplier band intentionally deletes its transport credential before archiving the row, so that row
+    /// can only return through the authenticated pairing flow. Import-only rows never own live transport.
+    nonisolated static func activationRoute(for device: PairedDevice) -> DeviceActivationRoute {
+        if device.isImportSource { return .unavailable }
+        if device.status == .archived, device.sourceKind == .veepoo {
+            return .supplierPairing
+        }
+        return .direct
+    }
+
+    /// Defensively enforce the activation policy against the registry's current row rather than trusting a
+    /// potentially stale SwiftUI value. This prevents an archived supplier from becoming active after its
+    /// credential was cleared even if a delayed confirmation action still holds the pre-archive device.
+    @discardableResult
+    static func activateDeviceDirectlyIfAllowed(
+        _ device: PairedDevice,
+        in registry: DeviceRegistry
+    ) -> Bool {
+        guard let current = registry.devices.first(where: { $0.id == device.id }),
+              activationRoute(for: current) == .direct else {
+            return false
+        }
+        registry.setActive(current.id)
+        return registry.activeDeviceId == current.id
+    }
+
     @discardableResult
     func removeDevice(_ device: PairedDevice, from registry: DeviceRegistry) -> Bool {
         if device.sourceKind == .veepoo {
@@ -1983,22 +2017,43 @@ final class AppModel: ObservableObject {
         return registry.archive(device.id)
     }
 
-    /// Register a paired device and (optionally) make it the active one. The Add-a-device wizard's
-    /// single write path: `add` upserts the row, and when `makeActive` is true `setActive` promotes it
-    /// (the SourceCoordinator reacts to the active-device change and connects). No-op if the registry
-    /// hasn't been wired yet (pre store-open) , the wizard is only reachable once it has.
-    func registerDevice(_ device: PairedDevice, makeActive: Bool) {
-        guard let registry = deviceRegistry else { return }
-        registry.add(device)
+    /// Register a paired device and (optionally) make it the active one. Success means the complete
+    /// requested state survived an authoritative database read-back; callers must keep their UI open
+    /// and surface retry when this returns false.
+    @discardableResult
+    func registerDevice(_ device: PairedDevice, makeActive: Bool) -> Bool {
+        guard let registry = deviceRegistry else { return false }
+        let registered = makeActive
+            ? registry.addAndSetActive(device)
+            : registry.add(device)
+        guard registered else {
+            AppDiagnosticsRecorder.shared.record(
+                "device.registration",
+                fields: [
+                    "outcome": "failed",
+                    "source": device.sourceKind.rawValue,
+                    "make_active": makeActive ? "true" : "false",
+                ]
+            )
+            return false
+        }
         if makeActive {
             // `setActive` republishes `registry.$activeDeviceId`, which the read-spine subscription
             // (`readSpineCancellable`, wired in `wireSourceCoordinator`) observes and re-points the reads
             // off, so the dashboard follows a re-add without a one-shot call here. The explicit adopt below
             // is kept as a belt-and-braces immediate re-point (idempotent, so it's a safe no-op once the
-            // subscription has also fired). The just-activated id IS `device.id` (`setActive` made it active).
-            registry.setActive(device.id)
+            // subscription has also fired).
             Task { [weak self] in await self?.adoptActiveDevice(device.id) }
         }
+        AppDiagnosticsRecorder.shared.record(
+            "device.registration",
+            fields: [
+                "outcome": "completed",
+                "source": device.sourceKind.rawValue,
+                "make_active": makeActive ? "true" : "false",
+            ]
+        )
+        return true
     }
 
     #if os(iOS)
@@ -2081,13 +2136,18 @@ final class AppModel: ObservableObject {
     /// session), then begin mirroring its adopt outcome for the wizard. The irreversible-consent gate has
     /// ALREADY been passed in the wizard (the consent tick + the "Take over this ring?" confirm); this is the
     /// commit. Never prompts to make-active (the takeover IS the user's new active source).
-    func adoptOuraRing(_ device: PairedDevice) {
+    @discardableResult
+    func adoptOuraRing(_ device: PairedDevice) -> Bool {
         sourceCoordinator?.requestOuraAdopt(deviceId: device.id)
         // Reset the mirror so a previous attempt's outcome never leaks into this one.
         ouraAdoptPhase = .idle
         ouraNeedsPairing = nil
-        registerDevice(device, makeActive: true)
+        guard registerDevice(device, makeActive: true) else {
+            sourceCoordinator?.cancelOuraAdopt(deviceId: device.id)
+            return false
+        }
         bindOuraAdoptMirror()
+        return true
     }
 
     /// (Re)bind the adopt-outcome mirror to whichever `OuraLiveSource` the coordinator has live now and on

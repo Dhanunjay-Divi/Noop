@@ -457,6 +457,39 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testAddReturnsFalseWhenDatabaseIgnoresRegistration() async throws {
+        let store = try await WhoopStore.inMemory()
+        let persistence = DeviceRegistryStore(
+            dbQueue: store.registryWriter
+        )
+        let registry = DeviceRegistry(store: persistence)
+        registry.reload()
+        let device = supplierDevice(
+            id: "ignored-registration",
+            status: .paired
+        )
+
+        try await store.registryWriter.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER ignore_device_registration
+                BEFORE INSERT ON pairedDevice
+                WHEN NEW.id = 'ignored-registration'
+                BEGIN
+                    SELECT RAISE(IGNORE);
+                END
+                """)
+        }
+
+        XCTAssertFalse(registry.add(device))
+        XCTAssertFalse(
+            registry.devices.contains { $0.id == device.id }
+        )
+        XCTAssertFalse(
+            try persistence.all().contains { $0.id == device.id }
+        )
+    }
+
+    @MainActor
     func testArchiveOwnershipDeletionFailureRollsBackStatusAndOwners() async throws {
         let store = try await WhoopStore.inMemory()
         let persistence = DeviceRegistryStore(
@@ -547,6 +580,60 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
             registry.registeredSupplierCredentialDeviceIDs(),
             Set<String>()
         )
+    }
+
+    @MainActor
+    func testArchivedSupplierRequiresPairingAndRejectsStaleDirectActivation()
+        async throws
+    {
+        let (_, registry) = try await makeRegistry()
+        let stalePairedValue = supplierDevice(
+            id: "supplier-readd",
+            status: .paired
+        )
+        registry.add(stalePairedValue)
+        XCTAssertTrue(registry.archive(stalePairedValue.id))
+
+        let archived = try XCTUnwrap(
+            registry.devices.first { $0.id == stalePairedValue.id }
+        )
+        XCTAssertEqual(
+            AppModel.activationRoute(for: archived),
+            .supplierPairing
+        )
+        XCTAssertFalse(
+            AppModel.activateDeviceDirectlyIfAllowed(
+                stalePairedValue,
+                in: registry
+            ),
+            "A stale pre-removal value must not reactivate a supplier whose credential was cleared."
+        )
+        XCTAssertNotEqual(registry.activeDeviceId, stalePairedValue.id)
+        XCTAssertEqual(
+            registry.devices.first { $0.id == stalePairedValue.id }?.status,
+            .archived
+        )
+    }
+
+    @MainActor
+    func testPairedSupplierWithCredentialOwnershipRemainsDirectlyActivatable()
+        async throws
+    {
+        let (_, registry) = try await makeRegistry()
+        let device = supplierDevice(
+            id: "supplier-paired",
+            status: .paired
+        )
+        registry.add(device)
+
+        XCTAssertEqual(AppModel.activationRoute(for: device), .direct)
+        XCTAssertTrue(
+            AppModel.activateDeviceDirectlyIfAllowed(
+                device,
+                in: registry
+            )
+        )
+        XCTAssertEqual(registry.activeDeviceId, device.id)
     }
 
     @MainActor

@@ -257,6 +257,11 @@ struct HRVSnapshotView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(phase == .capturing ? StrandPalette.statusCritical : StrandPalette.accent)
+            .foregroundStyle(
+                phase == .capturing
+                    ? StrandPalette.goldDeepText
+                    : StrandPalette.accentInk
+            )
             .disabled(!bonded && phase != .capturing)
             .help(bonded
                   ? "Take a 60-second seated HRV reading from the live R-R stream."

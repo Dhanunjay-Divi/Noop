@@ -13,7 +13,7 @@ import com.noop.data.StepSample
  * callers can never disagree on the counter math). The raw total is an ESTIMATE (@57 counts motion ticks,
  * not validated steps), not cloud/clinical parity.
  *
- * Byte-for-byte twin of the Swift `StepsCounter.stepsInWindow`.
+ * Twin of the Swift `StepsCounter`.
  */
 object StepsCounter {
     /**
@@ -25,20 +25,92 @@ object StepsCounter {
     const val MAX_STEP_DELTA = 512
 
     /**
+     * Pure counter analysis shared by production totals and bounded diagnostics. It exposes aggregate counts,
+     * never timestamps, identifiers, or per-sample counter values.
+     */
+    data class Analysis(
+        val filterMode: FilterMode,
+        val sampleCount: Int,
+        val deltaCount: Int,
+        val keptDeltaCount: Int,
+        val rejectedStillDeltaCount: Int,
+        val rejectedUnknownDeltaCount: Int,
+        val rejectedGapDeltaCount: Int,
+        val zeroDeltaCount: Int,
+        val rawTicks: Int,
+    ) {
+        enum class FilterMode {
+            legacyRawMotion,
+            activityClassFiltered,
+        }
+
+        val steps: Int?
+            get() = rawTicks.takeIf { it > 0 }
+    }
+
+    /**
+     * Analyze wrap-aware motion-counter deltas in timestamp order.
+     *
+     * Legacy windows with no non-null activity class preserve the prior raw-motion behavior. Once any class
+     * evidence exists anywhere in the window, a delta is locomotion only when its later sample is walk (1) or
+     * run (2). Still (0), unknown (null), and any other class are rejected. Gap/reset deltas remain rejected
+     * before activity classification.
+     */
+    fun analyze(samples: List<StepSample>): Analysis {
+        val sorted = samples.sortedBy { it.ts }
+        val filterMode = if (sorted.any { it.activityClass != null }) {
+            Analysis.FilterMode.activityClassFiltered
+        } else {
+            Analysis.FilterMode.legacyRawMotion
+        }
+
+        var rawTicks = 0
+        var keptDeltaCount = 0
+        var rejectedStillDeltaCount = 0
+        var rejectedUnknownDeltaCount = 0
+        var rejectedGapDeltaCount = 0
+        var zeroDeltaCount = 0
+
+        for (i in 1 until sorted.size) {
+            val later = sorted[i]
+            val delta = (later.counter - sorted[i - 1].counter) and 0xFFFF
+            when {
+                delta == 0 -> zeroDeltaCount += 1
+                delta >= MAX_STEP_DELTA -> rejectedGapDeltaCount += 1
+                filterMode == Analysis.FilterMode.legacyRawMotion -> {
+                    rawTicks += delta
+                    keptDeltaCount += 1
+                }
+                else -> when (later.activityClass) {
+                    1, 2 -> {
+                        rawTicks += delta
+                        keptDeltaCount += 1
+                    }
+                    0 -> rejectedStillDeltaCount += 1
+                    else -> rejectedUnknownDeltaCount += 1
+                }
+            }
+        }
+
+        return Analysis(
+            filterMode = filterMode,
+            sampleCount = sorted.size,
+            deltaCount = (sorted.size - 1).coerceAtLeast(0),
+            keptDeltaCount = keptDeltaCount,
+            rejectedStillDeltaCount = rejectedStillDeltaCount,
+            rejectedUnknownDeltaCount = rejectedUnknownDeltaCount,
+            rejectedGapDeltaCount = rejectedGapDeltaCount,
+            zeroDeltaCount = zeroDeltaCount,
+            rawTicks = rawTicks,
+        )
+    }
+
+    /**
      * Raw wrap-aware motion-tick total across [samples] — the sum of positive consecutive
      * `step_motion_counter@57` increments in `[1, MAX_STEP_DELTA)`. Sorts by `ts` internally, so the caller
      * may pass an unsorted window (already filtered to the range it cares about). Returns `null` when there
      * are fewer than two samples or no forward movement (so "no data" stays distinct from a real zero). The
      * caller applies its `stepTicksPerStep` calibration to the returned ticks.
      */
-    fun stepsInWindow(samples: List<StepSample>): Int? {
-        val sorted = samples.sortedBy { it.ts }
-        if (sorted.size < 2) return null
-        var total = 0
-        for (i in 1 until sorted.size) {
-            val delta = (sorted[i].counter - sorted[i - 1].counter) and 0xFFFF // wrap-aware u16 increment
-            if (delta in 1 until MAX_STEP_DELTA) total += delta // ignore a delta >= 512 (gap/reset)
-        }
-        return if (total > 0) total else null
-    }
+    fun stepsInWindow(samples: List<StepSample>): Int? = analyze(samples).steps
 }

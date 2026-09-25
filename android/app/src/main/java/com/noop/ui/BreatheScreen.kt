@@ -493,7 +493,11 @@ fun BreatheScreen(viewModel: AppViewModel) {
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (running) Palette.statusCritical else Palette.accent,
-                    contentColor = Palette.surfaceBase,
+                    contentColor = if (running) {
+                        contrastInk(Palette.statusCritical)
+                    } else {
+                        Palette.accentInk
+                    },
                 ),
             ) {
                 Icon(
@@ -784,7 +788,7 @@ private fun StressCheckInCard(onBreatheNow: () -> Unit) {
                 Button(
                     onClick = { StressNudgeCenter.dismiss(); onBreatheNow() },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+                        containerColor = Palette.accent, contentColor = Palette.accentInk),
                     modifier = Modifier.weight(1f),
                 ) { Text(uiString(R.string.l10n_breathe_screen_breathe_now_98d6c341), style = NoopType.headline) }
                 OutlinedButton(
@@ -926,7 +930,7 @@ private fun ResonanceMode(
                     Button(
                         onClick = { quick = false; result = null; sweeping = true },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+                            containerColor = Palette.accent, contentColor = Palette.accentInk),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Filled.GraphicEq, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
@@ -1165,7 +1169,7 @@ private fun CalmMode(viewModel: AppViewModel, live: com.noop.ble.LiveState, bpm:
                         },
                         enabled = canRun,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+                            containerColor = Palette.accent, contentColor = Palette.accentInk),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Filled.Favorite, contentDescription = null, modifier = Modifier.padding(end = 6.dp))

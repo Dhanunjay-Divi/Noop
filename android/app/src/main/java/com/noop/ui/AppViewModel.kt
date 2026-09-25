@@ -255,6 +255,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun setActiveDevice(id: String) {
         val changed = id != deviceId
         noopApp.deviceRegistry.setActive(id)
+        publishActiveDevice(id, changed)
+    }
+
+    private suspend fun publishActiveDevice(id: String, changed: Boolean) {
         noopApp.noteActiveDeviceId(id)
         _selectedDeviceId.value = id
         noopApp.sourceCoordinator.onActiveDeviceChanged(id)
@@ -475,14 +479,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun stopWhoopScan() = ble.stopWhoopScan()
 
     /**
-     * Register a paired device and (optionally) make it the active one — the Add-a-device wizard's single
-     * write path. [addPairedDevice] upserts the row; when [makeActive] is true [setActiveDevice] promotes
-     * it (which also tells the [SourceCoordinator] the active device changed, so it pins the WHOOP /
-     * starts the strap source). Mirrors the macOS AppModel.registerDevice.
+     * Register a paired device and optionally make it active. Active registration uses the registry's
+     * verified one-transaction add-and-promote operation, then publishes the committed source to the live
+     * coordinator. A false result means no durable active row was confirmed.
      */
-    suspend fun registerDevice(device: com.noop.data.PairedDeviceRow, makeActive: Boolean) {
-        addPairedDevice(device)
-        if (makeActive) setActiveDevice(device.id)
+    suspend fun registerDevice(
+        device: com.noop.data.PairedDeviceRow,
+        makeActive: Boolean,
+    ): Boolean {
+        if (!makeActive) {
+            return addPairedDevice(device)
+        }
+
+        val changed = device.id != deviceId
+        if (!noopApp.deviceRegistry.addAndSetActive(device)) return false
+        publishActiveDevice(device.id, changed)
+        return true
     }
 
     /**
@@ -2677,7 +2689,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Steps over a manual-workout window `[from, to]` from the strap's own `step_motion_counter@57`
-     *  (#398): the shared wrap-aware `StepsCounter` delta-sum, then the per-user `stepTicksPerStep`
+     *  (#398): the shared wrap-aware, activity-class-aware `StepsCounter` result, then the per-user `stepTicksPerStep`
      *  calibration the daily total applies (#139, floor 0.5). null when no strap counter covers the window
      *  — a WHOOP 4.0 (no @57 counter) or an MG/5.0 that hasn't offloaded the window yet. Mirrors Swift
      *  `Repository.strapStepTicks` + the WorkoutDetailView scaling; the phone-pedometer fallback iOS adds is

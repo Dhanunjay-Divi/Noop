@@ -113,7 +113,7 @@ class AppWideLocalizationContractTest {
         val supplierKeys = base.keys.filter {
             it.startsWith("appwide_onboarding_device_wizard_supplier_")
         }
-        assertEquals(48, supplierKeys.size)
+        assertEquals(49, supplierKeys.size)
         assertEquals(
             "The supplier password authorizes this Bluetooth transport only. " +
                 "It does not prove band ownership.",

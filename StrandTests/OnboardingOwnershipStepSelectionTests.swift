@@ -3,36 +3,34 @@ import XCTest
 import WhoopStore
 
 final class OnboardingOwnershipStepSelectionTests: XCTestCase {
-    func testConfiguredOwnershipIncludesAccountStepWithoutConstructingRuntimeService() {
+    func testFirstRunUsesConciseAccountFirstSequence() {
         let steps = OnboardingWizard.onboardingSteps(
             ownershipConfigured: true
         )
 
-        XCTAssertTrue(steps.contains(.ownership))
         XCTAssertEqual(
-            steps.firstIndex(of: .ownership),
-            steps.firstIndex(of: .bonded).map { $0 + 1 }
-        )
-        XCTAssertEqual(
-            steps.firstIndex(of: .profile),
-            steps.firstIndex(of: .ownership).map { $0 + 1 }
+            steps,
+            [
+                .welcome,
+                .account,
+                .bluetooth,
+                .scan,
+                .ownership,
+                .profile,
+                .plan,
+                .done,
+            ]
         )
     }
 
-    func testUnconfiguredCoreModeKeepsAccountStepVisibleBeforeProfile() {
+    func testUnconfiguredBuildKeepsTheSameVisibleJourney() {
         let steps = OnboardingWizard.onboardingSteps(
             ownershipConfigured: false
         )
 
-        XCTAssertTrue(steps.contains(.ownership))
-        XCTAssertTrue(steps.contains(.profile))
         XCTAssertEqual(
-            steps.firstIndex(of: .ownership),
-            steps.firstIndex(of: .bonded).map { $0 + 1 }
-        )
-        XCTAssertEqual(
-            steps.firstIndex(of: .profile),
-            steps.firstIndex(of: .ownership).map { $0 + 1 }
+            steps,
+            OnboardingWizard.onboardingSteps(ownershipConfigured: true)
         )
     }
 
@@ -56,22 +54,31 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
         )
     }
 
-    func testConfiguredOwnershipRestoresPostOwnershipCheckpointsBeforeReconciliation() {
-        for step in OnboardingWizard.Step.allCases
-        where step.rawValue > OnboardingWizard.Step.ownership.rawValue {
-            XCTAssertEqual(
-                OnboardingWizard.restoredOnboardingStep(
-                    storedValue: step.storageValue,
-                    ownershipConfigured: true
-                ),
-                step
-            )
+    func testRemovedCheckpointsRestartTheAccountFirstJourney() {
+        for step in [
+            OnboardingWizard.Step.what,
+            .expectations,
+            .wear,
+            .bonded,
+            .importData,
+            .notifications,
+            .safetyContacts,
+            .appearance,
+            .dailyRhythm,
+        ] {
+            XCTAssertEqual(restored(step), .welcome)
         }
     }
 
     func testTransientOwnershipBootstrapDoesNotResolveOrPersistRedirect() {
-        for step in OnboardingWizard.Step.allCases
-        where step.rawValue > OnboardingWizard.Step.ownership.rawValue {
+        for step in [
+            OnboardingWizard.Step.bluetooth,
+            .scan,
+            .ownership,
+            .profile,
+            .plan,
+            .done,
+        ] {
             XCTAssertNil(
                 OnboardingWizard.ownershipDestination(
                     for: step,
@@ -84,9 +91,15 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
         }
     }
 
-    func testResolvedUnclaimedOwnershipRedirectsPostOwnershipSteps() {
-        for step in OnboardingWizard.Step.allCases
-        where step.rawValue > OnboardingWizard.Step.ownership.rawValue {
+    func testSignedOutAccountRedirectsEveryLaterStepToAccount() {
+        for step in [
+            OnboardingWizard.Step.bluetooth,
+            .scan,
+            .ownership,
+            .profile,
+            .plan,
+            .done,
+        ] {
             XCTAssertEqual(
                 OnboardingWizard.ownershipDestination(
                     for: step,
@@ -94,15 +107,110 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
                     reconciliationComplete: true,
                     phase: .signedOut
                 ),
+                .account
+            )
+        }
+    }
+
+    func testAccountReadyAllowsBandSetupButSupplierClaimGatesProfile() {
+        for step in [
+            OnboardingWizard.Step.bluetooth,
+            .scan,
+            .ownership,
+        ] {
+            XCTAssertEqual(
+                OnboardingWizard.ownershipDestination(
+                    for: step,
+                    ownershipConfigured: true,
+                    reconciliationComplete: true,
+                    phase: .accountReady,
+                    supplierClaimRequired: true
+                ),
+                step
+            )
+        }
+
+        for step in [
+            OnboardingWizard.Step.profile,
+            .plan,
+            .done,
+        ] {
+            XCTAssertEqual(
+                OnboardingWizard.ownershipDestination(
+                    for: step,
+                    ownershipConfigured: true,
+                    reconciliationComplete: true,
+                    phase: .accountReady,
+                    supplierClaimRequired: true
+                ),
                 .ownership
             )
         }
     }
 
-    func testResolvedClaimedOwnershipPreservesPostOwnershipSteps() {
+    func testAccountReadyWhoopPathDoesNotRequireSupplierClaim() {
+        for step in [
+            OnboardingWizard.Step.bluetooth,
+            .scan,
+            .ownership,
+            .profile,
+            .plan,
+            .done,
+        ] {
+            XCTAssertEqual(
+                OnboardingWizard.ownershipDestination(
+                    for: step,
+                    ownershipConfigured: true,
+                    reconciliationComplete: true,
+                    phase: .accountReady,
+                    supplierClaimRequired: false
+                ),
+                step
+            )
+        }
+    }
+
+    func testPostScanPagesRequireDurableDeviceSetupAfterRelaunch() {
+        for step in [
+            OnboardingWizard.Step.ownership,
+            .profile,
+            .plan,
+            .done,
+        ] {
+            XCTAssertEqual(
+                OnboardingWizard.ownershipDestination(
+                    for: step,
+                    ownershipConfigured: true,
+                    reconciliationComplete: true,
+                    phase: .accountReady,
+                    supplierClaimRequired: false,
+                    deviceSetupComplete: false
+                ),
+                .scan,
+                "\(step) must not trust transient pre-relaunch setup state"
+            )
+        }
+    }
+
+    func testUnconfiguredBuildAlsoRequiresDurableDeviceSetup() {
+        XCTAssertEqual(
+            OnboardingWizard.ownershipDestination(
+                for: .done,
+                ownershipConfigured: false,
+                reconciliationComplete: false,
+                phase: .unavailable,
+                supplierClaimRequired: false,
+                deviceSetupComplete: false
+            ),
+            .scan
+        )
+    }
+
+    func testResolvedClaimedOwnershipPreservesActiveSteps() {
         for phase in [OwnershipServicePhase.claimed, .complete] {
-            for step in OnboardingWizard.Step.allCases
-            where step.rawValue > OnboardingWizard.Step.ownership.rawValue {
+            for step in OnboardingWizard.onboardingSteps(
+                ownershipConfigured: true
+            ) {
                 XCTAssertEqual(
                     OnboardingWizard.ownershipDestination(
                         for: step,
@@ -128,38 +236,54 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
         )
     }
 
-    func testUnconfiguredAccountStepContinuesWithoutClaimOrReconciliation() {
+    func testUnconfiguredAccountStepContinuesWithoutReconciliation() {
         XCTAssertTrue(
-            OnboardingWizard.ownershipStepCanContinue(
+            OnboardingWizard.accountStepCanContinue(
                 ownershipConfigured: false,
-                claimed: false,
-                reconciliationComplete: false
+                reconciliationComplete: false,
+                phase: .unavailable
             )
         )
     }
 
-    func testUnconfiguredScanNamesTheOfflinePathExplicitly() {
-        XCTAssertEqual(
-            OnboardingWizard.scanCTATitle(
-                ownershipConfigured: false,
-                deviceSetupComplete: false
-            ),
-            String(localized: "appwide.onboarding.continue_without_band")
-        )
-        XCTAssertEqual(
-            OnboardingWizard.scanCTATitle(
+    func testConfiguredAccountRequiresSettledReadyPhase() {
+        XCTAssertFalse(
+            OnboardingWizard.accountStepCanContinue(
                 ownershipConfigured: true,
-                deviceSetupComplete: false
-            ),
-            String(localized: "Continue")
+                reconciliationComplete: false,
+                phase: .accountReady
+            )
         )
-        XCTAssertEqual(
-            OnboardingWizard.scanCTATitle(
-                ownershipConfigured: false,
-                deviceSetupComplete: true
-            ),
-            String(localized: "Continue")
-        )
+        for phase in [
+            OwnershipServicePhase.signedOut,
+            .emailVerification,
+            .termsReview,
+            .registering,
+            .deletionPending,
+        ] {
+            XCTAssertFalse(
+                OnboardingWizard.accountStepCanContinue(
+                    ownershipConfigured: true,
+                    reconciliationComplete: true,
+                    phase: phase
+                )
+            )
+        }
+        for phase in [
+            OwnershipServicePhase.accountReady,
+            .possessionUnavailable,
+            .claimed,
+            .complete,
+            .replacementRequired,
+        ] {
+            XCTAssertTrue(
+                OnboardingWizard.accountStepCanContinue(
+                    ownershipConfigured: true,
+                    reconciliationComplete: true,
+                    phase: phase
+                )
+            )
+        }
     }
 
     func testUntouchedSeedAndImportsDoNotCompleteDeviceSetup() {
@@ -250,6 +374,65 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
         )
     }
 
+    func testActiveSupplierWinsOverOlderPairedCompatibleBandOnRestart() {
+        let olderCompatibleBand = pairedDevice(
+            id: "whoop-test-band",
+            brand: "WHOOP",
+            peripheralID: "older-compatible-peripheral",
+            sourceKind: .liveBLE,
+            status: .paired
+        )
+        let activeSupplier = pairedDevice(
+            id: "supplier-band",
+            brand: "Supplier",
+            peripheralID: "active-supplier-peripheral",
+            sourceKind: .veepoo,
+            status: .active
+        )
+
+        XCTAssertEqual(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [olderCompatibleBand, activeSupplier],
+                requiresClaimEligibleBand: true,
+                supplierUsable: { $0.id == activeSupplier.id }
+            ),
+            .veepoo
+        )
+        XCTAssertNil(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [olderCompatibleBand, activeSupplier],
+                requiresClaimEligibleBand: true,
+                supplierUsable: { _ in false }
+            ),
+            "An unusable active supplier row must not fall through to an older paired test band."
+        )
+    }
+
+    func testUntouchedActiveSeedStillAllowsPairedCompatibleTestBand() {
+        let untouchedSeed = pairedDevice(
+            id: "my-whoop",
+            peripheralID: nil,
+            sourceKind: .liveBLE,
+            status: .active
+        )
+        let pairedCompatibleBand = pairedDevice(
+            id: "whoop-test-band",
+            brand: "WHOOP",
+            peripheralID: "paired-compatible-peripheral",
+            sourceKind: .liveBLE,
+            status: .paired
+        )
+
+        XCTAssertEqual(
+            OnboardingWizard.completedDeviceSetupSource(
+                in: [untouchedSeed, pairedCompatibleBand],
+                requiresClaimEligibleBand: true,
+                supplierUsable: { _ in false }
+            ),
+            .liveBLE
+        )
+    }
+
     func testCanonicalWhoopRowCompletesConfiguredBandSetup() {
         let whoop = pairedDevice(
             id: "whoop-test-band",
@@ -294,26 +477,33 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
         )
     }
 
-    func testConfiguredAccountStepRequiresSettledClaim() {
+    func testSupplierClaimStepRequiresSettledClaim() {
         XCTAssertFalse(
-            OnboardingWizard.ownershipStepCanContinue(
-                ownershipConfigured: true,
+            OnboardingWizard.claimStepCanContinue(
+                supplierClaimRequired: true,
                 claimed: false,
                 reconciliationComplete: true
             )
         )
         XCTAssertFalse(
-            OnboardingWizard.ownershipStepCanContinue(
-                ownershipConfigured: true,
+            OnboardingWizard.claimStepCanContinue(
+                supplierClaimRequired: true,
                 claimed: true,
                 reconciliationComplete: false
             )
         )
         XCTAssertTrue(
-            OnboardingWizard.ownershipStepCanContinue(
-                ownershipConfigured: true,
+            OnboardingWizard.claimStepCanContinue(
+                supplierClaimRequired: true,
                 claimed: true,
                 reconciliationComplete: true
+            )
+        )
+        XCTAssertTrue(
+            OnboardingWizard.claimStepCanContinue(
+                supplierClaimRequired: false,
+                claimed: false,
+                reconciliationComplete: false
             )
         )
     }
@@ -352,6 +542,15 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
             status: status,
             addedAt: 1,
             lastSeenAt: 1
+        )
+    }
+
+    private func restored(
+        _ step: OnboardingWizard.Step
+    ) -> OnboardingWizard.Step {
+        OnboardingWizard.restoredOnboardingStep(
+            storedValue: step.storageValue,
+            ownershipConfigured: true
         )
     }
 }

@@ -2,10 +2,12 @@
 
 ## 1. Independent & unofficial
 
-This is an independent project. **NOOP Band is in development and is not available yet.** Until it is
-announced ready, current direct-band support interoperates with compatible third-party WHOOP
-hardware. NOOP is **not affiliated with, endorsed by, sponsored by, or connected to WHOOP, Inc.** in
-any way. All references to "WHOOP" describe the third-party hardware this software currently
+This is an independent project. Direct-band support depends on the exact build
+and compatible hardware. Builds that include the approved supplier SDK may
+connect supported **NOOP Band** hardware. WHOOP remains a separate
+compatibility-testing transport. NOOP is **not affiliated with, endorsed by,
+sponsored by, or connected to WHOOP, Inc.** in any way. All references to
+"WHOOP" describe the third-party hardware this software currently
 interoperates with and are
 **nominative fair use** of the mark — used only to identify that hardware, never to imply origin,
 sponsorship, or endorsement, and never as the name of this project's own product or brand.
@@ -41,10 +43,11 @@ author's own observation of traffic to and from a device the author owns.
 
 ## 3. Nature of the work: interoperability & security research
 
-The purpose of the current third-party compatibility path is to allow a person who owns a compatible
-WHOOP device to read **their own biometric data** from **their own device** in an interoperable way,
-and to study the device for educational and security-research purposes while NOOP Band is in
-development.
+The purpose of the third-party compatibility path is to allow a person who owns
+a compatible WHOOP device to read **their own biometric data** from **their own
+device** in an interoperable way, and to study the device for educational and
+security-research purposes. The separate NOOP Band path uses approved supplier
+SDK artifacts when they are present in the build.
 
 - It operates only with the **user's own device** and the **user's own data**.
 - It does **not** circumvent any technological protection measure protecting a copyrighted work,

@@ -54,6 +54,50 @@
     "zh-Hans": "正在保存设备…",
     "zh-Hant": "正在儲存裝置…"
   },
+  "appwide.devices.connect_action": {
+    "de": "Band verbinden",
+    "en": "Connect band",
+    "es": "Conectar pulsera",
+    "fr": "Connecter un bracelet",
+    "it": "Collega una fascia",
+    "pt-PT": "Ligar pulseira",
+    "ru": "Подключить браслет",
+    "zh-Hans": "连接手环",
+    "zh-Hant": "連接手環"
+  },
+  "appwide.devices.empty_body": {
+    "de": "Verbinde ein NOOP Band oder ein kompatibles Band der Version 4.0 oder 5.0/MG. Es werden nur Bänder angezeigt, die dieser Build koppeln kann.",
+    "en": "Connect a NOOP Band or a compatible 4.0 or 5.0/MG band. Only bands this build can pair with are shown.",
+    "es": "Conecta una NOOP Band o una pulsera compatible 4.0 o 5.0/MG. Solo se muestran las pulseras que esta versión puede enlazar.",
+    "fr": "Connectez un NOOP Band ou un bracelet compatible 4.0 ou 5.0/MG. Seuls les bracelets que cette version peut associer sont affichés.",
+    "it": "Collega una NOOP Band o una fascia compatibile 4.0 o 5.0/MG. Vengono mostrate solo le fasce che questa build può associare.",
+    "pt-PT": "Liga uma NOOP Band ou uma pulseira compatível 4.0 ou 5.0/MG. Só são apresentadas as pulseiras que esta versão consegue emparelhar.",
+    "ru": "Подключите NOOP Band или совместимый браслет 4.0 либо 5.0/MG. Показаны только браслеты, с которыми эта сборка может выполнить сопряжение.",
+    "zh-Hans": "连接 NOOP Band 或兼容的 4.0、5.0/MG 手环。这里只显示此版本能够配对的手环。",
+    "zh-Hant": "連接 NOOP Band 或相容的 4.0、5.0/MG 手環。這裡只顯示此版本能夠配對的手環。"
+  },
+  "appwide.devices.empty_title": {
+    "de": "Verbinde dein erstes Band",
+    "en": "Connect your first band",
+    "es": "Conecta tu primera pulsera",
+    "fr": "Connectez votre premier bracelet",
+    "it": "Collega la tua prima fascia",
+    "pt-PT": "Liga a tua primeira pulseira",
+    "ru": "Подключите первый браслет",
+    "zh-Hans": "连接你的第一个手环",
+    "zh-Hant": "連接你的第一個手環"
+  },
+  "appwide.devices.supported_footer": {
+    "de": "NOOP Band ist das primär unterstützte Band. Kompatible Bänder der Version 4.0 und 5.0/MG bleiben für Kompatibilitätstests verfügbar.",
+    "en": "NOOP Band is the primary supported band. Compatible 4.0 and 5.0/MG bands remain available for compatibility testing.",
+    "es": "NOOP Band es la pulsera principal compatible. Las pulseras compatibles 4.0 y 5.0/MG siguen disponibles para pruebas de compatibilidad.",
+    "fr": "NOOP Band est le bracelet principalement pris en charge. Les bracelets compatibles 4.0 et 5.0/MG restent disponibles pour les tests de compatibilité.",
+    "it": "NOOP Band è la fascia supportata principale. Le fasce compatibili 4.0 e 5.0/MG restano disponibili per i test di compatibilità.",
+    "pt-PT": "A NOOP Band é a pulseira principal suportada. As pulseiras compatíveis 4.0 e 5.0/MG continuam disponíveis para testes de compatibilidade.",
+    "ru": "NOOP Band является основным поддерживаемым браслетом. Совместимые браслеты 4.0 и 5.0/MG остаются доступными для тестирования совместимости.",
+    "zh-Hans": "NOOP Band 是主要支持的手环。兼容的 4.0 和 5.0/MG 手环仍可用于兼容性测试。",
+    "zh-Hant": "NOOP Band 是主要支援的手環。相容的 4.0 和 5.0/MG 手環仍可用於相容性測試。"
+  },
   "appwide.mac.viewer.phone_only_detail": {
     "de": "Verwende diese Steuerung auf dem Sammler-Telefon. Dieser Mac verbindet sich nicht mit dem Band.",
     "en": "Use this control on the collector phone. This Mac does not connect to the band.",
@@ -3949,15 +3993,15 @@
     "zh-Hant": "%1$d 組"
   },
   "appwide.terms.attest.band": {
-    "de": "Ich verstehe, dass NOOP Band noch nicht verfügbar ist. Diese Version funktioniert derzeit mit einem kompatiblen Band, das mir gehört, und ich werde nur mein eigenes Band und meine eigenen Daten verwenden.",
-    "en": "I understand NOOP Band is not available yet. This version currently works with a compatible band I own, and I will use only my own band and my own data.",
-    "es": "Entiendo que NOOP Band aún no está disponible. Esta versión funciona actualmente con una banda compatible que me pertenece y usaré únicamente mi propia banda y mis propios datos.",
-    "fr": "Je comprends que NOOP Band n’est pas encore disponible. Cette version fonctionne actuellement avec un bracelet compatible qui m’appartient et j’utiliserai uniquement mon propre bracelet et mes propres données.",
-    "it": "Comprendo che NOOP Band non è ancora disponibile. Questa versione funziona attualmente con un dispositivo compatibile di mia proprietà e userò solo il mio dispositivo e i miei dati.",
-    "pt-PT": "Compreendo que a NOOP Band ainda não está disponível. Esta versão funciona atualmente com uma pulseira compatível que me pertence e utilizarei apenas a minha própria pulseira e os meus próprios dados.",
-    "ru": "Я понимаю, что NOOP Band пока недоступен. Сейчас эта версия работает с принадлежащим мне совместимым браслетом, и я буду использовать только собственный браслет и собственные данные.",
-    "zh-Hans": "我了解 NOOP Band 尚未推出。此版本目前可配合我本人拥有的兼容手环使用，并且我只会使用自己的手环和自己的数据。",
-    "zh-Hant": "我了解 NOOP Band 尚未推出。此版本目前可配合我本人擁有的相容手環使用，並且我只會使用自己的手環和自己的資料。"
+    "de": "Ich verstehe, dass die Bandunterstützung von diesem Build und kompatibler Hardware abhängt. Ich verbinde nur ein Band, das mir gehört, und verwende nur mein eigenes Band und meine eigenen Daten.",
+    "en": "I understand band support depends on this build and compatible hardware. I will connect only a band I own and use only my own band and my own data.",
+    "es": "Entiendo que la compatibilidad con bandas depende de esta compilación y del hardware compatible. Solo conectaré una banda que me pertenezca y usaré únicamente mi propia banda y mis propios datos.",
+    "fr": "Je comprends que la prise en charge des bracelets dépend de cette version et du matériel compatible. Je connecterai uniquement un bracelet qui m’appartient et n’utiliserai que mon propre bracelet et mes propres données.",
+    "it": "Comprendo che il supporto dei dispositivi dipende da questa build e dall’hardware compatibile. Collegherò solo un dispositivo di mia proprietà e userò esclusivamente il mio dispositivo e i miei dati.",
+    "pt-PT": "Compreendo que o suporte de pulseiras depende desta versão e de hardware compatível. Ligarei apenas uma pulseira que me pertença e utilizarei apenas a minha própria pulseira e os meus próprios dados.",
+    "ru": "Я понимаю, что поддержка браслетов зависит от этой сборки и совместимого оборудования. Я буду подключать только принадлежащий мне браслет и использовать только собственный браслет и собственные данные.",
+    "zh-Hans": "我了解手环支持取决于此版本和兼容硬件。我只会连接本人拥有的手环，并且只使用自己的手环和自己的数据。",
+    "zh-Hant": "我了解手環支援取決於此版本和相容硬體。我只會連接本人擁有的手環，並且只使用自己的手環和自己的資料。"
   },
   "appwide.terms.attest.early_access": {
     "de": "Ich verstehe, dass NOOP eine Early-Access-Wellnesssoftware ist, ohne Zusicherungen im aktuellen Zustand bereitgestellt wird und weder ein Medizinprodukt noch medizinische Beratung ist.",
@@ -3982,15 +4026,15 @@
     "zh-Hant": "我已閱讀並接受完整的使用條款，包括法律允許的保固和責任限制。"
   },
   "appwide.terms.point.compatibility.body": {
-    "de": "NOOP wird unabhängig entwickelt. Die aktuelle direkte Bandunterstützung dient Kompatibilitätstests, während NOOP Band entwickelt wird.",
-    "en": "NOOP is developed independently. Current direct-band support is provided for compatibility testing while NOOP Band is in development.",
-    "es": "NOOP se desarrolla de forma independiente. La compatibilidad directa actual se ofrece para pruebas mientras NOOP Band está en desarrollo.",
-    "fr": "NOOP est développé de manière indépendante. La prise en charge directe actuelle sert aux tests de compatibilité pendant le développement de NOOP Band.",
-    "it": "NOOP è sviluppato in modo indipendente. Il supporto diretto attuale serve a testare la compatibilità mentre NOOP Band è in fase di sviluppo.",
-    "pt-PT": "O NOOP é desenvolvido de forma independente. O suporte direto atual destina-se a testes de compatibilidade enquanto a NOOP Band está em desenvolvimento.",
-    "ru": "NOOP разрабатывается независимо. Текущая прямая поддержка браслета предназначена для проверки совместимости, пока NOOP Band находится в разработке.",
-    "zh-Hans": "NOOP 由独立团队开发。在 NOOP Band 仍处于开发阶段时，当前的手环直连支持仅用于兼容性测试。",
-    "zh-Hant": "NOOP 由獨立團隊開發。在 NOOP Band 仍處於開發階段時，目前的手環直連支援僅用於相容性測試。"
+    "de": "NOOP wird unabhängig entwickelt. Die Bandunterstützung hängt von diesem Build und kompatibler Hardware ab. Genehmigte Lieferanten-Builds können NOOP Band verbinden; kompatible Testbänder sind nur verfügbar, wenn dieser Build sie unterstützt.",
+    "en": "NOOP is developed independently. Band support depends on this build and compatible hardware. Approved supplier builds can connect NOOP Band; compatible test bands are available only when this build supports them.",
+    "es": "NOOP se desarrolla de forma independiente. La compatibilidad con bandas depende de esta compilación y del hardware compatible. Las compilaciones aprobadas del proveedor pueden conectar NOOP Band; las bandas de prueba compatibles solo están disponibles cuando esta compilación las admite.",
+    "fr": "NOOP est développé de manière indépendante. La prise en charge des bracelets dépend de cette version et du matériel compatible. Les versions fournisseur approuvées peuvent connecter NOOP Band ; les bracelets de test compatibles ne sont disponibles que si cette version les prend en charge.",
+    "it": "NOOP è sviluppato in modo indipendente. Il supporto delle fasce dipende da questa build e dall’hardware compatibile. Le build approvate del fornitore possono collegare NOOP Band; le fasce di test compatibili sono disponibili solo quando questa build le supporta.",
+    "pt-PT": "O NOOP é desenvolvido de forma independente. O suporte de pulseiras depende desta versão e de hardware compatível. As versões aprovadas do fornecedor podem ligar a NOOP Band; as pulseiras de teste compatíveis só estão disponíveis quando esta versão as suporta.",
+    "ru": "NOOP разрабатывается независимо. Поддержка браслетов зависит от этой сборки и совместимого оборудования. Одобренные сборки поставщика могут подключать NOOP Band; совместимые тестовые браслеты доступны только в сборках, которые их поддерживают.",
+    "zh-Hans": "NOOP 由独立团队开发。手环支持取决于此版本和兼容硬件。经批准的供应商版本可以连接 NOOP Band；兼容测试手环仅在此版本支持时可用。",
+    "zh-Hant": "NOOP 由獨立團隊開發。手環支援取決於此版本和相容硬體。經核准的供應商版本可以連接 NOOP Band；相容測試手環僅在此版本支援時可用。"
   },
   "appwide.terms.point.compatibility.head": {
     "de": "Aktuelle Kompatibilität",
@@ -8117,6 +8161,61 @@
     "zh-Hans": "每分钟 %1$d 次",
     "zh-Hant": "每分鐘 %1$d 次"
   },
+  "appwide.devices.pair_again": {
+    "de": "Erneut koppeln",
+    "en": "Pair again",
+    "es": "Volver a enlazar",
+    "fr": "Associer à nouveau",
+    "it": "Abbina di nuovo",
+    "pt-PT": "Emparelhar novamente",
+    "ru": "Подключить снова",
+    "zh-Hans": "重新配对",
+    "zh-Hant": "重新配對"
+  },
+  "appwide.devices.supplier_captures": {
+    "de": "Herzfrequenz (nur Live-Anzeige) · Akku",
+    "en": "Heart rate (live display only) · Battery",
+    "es": "Frecuencia cardiaca (solo visualización en directo) · Batería",
+    "fr": "Fréquence cardiaque (affichage en direct uniquement) · Batterie",
+    "it": "Frequenza cardiaca (solo visualizzazione in tempo reale) · Batteria",
+    "pt-PT": "Frequência cardíaca (apenas apresentação em direto) · Bateria",
+    "ru": "Пульс (только отображение в реальном времени) · Заряд",
+    "zh-Hans": "心率（仅实时显示）· 电池",
+    "zh-Hant": "心率（僅即時顯示）· 電池"
+  },
+  "appwide.devices.supplier_display_model": {
+    "de": "NOOP Band",
+    "en": "NOOP Band",
+    "es": "NOOP Band",
+    "fr": "NOOP Band",
+    "it": "NOOP Band",
+    "pt-PT": "NOOP Band",
+    "ru": "NOOP Band",
+    "zh-Hans": "NOOP Band",
+    "zh-Hant": "NOOP Band"
+  },
+  "appwide.devices.supplier_footnote": {
+    "de": "Die Herzfrequenz verschwindet, wenn keine neuen Werte eintreffen. Der Akkustand wird nur angezeigt, solange das Band verbunden ist.",
+    "en": "Heart rate expires when updates stop. Battery is shown only while the band is connected.",
+    "es": "La frecuencia cardiaca desaparece cuando dejan de llegar datos. La batería solo se muestra mientras la banda está conectada.",
+    "fr": "La fréquence cardiaque disparaît lorsque les mises à jour s’arrêtent. La batterie s’affiche uniquement lorsque le bracelet est connecté.",
+    "it": "La frequenza cardiaca scompare quando gli aggiornamenti si interrompono. La batteria viene mostrata solo mentre la fascia è connessa.",
+    "pt-PT": "A frequência cardíaca desaparece quando as atualizações param. A bateria só é apresentada enquanto a pulseira está ligada.",
+    "ru": "Пульс скрывается, когда обновления прекращаются. Заряд показывается только пока браслет подключён.",
+    "zh-Hans": "更新停止后，心率会过期。仅在手环已连接时显示电池电量。",
+    "zh-Hant": "更新停止後，心率會過期。僅在手環已連線時顯示電池電量。"
+  },
+  "appwide.devices.supplier_powers": {
+    "de": "Nur Live-Anzeige. Von dieser Quelle werden weder Verlauf noch Scores gespeichert.",
+    "en": "Live display only. No history or scores are stored from this source.",
+    "es": "Solo visualización en directo. No se guardan historial ni puntuaciones de esta fuente.",
+    "fr": "Affichage en direct uniquement. Aucun historique ni score provenant de cette source n’est enregistré.",
+    "it": "Solo visualizzazione in tempo reale. Da questa fonte non vengono salvati cronologia o punteggi.",
+    "pt-PT": "Apenas apresentação em direto. Não são guardados históricos nem pontuações desta fonte.",
+    "ru": "Только отображение в реальном времени. История и оценки из этого источника не сохраняются.",
+    "zh-Hans": "仅实时显示。不会存储此来源的历史记录或评分。",
+    "zh-Hant": "僅即時顯示。不會儲存此來源的歷史記錄或評分。"
+  },
   "appwide.health.live_hr.bpm_format": {
     "de": "%1$d bpm",
     "en": "%1$d bpm",
@@ -8216,6 +8315,94 @@
     "zh-Hans": "Noop Band 未连接。请先连接，再开始实时心率。",
     "zh-Hant": "Noop Band 未連線。請先連線，再開始即時心率。"
   },
+  "appwide.onboarding.account.local_body": {
+    "de": "Die grundlegende Gesundheitsaufzeichnung bleibt auf diesem Gerät. In diesem Modus können weder eine NOOP Band beansprucht noch ein Konto wiederhergestellt oder verwaltete Cloud-Funktionen aktiviert werden.",
+    "en": "Core health tracking stays on this device. This mode cannot claim a NOOP Band, restore an account, or enable managed cloud features.",
+    "es": "El seguimiento de salud básico permanece en este dispositivo. Este modo no puede reclamar una NOOP Band, restaurar una cuenta ni activar funciones gestionadas en la nube.",
+    "fr": "Le suivi de santé principal reste sur cet appareil. Ce mode ne permet pas de revendiquer une NOOP Band, de restaurer un compte ni d’activer les fonctions cloud gérées.",
+    "it": "Il monitoraggio sanitario di base rimane su questo dispositivo. Questa modalità non può associare una NOOP Band, ripristinare un account o attivare le funzioni cloud gestite.",
+    "pt-PT": "O acompanhamento de saúde principal permanece neste dispositivo. Este modo não permite reivindicar uma NOOP Band, restaurar uma conta ou ativar funcionalidades cloud geridas.",
+    "ru": "Основное отслеживание здоровья остаётся на этом устройстве. В этом режиме нельзя закрепить NOOP Band, восстановить учётную запись или включить управляемые облачные функции.",
+    "zh-Hans": "核心健康追踪数据保留在此设备上。此模式无法认领 NOOP Band、恢复账户或启用托管云功能。",
+    "zh-Hant": "核心健康追蹤資料保留在此裝置上。此模式無法認領 NOOP Band、還原帳戶或啟用託管雲端功能。"
+  },
+  "appwide.onboarding.account.local_title": {
+    "de": "Im lokalen Testmodus fortfahren",
+    "en": "Continue in local test mode",
+    "es": "Continuar en modo de prueba local",
+    "fr": "Continuer en mode de test local",
+    "it": "Continua in modalità di test locale",
+    "pt-PT": "Continuar no modo de teste local",
+    "ru": "Продолжить в локальном тестовом режиме",
+    "zh-Hans": "以本地测试模式继续",
+    "zh-Hant": "以本機測試模式繼續"
+  },
+  "appwide.onboarding.account.release_body": {
+    "de": "Ein konfigurierter Release-Build zeigt hier „Konto erstellen“ und „Anmelden“, bevor NOOP Band aktiviert werden kann.",
+    "en": "A configured release build shows Create account and Sign in here before NOOP Band activation.",
+    "es": "Una compilación de lanzamiento configurada muestra aquí Crear cuenta e Iniciar sesión antes de activar NOOP Band.",
+    "fr": "Une version de publication configurée affiche ici Créer un compte et Se connecter avant l’activation de NOOP Band.",
+    "it": "Una build di rilascio configurata mostra qui Crea account e Accedi prima dell’attivazione di NOOP Band.",
+    "pt-PT": "Uma versão de lançamento configurada apresenta aqui Criar conta e Iniciar sessão antes da ativação da NOOP Band.",
+    "ru": "В настроенной сборке для выпуска здесь отображаются действия создания учётной записи и входа до активации NOOP Band.",
+    "zh-Hans": "配置完成的发布版本会在激活 NOOP Band 前，在此显示“创建账户”和“登录”。",
+    "zh-Hant": "設定完成的發佈版本會在啟用 NOOP Band 前，在此顯示「建立帳戶」和「登入」。"
+  },
+  "appwide.onboarding.account.release_title": {
+    "de": "Verhalten im Release-Build",
+    "en": "Configured release behavior",
+    "es": "Comportamiento de la versión configurada",
+    "fr": "Comportement de la version configurée",
+    "it": "Comportamento della build configurata",
+    "pt-PT": "Comportamento da versão configurada",
+    "ru": "Поведение настроенной сборки",
+    "zh-Hans": "已配置发布版本的行为",
+    "zh-Hant": "已設定發佈版本的行為"
+  },
+  "appwide.onboarding.account.unconfigured_footer": {
+    "de": "Wenn Sie fortfahren, wird kein Konto erstellt und es werden keine Daten hochgeladen.",
+    "en": "Continuing creates no account and uploads no data.",
+    "es": "Al continuar no se crea ninguna cuenta ni se carga ningún dato.",
+    "fr": "Continuer ne crée aucun compte et ne téléverse aucune donnée.",
+    "it": "Continuando non viene creato alcun account e non viene caricato alcun dato.",
+    "pt-PT": "Continuar não cria uma conta nem carrega dados.",
+    "ru": "Продолжение не создаёт учётную запись и не загружает данные.",
+    "zh-Hans": "继续操作不会创建账户，也不会上传任何数据。",
+    "zh-Hant": "繼續操作不會建立帳戶，也不會上傳任何資料。"
+  },
+  "appwide.onboarding.account.unconfigured_subtitle": {
+    "de": "In diesem Test-Build nicht verfügbar",
+    "en": "Unavailable in this test build",
+    "es": "No disponible en esta compilación de prueba",
+    "fr": "Indisponible dans cette version de test",
+    "it": "Non disponibile in questa build di test",
+    "pt-PT": "Indisponível nesta versão de teste",
+    "ru": "Недоступно в этой тестовой сборке",
+    "zh-Hans": "此测试版本不可用",
+    "zh-Hant": "此測試版本無法使用"
+  },
+  "appwide.onboarding.account.unconfigured_title": {
+    "de": "Kontoeinrichtung",
+    "en": "Account setup",
+    "es": "Configuración de la cuenta",
+    "fr": "Configuration du compte",
+    "it": "Configurazione dell’account",
+    "pt-PT": "Configuração da conta",
+    "ru": "Настройка учётной записи",
+    "zh-Hans": "账户设置",
+    "zh-Hant": "帳戶設定"
+  },
+  "appwide.onboarding.bluetooth.local_body": {
+    "de": "NOOP verbindet sich über Bluetooth Low Energy direkt mit dem ausgewählten Band. Sensordaten werden auf diesem Gerät verarbeitet. Daten verlassen es nur, wenn Sie ausdrücklich einen NOOP-Kontodienst aktivieren oder sie teilen bzw. exportieren.",
+    "en": "NOOP connects directly to the selected band over Bluetooth Low Energy. Sensor readings are processed on this device. Data leaves only when you explicitly enable a NOOP account service or share or export it.",
+    "es": "NOOP se conecta directamente a la banda seleccionada mediante Bluetooth Low Energy. Las lecturas del sensor se procesan en este dispositivo. Los datos solo salen cuando activas expresamente un servicio de cuenta NOOP o los compartes o exportas.",
+    "fr": "NOOP se connecte directement au bracelet sélectionné via Bluetooth Low Energy. Les mesures des capteurs sont traitées sur cet appareil. Les données ne le quittent que lorsque vous activez explicitement un service de compte NOOP ou que vous les partagez ou les exportez.",
+    "it": "NOOP si collega direttamente al dispositivo selezionato tramite Bluetooth Low Energy. Le letture dei sensori vengono elaborate su questo dispositivo. I dati escono solo quando attivi esplicitamente un servizio account NOOP oppure li condividi o esporti.",
+    "pt-PT": "O NOOP liga-se diretamente à pulseira selecionada através de Bluetooth Low Energy. As leituras dos sensores são processadas neste dispositivo. Os dados só saem quando ativar explicitamente um serviço de conta NOOP ou quando os partilhar ou exportar.",
+    "ru": "NOOP подключается непосредственно к выбранному браслету по Bluetooth Low Energy. Показания датчиков обрабатываются на этом устройстве. Данные покидают его только при явном включении службы учётной записи NOOP, публикации или экспорте.",
+    "zh-Hans": "NOOP 通过低功耗蓝牙直接连接所选手环。传感器读数在此设备上处理。只有在您明确启用 NOOP 账户服务、共享或导出数据时，数据才会离开设备。",
+    "zh-Hant": "NOOP 透過低功耗藍牙直接連接所選手環。感測器讀數會在此裝置上處理。只有在您明確啟用 NOOP 帳戶服務、分享或匯出資料時，資料才會離開裝置。"
+  },
   "appwide.onboarding.continue_without_band": {
     "de": "Ohne Band fortfahren",
     "en": "Continue without a band",
@@ -8228,26 +8415,26 @@
     "zh-Hant": "不連接手環繼續"
   },
   "appwide.onboarding.device_wizard.add_body": {
-    "de": "Was möchtest du hinzufügen?",
-    "en": "What are you adding?",
-    "es": "¿Qué quieres añadir?",
-    "fr": "Qu’ajoutez-vous ?",
-    "it": "Cosa vuoi aggiungere?",
-    "pt-PT": "O que queres adicionar?",
-    "ru": "Что вы хотите добавить?",
-    "zh-Hans": "你要添加什么？",
-    "zh-Hant": "你要加入什麼？"
+    "de": "Wähle ein unterstütztes Band.",
+    "en": "Choose a supported band.",
+    "es": "Elige una pulsera compatible.",
+    "fr": "Choisissez un bracelet pris en charge.",
+    "it": "Scegli una fascia supportata.",
+    "pt-PT": "Escolhe uma pulseira compatível.",
+    "ru": "Выберите поддерживаемый браслет.",
+    "zh-Hans": "选择受支持的手环。",
+    "zh-Hant": "選擇支援的手環。"
   },
   "appwide.onboarding.device_wizard.add_title": {
-    "de": "Gerät hinzufügen",
-    "en": "Add a device",
-    "es": "Añadir un dispositivo",
-    "fr": "Ajouter un appareil",
-    "it": "Aggiungi un dispositivo",
-    "pt-PT": "Adicionar um dispositivo",
-    "ru": "Добавить устройство",
-    "zh-Hans": "添加设备",
-    "zh-Hant": "加入裝置"
+    "de": "Band verbinden",
+    "en": "Connect band",
+    "es": "Conectar pulsera",
+    "fr": "Connecter un bracelet",
+    "it": "Collega una fascia",
+    "pt-PT": "Ligar pulseira",
+    "ru": "Подключить браслет",
+    "zh-Hans": "连接手环",
+    "zh-Hant": "連接手環"
   },
   "appwide.onboarding.device_wizard.compatible_band": {
     "de": "Kompatibles Band",
@@ -8259,6 +8446,39 @@
     "ru": "Совместимый браслет",
     "zh-Hans": "兼容手环",
     "zh-Hant": "相容手環"
+  },
+  "appwide.onboarding.device_wizard.compatible_4_title": {
+    "de": "Kompatibles Band 4.0",
+    "en": "Compatible band 4.0",
+    "es": "Banda compatible 4.0",
+    "fr": "Bracelet compatible 4.0",
+    "it": "Fascia compatibile 4.0",
+    "pt-PT": "Pulseira compatível 4.0",
+    "ru": "Совместимый браслет 4.0",
+    "zh-Hans": "兼容手环 4.0",
+    "zh-Hant": "相容手環 4.0"
+  },
+  "appwide.onboarding.device_wizard.compatible_5_title": {
+    "de": "Kompatibles Band 5.0 / MG",
+    "en": "Compatible band 5.0 / MG",
+    "es": "Banda compatible 5.0 / MG",
+    "fr": "Bracelet compatible 5.0 / MG",
+    "it": "Fascia compatibile 5.0 / MG",
+    "pt-PT": "Pulseira compatível 5.0 / MG",
+    "ru": "Совместимый браслет 5.0 / MG",
+    "zh-Hans": "兼容手环 5.0 / MG",
+    "zh-Hant": "相容手環 5.0 / MG"
+  },
+  "appwide.onboarding.device_wizard.supplier_physical_device_required": {
+    "de": "Für die Kopplung der NOOP Band ist ein signierter Build auf einem physischen iPhone erforderlich.",
+    "en": "NOOP Band pairing requires a signed build on a physical iPhone.",
+    "es": "El enlace de NOOP Band requiere una compilación firmada en un iPhone físico.",
+    "fr": "L’association de NOOP Band nécessite une version signée sur un iPhone physique.",
+    "it": "L’associazione di NOOP Band richiede una build firmata su un iPhone fisico.",
+    "pt-PT": "O emparelhamento da NOOP Band requer uma compilação assinada num iPhone físico.",
+    "ru": "Для сопряжения NOOP Band требуется подписанная сборка на физическом iPhone.",
+    "zh-Hans": "NOOP Band 配对需要在实体 iPhone 上运行已签名的构建版本。",
+    "zh-Hant": "NOOP Band 配對需要在實體 iPhone 上執行已簽署的建置版本。"
   },
   "appwide.onboarding.device_wizard.confirm_title": {
     "de": "Benennen und bestätigen",
@@ -8976,15 +9196,15 @@
     "zh-Hant": "裝置設定完成"
   },
   "appwide.onboarding.device_setup_action": {
-    "de": "Band oder Gerät auswählen",
-    "en": "Choose band or device",
-    "es": "Elegir banda o dispositivo",
-    "fr": "Choisir un bracelet ou appareil",
-    "it": "Scegli fascia o dispositivo",
-    "pt-PT": "Escolher pulseira ou dispositivo",
-    "ru": "Выбрать браслет или устройство",
-    "zh-Hans": "选择手环或设备",
-    "zh-Hant": "選擇手環或裝置"
+    "de": "Band verbinden",
+    "en": "Connect band",
+    "es": "Conectar pulsera",
+    "fr": "Connecter un bracelet",
+    "it": "Collega una fascia",
+    "pt-PT": "Ligar pulseira",
+    "ru": "Подключить браслет",
+    "zh-Hans": "连接手环",
+    "zh-Hant": "連接手環"
   },
   "appwide.onboarding.claim_band_setup_body": {
     "de": "Wähle ein kompatibles Band aus, um fortzufahren. Andere unterstützte Geräte kannst du nach der Einrichtung hinzufügen.",

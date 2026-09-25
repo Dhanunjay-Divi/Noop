@@ -676,6 +676,7 @@ private struct MacLighterWorkoutOptionsSheet: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(StrandPalette.accent)
+                        .foregroundStyle(StrandPalette.accentInk)
 
                         Button(action: onOpenStrength) {
                             Label(

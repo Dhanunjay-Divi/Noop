@@ -54,6 +54,14 @@ class AppearanceModeTest {
     }
 
     @Test
+    fun runtimeFillInkChoosesTheHigherContrastBlackOrWhite() {
+        assertEquals(Color.Black, contrastInk(Color.White))
+        assertEquals(Color.White, contrastInk(Color.Black))
+        assertEquals(Color.Black, contrastInk(Color(0xFFFFD54F)))
+        assertEquals(Color.White, contrastInk(Color(0xFF1A237E)))
+    }
+
+    @Test
     fun moderateRecoveryGaugeCannotDriftIntoPrimedGreen() {
         val (base, tip) = Palette.recoveryGaugeColors(69.0)
         assertEquals(Palette.recoveryColor(55.0), base)

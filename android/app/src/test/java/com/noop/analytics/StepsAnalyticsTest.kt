@@ -19,8 +19,13 @@ class StepsAnalyticsTest {
     private val dayUtc = "2026-01-02"
     private val noonUtc = 1_767_355_200L
 
-    private fun step(tsOffsetSec: Long, counter: Int) =
-        StepSample(deviceId = "my-whoop", ts = noonUtc + tsOffsetSec, counter = counter)
+    private fun step(tsOffsetSec: Long, counter: Int, activityClass: Int? = null) =
+        StepSample(
+            deviceId = "my-whoop",
+            ts = noonUtc + tsOffsetSec,
+            counter = counter,
+            activityClass = activityClass,
+        )
 
     private fun stepsFor(samples: List<StepSample>): Int? =
         AnalyticsEngine.analyzeDay(day = dayUtc, steps = samples, profile = profile).daily.steps
@@ -157,9 +162,28 @@ class StepsAnalyticsTest {
     }
 
     @Test
-    fun dailyEffortIncludesOrdinaryWalkingWithoutExerciseHr() {
+    fun dailyStationaryClassedBurstDoesNotBecomeSteps() {
+        val samples = (0..10).map { index ->
+            step(index * 60L, index * 400, activityClass = 0)
+        }
+
+        val result = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = samples,
+            profile = profile,
+        )
+
+        assertNull(result.daily.steps)
+    }
+
+    @Test
+    fun dailyNoHrWalkClassStepsStillCount() {
+        // 1,715 calibrated steps and no HR stream: the daily movement floor should keep Effort from
+        // reading zero, while the same calibrated total remains visible on the Steps metric.
         val counters = listOf(100, 400, 700, 1_000, 1_300, 1_600, 1_815)
-        val samples = counters.mapIndexed { index, counter -> step(index * 60L, counter) }
+        val samples = counters.mapIndexed { index, counter ->
+            step(index * 60L, counter, activityClass = 1)
+        }
         val result = AnalyticsEngine.analyzeDay(
             day = dayUtc,
             steps = samples,

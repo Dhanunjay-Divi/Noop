@@ -275,7 +275,7 @@ fun MedicationSettingsDialog(
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Palette.accent,
-                                    contentColor = Palette.surfaceBase,
+                                    contentColor = Palette.accentInk,
                                 ),
                             ) {
                                 Text(

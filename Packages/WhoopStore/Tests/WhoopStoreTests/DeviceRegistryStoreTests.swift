@@ -58,6 +58,70 @@ final class DeviceRegistryStoreTests: XCTestCase {
         XCTAssertEqual(unchangedGeneration, 1)
     }
 
+    func testAddAndSetActivePersistsCompleteRowAtomically() throws {
+        let store = DeviceRegistryStore(dbQueue: try makeDB())
+        let device = PairedDevice(
+            id: "whoop-test-band",
+            brand: "WHOOP",
+            model: "WHOOP 5.0 / MG",
+            nickname: "Training band",
+            peripheralId: "opaque-peripheral",
+            sourceKind: .liveBLE,
+            capabilities: [.hr, .hrv, .spo2],
+            status: .paired,
+            addedAt: 200,
+            lastSeenAt: 200
+        )
+
+        let rows = try store.addAndSetActive(device, at: 300)
+        let saved = try XCTUnwrap(rows.first { $0.id == device.id })
+
+        XCTAssertEqual(rows.filter { $0.status == .active }.map(\.id), [device.id])
+        XCTAssertEqual(saved.brand, device.brand)
+        XCTAssertEqual(saved.model, device.model)
+        XCTAssertEqual(saved.nickname, device.nickname)
+        XCTAssertEqual(saved.peripheralId, device.peripheralId)
+        XCTAssertEqual(saved.sourceKind, device.sourceKind)
+        XCTAssertEqual(saved.capabilities, [.hr, .hrv])
+        XCTAssertEqual(saved.status, .active)
+        XCTAssertEqual(saved.lastSeenAt, 300)
+        XCTAssertEqual(try store.activeDeviceId(), device.id)
+    }
+
+    func testAddAndSetActiveRollsBackTheWholeRegistrationOnFailure() throws {
+        let dbq = try makeDB()
+        let store = DeviceRegistryStore(dbQueue: dbq)
+        let device = PairedDevice(
+            id: "rejected-band",
+            brand: "WHOOP",
+            model: "WHOOP 4.0",
+            peripheralId: "opaque-peripheral",
+            sourceKind: .liveBLE,
+            capabilities: [.hr, .hrv],
+            status: .paired,
+            addedAt: 200,
+            lastSeenAt: 200
+        )
+        try dbq.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER reject_active_registration
+                BEFORE INSERT ON pairedDevice
+                WHEN NEW.id = 'rejected-band'
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected registration failure');
+                END
+                """)
+        }
+
+        XCTAssertThrowsError(try store.addAndSetActive(device, at: 300))
+        XCTAssertEqual(try store.activeDeviceId(), "my-whoop")
+        XCTAssertFalse(try store.all().contains { $0.id == device.id })
+        XCTAssertEqual(
+            try store.all().filter { $0.status == .active }.map(\.id),
+            ["my-whoop"]
+        )
+    }
+
     func testArchiveKeepsRowAndClearsActive() throws {
         let dbq = try makeDB()
         let store = DeviceRegistryStore(dbQueue: dbq)

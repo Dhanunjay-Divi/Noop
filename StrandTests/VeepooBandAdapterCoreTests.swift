@@ -808,6 +808,76 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     }
 
     @MainActor
+    func testSourceRestartsLiveAfterNotWornAndBusyResponses() async {
+        let adapter = FakeAdapter()
+        let source = VeepooBandSource(
+            live: LiveState(),
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {},
+            liveRestartDelaysNanoseconds: [0, 0],
+            liveRestartTailDelayNanoseconds: 0
+        )
+
+        adapter.emit(.failed(stage: .live, failure: .notWorn))
+        for _ in 0..<100 where adapter.liveStartCount < 1 {
+            await Task.yield()
+        }
+        XCTAssertEqual(adapter.liveStartCount, 1)
+
+        adapter.emit(.failed(stage: .live, failure: .busy))
+        for _ in 0..<100 where adapter.liveStartCount < 2 {
+            await Task.yield()
+        }
+        XCTAssertEqual(adapter.liveStartCount, 2)
+        source.stop()
+    }
+
+    @MainActor
+    func testSourceContinuesWithLowFrequencyTailAfterRestartBurst() async {
+        let adapter = FakeAdapter()
+        let source = VeepooBandSource(
+            live: LiveState(),
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {},
+            liveRestartDelaysNanoseconds: [0],
+            liveRestartTailDelayNanoseconds: 0
+        )
+
+        adapter.emit(.failed(stage: .live, failure: .notWorn))
+        for _ in 0..<100 where adapter.liveStartCount < 1 {
+            await Task.yield()
+        }
+        adapter.emit(.failed(stage: .live, failure: .notWorn))
+        for _ in 0..<100 where adapter.liveStartCount < 2 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(adapter.liveStartCount, 2)
+        source.stop()
+    }
+
+    @MainActor
+    func testStoppingSourceCancelsPendingLiveRestart() async {
+        let adapter = FakeAdapter()
+        let source = VeepooBandSource(
+            live: LiveState(),
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {},
+            liveRestartDelaysNanoseconds: [20_000_000],
+            liveRestartTailDelayNanoseconds: 20_000_000
+        )
+
+        adapter.emit(.failed(stage: .live, failure: .notWorn))
+        source.stop()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(adapter.liveStartCount, 0)
+    }
+
+    @MainActor
     func testSupplierRegistrationUsabilityRequiresRuntimeAndCredential() {
         let credentials = FakeCredentials()
         let device = PairedDevice(

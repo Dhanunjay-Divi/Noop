@@ -55,6 +55,59 @@ final class DevicePillStateTests: XCTestCase {
         XCTAssertEqual(WhoopModel.whoop5mg.transportName, "newer band")
     }
 
+    func testCompatibleBandSelectionPreservesDistinctVisibleAndRegistryModels() {
+        let older = AddDeviceWizard.compatibleBandIdentity(for: .whoop4)
+        let newer = AddDeviceWizard.compatibleBandIdentity(for: .whoop5mg)
+
+        XCTAssertEqual(
+            older.displayName,
+            String(
+                localized:
+                    "appwide.onboarding.device_wizard.compatible_4_title"
+            )
+        )
+        XCTAssertEqual(older.registryModel, "4.0")
+        XCTAssertEqual(
+            newer.displayName,
+            String(
+                localized:
+                    "appwide.onboarding.device_wizard.compatible_5_title"
+            )
+        )
+        XCTAssertEqual(newer.registryModel, "5.0 MG")
+        XCTAssertNotEqual(older, newer)
+
+        let olderDevice = PairedDevice(
+            id: "whoop-older",
+            brand: "WHOOP",
+            model: older.registryModel,
+            nickname: older.displayName,
+            peripheralId: UUID().uuidString,
+            sourceKind: .liveBLE,
+            capabilities: [.hr],
+            status: .paired,
+            addedAt: 0,
+            lastSeenAt: 0
+        )
+        let newerDevice = PairedDevice(
+            id: "whoop-newer",
+            brand: "WHOOP",
+            model: newer.registryModel,
+            nickname: newer.displayName,
+            peripheralId: UUID().uuidString,
+            sourceKind: .liveBLE,
+            capabilities: [.hr],
+            status: .paired,
+            addedAt: 0,
+            lastSeenAt: 0
+        )
+
+        XCTAssertEqual(olderDevice.displayName, older.displayName)
+        XCTAssertEqual(newerDevice.displayName, newer.displayName)
+        XCTAssertNotEqual(olderDevice.displayName, newerDevice.displayName)
+        XCTAssertNotEqual(olderDevice.model, newerDevice.model)
+    }
+
     func testDeviceModelIsHiddenOnlyWhenItDuplicatesTheDisplayName() {
         XCTAssertFalse(
             DeviceCapabilityProfile.shouldShowModel(
@@ -74,10 +127,92 @@ final class DevicePillStateTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("Strand/Screens/DevicesView.swift"))
         XCTAssertTrue(source.contains("private var emptyDevicesHero"))
-        XCTAssertTrue(source.contains("Text(\"Add your first device\")"))
+        XCTAssertTrue(source.contains("Text(\"appwide.devices.empty_title\")"))
+        XCTAssertTrue(source.contains("\"appwide.devices.connect_action\""))
+        XCTAssertTrue(source.contains("selectionScope: .launchBands"))
         XCTAssertTrue(source.contains("DisclosureGroup(isExpanded: $showTechnicalDetails)"))
         XCTAssertTrue(source.contains("Text(\"Technical details\")"))
         XCTAssertFalse(source.contains("Button(action: action) { cardContent }"),
                        "A disclosure cannot be nested in the whole-card activation button.")
+    }
+
+    func testLaunchBandPickerOmitsUnavailableAndExperimentalRows() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Strand/Screens/AddDeviceWizard.swift"))
+        let typeStep = source
+            .components(separatedBy: "@ViewBuilder private var typeStep: some View {")[1]
+            .components(separatedBy: "private func typeRow")[0]
+
+        XCTAssertFalse(typeStep.contains("unavailableTypeRow"))
+        XCTAssertLessThan(
+            try XCTUnwrap(typeStep.range(of: ".whoop5mg")?.lowerBound),
+            try XCTUnwrap(typeStep.range(of: ".whoop4")?.lowerBound)
+        )
+        XCTAssertTrue(source.contains("if selectionScope == .allDevices"))
+        XCTAssertTrue(source.contains("type.isWhoop || type == .veepoo"))
+    }
+
+    func testArchivedSupplierAffordanceUsesAddDeviceInsteadOfMakeActive() {
+        let supplier = PairedDevice(
+            id: "supplier-removed",
+            brand: "Veepoo-compatible",
+            model: "Compatible supplier band",
+            peripheralId: UUID().uuidString,
+            sourceKind: .veepoo,
+            capabilities: [.hr],
+            status: .archived,
+            addedAt: 0,
+            lastSeenAt: 0
+        )
+
+        XCTAssertEqual(
+            DeviceActivationAffordance.resolve(
+                device: supplier,
+                isActive: false,
+                hasReAddAction: true,
+                supplierPairingAvailable: true
+            ),
+            .addDevice
+        )
+        XCTAssertNil(
+            DeviceActivationAffordance.resolve(
+                device: supplier,
+                isActive: false,
+                hasReAddAction: false,
+                supplierPairingAvailable: true
+            )
+        )
+        XCTAssertNil(
+            DeviceActivationAffordance.resolve(
+                device: supplier,
+                isActive: false,
+                hasReAddAction: true,
+                supplierPairingAvailable: false
+            )
+        )
+    }
+
+    func testRemovedSupplierUIReentersPairingInsteadOfSettingRegistryActive()
+        throws
+    {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/Screens/DevicesView.swift"
+            )
+        )
+
+        XCTAssertTrue(
+            source.contains(
+                "presentAddWizard(startAt: (.veepoo, .prep))"
+            )
+        )
+        XCTAssertFalse(
+            source.contains(
+                "onReAdd: { registry.setActive(device.id) }"
+            )
+        )
     }
 }

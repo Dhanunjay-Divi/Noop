@@ -19,6 +19,22 @@ final class ScreenStateContractTests: XCTestCase {
         )
     }
 
+    func testDestructiveButtonsUseTheContrastResolvedInkToken() throws {
+        let button = try sourceText(
+            "Packages/StrandDesign/Sources/StrandDesign/NoopButton.swift"
+        )
+        let destructive = button
+            .components(separatedBy: "case .destructive:")
+            .dropFirst()
+            .first?
+            .components(separatedBy: "}")
+            .first ?? ""
+
+        XCTAssertTrue(destructive.contains("fill = StrandPalette.statusCritical"))
+        XCTAssertTrue(destructive.contains("label = StrandPalette.accentInk"))
+        XCTAssertFalse(destructive.contains("goldDeepText"))
+    }
+
     func testFeedbackUploadCallbacksDropTerminalRacesBeforeDiagnostics() throws {
         let coordinator = try sourceText(
             "StrandiOS/System/FeedbackUploadCoordinator.swift"
@@ -1268,7 +1284,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
         let supplierKeys = source.keys.filter {
             $0.hasPrefix("appwide.onboarding.device_wizard.supplier_")
         }
-        XCTAssertEqual(supplierKeys.count, 48)
+        XCTAssertEqual(supplierKeys.count, 49)
         XCTAssertEqual(
             source[
                 "appwide.onboarding.device_wizard.supplier_prep_password_scope"
@@ -1471,6 +1487,16 @@ final class AppWideLocalizationContractTests: XCTestCase {
 
         XCTAssertEqual(appleVersion, androidVersion)
         XCTAssertEqual(appleVersion, documentVersion)
+        XCTAssertFalse(document.contains("NOOP Band is not available yet"))
+        XCTAssertTrue(document.contains("approved supplier SDK"))
+
+        let catalog = try text("Tools/AppWideLocalization/appwide_strings.json")
+        XCTAssertFalse(catalog.contains("NOOP Band is not available yet"))
+        XCTAssertTrue(
+            catalog.contains(
+                "Approved supplier builds can connect NOOP Band"
+            )
+        )
     }
 }
 
