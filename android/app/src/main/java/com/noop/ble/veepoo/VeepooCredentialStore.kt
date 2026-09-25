@@ -23,6 +23,113 @@ interface VeepooCredentialAccess {
     fun clear(deviceId: String): Boolean
 }
 
+interface VeepooCredentialCleanupAccess {
+    fun markPending(deviceId: String): Boolean
+    fun pendingDeviceIds(): VeepooCredentialCleanupRead
+    fun clearPending(deviceId: String): Boolean
+}
+
+sealed interface VeepooCredentialCleanupRead {
+    data class Available(val deviceIds: Set<String>) : VeepooCredentialCleanupRead
+    data object Unavailable : VeepooCredentialCleanupRead
+}
+
+internal interface VeepooCredentialCleanupBackend {
+    fun read(): VeepooCredentialCleanupRead
+    fun write(deviceIds: Set<String>): Boolean
+}
+
+/**
+ * Restart-safe cleanup ledger for a generated supplier id whose credential was saved before registry
+ * adoption failed. It stores opaque generated ids only, never credentials, hardware identifiers, or
+ * health data. A registered row always wins during reconciliation so a stale ledger entry can never
+ * delete the credential for a successfully adopted band.
+ */
+class VeepooCredentialCleanupStore internal constructor(
+    private val backend: VeepooCredentialCleanupBackend,
+) : VeepooCredentialCleanupAccess {
+    constructor(context: Context) : this(
+        SharedPreferencesCleanupBackend(
+            context.applicationContext.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE),
+        ),
+    )
+
+    override fun markPending(deviceId: String): Boolean {
+        if (!validDeviceId(deviceId)) return false
+        val current = when (val read = backend.read()) {
+            is VeepooCredentialCleanupRead.Available -> read.deviceIds
+            VeepooCredentialCleanupRead.Unavailable -> return false
+        }
+        if (deviceId in current) return true
+        if (current.size >= MAX_PENDING_IDS) return false
+        return backend.write(current + deviceId)
+    }
+
+    override fun pendingDeviceIds(): VeepooCredentialCleanupRead =
+        when (val read = backend.read()) {
+            is VeepooCredentialCleanupRead.Available -> {
+                VeepooCredentialCleanupRead.Available(
+                    read.deviceIds
+                        .asSequence()
+                        .filter(::validDeviceId)
+                        .take(MAX_PENDING_IDS)
+                        .toSet(),
+                )
+            }
+            VeepooCredentialCleanupRead.Unavailable -> read
+        }
+
+    override fun clearPending(deviceId: String): Boolean {
+        if (!validDeviceId(deviceId)) return false
+        val current = when (val read = backend.read()) {
+            is VeepooCredentialCleanupRead.Available -> read.deviceIds
+            VeepooCredentialCleanupRead.Unavailable -> return false
+        }
+        if (deviceId !in current) return true
+        return backend.write(current - deviceId)
+    }
+
+    private fun validDeviceId(value: String): Boolean =
+        value.isNotBlank() &&
+            value.length <= MAX_DEVICE_ID_LENGTH &&
+            value.none(Char::isISOControl)
+
+    private class SharedPreferencesCleanupBackend(
+        private val preferences: SharedPreferences,
+    ) : VeepooCredentialCleanupBackend {
+        override fun read(): VeepooCredentialCleanupRead =
+            try {
+                VeepooCredentialCleanupRead.Available(
+                    preferences.getStringSet(KEY_PENDING_IDS, emptySet())
+                        ?.toSet()
+                        .orEmpty(),
+                )
+            } catch (_: Throwable) {
+                VeepooCredentialCleanupRead.Unavailable
+            }
+
+        override fun write(deviceIds: Set<String>): Boolean =
+            try {
+                val editor = preferences.edit()
+                if (deviceIds.isEmpty()) {
+                    editor.remove(KEY_PENDING_IDS)
+                } else {
+                    editor.putStringSet(KEY_PENDING_IDS, deviceIds.toSet())
+                }
+                editor.commit()
+            } catch (_: Throwable) {
+                false
+            }
+    }
+
+    companion object {
+        private const val FILE_NAME = "noop_supplier_band_cleanup"
+        private const val KEY_PENDING_IDS = "pending_credential_cleanup_ids"
+        private const val MAX_PENDING_IDS = 64
+        private const val MAX_DEVICE_ID_LENGTH = 256
+    }
+}
+
 sealed interface VeepooCredentialRead {
     data class Available(val credential: VeepooStoredCredential) : VeepooCredentialRead
     data object Missing : VeepooCredentialRead

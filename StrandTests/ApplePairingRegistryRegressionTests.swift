@@ -122,6 +122,56 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testSynchronousPermanentCredentialFailureRestoresWhoopOwnership()
+        async throws
+    {
+        let (store, registry) = try await makeRegistry()
+        let device = supplierDevice(
+            id: "supplier-missing-credential",
+            status: .paired
+        )
+        XCTAssertTrue(registry.addAndSetActive(device))
+
+        let adapter = FakePairingAdapter()
+        var permanentFailures = 0
+        let source = VeepooBandSource(
+            live: LiveState(),
+            adapter: adapter,
+            credentialLoader: { .missing },
+            credentialRetryDelaysNanoseconds: [],
+            onCredentialRejected: {},
+            onCredentialPermanentlyUnavailable: {
+                permanentFailures += 1
+                XCTAssertTrue(
+                    registry.reconcileUnavailableSupplier(device.id)
+                )
+            }
+        )
+        var whoopStarts = 0
+        var whoopStops = 0
+        let coordinator = makeCoordinator(
+            registry: registry,
+            sources: [device.id: source],
+            startWhoop: { whoopStarts += 1 },
+            stopWhoop: { whoopStops += 1 }
+        )
+        coordinator.start()
+
+        XCTAssertEqual(permanentFailures, 1)
+        XCTAssertEqual(registry.activeDeviceId, "my-whoop")
+        XCTAssertEqual(
+            try DeviceRegistryStore(
+                dbQueue: store.registryWriter
+            ).activeDeviceId(),
+            "my-whoop"
+        )
+        XCTAssertEqual(whoopStops, 1)
+        XCTAssertEqual(whoopStarts, 1)
+        XCTAssertEqual(adapter.disconnectCount, 2)
+        XCTAssertTrue(adapter.discoveries.isEmpty)
+    }
+
+    @MainActor
     func testPairingCancelStartsCurrentSupplierOnlyAfterAdapterDisconnect()
         async throws
     {
@@ -469,6 +519,37 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testSupplierCredentialRegistrationReadFailsClosed() async throws {
+        let store = try await WhoopStore.inMemory()
+        let registry = DeviceRegistry(
+            store: DeviceRegistryStore(dbQueue: store.registryWriter)
+        )
+        registry.reload()
+
+        try await store.registryWriter.write { db in
+            try db.drop(table: "pairedDevice")
+        }
+
+        XCTAssertNil(registry.registeredSupplierCredentialDeviceIDs())
+    }
+
+    @MainActor
+    func testArchivedSupplierDoesNotOwnCredentialRegistration() async throws {
+        let (_, registry) = try await makeRegistry()
+        let device = supplierDevice(
+            id: "supplier-archived-cleanup",
+            status: .paired
+        )
+        registry.add(device)
+        XCTAssertTrue(registry.archive(device.id))
+
+        XCTAssertEqual(
+            registry.registeredSupplierCredentialDeviceIDs(),
+            Set<String>()
+        )
+    }
+
+    @MainActor
     private func makeRegistry() async throws -> (WhoopStore, DeviceRegistry) {
         let store = try await WhoopStore.inMemory()
         let registry = DeviceRegistry(
@@ -482,13 +563,14 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
     private func makeCoordinator(
         registry: DeviceRegistry,
         sources: [String: any LiveHRSource],
+        startWhoop: @escaping () -> Void = {},
         stopWhoop: @escaping () -> Void = {}
     ) -> SourceCoordinator {
         SourceCoordinator(
             registry: registry,
             live: LiveState(),
             storeHandle: { nil },
-            startWhoop: {},
+            startWhoop: startWhoop,
             stopWhoop: stopWhoop,
             setWhoopPreferredPeripheral: { _ in },
             setWhoopActiveDeviceId: { _ in },

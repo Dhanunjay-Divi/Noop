@@ -13,6 +13,8 @@ import com.noop.ble.veepoo.VeepooBinding
 import com.noop.ble.veepoo.VeepooCandidateHandle
 import com.noop.ble.veepoo.VeepooCandidateRow
 import com.noop.ble.veepoo.VeepooCredentialAccess
+import com.noop.ble.veepoo.VeepooCredentialCleanupAccess
+import com.noop.ble.veepoo.VeepooCredentialCleanupRead
 import com.noop.ble.veepoo.VeepooCredentialRead
 import com.noop.ble.veepoo.VeepooDisplayState
 import com.noop.ble.veepoo.VeepooManagedSource
@@ -25,6 +27,7 @@ import com.noop.ble.veepoo.VeepooSupplierLifecycleFailure
 import com.noop.ble.veepoo.VeepooSupplierLifecycleOutcome
 import com.noop.ble.veepoo.VeepooSupplierLifecycleStage
 import com.noop.ble.veepoo.VeepooSupplierLifecycleTrigger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -155,13 +158,21 @@ class SourceCoordinatorAdoptionTest {
         var beforeUpsert: (suspend (PairedDeviceRow) -> Unit)? = null
         var beforeArchive: (suspend (String) -> Unit)? = null
         var beforePairedDevices: (suspend () -> Unit)? = null
+        var activeDeviceFailuresRemaining = 0
 
         override suspend fun pairedDevices(): List<PairedDeviceRow> {
             beforePairedDevices?.invoke()
             return devices.values.sortedBy { it.addedAt }
         }
-        override suspend fun activeDeviceId(): String? =
-            devices.values.firstOrNull { it.status == DeviceStatus.active.name }?.id
+        override suspend fun activeDeviceId(): String? {
+            if (activeDeviceFailuresRemaining > 0) {
+                activeDeviceFailuresRemaining -= 1
+                error("injected active-device read failure")
+            }
+            return devices.values.firstOrNull {
+                it.status == DeviceStatus.active.name
+            }?.id
+        }
         override suspend fun upsertPairedDevice(row: PairedDeviceRow) {
             lifecycleOperations?.add("registry.upsert")
             beforeUpsert?.invoke(row)
@@ -289,10 +300,13 @@ class SourceCoordinatorAdoptionTest {
 
         val values = mutableMapOf<String, Value>()
         var saveSucceeds = true
+        var saveMutatesBeforeFailure = false
+        var saveThrowsAfterMutation = false
         var clearSucceeds = true
         var clearMutatesBeforeFailure = false
         var loadFails = false
         var unavailableReadsRemaining = 0
+        var retentionReadCount = 0
 
         override fun save(
             deviceId: String,
@@ -300,6 +314,14 @@ class SourceCoordinatorAdoptionTest {
             revisionBinding: VeepooRevisionBinding,
         ): Boolean {
             lifecycleOperations?.add("credential.save")
+            if (saveMutatesBeforeFailure || saveThrowsAfterMutation) {
+                values[deviceId] =
+                    Value(password.concatToString(), revisionBinding)
+                if (saveThrowsAfterMutation) {
+                    error("injected post-write save failure")
+                }
+                return false
+            }
             if (!saveSucceeds) return false
             values[deviceId] = Value(password.concatToString(), revisionBinding)
             return true
@@ -315,6 +337,7 @@ class SourceCoordinatorAdoptionTest {
 
         override fun readForRetention(deviceId: String): VeepooCredentialRead {
             lifecycleOperations?.add("credential.read")
+            retentionReadCount += 1
             if (loadFails) return VeepooCredentialRead.Unavailable
             if (unavailableReadsRemaining > 0) {
                 unavailableReadsRemaining -= 1
@@ -348,6 +371,32 @@ class SourceCoordinatorAdoptionTest {
                     VeepooRevisionBinding.from("hw-1", "fw-1"),
                 ),
             )
+        }
+    }
+
+    private class FakeCredentialCleanup : VeepooCredentialCleanupAccess {
+        val pending = linkedSetOf<String>()
+        var readsAvailable = true
+        var markSucceeds = true
+        var clearSucceeds = true
+
+        override fun markPending(deviceId: String): Boolean {
+            if (!markSucceeds) return false
+            pending += deviceId
+            return true
+        }
+
+        override fun pendingDeviceIds(): VeepooCredentialCleanupRead =
+            if (readsAvailable) {
+                VeepooCredentialCleanupRead.Available(pending.toSet())
+            } else {
+                VeepooCredentialCleanupRead.Unavailable
+            }
+
+        override fun clearPending(deviceId: String): Boolean {
+            if (!clearSucceeds) return false
+            pending -= deviceId
+            return true
         }
     }
 
@@ -656,6 +705,7 @@ class SourceCoordinatorAdoptionTest {
             failUpsertFor = "supplier-new"
         }
         val credentials = FakeCredentials()
+        val cleanup = FakeCredentialCleanup()
         val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
         val attempt = VeepooAttemptToken.create()
         val provisioning = VeepooProvisioningCommit(
@@ -668,6 +718,7 @@ class SourceCoordinatorAdoptionTest {
         val adopted = VeepooPairingAdoption(
             registry = registryWith(dao),
             credentials = credentials,
+            cleanup = cleanup,
             diagnostics = VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
         ).commit(
             deviceId = "supplier-new",
@@ -680,6 +731,7 @@ class SourceCoordinatorAdoptionTest {
         assertEquals("my-whoop", dao.activeDeviceId())
         assertFalse(dao.devices.containsKey("supplier-new"))
         assertTrue(credentials.values.isEmpty())
+        assertTrue(cleanup.pending.isEmpty())
         assertEquals(
             listOf(
                 VeepooSupplierLifecycleStage.ADOPTION to VeepooSupplierLifecycleOutcome.BEGAN,
@@ -693,6 +745,184 @@ class SourceCoordinatorAdoptionTest {
             VeepooSupplierLifecycleFailure.REGISTRY_PERSISTENCE,
             diagnostics.last().failure,
         )
+    }
+
+    @Test
+    fun failedSupplierAdoptionRetainsCleanupHandleUntilCredentialCanBeDeleted() =
+        runBlocking {
+            val dao = FakeRegistryDao().apply {
+                devices["my-whoop"] = whoopRow("my-whoop", null)
+                failUpsertFor = "supplier-orphan"
+            }
+            val credentials = FakeCredentials().apply {
+                clearSucceeds = false
+            }
+            val cleanup = FakeCredentialCleanup()
+            val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
+
+            val adopted = VeepooPairingAdoption(
+                registry = registryWith(dao),
+                credentials = credentials,
+                cleanup = cleanup,
+                diagnostics = VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+            ).commit(
+                deviceId = "supplier-orphan",
+                nickname = null,
+                provisioning = provisioningCommit(),
+                now = 500,
+            )
+
+            assertFalse(adopted)
+            assertTrue("orphaned credential remains until deletion succeeds", credentials.values.containsKey("supplier-orphan"))
+            assertEquals(setOf("supplier-orphan"), cleanup.pending)
+
+            credentials.clearSucceeds = true
+            VeepooPendingCredentialCleanup.reconcile(
+                registry = registryWith(dao),
+                credentials = credentials,
+                cleanup = cleanup,
+                diagnostics = VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+            )
+
+            assertFalse(credentials.values.containsKey("supplier-orphan"))
+            assertTrue(cleanup.pending.isEmpty())
+            assertTrue(
+                diagnostics.any {
+                    it.stage == VeepooSupplierLifecycleStage.SECURE_CLEANUP &&
+                        it.outcome == VeepooSupplierLifecycleOutcome.COMPLETED
+                },
+            )
+        }
+
+    @Test
+    fun mutatingCredentialSaveFailureRetainsRestartCleanupHandle() =
+        runBlocking {
+            for (throwsAfterMutation in listOf(false, true)) {
+                val dao = FakeRegistryDao().apply {
+                    devices["my-whoop"] = whoopRow("my-whoop", null)
+                }
+                val credentials = FakeCredentials().apply {
+                    clearSucceeds = false
+                    saveMutatesBeforeFailure = !throwsAfterMutation
+                    saveThrowsAfterMutation = throwsAfterMutation
+                }
+                val cleanup = FakeCredentialCleanup()
+
+                val adopted = VeepooPairingAdoption(
+                    registry = registryWith(dao),
+                    credentials = credentials,
+                    cleanup = cleanup,
+                    diagnostics = VeepooSupplierLifecycleDiagnosticSink {},
+                ).commit(
+                    deviceId = "supplier-mutating-$throwsAfterMutation",
+                    nickname = null,
+                    provisioning = provisioningCommit(),
+                    now = 500,
+                )
+
+                assertFalse(adopted)
+                assertTrue(
+                    credentials.values.containsKey(
+                        "supplier-mutating-$throwsAfterMutation",
+                    ),
+                )
+                assertEquals(
+                    setOf("supplier-mutating-$throwsAfterMutation"),
+                    cleanup.pending,
+                )
+            }
+        }
+
+    @Test
+    fun pendingCleanupPreservesCredentialForSuccessfullyRegisteredSupplier() =
+        runBlocking {
+            val dao = FakeRegistryDao().apply {
+                devices["my-whoop"] = whoopRow("my-whoop", null)
+                devices["supplier-registered"] =
+                    supplierRow("supplier-registered", DeviceStatus.paired)
+            }
+            val credentials = FakeCredentials().apply {
+                seed("supplier-registered")
+            }
+            val cleanup = FakeCredentialCleanup().apply {
+                pending += "supplier-registered"
+            }
+
+            VeepooPendingCredentialCleanup.reconcile(
+                registry = registryWith(dao),
+                credentials = credentials,
+                cleanup = cleanup,
+                diagnostics = VeepooSupplierLifecycleDiagnosticSink {},
+            )
+
+            assertTrue(credentials.values.containsKey("supplier-registered"))
+            assertTrue(cleanup.pending.isEmpty())
+        }
+
+    @Test
+    fun pendingCleanupDeletesCredentialForArchivedSupplier() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+            devices["supplier-archived"] =
+                supplierRow("supplier-archived", DeviceStatus.archived)
+        }
+        val credentials = FakeCredentials().apply {
+            seed("supplier-archived")
+        }
+        val cleanup = FakeCredentialCleanup().apply {
+            pending += "supplier-archived"
+        }
+
+        VeepooPendingCredentialCleanup.reconcile(
+            registry = registryWith(dao),
+            credentials = credentials,
+            cleanup = cleanup,
+            diagnostics = VeepooSupplierLifecycleDiagnosticSink {},
+        )
+
+        assertFalse(credentials.values.containsKey("supplier-archived"))
+        assertTrue(cleanup.pending.isEmpty())
+    }
+
+    @Test
+    fun pendingCleanupCancellationCannotStartPairingTransport() = runTest {
+        val readStarted = CompletableDeferred<Unit>()
+        val releaseRead = CompletableDeferred<Unit>()
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+            beforePairedDevices = {
+                readStarted.complete(Unit)
+                releaseRead.await()
+            }
+        }
+        val pairing = FakeVeepooManagedSource()
+        val cleanup = FakeCredentialCleanup().apply {
+            pending += "supplier-pending"
+        }
+        var whoopStops = 0
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = { whoopStops += 1 },
+            scope = this,
+            veepooPairingSourceFactory = { pairing },
+            veepooCredentials = FakeCredentials(),
+            veepooCredentialCleanup = cleanup,
+        )
+
+        val operation = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.beginVeepooPairing()
+        }
+        readStarted.await()
+        operation.cancel()
+        operation.join()
+
+        assertTrue(operation.isCancelled)
+        assertEquals(0, whoopStops)
+        assertEquals(0, pairing.scans)
     }
 
     @Test
@@ -730,6 +960,7 @@ class SourceCoordinatorAdoptionTest {
                 ).also(pairingSources::add)
             },
             veepooCredentials = FakeCredentials(),
+            veepooCredentialCleanup = FakeCredentialCleanup(),
         )
 
         try {
@@ -944,6 +1175,123 @@ class SourceCoordinatorAdoptionTest {
                     it.outcome == VeepooSupplierLifecycleOutcome.COMPLETED
             },
         )
+    }
+
+    @Test
+    fun supplierCredentialRecoveryContinuesAfterInitialRetryBurst() = runTest {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+        }
+        val credentials = FakeCredentials().apply {
+            seed("supplier-band")
+            // Launch read plus all three initial retries remain unavailable. The low-frequency tail
+            // is the first attempt that can load the credential.
+            unavailableReadsRemaining = 4
+        }
+        val sources = mutableListOf<FakeNoopBandSource>()
+        val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = this,
+            veepooActiveSourceFactory = { _, _ ->
+                FakeNoopBandSource().also(sources::add)
+            },
+            veepooCredentials = credentials,
+            veepooLifecycleDiagnostics =
+                VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+            supplierCredentialRetryDelaysMillis = listOf(1L, 1L, 1L),
+            supplierCredentialRecoveryDelayMillis = 5L,
+        )
+
+        coordinator.start()
+        testScheduler.runCurrent()
+        advanceTimeBy(3L)
+        testScheduler.runCurrent()
+        assertTrue(sources.isEmpty())
+
+        dao.activeDeviceFailuresRemaining = 1
+        advanceTimeBy(5L)
+        testScheduler.runCurrent()
+        assertTrue(sources.isEmpty())
+
+        advanceTimeBy(5L)
+        testScheduler.runCurrent()
+
+        assertEquals(1, sources.size)
+        assertEquals(1, sources.single().connections.size)
+        assertEquals(
+            2,
+            diagnostics.count {
+                it.stage == VeepooSupplierLifecycleStage.SECURE_READ &&
+                    it.outcome == VeepooSupplierLifecycleOutcome.FAILED
+            },
+        )
+        assertEquals(
+            1,
+            diagnostics.count {
+                it.stage == VeepooSupplierLifecycleStage.SECURE_READ &&
+                    it.outcome == VeepooSupplierLifecycleOutcome.COMPLETED
+            },
+        )
+    }
+
+    @Test
+    fun staleRetryFinallyCannotUntrackSameDeviceReplacement() = runTest {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+        }
+        val credentials = FakeCredentials().apply {
+            seed("supplier-band")
+        }
+        val sources = mutableListOf<FakeNoopBandSource>()
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = this,
+            veepooActiveSourceFactory = { _, _ ->
+                FakeNoopBandSource().also(sources::add)
+            },
+            veepooCredentials = credentials,
+            supplierCredentialRetryDelaysMillis = listOf(1L),
+        )
+        val schedule = SourceCoordinator::class.java.getDeclaredMethod(
+            "scheduleSupplierCredentialRetry",
+            String::class.java,
+        ).apply { isAccessible = true }
+        val cancel = SourceCoordinator::class.java.getDeclaredMethod(
+            "cancelSupplierCredentialRetry",
+        ).apply { isAccessible = true }
+
+        schedule.invoke(coordinator, "supplier-band")
+        testScheduler.runCurrent()
+        cancel.invoke(coordinator)
+        schedule.invoke(coordinator, "supplier-band")
+        testScheduler.runCurrent()
+
+        // Process the canceled job's finally, then ask to schedule the same id.
+        // Correct generation ownership keeps the replacement tracked, so this is
+        // a no-op rather than creating a duplicate retry loop.
+        testScheduler.runCurrent()
+        schedule.invoke(coordinator, "supplier-band")
+        advanceTimeBy(1L)
+        testScheduler.runCurrent()
+
+        assertEquals(1, credentials.retentionReadCount)
+        assertEquals(1, sources.size)
+        assertEquals(1, sources.single().connections.size)
     }
 
     @Test

@@ -319,6 +319,17 @@ final class SourceCoordinator: ObservableObject {
 
         // Switching source→source: stop the previous non-WHOOP source before starting the new one.
         tearDownNonWhoopSource(clearMonitoringExpectation: false)
+
+        // Publish ownership before entering source code. A supplier source can synchronously reconcile a
+        // permanently unavailable credential from connect(), which re-enters activeDeviceChanged; that
+        // fallback must see and tear down this source, with no stale ownership writes after connect returns.
+        activeSource = source
+        activeStrapId = id
+        onStrap = true
+        // All non-Watch sources owned here are BLE-backed. This durable expectation lets the shared WHOOP
+        // central's radio callback provide the same one-shot Bluetooth-off alert without another scanner.
+        BluetoothAvailabilityNotifications.setMonitoringExpected(true)
+
         // CONNECT to the active strap's known peripheral, don't just scan. scan() only discovered + listed
         // it but never connected, so a Polar etc. showed as "found" yet never streamed (#421). connect()
         // reaches the cached peripheral by identifier (or scans-then-connects if not yet cached); a bare
@@ -328,12 +339,6 @@ final class SourceCoordinator: ObservableObject {
         } else {
             source.scan()
         }
-        activeSource = source
-        activeStrapId = id
-        onStrap = true
-        // All non-Watch sources owned here are BLE-backed. This durable expectation lets the shared WHOOP
-        // central's radio callback provide the same one-shot Bluetooth-off alert without another scanner.
-        BluetoothAvailabilityNotifications.setMonitoringExpected(true)
     }
 
     /// Build the isolated `LiveHRSource` for a device id from its registered `sourceKind` — the ONE place

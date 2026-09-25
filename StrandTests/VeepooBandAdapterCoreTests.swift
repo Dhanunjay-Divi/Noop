@@ -140,6 +140,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     @MainActor
     private final class FakeCredentials: VeepooCredentialAccess {
         var saveSucceeds = true
+        var saveMutatesBeforeFailure = false
         var clearSucceeds = true
         var values: [String: String] = [:]
         var loadOverride: VeepooCredentialLoadResult?
@@ -154,6 +155,10 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
 
         func save(_ password: String, deviceID: String) -> Bool {
             saveCount += 1
+            if saveMutatesBeforeFailure {
+                values[deviceID] = password
+                return false
+            }
             guard saveSucceeds else { return false }
             values[deviceID] = password
             return true
@@ -165,6 +170,80 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             guard clearSucceeds else { return false }
             values.removeValue(forKey: deviceID)
             return true
+        }
+    }
+
+    @MainActor
+    private final class FakeCredentialCleanup:
+        VeepooCredentialCleanupAccess
+    {
+        var pending = Set<String>()
+        var readsAvailable = true
+        var markSucceeds = true
+        var clearSucceeds = true
+
+        func markPending(deviceID: String) -> Bool {
+            guard markSucceeds else { return false }
+            pending.insert(deviceID)
+            return true
+        }
+
+        func pendingDeviceIDs() -> Set<String>? {
+            readsAvailable ? pending : nil
+        }
+
+        @discardableResult
+        func clearPending(deviceID: String) -> Bool {
+            guard clearSucceeds else { return false }
+            pending.remove(deviceID)
+            return true
+        }
+    }
+
+    @MainActor
+    private final class FakeCredentialCleanupKeychain {
+        var accounts = Set<String>()
+        var forcedRows: [[String: Any]]?
+
+        func makeStore() -> VeepooCredentialCleanupStore {
+            VeepooCredentialCleanupStore(
+                copyMatching: { [weak self] _, result in
+                    guard let self else { return errSecNotAvailable }
+                    let rows = self.forcedRows
+                        ?? self.accounts.sorted().map {
+                            [kSecAttrAccount as String: $0]
+                        }
+                    guard !rows.isEmpty else { return errSecItemNotFound }
+                    result?.pointee = rows as CFArray
+                    return errSecSuccess
+                },
+                addItem: { [weak self] item, _ in
+                    guard let self,
+                          let account = (item as NSDictionary)[
+                              kSecAttrAccount
+                          ] as? String
+                    else {
+                        return errSecParam
+                    }
+                    if self.accounts.contains(account) {
+                        return errSecDuplicateItem
+                    }
+                    self.accounts.insert(account)
+                    return errSecSuccess
+                },
+                deleteItem: { [weak self] query in
+                    guard let self,
+                          let account = (query as NSDictionary)[
+                              kSecAttrAccount
+                          ] as? String
+                    else {
+                        return errSecParam
+                    }
+                    return self.accounts.remove(account) == nil
+                        ? errSecItemNotFound
+                        : errSecSuccess
+                }
+            )
         }
     }
 
@@ -937,6 +1016,119 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     }
 
     @MainActor
+    func testFailedRegistrationRetainsCleanupHandleUntilCredentialDeletionSucceeds()
+        throws
+    {
+        let credentials = FakeCredentials()
+        credentials.clearSucceeds = false
+        let cleanup = FakeCredentialCleanup()
+        let (session, _) = try readyPairingSession(
+            credentials: credentials,
+            credentialCleanup: cleanup
+        )
+        var generatedDeviceID: String?
+
+        let committed = session.commitPairedDevice(nickname: nil) { device in
+            generatedDeviceID = device.id
+            return false
+        }
+
+        let deviceID = try XCTUnwrap(generatedDeviceID)
+        XCTAssertFalse(committed)
+        XCTAssertEqual(cleanup.pending, Set([deviceID]))
+        XCTAssertEqual(credentials.values[deviceID], "2468")
+
+        credentials.clearSucceeds = true
+        VeepooPendingCredentialCleanup.reconcile(
+            registeredDeviceIDs: [],
+            credentials: credentials,
+            cleanup: cleanup
+        )
+
+        XCTAssertTrue(cleanup.pending.isEmpty)
+        XCTAssertNil(credentials.values[deviceID])
+    }
+
+    @MainActor
+    func testPendingCleanupPreservesCredentialForRegisteredSupplier() throws {
+        let credentials = FakeCredentials()
+        let cleanup = FakeCredentialCleanup()
+        cleanup.clearSucceeds = false
+        let (session, _) = try readyPairingSession(
+            credentials: credentials,
+            credentialCleanup: cleanup
+        )
+        var generatedDeviceID: String?
+
+        let committed = session.commitPairedDevice(nickname: nil) { device in
+            generatedDeviceID = device.id
+            return true
+        }
+
+        let deviceID = try XCTUnwrap(generatedDeviceID)
+        XCTAssertTrue(committed)
+        XCTAssertEqual(cleanup.pending, Set([deviceID]))
+        XCTAssertEqual(credentials.values[deviceID], "2468")
+
+        cleanup.clearSucceeds = true
+        VeepooPendingCredentialCleanup.reconcile(
+            registeredDeviceIDs: [deviceID],
+            credentials: credentials,
+            cleanup: cleanup
+        )
+
+        XCTAssertTrue(cleanup.pending.isEmpty)
+        XCTAssertEqual(credentials.values[deviceID], "2468")
+    }
+
+    @MainActor
+    func testCredentialCleanupLedgerSurvivesStoreRecreation() throws {
+        let keychain = FakeCredentialCleanupKeychain()
+        let first = keychain.makeStore()
+        XCTAssertTrue(first.markPending(deviceID: "veepoo-generated"))
+
+        let restored = keychain.makeStore()
+        XCTAssertEqual(
+            restored.pendingDeviceIDs(),
+            Set(["veepoo-generated"])
+        )
+        XCTAssertTrue(restored.clearPending(deviceID: "veepoo-generated"))
+        XCTAssertEqual(first.pendingDeviceIDs(), Set<String>())
+    }
+
+    @MainActor
+    func testCredentialCleanupLedgerRejectsMalformedAndOversizedRows() {
+        let keychain = FakeCredentialCleanupKeychain()
+        let store = keychain.makeStore()
+
+        keychain.forcedRows = [["unexpected": "row"]]
+        XCTAssertNil(store.pendingDeviceIDs())
+
+        keychain.forcedRows = (0...64).map {
+            [kSecAttrAccount as String: "supplier-\($0)"]
+        }
+        XCTAssertNil(store.pendingDeviceIDs())
+    }
+
+    @MainActor
+    func testPendingCleanupFailsClosedWithoutAuthoritativeRegistry() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        let cleanup = FakeCredentialCleanup()
+        cleanup.pending.insert("supplier")
+
+        VeepooPendingCredentialCleanup.reconcile(
+            registeredDeviceIDs: nil,
+            credentials: credentials,
+            cleanup: cleanup
+        )
+
+        XCTAssertEqual(credentials.clearCount, 0)
+        XCTAssertEqual(credentials.values["supplier"], "2468")
+        XCTAssertEqual(cleanup.pending, Set(["supplier"]))
+    }
+
+    @MainActor
     func testSecureStorageFailureNeverMutatesRegistry() throws {
         let credentials = FakeCredentials()
         credentials.saveSucceeds = false
@@ -953,10 +1145,37 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         XCTAssertFalse(committed)
         XCTAssertEqual(registryCalls, 0)
         XCTAssertEqual(credentials.saveCount, 1)
-        XCTAssertEqual(credentials.clearCount, 0)
+        XCTAssertEqual(credentials.clearCount, 1)
         XCTAssertTrue(credentials.values.isEmpty)
         XCTAssertTrue(session.registrationFailed)
         XCTAssertGreaterThan(client.disconnectCount, 0)
+    }
+
+    @MainActor
+    func testMutatingSecureStorageFailureRetainsCleanupHandleWhenDeletionFails()
+        throws
+    {
+        let credentials = FakeCredentials()
+        credentials.saveMutatesBeforeFailure = true
+        credentials.clearSucceeds = false
+        let cleanup = FakeCredentialCleanup()
+        let (session, _) = try readyPairingSession(
+            credentials: credentials,
+            credentialCleanup: cleanup
+        )
+        var registryCalls = 0
+
+        let committed = session.commitPairedDevice(nickname: nil) { _ in
+            registryCalls += 1
+            return true
+        }
+
+        XCTAssertFalse(committed)
+        XCTAssertEqual(registryCalls, 0)
+        XCTAssertEqual(credentials.saveCount, 1)
+        XCTAssertEqual(credentials.clearCount, 1)
+        XCTAssertEqual(credentials.values.count, 1)
+        XCTAssertEqual(cleanup.pending.count, 1)
     }
 
     @MainActor
@@ -1098,7 +1317,8 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
 
     @MainActor
     private func readyPairingSession(
-        credentials: FakeCredentials
+        credentials: FakeCredentials,
+        credentialCleanup: FakeCredentialCleanup? = nil
     ) throws -> (VeepooBandPairingSession, FakeClient) {
         let client = FakeClient()
         let core = VeepooBandAdapterCore(
@@ -1108,7 +1328,9 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         )
         let session = VeepooBandPairingSession(
             adapter: core,
-            credentials: credentials
+            credentials: credentials,
+            credentialCleanup:
+                credentialCleanup ?? FakeCredentialCleanup()
         )
         session.start()
         let generation = try XCTUnwrap(client.discoveries.last?.0)

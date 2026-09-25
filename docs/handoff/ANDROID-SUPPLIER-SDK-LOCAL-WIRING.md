@@ -57,6 +57,26 @@ KSP, and connected-test tasks depend on the verifier. Demo never receives the
 supplier source set or AARs. Supplier-enabled Full release packaging is
 deliberately rejected.
 
+## Updating the supplier SDK
+
+Treat a new SDK drop as an adapter replacement:
+
+1. Keep the new AARs outside Git and create a fresh immutable inventory.
+2. Update the protected artifact trust data and local properties only after
+   reviewing hashes, classes, native libraries, dependencies, rights, privacy,
+   egress, and supported hardware/firmware.
+3. Map changed supplier APIs only in
+   `src/veepoo/java/com/noop/ble/veepoo/vendor/VeepooBridgeProviderImpl.kt`.
+4. Change `VeepooVendorBridge.kt` only when callback ordering or lifecycle
+   semantics changed. Keep `VeepooBridge`, `VeepooManagedSource`, app
+   coordinators, storage, metrics, and UI supplier-type free.
+5. Update the shared compatibility tuple and wrapper/conformance tests, then
+   rerun the verifier, focused supplier tests, the Full wall, and physical
+   validation.
+
+`Tools/tests/test_supplier_sdk_wrapper_boundary.py` fails if direct supplier
+imports escape the local provider wrapper.
+
 ## Remaining gates
 
 - Written supplier and transitive-component redistribution authority.

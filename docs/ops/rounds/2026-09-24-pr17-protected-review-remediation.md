@@ -120,10 +120,13 @@ protections.
 ## Resource cleanup
 
 - No new long-lived service or public resource was created.
-- Round-owned generated evidence currently includes approximately 3.6 GiB of
-  macOS DerivedData, 5.1 GiB of iOS-simulator DerivedData, 672 MiB of
-  `WhoopStore` scratch output, Android build output, and bounded `/tmp` logs.
-  These remain pending exact deletion after replacement evidence and protected
+- After confirming no active handles, exact-deleted the obsolete generated
+  `/tmp/noop-pr17-final-macos-dd` and
+  `/tmp/noop-pr17-final-ios-simulator-release-dd` trees. This reclaimed
+  8,392,960 KiB and raised free Data-volume space from about 12 GiB to about
+  20 GiB without removing source, private inputs, or durable logs/status files.
+- Current shared Apple DerivedData, Android build output, and bounded `/tmp`
+  logs remain pending exact deletion after replacement evidence and protected
   integration are durable.
 - Xcode generated `Vendor/NoopBandSDK/.swiftpm/xcode` during verification. The
   exact empty generated tree was removed before the artifact and trust gates
@@ -147,7 +150,7 @@ protections.
 - Changed paths: supplier lifecycle/presentation, Apple local SDK wiring,
   Android artifact trust, focused tests, workflow applicability, reviewed
   terminology, and operations records.
-- Current remote commit: `22318af43bc42cee7f0fcccb764771113a4dcb70`.
+- Current remote commit: `5c67c664a4e7347d9de4c5fd319b6613fd308be8`.
 - Branch and remote state: PR `#17` is open with auto-merge configured and the
   remote exact head `22318af43bc42cee7f0fcccb764771113a4dcb70`
   green across all applicable hosted checks. The independently reviewed
@@ -175,6 +178,39 @@ The current candidate is not merge-ready despite green builds. Review findings
 must not be dismissed merely to satisfy conversation resolution. Supplier
 identity mapping, physical BLE, signed-device behavior, redistribution rights,
 firmware, background operation, and physiological accuracy remain unproven.
+
+## Post-push protected review follow-up
+
+- Exact remote head
+  `5c67c664a4e7347d9de4c5fd319b6613fd308be8` passed every applicable
+  hosted context: 33 success, five intentional skips, and zero failures.
+- Three new current-line P2 findings appeared after that replacement push and
+  keep PR `#17` blocked despite the green build surface.
+- Android secure-read recovery currently ends after the bounded
+  1-second/5-second/15-second burst. If encrypted storage remains unavailable
+  for that window, the durable supplier source stays selected without a live
+  transport until another lifecycle event or process restart.
+- Apple and Android pairing adoption save the generated transport credential
+  before registry publication. If registry publication and compensating
+  credential deletion both fail, the generated device id is discarded and the
+  orphaned secret has no restart-safe cleanup handle.
+- Apple supplier activation connects before publishing coordinator ownership.
+  A synchronous permanent credential failure can therefore re-enter fallback
+  reconciliation while the coordinator still appears to own WHOOP, after
+  which the original activation call can overwrite the fallback with the
+  unusable supplier source.
+- The corrective scope is limited to a single cancellable low-frequency
+  Android recovery tail, a bounded durable cleanup ledger containing opaque
+  generated device ids only on both platforms, startup/adoption reconciliation
+  that preserves credentials for an already-registered row, and Apple
+  ownership publication before supplier connect/scan.
+- Required evidence is focused restart/retry, cleanup-failure, registered-row
+  preservation, and synchronous-fallback regression coverage on both
+  platforms, followed by the applicable complete Apple, Android, policy, trust,
+  terminology, and operations-record walls.
+- No physical BLE, background execution, firmware, battery, haptic,
+  physiological, signing, redistribution, or production claim follows from
+  these source and simulator corrections.
 
 ## iOS supplier trust-root follow-up
 
@@ -513,18 +549,43 @@ firmware, background operation, and physiological accuracy remain unproven.
   The supplier picker also has a local busy guard so repeated selection or
   rescan taps cannot enqueue duplicate requests.
 
+## SDK wrapper replacement reinforcement
+
+- Supplier SDK APIs remain quarantined behind NOOP-owned platform interfaces:
+  Apple app code depends on `VeepooBandAdapterControlling` and
+  `VeepooBandSDKClient`; Android app code depends on `VeepooBridge`,
+  `VeepooManagedSource`, and `VeepooVendorClient`.
+- Direct Apple supplier-framework import is allowed only in
+  `Strand/BLE/VeepooBandAdapter.swift`. Direct Android supplier imports are
+  allowed only in the local `veepoo` source set's
+  `VeepooBridgeProviderImpl.kt`.
+- `Tools/tests/test_supplier_sdk_wrapper_boundary.py` scans the complete Apple
+  and production Android source surfaces and fails if supplier imports escape
+  those native clients or enter either source coordinator.
+- The wrapper handoff and both platform-local wiring guides now define the
+  replacement sequence, stable app-facing contracts, expected change files,
+  trust/compatibility repins, conformance requirements, rollback boundary, and
+  physical revalidation requirement.
+- An API-compatible future SDK drop should change only the external immutable
+  artifacts, reviewed trust data, one native client per platform, compatibility
+  tuple, and wrapper tests. Registry, storage, metrics, account/cloud, UI,
+  Watch/widgets, and WHOOP transport must remain unchanged.
+- Focused wrapper, Apple app-slice, and Android artifact-verifier tests pass
+  26/26. This proves the source boundary and verifier contracts, not physical
+  behavior or compatibility with an unseen future SDK.
+
 ## Final local replacement verification
 
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
-| Focused Apple pairing, registry, and supplier tests | 41 passed, 0 failed | Early-failure restoration, exact-owner handoff, transient secure-read handling, fail-closed malformed-secret cleanup, battery fallback, archival cleanup, compatibility, freshness, and adapter lifecycle regressions pass in the app test target | Vendor callback ordering or physical BLE |
+| Focused Apple pairing, registry, and supplier tests | 50 passed, 0 failed | Restart-safe orphan cleanup, early-failure restoration, exact-owner handoff, transient secure-read handling, fail-closed malformed-secret cleanup, battery fallback, archival cleanup, compatibility, freshness, and adapter lifecycle regressions pass in the app test target | Vendor callback ordering or physical BLE |
 | Focused Android supplier tests | 73 passed, 0 failed; coordinator race slice 31/31 | Pairing serialization and request/session generation fencing, transient secure-read retry, prior-transport quiescence, scan-failure restoration, retry cancellation, pending reconciliation, terminal release, compensating credential restore, stale-callback fencing, and display freshness pass while compiling the Full app | Physical Android BLE, OEM background policy, or battery behavior |
 | Complete Android Full wall | `assembleFullDebug`, 5,085 `testFullDebugUnitTest` cases with 7 intentional skips, `lintFullDebug`, and `compileFullDebugAndroidTestKotlin` passed; APK SHA-256 `63f0ab41bdbe0421925ebbfb11995eee36b1484ba85538ba5f3b61807e26fbb0` | The supplier-enabled Full APK, complete unit surface, lint, and instrumentation sources compile together | Installation, hardware callbacks, or background execution |
 | `WhoopStore` package | 539 passed, 0 failed | Registry archive and day-ownership cleanup preserve the complete store contract | App UI or physical transport |
-| Complete macOS app wall | 2,287 tests, 1 intentional private-fixture skip, 0 failures | Shared Apple app, Watch/widget contracts, source coordination, storage, metrics, accessibility metadata, and supplier regressions compile and pass in the reference app | Physical accessibility, BLE, or signed distribution |
-| Unsigned Release iOS simulator graph | Build passed; `NOOP.app`, embedded `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` present | iPhone, Watch, complications dependency graph, widgets, localization, and Release launch gates compile together | Signing, installation, notifications, haptics, or physical performance |
-| Complete repository Tools wall | 362 tests, 1 intentional skip, 0 failures | Required-CI, artifact, workflow, release, trust, localization-contract, bounded-runner, and supplier-verifier tests agree | Hosted execution or external approvals |
-| Direct policy wall | 9 release controls; 10 required contexts; trusted self-verification; 12 metrics, 3 revisions, 13 thresholds, and 16 calibration guards; 18,248 terminology occurrences across 1,618 groups with 0 forbidden mappings; distribution, private-data, health-claims across 1,310 files, localization, all 91 operations records, Actionlint, shell syntax, ShellCheck, changed-Python compilation, and diff hygiene passed | The exact local tree satisfies repository-controlled release, privacy, claim, localization, workflow, and evidence contracts | Clinical/legal approval, professional translation, stores, or physical accuracy |
+| Complete macOS app wall | 2,296 tests, 1 intentional private-fixture skip, 0 failures | Shared Apple app, Watch/widget contracts, source coordination, storage, metrics, accessibility metadata, and supplier regressions compile and pass in the reference app | Physical accessibility, BLE, or signed distribution |
+| Unsigned Release iOS simulator graph | Exact-current build passed without source warnings; `NOOP.app`, embedded `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` are present | iPhone, Watch, complications dependency graph, widgets, localization, and Release launch gates compile together | Signing, installation, notifications, haptics, or physical performance |
+| Complete repository Tools wall | 365 tests, 1 intentional Safety dependency skip, 0 failures, plus 50 root localization-parser tests | Required-CI, artifact, workflow, release, trust, localization-contract, bounded-runner, supplier-verifier, and wrapper-import-boundary tests agree | Hosted execution or external approvals |
+| Direct policy wall | 9 release controls; 10 required contexts; trusted self-verification; 12 metrics, 3 revisions, 13 thresholds, and 16 calibration guards; 18,282 terminology occurrences across 1,618 groups with 0 forbidden mappings; distribution, private-data, health-claims across 1,310 files, localization, all 91 operations records, Actionlint, shell syntax, ShellCheck, changed-Python compilation, and diff hygiene passed | The exact local tree satisfies repository-controlled release, privacy, claim, localization, workflow, and evidence contracts | Clinical/legal approval, professional translation, stores, or physical accuracy |
 
 ## Failed-attempt history
 
@@ -551,10 +612,12 @@ firmware, background operation, and physiological accuracy remain unproven.
 
 ## Current next steps
 
-1. Validate the updated operations records and exact final diff.
+1. Remove the regenerated ignored `Vendor/NoopBandSDK/.swiftpm` tree, rerun the
+   exact artifact/trust checks, and validate the updated operations records and
+   final diff.
 2. Create one consolidated replacement commit and push it once.
 3. Require every applicable hosted context on that exact replacement SHA.
-4. Re-inventory all paginated review threads; the current remote state has
+4. Re-inventory all paginated review threads; the previous remote state had
    20 unresolved threads on the second page, 19 current and one outdated.
    Resolve only evidence-backed remaining conversations after the replacement
    SHA is hosted.

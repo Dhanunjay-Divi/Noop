@@ -37,6 +37,24 @@ final class DeviceRegistry: ObservableObject {
         publish(rows)
     }
 
+    /// Authoritative supplier registrations for secure-cleanup reconciliation.
+    /// `nil` means the registry could not be read and callers must fail closed.
+    /// Archived compensation rows do not own a live credential.
+    func registeredSupplierCredentialDeviceIDs() -> Set<String>? {
+        do {
+            return Set(
+                try store.all()
+                    .filter {
+                        $0.sourceKind == .veepoo
+                            && $0.status != .archived
+                    }
+                    .map(\.id)
+            )
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - UI mutations (Devices screen)
     //
     // Each op delegates to the synchronous store, then `reload()`s so the published `devices` /

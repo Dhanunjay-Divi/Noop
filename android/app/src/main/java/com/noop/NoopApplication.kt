@@ -483,6 +483,8 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
     private val sourceCoordinatorDelegate = lazy {
         val supplierBridgeProvider = VeepooBridgeProviderLoader.load()
         val supplierCredentials = VeepooCredentialStore(applicationContext)
+        val supplierCredentialCleanup =
+            com.noop.ble.veepoo.VeepooCredentialCleanupStore(applicationContext)
         SourceCoordinator(
             context = applicationContext,
             registry = deviceRegistry,
@@ -509,6 +511,10 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             // Keep secure cleanup available even when this build cannot load the optional provider. A
             // durable supplier row from an earlier build must still be removable and reconcilable.
             veepooCredentials = supplierCredentials,
+            veepooCredentialCleanup = supplierCredentialCleanup,
+            // After the short unlock burst, retain one cancellable low-frequency recovery loop so a
+            // temporarily unavailable encrypted store cannot strand the durable supplier selection.
+            supplierCredentialRecoveryDelayMillis = 60_000L,
             onDurableActiveDeviceChanged = ::noteActiveDeviceId,
         )
     }

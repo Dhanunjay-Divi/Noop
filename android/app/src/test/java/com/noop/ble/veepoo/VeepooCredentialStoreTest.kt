@@ -32,6 +32,56 @@ class VeepooCredentialStoreTest {
         }
     }
 
+    private class MemoryCleanupBackend : VeepooCredentialCleanupBackend {
+        var values: Set<String> = emptySet()
+        var readsAvailable = true
+        var writesSucceed = true
+
+        override fun read(): VeepooCredentialCleanupRead =
+            if (readsAvailable) {
+                VeepooCredentialCleanupRead.Available(values.toSet())
+            } else {
+                VeepooCredentialCleanupRead.Unavailable
+            }
+
+        override fun write(deviceIds: Set<String>): Boolean {
+            if (!writesSucceed) return false
+            values = deviceIds.toSet()
+            return true
+        }
+    }
+
+    @Test
+    fun pendingCredentialCleanupSurvivesStoreRecreation() {
+        val backend = MemoryCleanupBackend()
+        val first = VeepooCredentialCleanupStore(backend)
+        assertTrue(first.markPending("supplier-generated"))
+
+        val restored = VeepooCredentialCleanupStore(backend)
+        assertEquals(
+            setOf("supplier-generated"),
+            (restored.pendingDeviceIds() as VeepooCredentialCleanupRead.Available).deviceIds,
+        )
+        assertTrue(restored.clearPending("supplier-generated"))
+        assertTrue(
+            (first.pendingDeviceIds() as VeepooCredentialCleanupRead.Available)
+                .deviceIds
+                .isEmpty(),
+        )
+    }
+
+    @Test
+    fun unavailableCleanupLedgerFailsClosedWithoutDiscardingPendingIds() {
+        val backend = MemoryCleanupBackend()
+        val store = VeepooCredentialCleanupStore(backend)
+        assertTrue(store.markPending("supplier-generated"))
+        backend.readsAvailable = false
+
+        assertFalse(store.clearPending("supplier-generated"))
+        assertFalse(store.markPending("supplier-other"))
+        assertEquals(setOf("supplier-generated"), backend.values)
+    }
+
     @Test
     fun encryptedStoreEncodingPreservesLeadingZeroes() {
         val backend = MemoryBackend()

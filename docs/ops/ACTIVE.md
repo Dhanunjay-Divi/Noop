@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-24**
+Last updated: **2026-09-25**
 
 ## Authoritative context
 
@@ -64,7 +64,7 @@ Last updated: **2026-09-24**
   collection, history retention, haptics, battery, firmware, egress, provider
   delivery, production load, and physiological accuracy remain external or
   physical gates.
-- Final September 24 local replacement review is green and remains unpushed.
+- Final September 25 local replacement review is green and remains unpushed.
   Apple now restores supplier transport after early pairing failure, binds
   handoff to the exact current registry owner, and removes stale day ownership
   even when a device row was already archived. Android serializes pairing and
@@ -72,7 +72,7 @@ Last updated: **2026-09-24**
   mutating credential-clear failure before reconnect, and ignores delayed
   callbacks from replaced sources. Apple local SDK paths are root-derived,
   quoted for spaces, and reject xcconfig injection characters. Focused Apple
-  tests pass 41/41. The final Android follow-up distinguishes a missing
+  tests pass 50/50. The final Android follow-up distinguishes a missing
   credential from a transient encrypted-store read failure, quiesces WHOOP
   before a supplier retry can inherit its source identity, serializes
   reconciliation and pairing, generation-fences queued pairing requests, and
@@ -80,20 +80,25 @@ Last updated: **2026-09-24**
   Coordinator regressions pass 31/31 and the complete supplier-focused Android
   slice passes 73/73. The complete Android Full wall passes 5,085 tests with
   seven intentional skips; `WhoopStore`
-  passes 539/539; the macOS app passes 2,287 tests with one intentional fixture
-  skip; and the unsigned Release iOS graph builds the phone app with embedded
-  Watch, Watch complications, and widget products. The complete
-  Tools wall passes 362 tests with one intentional skip. Direct release,
+  passes 539/539; the macOS app passes 2,296 tests with one intentional fixture
+  skip; and the exact-current unsigned Release iOS graph builds the phone app
+  with embedded Watch, Watch complications, and widget products without source
+  warnings. The complete Tools wall passes 365 tests with one intentional skip
+  plus 50 root localization-parser tests. Direct release,
   required-CI, trusted-control, calibration, terminology, provenance,
   private-data, health-claim, localization, workflow, and shell gates pass.
-  Terminology records 18,248 classified occurrences across 1,618 groups with
+  Terminology records 18,282 classified occurrences across 1,618 groups with
   zero forbidden mappings. Remote PR head
-  `22318af43bc42cee7f0fcccb764771113a4dcb70` remains the previous all-green
-  candidate. Its first 100 review threads are resolved; the final paginated
-  page has 20 unresolved threads, 19 current and one outdated, whose fixes are
-  in the local tree. One consolidated replacement commit/push, exact-SHA hosted
-  checks, evidence-backed thread resolution, protected merge/main verification,
-  and exact round-owned cleanup remain.
+  `5c67c664a4e7347d9de4c5fd319b6613fd308be8` remains the previous all-green
+  candidate. The local tree additionally adds restart-safe orphaned-credential
+  cleanup, a cancellable Android recovery tail, and ownership-before-connect
+  ordering. Supplier APIs are quarantined behind one native client per
+  platform; a cross-platform source-boundary regression and updated runbooks
+  make future SDK drops a wrapper, artifact-trust, compatibility, and
+  conformance change rather than an app rewrite. One consolidated replacement
+  commit/push, exact-SHA hosted checks, evidence-backed thread resolution,
+  protected merge/main verification, and final exact round-owned cleanup
+  remain.
 - An isolated local follow-up from `60df38a2` confirms the vendored Swift and
   Kotlin `failOperation` implementations already reject non-operation failure
   categories before state mutation. Matching app-side regressions pass 2/2 on

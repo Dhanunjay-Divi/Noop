@@ -45,6 +45,27 @@ whenever the local SDK is enabled.
 
 Delete `Config/VeepooLocalSDK.xcconfig` to return to the default-off build.
 
+## Updating the supplier SDK
+
+Treat a new framework drop as an adapter replacement:
+
+1. Keep the incoming SDK tree immutable and outside Git.
+2. Review its complete inventory, headers, dependencies, hashes, architecture,
+   rights, privacy, egress, vulnerabilities, and supported hardware/firmware.
+3. Update the protected trust manifest and configurator expectations only
+   after that review.
+4. Map changed framework APIs only in the private `VeepooBleSDKClient` inside
+   `Strand/BLE/VeepooBandAdapter.swift`. Keep
+   `VeepooBandSDKClient`, `VeepooBandAdapterControlling`, source coordination,
+   registry, storage, metrics, UI, Watch, widgets, and shared packages free of
+   supplier types.
+5. Update the shared compatibility tuple and wrapper/conformance tests, then
+   rerun artifact verification, focused Apple tests, complete Apple builds,
+   repository policy gates, and the affected physical-device matrix.
+
+`Tools/tests/test_supplier_sdk_wrapper_boundary.py` fails if the supplier
+framework import escapes the native client wrapper.
+
 ## Supplier dependency gate
 
 The supplied static framework is not self-contained. The protected trust root
