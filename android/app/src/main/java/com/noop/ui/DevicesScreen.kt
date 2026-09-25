@@ -286,7 +286,7 @@ fun DevicesScreen(
                     isActive = false,
                     isLiveConnected = false,
                     dimmed = true,
-                    onMakeActive = {},
+                    onMakeActive = null,
                     onRename = { renameTarget = device },
                     onRemove = null,
                     archivedPrimaryAction = primaryAction,
@@ -495,7 +495,7 @@ private fun DeviceCard(
     liveFirmware: String? = null,
     /** The active+connected strap's observed banked-history record layout (`hist_version`). */
     liveHistoryLayout: Int? = null,
-    onMakeActive: () -> Unit,
+    onMakeActive: (() -> Unit)?,
     onRename: () -> Unit,
     onRemove: (() -> Unit)?,
     archivedPrimaryAction: ArchivedDevicePrimaryAction? = null,
@@ -740,7 +740,7 @@ private fun DeviceActionsMenu(
     // Open state is hoisted to the DeviceCard so the whole card (not just this ⋮ button) can open the menu.
     open: Boolean,
     onOpenChange: (Boolean) -> Unit,
-    onMakeActive: () -> Unit,
+    onMakeActive: (() -> Unit)?,
     onRename: () -> Unit,
     onRemove: (() -> Unit)?,
     archivedPrimaryAction: ArchivedDevicePrimaryAction?,
@@ -796,7 +796,7 @@ private fun DeviceActionsMenu(
                     }
                     HorizontalDivider(color = Palette.hairline)
                 }
-                if (!isActive) {
+                if (!isActive && onMakeActive != null) {
                     MenuItem("Make active", Icons.Filled.Bolt) { onOpenChange(false); onMakeActive() }
                 }
                 MenuItem("Rename", Icons.Filled.Edit) { onOpenChange(false); onRename() }

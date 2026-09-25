@@ -637,6 +637,57 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testArchivedWhoopAndOuraRemainDirectlyActivatable() async throws {
+        let (_, registry) = try await makeRegistry()
+        let devices = [
+            PairedDevice(
+                id: "whoop-readd",
+                brand: "WHOOP",
+                model: "5.0 MG",
+                peripheralId: UUID().uuidString,
+                sourceKind: .liveBLE,
+                capabilities: [.hr],
+                status: .paired,
+                addedAt: 1,
+                lastSeenAt: 1
+            ),
+            PairedDevice(
+                id: "oura-readd",
+                brand: "Oura",
+                model: "Oura Ring 4",
+                peripheralId: UUID().uuidString,
+                sourceKind: .oura,
+                capabilities: [.hr, .sleep],
+                status: .paired,
+                addedAt: 1,
+                lastSeenAt: 1
+            ),
+        ]
+
+        for device in devices {
+            XCTAssertTrue(registry.add(device))
+            XCTAssertTrue(registry.archive(device.id))
+
+            let archived = try XCTUnwrap(
+                registry.devices.first { $0.id == device.id }
+            )
+            XCTAssertEqual(AppModel.activationRoute(for: archived), .direct)
+            XCTAssertTrue(
+                AppModel.activateDeviceDirectlyIfAllowed(
+                    archived,
+                    in: registry
+                )
+            )
+            XCTAssertEqual(registry.activeDeviceId, device.id)
+            XCTAssertEqual(
+                registry.devices.first { $0.id == device.id }?.status,
+                .active
+            )
+            XCTAssertTrue(registry.archive(device.id))
+        }
+    }
+
+    @MainActor
     private func makeRegistry() async throws -> (WhoopStore, DeviceRegistry) {
         let store = try await WhoopStore.inMemory()
         let registry = DeviceRegistry(

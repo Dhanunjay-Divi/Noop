@@ -15,7 +15,11 @@ class SupplierDeviceCardPolicyTest {
     @Test
     fun supplierProfileClaimsOnlyDisplayHeartRateAndConnectedBattery() {
         val profile = deviceProfile(
-            device(SourceKind.veepoo, DeviceStatus.active),
+            device(
+                sourceKind = SourceKind.veepoo,
+                status = DeviceStatus.active,
+                capabilities = "hr,hrv,strainLoad",
+            ),
             stringResolver = ::supplierString,
         )
 
@@ -32,6 +36,19 @@ class SupplierDeviceCardPolicyTest {
         assertFalse(claimedCapabilities.contains("HRV", ignoreCase = true))
         assertFalse(claimedCapabilities.contains("Strain", ignoreCase = true))
         assertFalse(claimedCapabilities.contains("Effort", ignoreCase = true))
+    }
+
+    @Test
+    fun archivedSupplierCardCarriesNoDirectActivationCallback() {
+        val devicesScreen = source("DevicesScreen.kt").readText()
+        val removedDevicesStart = devicesScreen.indexOf("items(removedDevices)")
+        val removedDevicesEnd = devicesScreen.indexOf("item { WhoopFirstFooter() }")
+
+        assertTrue(removedDevicesStart >= 0)
+        assertTrue(removedDevicesEnd > removedDevicesStart)
+        val removedDevicesBlock = devicesScreen.substring(removedDevicesStart, removedDevicesEnd)
+        assertTrue(removedDevicesBlock.contains("onMakeActive = null"))
+        assertFalse(removedDevicesBlock.contains("onMakeActive = {"))
     }
 
     @Test
@@ -114,13 +131,17 @@ class SupplierDeviceCardPolicyTest {
         )
     }
 
-    private fun device(sourceKind: SourceKind, status: DeviceStatus) = PairedDeviceRow(
+    private fun device(
+        sourceKind: SourceKind,
+        status: DeviceStatus,
+        capabilities: String = "hr",
+    ) = PairedDeviceRow(
         id = "test-device",
         brand = if (sourceKind == SourceKind.veepoo) "NOOP" else "WHOOP",
         model = if (sourceKind == SourceKind.veepoo) "Supplier band" else "5.0 MG",
         nickname = null,
         sourceKind = sourceKind.name,
-        capabilities = "hr",
+        capabilities = capabilities,
         status = status.name,
         addedAt = 0,
         lastSeenAt = 0,

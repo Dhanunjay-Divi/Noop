@@ -192,6 +192,45 @@ final class DevicePillStateTests: XCTestCase {
         )
     }
 
+    func testArchivedWhoopAndOuraAffordancesRemainMakeActive() {
+        let devices = [
+            PairedDevice(
+                id: "whoop-removed",
+                brand: "WHOOP",
+                model: "5.0 MG",
+                peripheralId: UUID().uuidString,
+                sourceKind: .liveBLE,
+                capabilities: [.hr],
+                status: .archived,
+                addedAt: 0,
+                lastSeenAt: 0
+            ),
+            PairedDevice(
+                id: "oura-removed",
+                brand: "Oura",
+                model: "Oura Ring 4",
+                peripheralId: UUID().uuidString,
+                sourceKind: .oura,
+                capabilities: [.hr, .sleep],
+                status: .archived,
+                addedAt: 0,
+                lastSeenAt: 0
+            ),
+        ]
+
+        for device in devices {
+            XCTAssertEqual(
+                DeviceActivationAffordance.resolve(
+                    device: device,
+                    isActive: false,
+                    hasReAddAction: true,
+                    supplierPairingAvailable: false
+                ),
+                .makeActive
+            )
+        }
+    }
+
     func testRemovedSupplierUIReentersPairingInsteadOfSettingRegistryActive()
         throws
     {
