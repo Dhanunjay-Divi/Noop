@@ -5075,9 +5075,9 @@ final class IntelligenceEngine: ObservableObject {
 
     /// Resolve the SINGLE device that owns `day` (invariant I2), so the day is scored from exactly one
     /// source , never a mix. Builds one `DayOwnerResolver.Candidate` per non-archived device with a
-    /// priority (0 = the active strap, 1 = other live straps, 2 = imports; lower wins) and a CHEAP
-    /// per-day presence flag (one `LIMIT 1` HR read, then one step read only when HR is absent, per
-    /// device), then applies any locked override from the dayOwnership table. Returns `deviceId` when
+    /// priority (0 = the active strap, 1 = other live straps, 2 = imports; lower wins) and a bounded
+    /// per-day evidence flag (one `LIMIT 1` HR read, then a chunked classified-step probe only when HR
+    /// is absent, per device), then applies any locked override from the dayOwnership table. Returns `deviceId` when
     /// the registry yields no owner (no candidate has data, or it's empty/unreadable) so the legacy
     /// single-source path is preserved.
     ///
@@ -5136,10 +5136,11 @@ final class IntelligenceEngine: ObservableObject {
         var candidates: [DayOwnerResolver.Candidate] = []
         for candidate in prioritiesByDevice {
             try Task.checkCancellation()
-            // Resolve all available evidence for this same source before applying source priority.
+            // Resolve all usable evidence for this same source before applying source priority.
             // Otherwise an import with one HR row can win before the active band's valid walking rows
             // are checked. HR short-circuits the step probe; steps are independent gait evidence and
-            // do not require an overnight HR row.
+            // do not require an overnight HR row. A raw counter row alone is not evidence: the same
+            // production classifier must retain at least one walk/run delta.
             let hasHeartRate = !(try await store.hrSamples(
                 deviceId: candidate.deviceId, from: from, to: to, limit: 1
             )).isEmpty
@@ -5147,13 +5148,12 @@ final class IntelligenceEngine: ObservableObject {
             if hasHeartRate {
                 hasSteps = false
             } else {
-                try Task.checkCancellation()
-                hasSteps = !(try await store.stepSamples(
+                hasSteps = try await hasRetainedStepEvidence(
+                    store: store,
                     deviceId: candidate.deviceId,
                     from: stepWindowFrom,
-                    to: stepWindowTo,
-                    limit: 1
-                )).isEmpty
+                    to: stepWindowTo
+                )
             }
             candidates.append(DayOwnerResolver.Candidate(
                 deviceId: candidate.deviceId,
@@ -5166,6 +5166,51 @@ final class IntelligenceEngine: ObservableObject {
             lockedOwner: nil,
             candidates: candidates
         ) ?? fallbackDeviceId
+    }
+
+    /// Determine whether a source has at least one production-eligible classified step delta without
+    /// materializing an entire day for every ownership candidate. The prior sample is carried across
+    /// chunks so a walk/run delta at a chunk boundary is evaluated exactly once.
+    nonisolated private static func hasRetainedStepEvidence(
+        store: WhoopStore,
+        deviceId: String,
+        from: Int,
+        to: Int
+    ) async throws -> Bool {
+        guard from <= to else { return false }
+
+        let batchSize = 8_192
+        var cursor = from
+        var previous: StepSample?
+
+        while cursor <= to {
+            try Task.checkCancellation()
+            let batch = try await store.stepSamples(
+                deviceId: deviceId,
+                from: cursor,
+                to: to,
+                limit: batchSize
+            )
+            guard !batch.isEmpty else { return false }
+
+            let probe = previous.map { [$0] + batch } ?? batch
+            if StepsCounter.analyze(
+                probe,
+                classificationPolicy: .requireActivityClass
+            ).steps != nil {
+                return true
+            }
+
+            guard batch.count == batchSize,
+                  let last = batch.last,
+                  last.ts < to,
+                  last.ts < Int.max else {
+                return false
+            }
+            previous = last
+            cursor = last.ts + 1
+        }
+        return false
     }
 
     /// The strap family that wrote `owner`'s skin-temp rows (#938), so the nightly funnel converts the raw

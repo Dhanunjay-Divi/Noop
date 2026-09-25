@@ -1259,6 +1259,145 @@ class SourceCoordinatorAdoptionTest {
     }
 
     @Test
+    fun approvedRevisionRebindPersistsWithoutCredentialCleanup() = runTest {
+        val operations = mutableListOf<String>()
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+        }
+        val source = FakeNoopBandSource()
+        val credentials = FakeCredentials(operations).apply { seed("supplier-band") }
+        val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = this,
+            noopBandSourceFactory = { id, _ ->
+                if (id == "supplier-band") source else null
+            },
+            veepooCredentials = credentials,
+            veepooLifecycleDiagnostics =
+                VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+        )
+        coordinator.start()
+        testScheduler.runCurrent()
+        operations.clear()
+        val password = "2468".toCharArray()
+        val replacementBinding =
+            requireNotNull(VeepooRevisionBinding.from("hw-2", "fw-1"))
+
+        val saved = try {
+            coordinator.persistVeepooReconnectRevision(
+                id = "supplier-band",
+                source = source,
+                password = password,
+                revisionBinding = replacementBinding,
+            )
+        } finally {
+            password.fill('\u0000')
+        }
+
+        assertTrue(saved)
+        assertEquals("2468", credentials.values["supplier-band"]?.password)
+        assertEquals(
+            replacementBinding,
+            credentials.values["supplier-band"]?.revisionBinding,
+        )
+        assertEquals(listOf("credential.save"), operations)
+        assertTrue(
+            diagnostics.any {
+                it.stage == VeepooSupplierLifecycleStage.SECURE_WRITE &&
+                    it.outcome == VeepooSupplierLifecycleOutcome.COMPLETED &&
+                    it.trigger == VeepooSupplierLifecycleTrigger.REVISION_REBIND
+            },
+        )
+    }
+
+    @Test
+    fun revisionPersistenceFailureRetainsCredentialAndRetriesSelectedSupplier() = runTest {
+        val operations = mutableListOf<String>()
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+        }
+        val credentials = FakeCredentials(operations).apply {
+            seed("supplier-band")
+            saveSucceeds = false
+        }
+        val sources = mutableListOf<FakeNoopBandSource>()
+        val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
+        var whoopStarts = 0
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = { whoopStarts += 1 },
+            stopWhoop = {},
+            scope = this,
+            veepooActiveSourceFactory = { id, _ ->
+                check(id == "supplier-band")
+                FakeNoopBandSource(operations).also(sources::add)
+            },
+            veepooCredentials = credentials,
+            veepooLifecycleDiagnostics =
+                VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+            supplierCredentialRetryDelaysMillis = listOf(1L),
+        )
+        coordinator.start()
+        testScheduler.runCurrent()
+        val terminalSource = sources.single()
+        operations.clear()
+        val password = "2468".toCharArray()
+        val replacementBinding =
+            requireNotNull(VeepooRevisionBinding.from("hw-2", "fw-1"))
+        val saved = try {
+            coordinator.persistVeepooReconnectRevision(
+                id = "supplier-band",
+                source = terminalSource,
+                password = password,
+                revisionBinding = replacementBinding,
+            )
+        } finally {
+            password.fill('\u0000')
+        }
+        assertFalse(saved)
+
+        coordinator.onVeepooRevisionPersistenceUnavailable(
+            id = "supplier-band",
+            source = terminalSource,
+        )
+        testScheduler.runCurrent()
+        advanceTimeBy(1L)
+        testScheduler.runCurrent()
+
+        assertEquals("supplier-band", dao.activeDeviceId())
+        assertEquals("2468", credentials.values["supplier-band"]?.password)
+        assertEquals(
+            VeepooRevisionBinding.from("hw-1", "fw-1"),
+            credentials.values["supplier-band"]?.revisionBinding,
+        )
+        assertEquals(2, sources.size)
+        assertEquals(1, sources.last().connections.size)
+        assertEquals(0, whoopStarts)
+        assertFalse(operations.contains("credential.clear"))
+        assertTrue(
+            diagnostics.any {
+                it.stage == VeepooSupplierLifecycleStage.SECURE_WRITE &&
+                    it.outcome == VeepooSupplierLifecycleOutcome.FAILED &&
+                    it.trigger == VeepooSupplierLifecycleTrigger.REVISION_REBIND &&
+                    it.failure == VeepooSupplierLifecycleFailure.SECURE_PERSISTENCE
+            },
+        )
+    }
+
+    @Test
     fun supplierCredentialRecoveryContinuesAfterInitialRetryBurst() = runTest {
         val dao = FakeRegistryDao().apply {
             devices["my-whoop"] = whoopRow("my-whoop", null)

@@ -131,6 +131,55 @@ class SupplierDeviceCardPolicyTest {
         )
     }
 
+    @Test
+    fun supplierRemovalConsumesTransactionalFallbackBeforeShowingReplacementDialog() {
+        val devicesScreen = source("DevicesScreen.kt").readText()
+        val removalBlock = devicesScreen
+            .substringAfter("// --- Remove confirm ---")
+            .substringBefore("// --- Restart strap confirm")
+
+        assertTrue(
+            removalBlock.contains(
+                "val archiveResult = viewModel.archivePairedDevice(device.id)",
+            ),
+        )
+        assertTrue(
+            removalBlock.contains(
+                "shouldPromptForReplacementAfterArchive(",
+            ),
+        )
+        assertFalse(
+            shouldPromptForReplacementAfterArchive(
+                wasActive = true,
+                archiveResult = ArchivedDeviceResult(
+                    archived = true,
+                    activeDeviceId = "fallback-band",
+                ),
+                hasRemainingDevice = true,
+            ),
+        )
+        assertTrue(
+            shouldPromptForReplacementAfterArchive(
+                wasActive = true,
+                archiveResult = ArchivedDeviceResult(
+                    archived = true,
+                    activeDeviceId = null,
+                ),
+                hasRemainingDevice = true,
+            ),
+        )
+        assertFalse(
+            shouldPromptForReplacementAfterArchive(
+                wasActive = true,
+                archiveResult = ArchivedDeviceResult(
+                    archived = false,
+                    activeDeviceId = null,
+                ),
+                hasRemainingDevice = true,
+            ),
+        )
+    }
+
     private fun device(
         sourceKind: SourceKind,
         status: DeviceStatus,

@@ -146,6 +146,10 @@ class VeepooBandSource(
     private val diagnostics: VeepooDiagnosticSink = AppVeepooDiagnosticSink,
     private val session: BandSessionMachine = NoopBandSdkBoundary.newSession(),
     private val onReconnectCredentialRejected: (VeepooBandSource) -> Unit = {},
+    private val onReconnectRevisionBindingChanged:
+        (VeepooBandSource, CharArray, VeepooRevisionBinding) -> Boolean =
+        { _, _, _ -> false },
+    private val onReconnectRevisionPersistenceUnavailable: (VeepooBandSource) -> Unit = {},
     private val onRuntimeUnavailable: (VeepooBandSource) -> Unit = {},
     private val reconnectScheduler: VeepooReconnectScheduler =
         ExecutorVeepooReconnectScheduler(),
@@ -467,18 +471,9 @@ class VeepooBandSource(
             failAttempt(VeepooDiagnosticCategory.CAPABILITY, VeepooDiagnosticFailure.REJECTED)
             return
         }
-        if (
+        val reconnectRevisionChanged =
             intent == VeepooConnectionIntent.RECONNECT &&
             reconnectRevisionBinding != observedRevisionBinding
-        ) {
-            failAttempt(
-                VeepooDiagnosticCategory.RECONNECT,
-                VeepooDiagnosticFailure.REJECTED,
-                reportRuntimeUnavailable = false,
-            )
-            notifyReconnectCredentialRejected()
-            return
-        }
         val connection = connectionToken
         val reconnect = reconnectToken
         if (reconnect != null) {
@@ -523,6 +518,35 @@ class VeepooBandSource(
             establishedIdentity = identity
             establishedCapabilities = capabilities
             reconnectAddress = binding.peripheralId
+        }
+        if (reconnectRevisionChanged) {
+            val password = reconnectPassword ?: return failAttempt(
+                VeepooDiagnosticCategory.RECONNECT,
+                VeepooDiagnosticFailure.INVALID_STATE,
+                reportRuntimeUnavailable = false,
+            )
+            val passwordCopy = password.copyOf()
+            val persisted = try {
+                runCatching {
+                    onReconnectRevisionBindingChanged(
+                        this,
+                        passwordCopy,
+                        observedRevisionBinding,
+                    )
+                }.getOrDefault(false)
+            } finally {
+                passwordCopy.fill('\u0000')
+            }
+            if (!persisted) {
+                failAttempt(
+                    VeepooDiagnosticCategory.RECONNECT,
+                    VeepooDiagnosticFailure.UNAVAILABLE,
+                    reportRuntimeUnavailable = false,
+                )
+                notifyReconnectRevisionPersistenceUnavailable()
+                return
+            }
+            reconnectRevisionBinding = observedRevisionBinding
         }
         if (intent == VeepooConnectionIntent.PAIRING) {
             val password = pendingPassword ?: return failAttempt(
@@ -858,6 +882,10 @@ class VeepooBandSource(
         runCatching { onReconnectCredentialRejected(this) }
     }
 
+    private fun notifyReconnectRevisionPersistenceUnavailable() {
+        runCatching { onReconnectRevisionPersistenceUnavailable(this) }
+    }
+
     private fun notifyRuntimeUnavailable() {
         runCatching { onRuntimeUnavailable(this) }
     }
@@ -1047,6 +1075,10 @@ class VeepooBandSource(
             adapterState = value,
             batteryPercent = mutableDisplay.value.batteryPercent
                 .takeUnless { value == VeepooAdapterState.RECONNECTING },
+            heartRate = mutableDisplay.value.heartRate
+                .takeIf { value == VeepooAdapterState.LIVE_DISPLAY_ONLY },
+            phoneReceiptMilliseconds = mutableDisplay.value.phoneReceiptMilliseconds
+                .takeIf { value == VeepooAdapterState.LIVE_DISPLAY_ONLY },
             active = value != VeepooAdapterState.IDLE &&
                 value != VeepooAdapterState.STOPPED &&
                 value != VeepooAdapterState.FAILED,

@@ -139,13 +139,17 @@ class VeepooBandSourceTest {
             requireNotNull(VeepooRevisionBinding.from("hw-1", "fw-1"))
         },
         compatibilityPolicy: VeepooCompatibilityPolicy = approvedPolicy(),
+        revisionPersistenceSucceeds: Boolean = true,
     ) {
         val bridge = FakeBridge()
         val session = BandSessionMachine()
         val reconnectScheduler = FakeReconnectScheduler()
         val diagnostics = mutableListOf<VeepooDiagnosticEvent>()
         var rejectedCredentials = 0
+        var revisionPersistenceUnavailable = 0
         var runtimeUnavailable = 0
+        val persistedRevisionBindings = mutableListOf<VeepooRevisionBinding>()
+        val persistedRevisionPasswords = mutableListOf<String>()
         var operationsAtCredentialRejection: List<String> = emptyList()
         var runtimeUnavailableSource: VeepooBandSource? = null
         var stateAtRuntimeUnavailable: VeepooAdapterState? = null
@@ -161,6 +165,14 @@ class VeepooBandSourceTest {
             onReconnectCredentialRejected = { _ ->
                 rejectedCredentials += 1
                 operationsAtCredentialRejection = bridge.operations.toList()
+            },
+            onReconnectRevisionBindingChanged = { _, password, binding ->
+                persistedRevisionPasswords += password.concatToString()
+                persistedRevisionBindings += binding
+                revisionPersistenceSucceeds
+            },
+            onReconnectRevisionPersistenceUnavailable = {
+                revisionPersistenceUnavailable += 1
             },
             onRuntimeUnavailable = { unavailableSource ->
                 runtimeUnavailable += 1
@@ -473,7 +485,7 @@ class VeepooBandSourceTest {
     }
 
     @Test
-    fun reconnectRejectsHardwareOrFirmwareRevisionDrift() {
+    fun reconnectRebindsApprovedHardwareOrFirmwareRevisionDrift() {
         listOf(
             VeepooIdentity("42", "hw-2", "fw-1"),
             VeepooIdentity("42", "hw-1", "fw-2"),
@@ -501,10 +513,94 @@ class VeepooBandSourceTest {
                 VeepooCapabilities(liveHeartRate = true, battery = true),
             )
 
-            assertEquals(VeepooAdapterState.FAILED, harness.source.state.value)
-            assertEquals(1, harness.rejectedCredentials)
-            assertFalse(harness.bridge.operations.contains("battery"))
+            assertEquals(VeepooAdapterState.READING_BATTERY, harness.source.state.value)
+            assertEquals(0, harness.rejectedCredentials)
+            assertEquals(0, harness.revisionPersistenceUnavailable)
+            assertEquals(0, harness.runtimeUnavailable)
+            assertEquals(listOf("0042"), harness.persistedRevisionPasswords)
+            assertEquals(
+                listOf(
+                    requireNotNull(
+                        VeepooRevisionBinding.from(
+                            identity.hardwareRevision,
+                            identity.firmwareVersion,
+                        ),
+                    ),
+                ),
+                harness.persistedRevisionBindings,
+            )
+            assertEquals("battery", harness.bridge.operations.last())
         }
+    }
+
+    @Test
+    fun approvedRevisionRebindSurvivesSourceRecreation() {
+        val policy = VeepooCompatibilityPolicy.parse(
+            manifest(row(hardwareRevision = "hw-2")),
+        )
+        val first = Harness(
+            initialPassword = "0042".toCharArray(),
+            compatibilityPolicy = policy,
+        )
+        first.source.connect("AA:BB:CC:DD:EE:01")
+        val firstAttempt = requireNotNull(first.bridge.attempt)
+        first.bridge.callback.onTransportConnected(firstAttempt)
+        first.bridge.callback.onAuthenticated(
+            firstAttempt,
+            requireNotNull(first.bridge.authentication),
+            VeepooBinding.create("AA:BB:CC:DD:EE:01", firstAttempt),
+            VeepooIdentity("42", "hw-2", "fw-1"),
+            VeepooCapabilities(liveHeartRate = true, battery = true),
+        )
+        val persistedBinding = first.persistedRevisionBindings.single()
+        first.source.stop()
+
+        val recreated = Harness(
+            initialPassword = "0042".toCharArray(),
+            initialRevisionBinding = persistedBinding,
+            compatibilityPolicy = policy,
+        )
+        recreated.source.connect("AA:BB:CC:DD:EE:01")
+        val secondAttempt = requireNotNull(recreated.bridge.attempt)
+        recreated.bridge.callback.onTransportConnected(secondAttempt)
+        recreated.bridge.callback.onAuthenticated(
+            secondAttempt,
+            requireNotNull(recreated.bridge.authentication),
+            VeepooBinding.create("AA:BB:CC:DD:EE:01", secondAttempt),
+            VeepooIdentity("42", "hw-2", "fw-1"),
+            VeepooCapabilities(liveHeartRate = true, battery = true),
+        )
+
+        assertEquals(VeepooAdapterState.READING_BATTERY, recreated.source.state.value)
+        assertTrue(recreated.persistedRevisionBindings.isEmpty())
+        assertEquals(0, recreated.rejectedCredentials)
+    }
+
+    @Test
+    fun approvedRevisionPersistenceFailurePreservesCredentialClassification() {
+        val harness = Harness(
+            initialPassword = "0042".toCharArray(),
+            compatibilityPolicy = VeepooCompatibilityPolicy.parse(
+                manifest(row(hardwareRevision = "hw-2")),
+            ),
+            revisionPersistenceSucceeds = false,
+        )
+        harness.source.connect("AA:BB:CC:DD:EE:01")
+        val attempt = requireNotNull(harness.bridge.attempt)
+        harness.bridge.callback.onTransportConnected(attempt)
+        harness.bridge.callback.onAuthenticated(
+            attempt,
+            requireNotNull(harness.bridge.authentication),
+            VeepooBinding.create("AA:BB:CC:DD:EE:01", attempt),
+            VeepooIdentity("42", "hw-2", "fw-1"),
+            VeepooCapabilities(liveHeartRate = true, battery = true),
+        )
+
+        assertEquals(VeepooAdapterState.FAILED, harness.source.state.value)
+        assertEquals(0, harness.rejectedCredentials)
+        assertEquals(1, harness.revisionPersistenceUnavailable)
+        assertEquals(0, harness.runtimeUnavailable)
+        assertFalse(harness.bridge.operations.contains("battery"))
     }
 
     @Test
@@ -526,6 +622,41 @@ class VeepooBandSourceTest {
         assertEquals(0, harness.rejectedCredentials)
         assertEquals(1, harness.runtimeUnavailable)
         assertFalse(harness.bridge.operations.contains("battery"))
+    }
+
+    @Test
+    fun postLiveRevisionDriftFailsBeforePersistingAReplacementBinding() {
+        val harness = Harness(
+            compatibilityPolicy = VeepooCompatibilityPolicy.parse(
+                manifest(
+                    row(),
+                    row(hardwareRevision = "hw-2"),
+                ),
+            ),
+        )
+        val firstAttempt = harness.pairThroughBattery()
+        harness.bridge.callback.onBattery(
+            firstAttempt,
+            VeepooBatteryReading(percent = 80, observedAtMilliseconds = 1_000),
+        )
+        harness.bridge.callback.onConnectionDropped(firstAttempt)
+        harness.reconnectScheduler.runNext()
+        val reconnectAttempt = requireNotNull(harness.bridge.attempt)
+        harness.bridge.callback.onTransportConnected(reconnectAttempt)
+
+        harness.bridge.callback.onAuthenticated(
+            reconnectAttempt,
+            requireNotNull(harness.bridge.authentication),
+            VeepooBinding.create("AA:BB:CC:DD:EE:01", reconnectAttempt),
+            VeepooIdentity("42", "hw-2", "fw-1"),
+            VeepooCapabilities(liveHeartRate = true, battery = true),
+        )
+
+        assertEquals(VeepooAdapterState.FAILED, harness.source.state.value)
+        assertEquals(0, harness.rejectedCredentials)
+        assertTrue(harness.persistedRevisionBindings.isEmpty())
+        assertEquals(0, harness.revisionPersistenceUnavailable)
+        assertEquals(1, harness.runtimeUnavailable)
     }
 
     @Test
@@ -556,10 +687,16 @@ class VeepooBandSourceTest {
             firstAttempt,
             VeepooBatteryReading(percent = 80, observedAtMilliseconds = 1_000),
         )
+        harness.bridge.callback.onLiveHeartRate(
+            firstAttempt,
+            VeepooLiveHeartRate(beatsPerMinute = 77, phoneReceiptMilliseconds = 1_100),
+        )
 
         harness.bridge.callback.onConnectionDropped(firstAttempt)
         assertEquals(VeepooAdapterState.RECONNECTING, harness.source.state.value)
         assertNull(harness.source.display.value.batteryPercent)
+        assertNull(harness.source.display.value.heartRate)
+        assertNull(harness.source.display.value.phoneReceiptMilliseconds)
         assertEquals(listOf(2_000L), harness.reconnectScheduler.delays)
         assertEquals(firstAttempt, harness.bridge.attempt)
 
@@ -696,13 +833,20 @@ class VeepooBandSourceTest {
             firstAttempt,
             VeepooBatteryReading(percent = 80, observedAtMilliseconds = 1_000),
         )
+        harness.bridge.callback.onLiveHeartRate(
+            firstAttempt,
+            VeepooLiveHeartRate(beatsPerMinute = 77, phoneReceiptMilliseconds = 1_100),
+        )
         assertEquals(BandSessionState.READY, harness.session.snapshot().state)
         assertEquals(VeepooAdapterState.LIVE_DISPLAY_ONLY, harness.source.state.value)
+        assertEquals(77, harness.source.display.value.heartRate)
 
         harness.bridge.callback.onFailure(firstAttempt, VeepooFailure.TIMEOUT)
 
         assertEquals(BandSessionState.RECOVERING, harness.session.snapshot().state)
         assertEquals(VeepooAdapterState.RECONNECTING, harness.source.state.value)
+        assertNull(harness.source.display.value.heartRate)
+        assertNull(harness.source.display.value.phoneReceiptMilliseconds)
         assertEquals(listOf(2_000L), harness.reconnectScheduler.delays)
         assertEquals(0, harness.runtimeUnavailable)
 
@@ -720,7 +864,16 @@ class VeepooBandSourceTest {
 
         assertEquals(BandSessionState.EXECUTING_COMMAND, harness.session.snapshot().state)
         assertEquals(VeepooAdapterState.READING_BATTERY, harness.source.state.value)
+        assertNull(harness.source.display.value.heartRate)
+        assertNull(harness.source.display.value.phoneReceiptMilliseconds)
         assertEquals(0, harness.runtimeUnavailable)
+        harness.bridge.callback.onBattery(
+            retryAttempt,
+            VeepooBatteryReading(percent = 79, observedAtMilliseconds = 2_000),
+        )
+        assertEquals(VeepooAdapterState.LIVE_DISPLAY_ONLY, harness.source.state.value)
+        assertNull(harness.source.display.value.heartRate)
+        assertNull(harness.source.display.value.phoneReceiptMilliseconds)
     }
 
     @Test

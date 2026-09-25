@@ -71,6 +71,7 @@ object AppVeepooDiagnosticSink : VeepooDiagnosticSink {
 enum class VeepooSupplierLifecycleStage {
     ADOPTION,
     SECURE_READ,
+    SECURE_WRITE,
     SECURE_CLEANUP,
     RECONCILIATION,
     REMOVAL,
@@ -85,6 +86,7 @@ enum class VeepooSupplierLifecycleOutcome {
 enum class VeepooSupplierLifecycleTrigger {
     SOURCE_UNAVAILABLE,
     AUTHENTICATION_REJECTED,
+    REVISION_REBIND,
     DEVICE_REMOVAL,
 }
 

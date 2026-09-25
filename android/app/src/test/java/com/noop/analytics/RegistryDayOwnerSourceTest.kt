@@ -178,7 +178,10 @@ class RegistryDayOwnerSourceTest {
                     val id = args!![0] as String
                     stepCalls += id
                     if (id == "my-whoop") {
-                        listOf(StepSample(id, 1_400, 100, activityClass = 1))
+                        listOf(
+                            StepSample(id, 1_400, 100, activityClass = 1),
+                            StepSample(id, 1_460, 120, activityClass = 1),
+                        )
                     } else {
                         emptyList<StepSample>()
                     }
@@ -212,6 +215,56 @@ class RegistryDayOwnerSourceTest {
         assertEquals(
             listOf("my-whoop"),
             stepCalls,
+        )
+    }
+
+    @Test
+    fun dayOwnerRejectsAClassifiedRowWithoutAUsableDelta() = runBlocking {
+        val dao = Proxy.newProxyInstance(
+            WhoopDao::class.java.classLoader,
+            arrayOf(WhoopDao::class.java),
+        ) { _, method, args ->
+            when (method.name) {
+                "hrSamples" -> {
+                    val id = args!![0] as String
+                    if (id == "oura") listOf(HrSample(id, 1_500, 60)) else emptyList<HrSample>()
+                }
+                "stepSamples" -> {
+                    val id = args!![0] as String
+                    if (id == "my-whoop") {
+                        listOf(StepSample(id, 1_400, 100, activityClass = 1))
+                    } else {
+                        emptyList<StepSample>()
+                    }
+                }
+                else -> throw UnsupportedOperationException(
+                    "day-owner fixture must not call ${method.name}"
+                )
+            }
+        } as WhoopDao
+        val ownerSource = object : IntelligenceEngine.DayOwnerSource {
+            override suspend fun candidatePriorities() =
+                listOf("my-whoop" to 0, "oura" to 2)
+
+            override suspend fun lockedOwner(day: String): String? = null
+        }
+
+        val owner = IntelligenceEngine.resolveDayOwner(
+            repo = WhoopRepository(dao),
+            ownerSource = ownerSource,
+            candidatePriorities = ownerSource.candidatePriorities(),
+            day = "1970-01-01",
+            from = 1_000,
+            to = 2_000,
+            importedDeviceId = "my-whoop",
+            stepFrom = 1_000,
+            stepTo = 2_000,
+        )
+
+        assertEquals(
+            "a lone counter row cannot suppress another source's usable evidence",
+            "oura",
+            owner,
         )
     }
 

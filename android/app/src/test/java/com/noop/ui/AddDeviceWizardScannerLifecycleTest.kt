@@ -64,6 +64,43 @@ class AddDeviceWizardScannerLifecycleTest {
         assertFalse(stopAll.contains(".get()"))
     }
 
+    @Test
+    fun supplierPickerUsesPairingStateForSearchingFailureAndRetryPresentation() {
+        val source = source().readText()
+        val callSite = source
+            .substringAfter("t == DeviceType.SupplierBand -> SupplierBandPickStep(")
+            .substringBefore("else -> HrPickStep(")
+        val picker = source
+            .substringAfter("private fun SupplierBandPickStep(")
+            .substringBefore("@Composable\nprivate fun SupplierBandConfirmStep(")
+
+        assertTrue(callSite.contains("state = supplierPairingState"))
+        assertTrue(
+            picker.contains(
+                "state == com.noop.ble.veepoo.VeepooAdapterState.SCANNING",
+            ),
+        )
+        assertTrue(
+            picker.contains(
+                "state == com.noop.ble.veepoo.VeepooAdapterState.FAILED",
+            ),
+        )
+        assertTrue(picker.contains("showEmptyProgress = searching"))
+        assertTrue(
+            picker.contains(
+                "appwide_onboarding_device_wizard_supplier_android_failed",
+            ),
+        )
+        assertTrue(picker.contains("appwide_onboarding_device_wizard_idle"))
+        assertTrue(picker.contains("emptySecondaryRes = if (searching)"))
+        assertTrue(
+            Regex(
+                """emptySecondaryRes\s*=\s*if\s*\(searching\)[\s\S]*?else\s*\{\s*null\s*}""",
+            ).containsMatchIn(picker),
+        )
+        assertFalse(picker.contains("searching = true"))
+    }
+
     private fun source(): File {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         return listOf(

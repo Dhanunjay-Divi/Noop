@@ -440,6 +440,78 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testTerminalCompatibilityFailureRestoresWhoopOwnershipOnce()
+        async throws
+    {
+        let (store, registry) = try await makeRegistry()
+        let device = supplierDevice(
+            id: "supplier-incompatible",
+            status: .paired
+        )
+        XCTAssertTrue(registry.addAndSetActive(device))
+
+        let live = LiveState()
+        live.setBattery(80)
+        live.setDisplayOnlyHeartRate(72, receivedAt: Date())
+        live.connected = true
+        let adapter = FakePairingAdapter()
+        var reconciliationCount = 0
+        var disconnectCountAtReconciliation: [Int] = []
+        let source = VeepooBandSource(
+            live: live,
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {},
+            onCompatibilityFailure: {
+                reconciliationCount += 1
+                disconnectCountAtReconciliation.append(
+                    adapter.disconnectCount
+                )
+                XCTAssertTrue(
+                    registry.reconcileUnavailableSupplier(device.id)
+                )
+            }
+        )
+        var whoopStarts = 0
+        var whoopStops = 0
+        let coordinator = makeCoordinator(
+            registry: registry,
+            sources: [device.id: source],
+            startWhoop: { whoopStarts += 1 },
+            stopWhoop: { whoopStops += 1 }
+        )
+        coordinator.start()
+        await Task.yield()
+
+        XCTAssertEqual(whoopStops, 1)
+        XCTAssertEqual(registry.activeDeviceId, device.id)
+
+        adapter.emit(
+            .failed(stage: .compatibility, failure: .unsupported)
+        )
+        adapter.emit(
+            .failed(stage: .compatibility, failure: .unsupported)
+        )
+        await Task.yield()
+
+        XCTAssertEqual(reconciliationCount, 1)
+        XCTAssertEqual(disconnectCountAtReconciliation, [1])
+        XCTAssertNil(live.batteryPct)
+        XCTAssertNil(live.charging)
+        XCTAssertNil(live.displayOnlyHeartRate)
+        XCTAssertNil(live.displayOnlyHeartRateReceivedAt)
+        XCTAssertFalse(live.connected)
+        XCTAssertEqual(registry.activeDeviceId, "my-whoop")
+        XCTAssertEqual(
+            try DeviceRegistryStore(
+                dbQueue: store.registryWriter
+            ).activeDeviceId(),
+            "my-whoop"
+        )
+        XCTAssertEqual(whoopStarts, 1)
+    }
+
+    @MainActor
     func testArchiveVerificationFailurePreservesDayOwnershipExactly() async throws {
         let store = try await WhoopStore.inMemory()
         let persistence = DeviceRegistryStore(

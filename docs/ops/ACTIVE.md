@@ -162,27 +162,32 @@ Last updated: **2026-09-25**
   candidate head, hosted exact-SHA checks, and protected integration state.
   Exact round-owned cleanup follows durable hosted evidence. Physical step
   validation remains external.
-- The uncommitted final September 25 review follow-up keeps that step policy
-  unchanged and closes five adjacent source-integration findings. Apple now
-  publishes the sole active registry row from the same verified transaction,
-  normalizes supplier battery level and charging callbacks, and rolls back a
-  failed activation verification. Apple and Android resolve each source's own
-  HR-or-step presence before applying source priority, so imported HR cannot
-  preempt active classified walking evidence; HR remains context rather than
-  gait proof. Android supplier onboarding requires both the adapter and a
-  usable durable credential, and pairing returns the committed device id
-  without a second read that could falsely report failure. Focused Apple app
-  tests pass 81/81, focused and complete `WhoopStore` pass 22/22 and 549/549,
-  focused Android passes 77/77, Android Full passes 5,154 tests with seven
-  intentional skips plus APK/lint/instrumentation-source compilation, macOS
-  passes 2,330 tests with one intentional fixture skip, and the unsigned
-  Release iPhone graph embeds Watch, complications, and widgets. The complete
-  repository-control wall passes 571 tests with one intentional skip; direct
-  release, required-CI, trust-root, calibration, terminology, health-claim,
-  localization, operations, legal-inventory, private-data, and diff gates pass.
-  One consolidated replacement commit/push, exact-SHA hosted checks,
-  review-thread resolution, normal protected merge, protected-main
-  verification, and final bounded-log cleanup remain.
+- The uncommitted final September 25 replacement keeps the step policy
+  unchanged and closes the remaining source-integration findings. Day ownership
+  now requires a retained classified walk/run delta rather than a raw or
+  singleton counter row. Apple incompatibility is terminal, clears stale live
+  state, disconnects, and reconciles the durable source. Android accepts
+  approved firmware/hardware revision drift through a durable non-authentication
+  rebind; a secure-write failure preserves the credential and supplier retry
+  path. Supplier archive, picker failure/idle presentation, and stale HR state
+  now follow their transactional source state. Exact local evidence is green:
+  Apple supplier compatibility 18/18 and day ownership 20/20; Android supplier
+  adapter/coordinator 73/73; Android Full 5,162 with seven intentional skips
+  plus APK/lint/instrumentation-source compilation; macOS 2,332 with one
+  intentional fixture skip; and the generic iPhoneOS Release graph embeds
+  Watch, complications, and widgets. The broad pinned repository/server/SDK
+  wall passes 1,017 tests with 214 declared optional/environment skips and 78
+  subtests; focused artifact, terminology, trust, required-CI, and release
+  controls pass 90/90. The reviewed terminology ratchet records 18,511
+  occurrences across 1,628 groups with zero forbidden mappings. The obsolete
+  iPhone DerivedData tree is removed. Final direct gates pass 9/9 release
+  controls, all ten required contexts, trusted-main verification, calibration,
+  terminology, localization, all 96 operations records, distribution/private
+  data, health claims, syntax, workflow lint, and diff hygiene. One consolidated
+  replacement commit/push, replacement exact-SHA hosted checks,
+  evidence-backed review-thread resolution, normal protected merge,
+  protected-main verification, and final bounded-log/test-environment cleanup
+  remain.
 - An isolated local follow-up from `60df38a2` confirms the vendored Swift and
   Kotlin `failOperation` implementations already reject non-operation failure
   categories before state mutation. Matching app-side regressions pass 2/2 on

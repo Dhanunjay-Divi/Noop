@@ -1091,12 +1091,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 91,
+      "occurrenceCount": 92,
       "owner": "project team",
       "path": "Strand/Data/IntelligenceEngine.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "123970d859cef5f61c846c69088939d327111583b37cf972ae746b66c525a944"
+      "sha256": "780cca23de5a1920ffdd78805fd65b9873455623fc266440a5709b604557df52"
     },
     {
       "category": "core",
@@ -2549,12 +2549,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 79,
+      "occurrenceCount": 80,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/analytics/IntelligenceEngine.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "683c4167ab4d6b3d745cb9d0a777a4531a92e91d4e1eef0bd40bd8fb6f62eb1b"
+      "sha256": "ed62e62d0a1d06af064483ed17536c9467cdcdf33141f45335fe190cf9c34789"
     },
     {
       "category": "core",

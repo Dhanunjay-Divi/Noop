@@ -369,11 +369,17 @@ fun DevicesScreen(
             onConfirm = {
                 val wasActive = device.status == DeviceStatus.active.name
                 scope.launch {
-                    viewModel.archivePairedDevice(device.id)
+                    val archiveResult = viewModel.archivePairedDevice(device.id)
                     devices = viewModel.pairedDevices()
-                    // If the removed device was active and other paired devices remain, prompt to pick a
-                    // new active one (the registry's reload demotes the active row to paired).
-                    if (wasActive && devices.orEmpty().any { it.status != DeviceStatus.archived.name }) {
+                    if (
+                        shouldPromptForReplacementAfterArchive(
+                            wasActive = wasActive,
+                            archiveResult = archiveResult,
+                            hasRemainingDevice = devices.orEmpty().any {
+                                it.status != DeviceStatus.archived.name
+                            },
+                        )
+                    ) {
                         pickNewActive = true
                     }
                 }
@@ -463,6 +469,16 @@ fun DevicesScreen(
         )
     }
 }
+
+internal fun shouldPromptForReplacementAfterArchive(
+    wasActive: Boolean,
+    archiveResult: ArchivedDeviceResult,
+    hasRemainingDevice: Boolean,
+): Boolean =
+    wasActive &&
+        archiveResult.archived &&
+        archiveResult.activeDeviceId == null &&
+        hasRemainingDevice
 
 // MARK: - Device card
 

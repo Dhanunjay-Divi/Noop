@@ -145,6 +145,22 @@ heart-rate elevation as proof of walking.
   proven missing credential requires repair. Android pairing returns the exact
   device identifier from its durable commit and no longer depends on a second
   registry read to report success.
+- Tightened day-owner evidence on both platforms. A raw or singleton counter
+  row can no longer claim a day; the bounded probe carries the preceding row
+  across 8,192-row chunks and requires at least one production-retained
+  classified walk/run delta. Imported HR therefore wins only when the active
+  source has no usable gait evidence, without making HR itself a gait signal.
+- Closed the final supplier lifecycle review. Apple treats an incompatible
+  product tuple as one terminal event, clears stale live presentation,
+  disconnects, and reconciles the durable source. Android accepts approved
+  firmware/hardware revision drift through a durable non-authentication rebind,
+  records bounded secure-write/rebind outcomes, and preserves the existing
+  credential plus supplier retry path when that write fails. Outside
+  display-only live mode it clears stale HR/receipt state.
+- Completed the Android supplier presentation boundary. Idle and failed picker
+  states no longer spin indefinitely, archive returns its transactional
+  fallback directly, and the UI no longer asks the user to repeat an obsolete
+  replacement step.
 
 ## Data, privacy, and medical truth
 
@@ -196,16 +212,16 @@ heart-rate elevation as proof of walking.
 | Focused Apple app orchestration | 57 tests, 0 failures | Classified walking publishes without overnight HR, active-source rejection cannot fall through, rejected counter evidence remains distinct from a truly absent counter for phone fallback, stationary evidence preserves prior history, and retained locomotion replaces only stale computed estimates | Physical-device collection or firmware classification quality |
 | Complete `StrandAnalytics` wall | 1,503 tests, 7 intentional private-data skips, 0 failures | The changed step kernel, absent-versus-observed fallback boundary, sparse-evidence preservation, and complete shared formula surface remain green | App integration or physical accuracy |
 | Complete `WhoopStore` wall | 547 tests, 0 failures | Exact-day computed estimate replacement preserves unrelated evidence and transaction boundaries | App orchestration or physical accuracy |
-| Complete Android Full wall | 5,150 tests, 7 intentional skips, 0 failures; APK, lint, and instrumentation-source compilation pass; APK SHA-256 `5879762993b64ad3dccb8c3bc7ec98d24e5e2039089455617cf302e2f46724f7` | The exact Full app, analytics integration, transactional persistence repair, resources, and test sources compile together | Installation, background collection, or hardware callbacks |
+| Complete Android Full wall | 5,162 tests, 7 intentional skips, 0 failures; APK, lint, and instrumentation-source compilation pass; APK SHA-256 `65388c8f9c9768b5e92bfe84f67539c3d9728c652e29fb98bdf29212e16d5e2f` | The exact Full app, analytics integration, transactional persistence repair, supplier revision rebind, resources, and test sources compile together | Installation, background collection, or hardware callbacks |
 | Apple rollback regression | First full wall exposed one stale failure-injection fixture; corrected focused case passes | The atomic registration failure restores the prior source and leaves no partial supplier row | A real secure-store, radio, or vendor callback failure |
-| Complete macOS app wall | 2,324 tests, 1 intentional fixture skip, 0 failures | Shared Apple app, exact stale-estimate repair, storage, source coordination, metrics, Watch/widget contracts, and accessibility metadata pass together | iPhone hardware, BLE, or signed distribution |
-| Unsigned iOS simulator graph | Exact-current build passes; the phone app embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | Phone, Watch, complication, widget, localization, and dependency graphs compile together | Signing, installation, haptics, notifications, or physical performance |
+| Complete macOS app wall | 2,332 tests, 1 intentional fixture skip, 0 failures | Shared Apple app, exact stale-estimate repair, terminal compatibility handling, storage, source coordination, metrics, Watch/widget contracts, and accessibility metadata pass together | iPhone hardware, BLE, or signed distribution |
+| Unsigned iOS Release graph | Exact-current generic iPhoneOS Release build passes; the phone app embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | Phone, Watch, complication, widget, localization, and dependency graphs compile together | Signing, installation, haptics, notifications, or physical performance |
 | Focused release-contract recovery | SDK artifact tests 9/9 and supplier app-slice tests 8/8 pass after exact generated-cache cleanup and atomic-contract update | The vendored SDK tree is exact and the source-shape gate follows the current transactional registration contract | Hosted execution or physical SDK behavior |
-| Complete repository and direct gates | Complete Tools wall passes 571 tests with one intentional dependency skip and two non-failing FastAPI deprecation warnings. Direct checks pass: 9/9 release controls, ten required contexts, protected-main trust, 12 metrics / 3 revisions / 13 thresholds / 16 calibration guards, the reviewed terminology ratchet, full localization, 96 operations records, and diff hygiene | The exact local candidate satisfies the repository-controlled release, privacy, claims, localization, workflow, and trust contracts | Hosted exact-SHA checks, protected integration, physical validation, or external approvals |
+| Complete repository and direct gates | Broad pinned repository/server/SDK wall passes 1,017 tests with 214 declared optional/environment skips and 78 subtests; focused artifact, terminology, trust, required-CI, and release controls pass 90/90. Direct checks pass 9/9 release controls, all ten required contexts, trusted-main verification, 12 metrics / 3 revisions / 13 thresholds / 16 calibration guards, the reviewed 18,511-occurrence terminology ratchet, full localization, all 96 operations records, distribution/private-data, 1,310-file health-claims scan plus 8 tests, syntax, workflow lint, and diff hygiene. | The exact local candidate satisfies the broad local repository, server, SDK-artifact, privacy, claims, localization, workflow, and trust contracts | Hosted exact-SHA checks, protected integration, physical validation, or external approvals |
 | Exact implementation hosted checks | Exact head `db7de8e2571b1effd8278537d63bd7019b2b0d28` passed 33 jobs with four intentional skips, including all ten protected contexts, Android, macOS, and iOS production-shell checks | The consolidated implementation builds and passes hosted policy/tests on the reviewed SHA | The later review-closeout commit until replacement hosted checks finish |
 | PR review closeout | Apple focused set passes 32/32; Android Full compile and `SupplierDeviceCardPolicyTest` pass 7/7 | Oura ownership, supplier transient live restart, archived activation policy, non-supplier reactivation, and Android supplier presentation are covered on the local replacement head | Physical BLE, Compose instrumentation, or signed installation |
 | Final source-integration review remediation | Android Full debug compile and supplier Live policy tests pass 10/10; Apple supplier recovery tests pass 2/2 | Durable source ownership now selects Android Live controls, the confirmed no-active path remains reachable, and Apple discovery continues through a cancellable low-frequency tail | Physical radios, background execution, signed installation, or supplier timing |
-| Final transaction, battery, owner, onboarding, and pairing review | Apple focused app tests 81/81; focused `WhoopStore` registry tests 22/22; complete `WhoopStore` 549/549; Android focused tests 77/77; complete Android Full 5,154 with seven intentional skips plus APK, lint, and instrumentation-source compilation; complete macOS 2,330 with one intentional fixture skip; unsigned Release iPhone graph builds and embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | Exact active-row publication is transactional, vendor battery forms agree across platforms, source priority cannot hide active walking evidence, unusable supplier rows do not complete onboarding, committed pairing is not downgraded by a later read failure, and all affected app graphs compile together | Signed installation, physical BLE, real battery callbacks, firmware activity classification, background execution, or physical step accuracy |
+| Final supplier compatibility, revision, owner, picker, and archive review | Apple supplier compatibility tests pass 18/18 and day-owner tests pass 20/20; Android supplier adapter/coordinator tests pass 73/73; complete Android Full passes 5,162 with seven intentional skips; complete macOS passes 2,332 with one intentional fixture skip; the unsigned Release iPhone graph embeds Watch, complications, and widgets | A singleton/raw step row cannot own the day, terminal Apple incompatibility cannot leave stale live state, approved Android revision drift rebinds durably without being misclassified as authentication failure, secure-write failure preserves credentials, and supplier removal/picker presentation reflects the transactional state | Signed installation, physical BLE, real revision callbacks, firmware activity classification, background execution, or physical step accuracy |
 
 ## Physical device and deployment
 
@@ -222,28 +238,27 @@ heart-rate elevation as proof of walking.
 
 ## Git and release state
 
-- Changed paths in this final local slice: shared Apple/Android step analysis and
-  daily orchestration, exact-day computed-step persistence helpers, active-source
-  workout ownership, matching store/app/formula regressions, and this operations
-  record. Earlier PR changes remain as recorded above.
+- Changed paths in this final local slice: Apple/Android day-owner evidence,
+  terminal Apple supplier compatibility handling, Android durable revision
+  rebind and stale-live cleanup, supplier picker/archive presentation, matching
+  regressions, reviewed terminology evidence, and this operations record.
+  Earlier PR changes remain as recorded above.
 - Commits: implementation `db7de8e2571b1effd8278537d63bd7019b2b0d28`;
   review closeout `93d5ffed104d7e3b9f193c2af71c9dfb57d486c8`.
-- Branch and remote state: implementation, review-closeout, and evidence commits
-  through `fe616b5dc7a7ea51f345e5c940af38cab3612477` are pushed on PR `#17`.
-  That exact head passed 34 hosted checks with four intended skips. A later
-  automated review found two source-integration defects outside the step
-  formula: Android transient display state could expose the wrong controls,
-  and Apple discovery stopped after the short retry burst. Both corrections
-  are locally verified. The commit containing this record is the final locally
-  verified candidate. The complete 571-test Tools wall and direct release,
-  required-CI,
-  trusted-control, calibration, terminology, provenance, private-data,
-  health-claim, localization, operations-record, workflow, shell, Python, and
-  diff gates are green. PR `#17` is authoritative for the exact candidate head,
-  hosted checks, review-thread state, and protected integration result.
+- Branch and remote state: remote PR `#17` remains at
+  `f8c44d925b6ed3dadc44c1d7945a5204bc9c5cb4`. Its Android, macOS, package,
+  server-applicability, localization, claims, license, operations, and trust
+  checks passed; its iOS job was deliberately cancelled after later review
+  findings made that SHA obsolete, so `apple-ci-required` is not valid evidence
+  for the local replacement. The commit containing this record is the final
+  locally verified candidate. Android Full 5,162/7, macOS 2,332/1, the unsigned
+  iPhone/Watch/widget Release graph, the 1,017-test pinned repository/server/SDK
+  wall, and the 90-test focused release-control wall are green. PR `#17` remains
+  authoritative for replacement exact-SHA checks, review-thread state, and
+  protected integration result after the consolidated push.
 - Current replacement state: the commit containing this record is the
   consolidated final-review follow-up to remote head
-  `801446e5b34e53b0ca001d25d5d525bb71ce9254`. Its complete affected Apple,
+  `f8c44d925b6ed3dadc44c1d7945a5204bc9c5cb4`. Its complete affected Apple,
   Android, storage, macOS, unsigned Release iPhone/Watch/widget, repository
   control, and direct gate walls are green. One push, replacement exact-SHA
   hosted checks, evidence-backed review-thread resolution, normal protected
@@ -356,6 +371,27 @@ heart-rate elevation as proof of walking.
   skip and two non-failing FastAPI deprecation warnings; direct release,
   required-CI, trust-root, calibration, terminology, health-claim,
   localization, operations, legal-inventory, private-data, and diff gates pass.
+- The final broad wall was first invoked with the host Python 3.11 environment,
+  which lacked `asyncpg`; collection stopped before product tests ran. A
+  round-owned Python 3.11 virtual environment installed the pinned server
+  development requirements and reran the complete repository/server/SDK wall.
+  Its first run executed 1,231 cases and failed only on the regenerated empty
+  SDK `.swiftpm` cache and the expected terminology ratchet/digest update.
+  Exact cache deletion, review of all 30 new classified occurrences, and the
+  two reviewed SHA-256 repins produced a 90/90 focused policy pass followed by
+  1,017 passed, 214 declared skips, and 78 passed subtests with zero failures.
+- The first final direct-wall command omitted the mandatory `--root` argument
+  from trusted-main verification. Release controls and all ten required
+  contexts passed before that invocation error. The corrected command ran the
+  complete direct wall and passed without changing source.
+- The final operations wording moved only historical inventory line numbers.
+  A temporary snapshot retained 18,511 classified occurrences, 1,628 groups,
+  zero forbidden mappings, and a byte-identical active allowlist. The reviewed
+  historical inventory was regenerated and its exact digest repinned.
+- The first post-documentation focused-policy invocation omitted the bounded
+  runner's required timeout, so no tests started. The corrected invocation
+  passed all 90 artifact, terminology, trust, required-CI, and release-control
+  tests plus 54 subtests.
 - A blanket ShellCheck invocation included two zsh visual-QA scripts and exited
   with ShellCheck's `SC1071` unsupported-shell result. All sh/bash scripts pass
   ShellCheck and `bash -n`; the two zsh scripts pass `zsh -n`.
@@ -387,6 +423,11 @@ heart-rate elevation as proof of walking.
   `/tmp/noop-step-false-positive-20260925/review-apple-derived` was
   exact-deleted, recovering another 5.5 GiB. The bounded review logs remain
   until replacement hosted evidence is durable.
+  The final generic iPhoneOS Release DerivedData tree was also exact-deleted
+  after its success status and embedded-product evidence were durable,
+  recovering about 3 GiB. The round-owned Python test environment remains only
+  until exact-SHA hosted verification is durable, then will be exact-deleted
+  with the bounded review logs.
   No source, simulator data, credentials, health data, or unidentified cache
   was removed. Free Data-volume space was about 19 GiB after the final local
   controls.

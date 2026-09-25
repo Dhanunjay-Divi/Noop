@@ -141,6 +141,11 @@ internal enum class ActiveDeviceSourceState {
     STANDARD,
 }
 
+data class ArchivedDeviceResult(
+    val archived: Boolean,
+    val activeDeviceId: String?,
+)
+
 /** Stable live fields the Today root is allowed to observe. Sensor values and sync counters stay in leaves. */
 internal data class DashboardLiveSnapshot(
     val connected: Boolean,
@@ -315,12 +320,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  pointed at it), so it stayed connected and couldn't show its blue pairing LEDs. iOS already does
      *  this in forgetDevice; this brings Android to parity. A non-WHOOP source (FTMS/HR strap) is owned by
      *  the SourceCoordinator, not the WHOOP client, so it isn't touched here. */
-    suspend fun archivePairedDevice(id: String) {
+    suspend fun archivePairedDevice(id: String): ArchivedDeviceResult {
         val devices = runCatching { noopApp.deviceRegistry.all() }.getOrDefault(emptyList())
         val target = devices.firstOrNull { it.id == id }
         val wasEligible = target?.status != null &&
             target.status != com.noop.data.DeviceStatus.archived.name
-        val archived = if (target?.sourceKind == com.noop.data.SourceKind.veepoo.name) {
+        val supplierRemoval = target?.sourceKind == com.noop.data.SourceKind.veepoo.name
+        val archived = if (supplierRemoval) {
             noopApp.sourceCoordinator.archiveVeepooDevice(id)
         } else {
             runCatching {
@@ -328,12 +334,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 true
             }.getOrDefault(false)
         }
-        if (!archived) return
+        if (!archived) return ArchivedDeviceResult(archived = false, activeDeviceId = null)
+        val activeDeviceId = if (supplierRemoval) {
+            val activeRead = runCatching {
+                noopApp.deviceRegistry.all()
+                    .firstOrNull { it.status == com.noop.data.DeviceStatus.active.name }
+            }
+            val active = activeRead.getOrNull()
+            val selectedId = active?.id ?: if (activeRead.isFailure) {
+                noopApp.activeDeviceIdFlow.value.takeIf { it != id }
+            } else {
+                null
+            }
+            if (selectedId != null) {
+                noopApp.noteActiveDeviceId(selectedId)
+                _selectedDeviceId.value = selectedId
+            }
+            refreshActiveDeviceName()
+            selectedId
+        } else {
+            null
+        }
         if (com.noop.ble.SourceCoordinator.isWhoop(id, devices)) ble.releaseStrap()
         if (wasEligible) {
             analyzeKick.trySend(Unit)
             scheduleAgeMetricRecompute()
         }
+        return ArchivedDeviceResult(archived = true, activeDeviceId = activeDeviceId)
     }
 
     /** Rename a device (blank clears the nickname → falls back to brand+model). */

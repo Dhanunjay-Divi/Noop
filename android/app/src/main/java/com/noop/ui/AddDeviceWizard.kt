@@ -736,6 +736,7 @@ fun AddDeviceWizard(
                             )
                             t == DeviceType.SupplierBand -> SupplierBandPickStep(
                                 candidates = supplierCandidates,
+                                state = supplierPairingState,
                                 onSelect = { candidate ->
                                     viewModel.selectSupplierBandCandidate(candidate.handle)
                                 },
@@ -1261,15 +1262,33 @@ private fun prepInstructions(type: DeviceType): List<String> = when (type) {
 @Composable
 private fun SupplierBandPickStep(
     candidates: List<com.noop.ble.veepoo.VeepooCandidateRow>,
+    state: com.noop.ble.veepoo.VeepooAdapterState,
     onSelect: suspend (com.noop.ble.veepoo.VeepooCandidateRow) -> Boolean,
     onSelected: () -> Unit,
     onRescan: suspend () -> Unit,
 ) {
     var actionBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val searching = state == com.noop.ble.veepoo.VeepooAdapterState.SCANNING
+    val failed = state == com.noop.ble.veepoo.VeepooAdapterState.FAILED
     PickList(
-        searching = true,
+        searching = searching,
         isEmpty = candidates.isEmpty(),
+        idleStatus = uiString(R.string.appwide_onboarding_device_wizard_idle),
+        idleTone = if (failed) StrandTone.Critical else StrandTone.Neutral,
+        emptyMessage = when {
+            searching -> null
+            failed ->
+                uiString(R.string.appwide_onboarding_device_wizard_supplier_android_failed)
+            else ->
+                uiString(R.string.l10n_add_device_wizard_make_sure_it_s_awake_and_8c40e59f)
+        },
+        emptySecondaryRes = if (searching) {
+            R.string.l10n_add_device_wizard_make_sure_it_s_awake_and_8c40e59f
+        } else {
+            null
+        },
+        showEmptyProgress = searching,
         onRescan = {
             if (!actionBusy) {
                 actionBusy = true
@@ -2070,6 +2089,12 @@ private fun PickList(
     searching: Boolean,
     isEmpty: Boolean,
     onRescan: () -> Unit,
+    idleStatus: String? = null,
+    idleTone: StrandTone = StrandTone.Neutral,
+    emptyMessage: String? = null,
+    emptySecondaryRes: Int? =
+        R.string.l10n_add_device_wizard_make_sure_it_s_awake_and_8c40e59f,
+    showEmptyProgress: Boolean = true,
     rows: @Composable () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
@@ -2080,9 +2105,9 @@ private fun PickList(
                         R.string.appwide_onboarding_device_wizard_searching,
                     )
                 } else {
-                    uiString(R.string.appwide_onboarding_device_wizard_idle)
+                    idleStatus ?: uiString(R.string.appwide_onboarding_device_wizard_idle)
                 },
-                tone = if (searching) StrandTone.Accent else StrandTone.Neutral,
+                tone = if (searching) StrandTone.Accent else idleTone,
                 pulsing = searching,
             )
             Spacer(Modifier.weight(1f))
@@ -2105,13 +2130,25 @@ private fun PickList(
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                CircularProgressIndicator(color = Palette.accent, modifier = Modifier.size(22.dp))
-                Text(uiString(R.string.l10n_add_device_wizard_searching_1a6a5ba8), style = NoopType.body, color = Palette.textPrimary)
+                if (showEmptyProgress) {
+                    CircularProgressIndicator(
+                        color = Palette.accent,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
                 Text(
-                    uiString(R.string.l10n_add_device_wizard_make_sure_it_s_awake_and_8c40e59f),
-                    style = NoopType.subhead,
-                    color = Palette.textSecondary,
+                    emptyMessage
+                        ?: uiString(R.string.l10n_add_device_wizard_searching_1a6a5ba8),
+                    style = NoopType.body,
+                    color = Palette.textPrimary,
                 )
+                emptySecondaryRes?.let { messageRes ->
+                    Text(
+                        uiString(messageRes),
+                        style = NoopType.subhead,
+                        color = Palette.textSecondary,
+                    )
+                }
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) { rows() }

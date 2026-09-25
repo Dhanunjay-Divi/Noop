@@ -811,6 +811,54 @@ class SourceCoordinator(
         }
     }
 
+    internal fun persistVeepooReconnectRevision(
+        id: String,
+        source: LiveHrSource,
+        password: CharArray,
+        revisionBinding: com.noop.ble.veepoo.VeepooRevisionBinding,
+    ): Boolean {
+        if (activeStrapId != id || activeSource !== source) return false
+        veepooLifecycleDiagnostics.recordSafely(
+            stage = VeepooSupplierLifecycleStage.SECURE_WRITE,
+            outcome = VeepooSupplierLifecycleOutcome.BEGAN,
+            trigger = VeepooSupplierLifecycleTrigger.REVISION_REBIND,
+        )
+        val saved = veepooCredentials?.let { credentials ->
+            runCatching {
+                credentials.save(
+                    deviceId = id,
+                    password = password,
+                    revisionBinding = revisionBinding,
+                )
+            }.getOrDefault(false)
+        } ?: false
+        veepooLifecycleDiagnostics.recordSafely(
+            stage = VeepooSupplierLifecycleStage.SECURE_WRITE,
+            outcome = if (saved) {
+                VeepooSupplierLifecycleOutcome.COMPLETED
+            } else {
+                VeepooSupplierLifecycleOutcome.FAILED
+            },
+            trigger = VeepooSupplierLifecycleTrigger.REVISION_REBIND,
+            failure = if (saved) null else VeepooSupplierLifecycleFailure.SECURE_PERSISTENCE,
+        )
+        return saved
+    }
+
+    internal fun onVeepooRevisionPersistenceUnavailable(
+        id: String,
+        source: LiveHrSource,
+    ) {
+        scope.launch {
+            reconcileLock.withLock {
+                if (activeStrapId != id || activeSource !== source) return@withLock
+                detachTerminalSupplierSource(source)
+                lastSeenId = null
+                scheduleSupplierCredentialRetry(id)
+            }
+        }
+    }
+
     internal fun onVeepooRuntimeUnavailable(id: String, source: LiveHrSource) {
         scope.launch {
             reconcileLock.withLock {
@@ -1208,6 +1256,17 @@ class SourceCoordinator(
                             compatibilityPolicy = veepooCompatibilityPolicy,
                             onReconnectCredentialRejected = { source ->
                                 onVeepooAuthenticationRejected(id, source)
+                            },
+                            onReconnectRevisionBindingChanged = { source, password, binding ->
+                                persistVeepooReconnectRevision(
+                                    id = id,
+                                    source = source,
+                                    password = password,
+                                    revisionBinding = binding,
+                                )
+                            },
+                            onReconnectRevisionPersistenceUnavailable = { source ->
+                                onVeepooRevisionPersistenceUnavailable(id, source)
                             },
                             onRuntimeUnavailable = { source ->
                                 onVeepooRuntimeUnavailable(id, source)

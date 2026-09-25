@@ -367,6 +367,7 @@ final class VeepooBandSource: LiveHRSource {
     private let credentialRetryDelaysNanoseconds: [UInt64]
     private let onCredentialRejected: () -> Void
     private let onCredentialPermanentlyUnavailable: () -> Void
+    private let onCompatibilityFailure: () -> Void
     private let onTerminalBatteryFailure: () -> Bool
     private let displayFreshnessInterval: TimeInterval
     private let reconnectDelaysNanoseconds: [UInt64]
@@ -387,6 +388,7 @@ final class VeepooBandSource: LiveHRSource {
     private var credentialRejected = false
     private var credentialWaitRecorded = false
     private var permanentCredentialFailureHandled = false
+    private var terminalCompatibilityFailureHandled = false
     private var terminalBatteryFailureHandled = false
     private var stopped = false
 
@@ -395,6 +397,7 @@ final class VeepooBandSource: LiveHRSource {
         adapter: any VeepooBandAdapterControlling,
         password: String,
         onCredentialRejected: @escaping () -> Void,
+        onCompatibilityFailure: @escaping () -> Void = {},
         onTerminalBatteryFailure: @escaping () -> Bool = { true },
         displayFreshnessInterval: TimeInterval = displayFreshnessInterval,
         reconnectDelaysNanoseconds: [UInt64] = [
@@ -421,6 +424,7 @@ final class VeepooBandSource: LiveHRSource {
         self.credentialRetryDelaysNanoseconds = []
         self.onCredentialRejected = onCredentialRejected
         self.onCredentialPermanentlyUnavailable = {}
+        self.onCompatibilityFailure = onCompatibilityFailure
         self.onTerminalBatteryFailure = onTerminalBatteryFailure
         self.displayFreshnessInterval = displayFreshnessInterval
         self.reconnectDelaysNanoseconds = reconnectDelaysNanoseconds
@@ -446,6 +450,7 @@ final class VeepooBandSource: LiveHRSource {
         ],
         onCredentialRejected: @escaping () -> Void,
         onCredentialPermanentlyUnavailable: @escaping () -> Void,
+        onCompatibilityFailure: @escaping () -> Void = {},
         onTerminalBatteryFailure: @escaping () -> Bool = { true },
         displayFreshnessInterval: TimeInterval = displayFreshnessInterval,
         reconnectDelaysNanoseconds: [UInt64] = [
@@ -475,6 +480,7 @@ final class VeepooBandSource: LiveHRSource {
         self.onCredentialRejected = onCredentialRejected
         self.onCredentialPermanentlyUnavailable =
             onCredentialPermanentlyUnavailable
+        self.onCompatibilityFailure = onCompatibilityFailure
         self.onTerminalBatteryFailure = onTerminalBatteryFailure
         self.displayFreshnessInterval = displayFreshnessInterval
         self.reconnectDelaysNanoseconds = reconnectDelaysNanoseconds
@@ -504,6 +510,7 @@ final class VeepooBandSource: LiveHRSource {
         credentialRetryAttempt = 0
         credentialRejected = false
         permanentCredentialFailureHandled = false
+        terminalCompatibilityFailureHandled = false
         terminalBatteryFailureHandled = false
         startTransportWhenCredentialAvailable(targetPeripheralID: id)
     }
@@ -580,7 +587,10 @@ final class VeepooBandSource: LiveHRSource {
             live.batteryPct = nil
             live.charging = nil
             live.clearBiometrics()
-            if !credentialRejected && !terminalBatteryFailureHandled {
+            if !credentialRejected
+                && !terminalCompatibilityFailureHandled
+                && !terminalBatteryFailureHandled
+            {
                 scheduleReconnect()
             }
         case .failed(let stage, let failure):
@@ -590,6 +600,23 @@ final class VeepooBandSource: LiveHRSource {
                 cancelLiveRestart(resetAttempt: true)
                 adapter.disconnect()
                 onCredentialRejected()
+                return
+            }
+            if stage == .compatibility {
+                guard !terminalCompatibilityFailureHandled else { return }
+                terminalCompatibilityFailureHandled = true
+                cancelLiveRestart(resetAttempt: true)
+                reconnectTask?.cancel()
+                reconnectTask = nil
+                credentialRetryTask?.cancel()
+                credentialRetryTask = nil
+                protectedDataCancellable?.cancel()
+                protectedDataCancellable = nil
+                live.batteryPct = nil
+                live.charging = nil
+                publishNonStreamingDisplayState()
+                adapter.disconnect()
+                onCompatibilityFailure()
                 return
             }
             if stage == .battery {
@@ -920,7 +947,7 @@ enum VeepooBandSourceFactory {
                 return nil
             }
 
-            let reconcilePermanentCredentialFailure = {
+            let reconcileUnavailableSource = {
                 let reconciled = registry.reconcileUnavailableSupplier(
                     deviceID
                 )
@@ -971,6 +998,7 @@ enum VeepooBandSourceFactory {
                     password: password,
                     onCredentialRejected:
                         reconcileAuthenticationRejection,
+                    onCompatibilityFailure: reconcileUnavailableSource,
                     onTerminalBatteryFailure: reconcileBatteryFailure
                 )
             case .unavailable:
@@ -983,7 +1011,8 @@ enum VeepooBandSourceFactory {
                     onCredentialRejected:
                         reconcileAuthenticationRejection,
                     onCredentialPermanentlyUnavailable:
-                        reconcilePermanentCredentialFailure,
+                        reconcileUnavailableSource,
+                    onCompatibilityFailure: reconcileUnavailableSource,
                     onTerminalBatteryFailure: reconcileBatteryFailure
                 )
             case .available, .missing, .malformed:

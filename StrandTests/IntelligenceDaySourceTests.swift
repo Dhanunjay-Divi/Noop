@@ -157,6 +157,54 @@ final class IntelligenceDaySourceTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testDayOwnerRejectsAClassifiedRowWithoutAUsableDelta() async throws {
+        let store = try await WhoopStore.inMemory()
+        let registry = DeviceRegistryStore(dbQueue: store.registryWriter)
+        try registry.add(PairedDevice(
+            id: "oura-import",
+            brand: "Oura",
+            model: "Oura import",
+            sourceKind: .cloudImport,
+            capabilities: [.hr],
+            status: .paired,
+            addedAt: 1,
+            lastSeenAt: 1
+        ))
+
+        let from = 1_000
+        let to = 2_000
+        _ = try await store.insert(
+            Streams(steps: [
+                StepSample(ts: 1_400, counter: 100, activityClass: 1),
+            ]),
+            deviceId: "my-whoop"
+        )
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: 1_500, bpm: 60)]),
+            deviceId: "oura-import"
+        )
+
+        let owner = try await IntelligenceEngine.resolveDayOwner(
+            day: "1970-01-01",
+            from: from,
+            to: to,
+            stepFrom: from,
+            stepTo: to,
+            store: store,
+            devices: try registry.all(),
+            activeId: "my-whoop",
+            registry: registry,
+            fallbackDeviceId: "my-whoop"
+        )
+
+        XCTAssertEqual(
+            owner,
+            "oura-import",
+            "a lone counter row cannot suppress another source's usable evidence"
+        )
+    }
+
     // MARK: - banked-sleep repair scope
 
     func testSleepRepairIncludesComputedAndEveryRegisteredDevice() {

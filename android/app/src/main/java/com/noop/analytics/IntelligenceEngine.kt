@@ -13,9 +13,11 @@ import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 
 /*
  * IntelligenceEngine.kt , on-device "intelligence": computes recovery / day-strain /
@@ -3247,8 +3249,9 @@ object IntelligenceEngine {
     /**
      * Resolve the SINGLE device that owns [day] (invariant I2), so the day is scored from exactly one
      * source , never a mix. A locked override (dayOwnership) wins outright and skips the presence checks.
-     * Otherwise builds one [DayOwnerResolver.Candidate] per device from [candidatePriorities] with a CHEAP
-     * per-day presence flag (one `LIMIT 1` HR read, then one step read only when HR is absent, per device),
+     * Otherwise builds one [DayOwnerResolver.Candidate] per device from [candidatePriorities] with a bounded
+     * per-day evidence flag (one `LIMIT 1` HR read, then a chunked classified-step probe only when HR is
+     * absent, per device),
      * and returns the lowest-priority candidate that has data. Returns [importedDeviceId] when
      * [ownerSource] is null or the resolver yields no owner , so the legacy single-source path is
      * preserved.
@@ -3287,12 +3290,18 @@ object IntelligenceEngine {
             return importedDeviceId
         }
         val candidates = candidatePriorities.map { (id, priority) ->
-            // Resolve all available evidence for this same source before applying source priority.
+            // Resolve all usable evidence for this same source before applying source priority.
             // Otherwise an import with one HR row can win before the active band's valid walking rows
             // are checked. HR short-circuits the step probe; steps are independent gait evidence and
-            // do not require an overnight HR row.
+            // do not require an overnight HR row. A raw counter row alone is not evidence: the same
+            // production classifier must retain at least one walk/run delta.
             val hasHeartRate = repo.hrSamples(id, from, to, 1).isNotEmpty()
-            val hasSteps = !hasHeartRate && repo.stepSamples(id, stepFrom, stepTo, 1).isNotEmpty()
+            val hasSteps = !hasHeartRate && hasRetainedStepEvidence(
+                repo = repo,
+                deviceId = id,
+                from = stepFrom,
+                to = stepTo,
+            )
             DayOwnerResolver.Candidate(
                 deviceId = id,
                 priority = priority,
@@ -3304,6 +3313,48 @@ object IntelligenceEngine {
             lockedOwner = null,
             candidates = candidates,
         ) ?: importedDeviceId
+    }
+
+    /**
+     * Determine whether a source has at least one production-eligible classified step delta without
+     * materializing an entire day for every ownership candidate. The prior row is carried across chunks
+     * so a walk/run delta at a chunk boundary is evaluated exactly once.
+     */
+    private suspend fun hasRetainedStepEvidence(
+        repo: WhoopRepository,
+        deviceId: String,
+        from: Long,
+        to: Long,
+    ): Boolean {
+        if (from > to) return false
+
+        val batchSize = 8_192
+        var cursor = from
+        var previous: com.noop.data.StepSample? = null
+
+        while (cursor <= to) {
+            coroutineContext.ensureActive()
+            val batch = repo.stepSamples(deviceId, cursor, to, batchSize)
+            if (batch.isEmpty()) return false
+
+            val probe = previous?.let { listOf(it) + batch } ?: batch
+            if (
+                StepsCounter.analyze(
+                    probe,
+                    classificationPolicy = StepsCounter.ClassificationPolicy.requireActivityClass,
+                ).steps != null
+            ) {
+                return true
+            }
+
+            val last = batch.last()
+            if (batch.size < batchSize || last.ts >= to || last.ts == Long.MAX_VALUE) {
+                return false
+            }
+            previous = last
+            cursor = last.ts + 1L
+        }
+        return false
     }
 
     internal fun <T> daySliceFromWindow(
