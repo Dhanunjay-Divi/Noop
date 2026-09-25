@@ -36,8 +36,17 @@ class StepsCounterTest {
     }
 
     @Test fun fewerThanTwoSamplesIsNull() {
-        assertNull(StepsCounter.stepsInWindow(emptyList()))
-        assertNull(StepsCounter.stepsInWindow(listOf(step(0, 100))))
+        val empty = StepsCounter.analyze(emptyList())
+        assertNull(empty.steps)
+        assertEquals(false, empty.counterObserved)
+        assertEquals(true, empty.allowsMotionFallback)
+        assertEquals(false, empty.hasAuthoritativeCounterOutcome)
+
+        val singleton = StepsCounter.analyze(listOf(step(0, 100)))
+        assertNull(singleton.steps)
+        assertEquals(true, singleton.counterObserved)
+        assertEquals(false, singleton.allowsMotionFallback)
+        assertEquals(false, singleton.hasAuthoritativeCounterOutcome)
     }
 
     @Test fun noForwardMovementIsNull() {
@@ -73,6 +82,9 @@ class StepsCounterTest {
         assertEquals(10, analysis.rejectedStillDeltaCount)
         assertEquals(0, analysis.rawTicks)
         assertNull(analysis.steps)
+        assertEquals(true, analysis.counterObserved)
+        assertEquals(false, analysis.allowsMotionFallback)
+        assertEquals(false, analysis.hasAuthoritativeCounterOutcome)
         assertNull(StepsCounter.stepsInWindow(samples))
     }
 
@@ -138,7 +150,78 @@ class StepsCounterTest {
         )
         assertEquals(10, analysis.keptDeltaCount)
         assertEquals(4_000, analysis.rawTicks)
+        assertEquals(true, analysis.counterObserved)
+        assertEquals(false, analysis.allowsMotionFallback)
+        assertEquals(true, analysis.hasAuthoritativeCounterOutcome)
         assertEquals(4_000, StepsCounter.stepsInWindow(samples))
+    }
+
+    @Test fun currentClasslessFourThousandTickBurstFailsClosed() {
+        val samples = (0..10).map { index -> step(index * 60L, index * 400) }
+        val analysis = StepsCounter.analyze(
+            samples,
+            StepsCounter.ClassificationPolicy.requireActivityClass,
+        )
+
+        assertEquals(
+            StepsCounter.Analysis.FilterMode.activityClassRequiredMissing,
+            analysis.filterMode,
+        )
+        assertEquals(0, analysis.keptDeltaCount)
+        assertEquals(10, analysis.rejectedUnknownDeltaCount)
+        assertEquals(0, analysis.rawTicks)
+        assertNull(analysis.steps)
+        assertEquals(true, analysis.counterObserved)
+        assertEquals(false, analysis.allowsMotionFallback)
+        assertEquals(false, analysis.hasAuthoritativeCounterOutcome)
+    }
+
+    @Test fun gapOnlyAndUnknownOnlyWindowsDoNotDisproveStoredSteps() {
+        val gapOnly = StepsCounter.analyze(
+            listOf(
+                step(0, 100, activityClass = 0),
+                step(60, 900, activityClass = 0),
+            )
+        )
+        assertNull(gapOnly.steps)
+        assertEquals(true, gapOnly.counterObserved)
+        assertEquals(false, gapOnly.hasAuthoritativeCounterOutcome)
+
+        val unknownOnly = StepsCounter.analyze(
+            listOf(
+                step(0, 100, activityClass = 9),
+                step(60, 200, activityClass = 9),
+            )
+        )
+        assertNull(unknownOnly.steps)
+        assertEquals(true, unknownOnly.counterObserved)
+        assertEquals(false, unknownOnly.hasAuthoritativeCounterOutcome)
+    }
+
+    @Test fun stillMixedWithUnknownOrGapRemainsAmbiguous() {
+        val stillAndUnknown = StepsCounter.analyze(
+            listOf(
+                step(0, 100, activityClass = 0),
+                step(60, 200, activityClass = 0),
+                step(120, 300, activityClass = 9),
+            )
+        )
+        assertNull(stillAndUnknown.steps)
+        assertEquals(1, stillAndUnknown.rejectedStillDeltaCount)
+        assertEquals(1, stillAndUnknown.rejectedUnknownDeltaCount)
+        assertEquals(false, stillAndUnknown.hasAuthoritativeCounterOutcome)
+
+        val stillAndGap = StepsCounter.analyze(
+            listOf(
+                step(0, 100, activityClass = 0),
+                step(60, 200, activityClass = 0),
+                step(120, 900, activityClass = 0),
+            )
+        )
+        assertNull(stillAndGap.steps)
+        assertEquals(1, stillAndGap.rejectedStillDeltaCount)
+        assertEquals(1, stillAndGap.rejectedGapDeltaCount)
+        assertEquals(false, stillAndGap.hasAuthoritativeCounterOutcome)
     }
 
     @Test fun classedWindowRetainsWrapAndGapBehavior() {

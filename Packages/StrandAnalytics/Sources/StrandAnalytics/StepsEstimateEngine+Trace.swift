@@ -83,6 +83,7 @@ extension StepsEstimateEngine {
                                        dayKey: String,
                                        tzOffsetSeconds: Int,
                                        ticksPerStep: Double,
+                                       classificationPolicy: StepsCounter.ClassificationPolicy = .allowLegacyRawMotion,
                                        civilDayStartTs: Int? = nil,
                                        civilDayEndTsExclusive: Int? = nil) -> [String] {
         let civilBounds = AnalyticsEngine.validateCivilDayBounds(
@@ -112,7 +113,10 @@ extension StepsEstimateEngine {
             }
             .sorted { $0.ts < $1.ts }
 
-        let analysis = StepsCounter.analyze(sorted)
+        let analysis = StepsCounter.analyze(
+            sorted,
+            classificationPolicy: classificationPolicy
+        )
         let status: String
         if analysis.sampleCount == 0 {
             status = "noRawCounter"

@@ -28,8 +28,17 @@ final class StepsCounterTests: XCTestCase {
     }
 
     func testFewerThanTwoSamplesIsNil() {
-        XCTAssertNil(StepsCounter.stepsInWindow([]))
-        XCTAssertNil(StepsCounter.stepsInWindow([step(0, 100)]))
+        let empty = StepsCounter.analyze([])
+        XCTAssertNil(empty.steps)
+        XCTAssertFalse(empty.counterObserved)
+        XCTAssertTrue(empty.allowsMotionFallback)
+        XCTAssertFalse(empty.hasAuthoritativeCounterOutcome)
+
+        let singleton = StepsCounter.analyze([step(0, 100)])
+        XCTAssertNil(singleton.steps)
+        XCTAssertTrue(singleton.counterObserved)
+        XCTAssertFalse(singleton.allowsMotionFallback)
+        XCTAssertFalse(singleton.hasAuthoritativeCounterOutcome)
     }
 
     func testNoForwardMovementIsNil() {
@@ -62,6 +71,9 @@ final class StepsCounterTests: XCTestCase {
         XCTAssertEqual(analysis.rejectedStillDeltaCount, 10)
         XCTAssertEqual(analysis.rawTicks, 0)
         XCTAssertNil(analysis.steps)
+        XCTAssertTrue(analysis.counterObserved)
+        XCTAssertFalse(analysis.allowsMotionFallback)
+        XCTAssertFalse(analysis.hasAuthoritativeCounterOutcome)
         XCTAssertNil(StepsCounter.stepsInWindow(samples))
     }
 
@@ -114,7 +126,67 @@ final class StepsCounterTests: XCTestCase {
         XCTAssertEqual(analysis.filterMode, .legacyRawMotion)
         XCTAssertEqual(analysis.keptDeltaCount, 10)
         XCTAssertEqual(analysis.rawTicks, 4_000)
+        XCTAssertTrue(analysis.counterObserved)
+        XCTAssertFalse(analysis.allowsMotionFallback)
+        XCTAssertTrue(analysis.hasAuthoritativeCounterOutcome)
         XCTAssertEqual(StepsCounter.stepsInWindow(samples), 4_000)
+    }
+
+    func testCurrentClasslessFourThousandTickBurstFailsClosed() {
+        let samples = (0...10).map { step($0 * 60, $0 * 400) }
+        let analysis = StepsCounter.analyze(
+            samples,
+            classificationPolicy: .requireActivityClass
+        )
+
+        XCTAssertEqual(analysis.filterMode, .activityClassRequiredMissing)
+        XCTAssertEqual(analysis.keptDeltaCount, 0)
+        XCTAssertEqual(analysis.rejectedUnknownDeltaCount, 10)
+        XCTAssertEqual(analysis.rawTicks, 0)
+        XCTAssertNil(analysis.steps)
+        XCTAssertTrue(analysis.counterObserved)
+        XCTAssertFalse(analysis.allowsMotionFallback)
+        XCTAssertFalse(analysis.hasAuthoritativeCounterOutcome)
+    }
+
+    func testGapOnlyAndUnknownOnlyWindowsDoNotDisproveStoredSteps() {
+        let gapOnly = StepsCounter.analyze([
+            step(0, 100, 0),
+            step(60, 900, 0),
+        ])
+        XCTAssertNil(gapOnly.steps)
+        XCTAssertTrue(gapOnly.counterObserved)
+        XCTAssertFalse(gapOnly.hasAuthoritativeCounterOutcome)
+
+        let unknownOnly = StepsCounter.analyze([
+            step(0, 100, 9),
+            step(60, 200, 9),
+        ])
+        XCTAssertNil(unknownOnly.steps)
+        XCTAssertTrue(unknownOnly.counterObserved)
+        XCTAssertFalse(unknownOnly.hasAuthoritativeCounterOutcome)
+    }
+
+    func testStillMixedWithUnknownOrGapRemainsAmbiguous() {
+        let stillAndUnknown = StepsCounter.analyze([
+            step(0, 100, 0),
+            step(60, 200, 0),
+            step(120, 300, 9),
+        ])
+        XCTAssertNil(stillAndUnknown.steps)
+        XCTAssertEqual(stillAndUnknown.rejectedStillDeltaCount, 1)
+        XCTAssertEqual(stillAndUnknown.rejectedUnknownDeltaCount, 1)
+        XCTAssertFalse(stillAndUnknown.hasAuthoritativeCounterOutcome)
+
+        let stillAndGap = StepsCounter.analyze([
+            step(0, 100, 0),
+            step(60, 200, 0),
+            step(120, 900, 0),
+        ])
+        XCTAssertNil(stillAndGap.steps)
+        XCTAssertEqual(stillAndGap.rejectedStillDeltaCount, 1)
+        XCTAssertEqual(stillAndGap.rejectedGapDeltaCount, 1)
+        XCTAssertFalse(stillAndGap.hasAuthoritativeCounterOutcome)
     }
 
     func testClassedWindowRetainsWrapAndGapBehavior() {

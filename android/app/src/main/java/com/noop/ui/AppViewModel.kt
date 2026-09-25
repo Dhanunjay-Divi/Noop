@@ -2722,8 +2722,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  not available on Android (no cheap windowed step source), so a 4.0 window simply shows no steps. */
     suspend fun workoutSteps(from: Long, to: Long): Int? {
         if (to <= from) return null
-        val samples = runCatching { repository.stepSamples(deviceId, from, to) }.getOrDefault(emptyList())
-        val ticks = com.noop.analytics.StepsCounter.stepsInWindow(samples) ?: return null
+        val ticks = try {
+            repository.strapStepTicks(deviceId, from, to)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "workouts.step_summary",
+                fields = mapOf(
+                    "outcome" to "failed",
+                    "failure_kind" to "storage",
+                ),
+            )
+            null
+        } ?: return null
         val scaled = (ticks.toDouble() / maxOf(profileStore.stepTicksPerStep, 0.5)).roundToInt()
         return if (scaled > 0) scaled else null
     }

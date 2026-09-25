@@ -441,6 +441,16 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun upsertDailyMetrics(rows: List<DailyMetric>)
 
     @Query(
+        "DELETE FROM metricSeries WHERE deviceId = :deviceId " +
+            "AND day IN (:days) AND `key` = :key"
+    )
+    suspend fun deleteMetricSeriesPoints(
+        deviceId: String,
+        days: List<String>,
+        key: String,
+    ): Int
+
+    @Query(
         "DELETE FROM dailyMetric WHERE deviceId = :deviceId " +
             "AND day >= :fromDay AND day <= :toDay"
     )

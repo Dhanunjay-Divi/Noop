@@ -24,6 +24,17 @@ object StepsCounter {
      */
     const val MAX_STEP_DELTA = 512
 
+    enum class ClassificationPolicy {
+        /** Preserve the historical raw-motion estimate for explicit legacy analysis. */
+        allowLegacyRawMotion,
+
+        /**
+         * Current counter-capable hardware must provide walk/run evidence. An all-unclassified window
+         * remains observed but ambiguous, yields no steps, and cannot enable another motion fallback.
+         */
+        requireActivityClass,
+    }
+
     /**
      * Pure counter analysis shared by production totals and bounded diagnostics. It exposes aggregate counts,
      * never timestamps, identifiers, or per-sample counter values.
@@ -42,10 +53,26 @@ object StepsCounter {
         enum class FilterMode {
             legacyRawMotion,
             activityClassFiltered,
+            activityClassRequiredMissing,
         }
 
         val steps: Int?
             get() = rawTicks.takeIf { it > 0 }
+
+        /**
+         * True when this window contains at least one counter row, including flat, discontinuous, or
+         * class-rejected motion. Callers must not treat such a window as hardware without a counter.
+         */
+        val counterObserved: Boolean
+            get() = sampleCount > 0
+
+        /** Gravity may stand in only when no counter row exists at all. */
+        val allowsMotionFallback: Boolean
+            get() = !counterObserved
+
+        /** Only retained walk/run evidence may replace older computed evidence. */
+        val hasAuthoritativeCounterOutcome: Boolean
+            get() = steps != null
     }
 
     /**
@@ -56,12 +83,17 @@ object StepsCounter {
      * run (2). Still (0), unknown (null), and any other class are rejected. Gap/reset deltas remain rejected
      * before activity classification.
      */
-    fun analyze(samples: List<StepSample>): Analysis {
+    fun analyze(
+        samples: List<StepSample>,
+        classificationPolicy: ClassificationPolicy = ClassificationPolicy.allowLegacyRawMotion,
+    ): Analysis {
         val sorted = samples.sortedBy { it.ts }
-        val filterMode = if (sorted.any { it.activityClass != null }) {
-            Analysis.FilterMode.activityClassFiltered
-        } else {
-            Analysis.FilterMode.legacyRawMotion
+        val hasActivityClass = sorted.any { it.activityClass != null }
+        val filterMode = when {
+            hasActivityClass -> Analysis.FilterMode.activityClassFiltered
+            classificationPolicy == ClassificationPolicy.requireActivityClass ->
+                Analysis.FilterMode.activityClassRequiredMissing
+            else -> Analysis.FilterMode.legacyRawMotion
         }
 
         var rawTicks = 0
@@ -112,5 +144,8 @@ object StepsCounter {
      * are fewer than two samples or no forward movement (so "no data" stays distinct from a real zero). The
      * caller applies its `stepTicksPerStep` calibration to the returned ticks.
      */
-    fun stepsInWindow(samples: List<StepSample>): Int? = analyze(samples).steps
+    fun stepsInWindow(
+        samples: List<StepSample>,
+        classificationPolicy: ClassificationPolicy = ClassificationPolicy.allowLegacyRawMotion,
+    ): Int? = analyze(samples, classificationPolicy).steps
 }

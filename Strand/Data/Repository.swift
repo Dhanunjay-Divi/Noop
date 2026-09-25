@@ -1930,17 +1930,31 @@ final class Repository: ObservableObject {
         return byTs.values.sorted { $0.ts < $1.ts }
     }
 
-    /// Retained strap step TICKS over `[from, to]` for a manual-workout summary (#398): the wrap-aware,
-    /// activity-class-aware `step_motion_counter@57` result (shared `StepsCounter` kernel) from the FIRST id
-    /// that has a countable window — the active strap wins, mirroring `stepActivityClassLatest`. Never MERGED
-    /// across ids: two devices' cumulative counters must not be interleaved (that would fabricate huge deltas).
-    /// `nil` when no strap counter covers the window — a WHOOP 4.0 (no @57 counter) or an MG/5.0 that hasn't
-    /// offloaded the window yet. The caller applies `stepTicksPerStep` and reconciles with the phone pedometer.
-    func strapStepTicks(from: Int, to: Int) async -> Int? {
-        guard let store = await ensureStore() else { return nil }
+    /// Strap counter analysis over `[from, to]` for a manual-workout summary (#398). The first source with
+    /// any counter evidence owns the result — the active strap wins, and counters are never interleaved across
+    /// devices. Returning the full analysis keeps "counter absent" distinct from "counter present but every
+    /// delta rejected as still/unknown", so only the truly absent case may use the phone-pedometer fallback.
+    /// A failed active read throws and cannot fall through to another source or fallback.
+    func strapStepAnalysis(from: Int, to: Int) async throws -> StepsCounter.Analysis? {
+        guard let store = await ensureStore() else {
+            throw RepositoryReadError.storeUnavailable
+        }
+        try Task.checkCancellation()
         for id in importedReadIds {   // active strap FIRST
-            let samples = (try? await store.stepSamples(deviceId: id, from: from, to: to, limit: 200_000)) ?? []
-            if let ticks = StepsCounter.stepsInWindow(samples) { return ticks }
+            try Task.checkCancellation()
+            let samples = try await store.stepSamples(
+                deviceId: id,
+                from: from,
+                to: to,
+                limit: 200_000
+            )
+            try Task.checkCancellation()
+            if !samples.isEmpty {
+                return StepsCounter.analyze(
+                    samples,
+                    classificationPolicy: .requireActivityClass
+                )
+            }
         }
         return nil
     }

@@ -1,5 +1,7 @@
 package com.noop.analytics
 
+import com.noop.data.GravitySample
+import com.noop.data.HrSample
 import com.noop.data.StepSample
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -29,6 +31,22 @@ class StepsAnalyticsTest {
 
     private fun stepsFor(samples: List<StepSample>): Int? =
         AnalyticsEngine.analyzeDay(day = dayUtc, steps = samples, profile = profile).daily.steps
+
+    private val lowHeartRateWearEvidence: List<HrSample>
+        get() = (0 until StrainScorer.minSparseReadings).map {
+            HrSample(deviceId = "my-whoop", ts = noonUtc + it, bpm = 50)
+        }
+
+    private val activeWristGravity: List<GravitySample>
+        get() = (0..10).map { index ->
+            GravitySample(
+                deviceId = "my-whoop",
+                ts = noonUtc + index * 60L,
+                x = if (index % 2 == 0) 0.0 else 0.30,
+                y = 0.0,
+                z = 1.0,
+            )
+        }
 
     @Test
     fun sumsPositiveConsecutiveDeltas() {
@@ -174,6 +192,54 @@ class StepsAnalyticsTest {
         )
 
         assertNull(result.daily.steps)
+    }
+
+    @Test
+    fun currentClasslessBurstDoesNotBecomeStepsOrGravityEffort() {
+        val samples = (0..10).map { index -> step(index * 60L, index * 400) }
+        val result = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            hr = lowHeartRateWearEvidence,
+            gravity = activeWristGravity,
+            steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.requireActivityClass,
+            profile = profile,
+        )
+
+        assertNull(result.daily.steps)
+        assertNull(result.daily.strain)
+    }
+
+    @Test
+    fun dailyStationaryClassedBurstDoesNotReappearAsGravityEffort() {
+        val samples = (0..10).map { index ->
+            step(index * 60L, index * 400, activityClass = 0)
+        }
+        val result = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            hr = lowHeartRateWearEvidence,
+            gravity = activeWristGravity,
+            steps = samples,
+            profile = profile,
+        )
+
+        assertNull(result.daily.steps)
+        assertNull(result.daily.strain)
+    }
+
+    @Test
+    fun dailyNoCounterStillAllowsWornGravityEffortFallback() {
+        val result = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            hr = lowHeartRateWearEvidence,
+            gravity = activeWristGravity,
+            steps = emptyList(),
+            profile = profile,
+        )
+
+        assertNull(result.daily.steps)
+        org.junit.Assert.assertTrue((result.daily.strain ?: 0.0) > 0.0)
     }
 
     @Test

@@ -23,6 +23,23 @@ final class StepsDailyTests: XCTestCase {
         AnalyticsEngine.analyzeDay(day: dayUtc, steps: samples, profile: profile).daily.steps
     }
 
+    private var lowHeartRateWearEvidence: [HRSample] {
+        (0..<StrainScorer.minSparseReadings).map {
+            HRSample(ts: noonUtc + $0, bpm: 50)
+        }
+    }
+
+    private var activeWristGravity: [GravitySample] {
+        (0...10).map { index in
+            GravitySample(
+                ts: noonUtc + index * 60,
+                x: index.isMultiple(of: 2) ? 0 : 0.30,
+                y: 0,
+                z: 1
+            )
+        }
+    }
+
     func testSumsPositiveConsecutiveDeltas() {
         // counters 100 -> 150 -> 220 => deltas 50 + 70 = 120
         let s = [step(0, 100), step(60, 150), step(120, 220)]
@@ -154,6 +171,50 @@ final class StepsDailyTests: XCTestCase {
         )
 
         XCTAssertNil(result.daily.steps)
+    }
+
+    func testCurrentClasslessBurstDoesNotBecomeStepsOrGravityEffort() {
+        let samples = (0...10).map { step($0 * 60, $0 * 400) }
+        let result = AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            hr: lowHeartRateWearEvidence,
+            gravity: activeWristGravity,
+            steps: samples,
+            stepClassificationPolicy: .requireActivityClass,
+            profile: profile
+        )
+
+        XCTAssertNil(result.daily.steps)
+        XCTAssertNil(result.daily.strain)
+    }
+
+    func testDailyStationaryClassedBurstDoesNotReappearAsGravityEffort() {
+        let samples = (0...10).map {
+            step($0 * 60, $0 * 400, activityClass: 0)
+        }
+        let result = AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            hr: lowHeartRateWearEvidence,
+            gravity: activeWristGravity,
+            steps: samples,
+            profile: profile
+        )
+
+        XCTAssertNil(result.daily.steps)
+        XCTAssertNil(result.daily.strain)
+    }
+
+    func testDailyNoCounterStillAllowsWornGravityEffortFallback() {
+        let result = AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            hr: lowHeartRateWearEvidence,
+            gravity: activeWristGravity,
+            steps: [],
+            profile: profile
+        )
+
+        XCTAssertNil(result.daily.steps)
+        XCTAssertGreaterThan(result.daily.strain ?? 0, 0)
     }
 
     func testDailyNoHRWalkClassStepsStillCount() {

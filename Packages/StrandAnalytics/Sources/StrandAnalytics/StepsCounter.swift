@@ -19,6 +19,15 @@ public enum StepsCounter {
     /// Real 1 Hz motion never ticks this fast between adjacent records. (#132/#276/#316)
     public static let maxStepDelta = 512
 
+    public enum ClassificationPolicy: Equatable, Sendable {
+        /// Preserve the historical raw-motion estimate when every persisted class is absent.
+        case allowLegacyRawMotion
+
+        /// Current counter-capable hardware must provide walk/run evidence. An all-unclassified
+        /// window remains observed but ambiguous: it yields no steps and cannot enable motion fallback.
+        case requireActivityClass
+    }
+
     public struct Analysis: Equatable, Sendable {
         public enum FilterMode: String, Equatable, Sendable {
             /// No activity-class evidence exists anywhere in the window, so preserve the legacy raw-motion
@@ -28,6 +37,10 @@ public enum StepsCounter {
             /// At least one sample has activity-class evidence. Only deltas whose later sample is walk (1)
             /// or run (2) are retained.
             case activityClassFiltered
+
+            /// The production source is expected to classify locomotion, but the complete window is
+            /// unclassified. Positive deltas are rejected as unknown rather than counted as steps.
+            case activityClassRequiredMissing
         }
 
         public let filterMode: FilterMode
@@ -44,17 +57,44 @@ public enum StepsCounter {
         public var steps: Int? {
             rawTicks > 0 ? rawTicks : nil
         }
+
+        /// At least one counter row exists in this window. This remains true when every delta was flat,
+        /// discontinuous, or rejected as still/unknown, so callers do not confuse explicit counter evidence
+        /// with hardware that exposes no counter at all.
+        public var counterObserved: Bool {
+            sampleCount > 0
+        }
+
+        /// Gravity-derived movement is only an honest fallback when the source exposes no counter rows.
+        /// A present-but-rejected counter must not be reinterpreted as steps through another motion path.
+        public var allowsMotionFallback: Bool {
+            !counterObserved
+        }
+
+        /// Only retained walk/run evidence is authoritative enough to replace an older estimate.
+        /// Still-only or unclassified partial windows suppress new fallbacks but do not prove that the
+        /// entire day's previously stored steps were false.
+        public var hasAuthoritativeCounterOutcome: Bool { steps != nil }
     }
 
     /// Pure analysis of a counter window. Deltas remain wrap-aware and the `maxStepDelta` boundary is
     /// applied before activity filtering. A window with no non-nil activity class keeps legacy behavior.
     /// Once any class evidence exists, each in-range positive delta is attributed to its later sample:
     /// walk/run is retained, still is rejected, and nil/unknown classes fail closed.
-    public static func analyze(_ samples: [StepSample]) -> Analysis {
+    public static func analyze(
+        _ samples: [StepSample],
+        classificationPolicy: ClassificationPolicy = .allowLegacyRawMotion
+    ) -> Analysis {
         let sorted = samples.sorted { $0.ts < $1.ts }
-        let filterMode: Analysis.FilterMode = sorted.contains { $0.activityClass != nil }
-            ? .activityClassFiltered
-            : .legacyRawMotion
+        let hasActivityClass = sorted.contains { $0.activityClass != nil }
+        let filterMode: Analysis.FilterMode
+        if hasActivityClass {
+            filterMode = .activityClassFiltered
+        } else if classificationPolicy == .requireActivityClass {
+            filterMode = .activityClassRequiredMissing
+        } else {
+            filterMode = .legacyRawMotion
+        }
 
         var rawTicks = 0
         var keptDeltaCount = 0
@@ -104,7 +144,10 @@ public enum StepsCounter {
     /// Compatibility wrapper for the retained raw tick total from `analyze`. Completely unclassified
     /// windows keep the legacy positive-delta sum; classed windows keep only walk/run deltas. Returns `nil`
     /// when no retained movement remains, and leaves `stepTicksPerStep` calibration to the caller.
-    public static func stepsInWindow(_ samples: [StepSample]) -> Int? {
-        analyze(samples).steps
+    public static func stepsInWindow(
+        _ samples: [StepSample],
+        classificationPolicy: ClassificationPolicy = .allowLegacyRawMotion
+    ) -> Int? {
+        analyze(samples, classificationPolicy: classificationPolicy).steps
     }
 }

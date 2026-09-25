@@ -2,7 +2,12 @@
 
 ## Status
 
-- State: `step correction and first review closeout are pushed on PR #17; exact head fe616b5 passed all hosted checks; two later source-integration review corrections are locally verified, with one replacement commit, hosted verification, and protected integration pending`
+- State: `the commit containing this record is the independently reviewed local
+  candidate; the class-aware step correction, no-fallback boundary, and
+  non-destructive stale-estimate replacement pass the complete local shared
+  analytics, storage, Android Full, macOS, unsigned iPhone/Watch/widget, and
+  repository-control walls; PR #17 is authoritative for hosted exact-SHA and
+  protected-integration state, while physical accuracy validation remains`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `4604fd53d15b459d0c2251da8e8697134bdb30e1`
@@ -67,14 +72,44 @@ heart-rate elevation as proof of walking.
   window contains activity-class evidence, only deltas attributed to `walk` or
   `run` are retained; `still`, absent/unknown, invalid, zero, and sync-gap
   deltas are counted separately and rejected.
-- Preserved the prior wrap-aware raw-motion estimate only for legacy windows
-  where every activity class is absent. Existing data is not relabelled as a
-  measured step count.
+- Preserved the legacy raw-motion kernel only for explicit offline compatibility
+  analysis. Production daily and manual paths require activity classification;
+  a current all-unclassified window is observed but yields no steps.
 - Kept the same kernel for daily steps, Daily Effort's movement floor, and
   manual-workout strap ticks so those surfaces cannot disagree.
 - Kept heart rate out of the gait gate. Slow walking remains eligible without a
   heart-rate rise, while bathing heat or stress cannot turn stationary wrist
   motion into locomotion merely by raising heart rate.
+- Distinguished an absent counter from any present counter. Gravity movement
+  can support the legacy Effort fallback only when no counter row exists; a
+  singleton, flat, discontinuous, still, or unknown counter window cannot
+  re-enter through the gravity path.
+- Moved classified calendar-day steps ahead of the overnight-HR gate. A real
+  walk/run counter can publish steps and movement Effort without a scorable sleep
+  night, while a counter with no retained locomotion still owns the day and
+  suppresses new motion estimates.
+- Added a day-scoped integrity repair on Apple and Android. Only a retained
+  classified walk/run total removes a superseded computed `steps_est`.
+  Still-only, classless, singleton, flat, gap-only, and unknown-only windows
+  suppress new fallback estimates without deleting an earlier daily total or
+  estimate that the partial window cannot disprove.
+- Integrated retained-counter estimate deletion into the same GRDB/Room
+  transaction as score-range replacement. When no score range is being
+  replaced, the estimate-only repair still runs in one transaction across all
+  computed source namespaces. Validation finishes before mutation and observer
+  invalidation occurs only after commit.
+- Closed the independent final-review findings that the first repair treated
+  every observed no-count window as destructive, performed cleanup through
+  separate writes, and lacked sparse-evidence/rollback coverage. Matching
+  Swift/Kotlin policy properties and storage regressions now distinguish
+  observed counter evidence from authoritative retained locomotion.
+- Made active-source ownership fail closed. A failed active counter read or an
+  explicit active classified rejection cannot fall through to a canonical/older
+  source and restore stationary motion in manual workout totals.
+- Preserved the absent-versus-rejected distinction through the Apple manual
+  workout display. A phone-pedometer fallback is now eligible only when no band
+  counter rows exist; a present still, unknown, flat, singleton, or gap-only
+  counter remains blank rather than re-entering through the phone fallback.
 - Replaced raw counter-value diagnostics with a bounded opt-in analysis line:
   fixed status/filter categories plus sample, kept, still, unknown, gap, and
   zero-delta counts. Timestamps, day keys, device identifiers, raw counter
@@ -97,11 +132,15 @@ heart-rate elevation as proof of walking.
 ## Data, privacy, and medical truth
 
 - Schema or migration impact: none.
-- Existing-data retention impact: none.
-- Source/provenance or formula impact: the motion-derived step estimate now
-  rejects counter deltas explicitly classified as non-locomotion when class
-  evidence exists. Rows with no class evidence remain a labelled legacy raw
-  motion estimate.
+- Existing-data retention impact: exact-day computed estimate replacement only.
+  Stale `steps_est` points are deleted only after a retained classified
+  walk/run count. Still-only, classless, sparse, flat, gap-only, and
+  unknown-only evidence preserves prior daily and estimate history. Other daily
+  evidence, unrelated series, adjacent days, and imported rows are retained.
+- Source/provenance or formula impact: production motion-derived steps now
+  require walk/run classification. Rows with no class evidence remain available
+  only to explicit legacy compatibility analysis and are rejected by current
+  daily and manual production paths.
 - Permissions/network disclosure impact: none.
 - Health/medical claim impact and limitations: step filtering is an activity
   estimate, not a medical result. Heart rate is supporting wear/effort context,
@@ -110,14 +149,17 @@ heart-rate elevation as proof of walking.
 ## Observability
 
 - Evidence that diagnoses success, stall/rejection, and failure: the existing
-  opt-in Steps test trace will report bounded class-filter mode and kept/rejected
-  delta counts without timestamps, identifiers, or raw samples.
+  opt-in Steps test trace reports bounded class-filter mode and kept/rejected
+  delta counts. A manual-workout counter read failure records one bounded
+  `workouts.step_summary` event on Apple and Android with only fixed outcome and
+  failure-kind categories.
 - Why existing evidence is sufficient, or why new evidence is required: the
   production calculation is pure and synchronous; no new lifecycle operation
   exists. The existing trace must change because the prior trace would otherwise
   disagree with the filtered total.
 - Existing evidence reused: `StepsEstimateEngine.rawCounterTrace`.
-- New bounded events or operation spans: none; deterministic trace fields only.
+- New bounded events or operation spans: one failure-only
+  `workouts.step_summary` event; no success or per-sample event.
 - Redaction, retention, and high-frequency controls: aggregate counts and fixed
   categories only, emitted solely through the existing opt-in test mode.
 - Cross-platform/backend correlation: identical Swift/Kotlin result and trace
@@ -131,15 +173,18 @@ heart-rate elevation as proof of walking.
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | Source and consumer review | Complete | The prior WHOOP-style path summed every plausible positive counter delta; the persisted stream also carries optional still/walk/run evidence, and daily/manual consumers share the counter kernel | Whether the device classifies real bathing or walking correctly |
-| Focused Swift analytics | 45 tests, 0 failures | The 4,000-tick stationary fixture is rejected; mixed, unknown, invalid, legacy, wrap, gap, daily, and trace behavior is deterministic | Physical sensitivity or specificity |
-| Focused Android analytics | 44 tests, 0 failures | Kotlin matches the Swift vectors and trace contract | OEM or physical-band behavior |
-| Complete `StrandAnalytics` wall | 1,497 tests, 7 intentional private-data skips, 0 failures | The changed step kernel preserves the complete shared formula surface | App integration or physical accuracy |
-| Complete Android Full wall | 5,121 tests, 7 intentional skips, 0 failures; APK, lint, and instrumentation-source compilation pass; APK SHA-256 `968d8ed32757b1ba81e0dffde66d85442a49e4211b39afe948ba908a02ae92a3` | The exact Full app, analytics integration, resources, and test sources compile together | Installation, background collection, or hardware callbacks |
+| Focused Swift analytics | 35 tests, 0 failures | The 4,000-tick stationary fixture is rejected; current classless, singleton, gap-only, unknown-only, mixed, legacy, wrap, daily, and trace behavior is deterministic | Physical sensitivity or specificity |
+| Focused Swift storage | 46 tests, 0 failures | Ambiguous counter windows preserve prior daily fields and estimates, while retained locomotion removes only superseded computed estimates | App orchestration or physical accuracy |
+| Focused Android analytics and integrity | 58 tests, 0 failures; Full app compile passes | Kotlin matches the Swift vectors, owner/window behavior, manual-workout fail-closed policy, chunking, and repository transaction fixtures | OEM or physical-band behavior |
+| Focused Apple app orchestration | 57 tests, 0 failures | Classified walking publishes without overnight HR, active-source rejection cannot fall through, rejected counter evidence remains distinct from a truly absent counter for phone fallback, stationary evidence preserves prior history, and retained locomotion replaces only stale computed estimates | Physical-device collection or firmware classification quality |
+| Complete `StrandAnalytics` wall | 1,503 tests, 7 intentional private-data skips, 0 failures | The changed step kernel, absent-versus-observed fallback boundary, sparse-evidence preservation, and complete shared formula surface remain green | App integration or physical accuracy |
+| Complete `WhoopStore` wall | 547 tests, 0 failures | Exact-day computed estimate replacement preserves unrelated evidence and transaction boundaries | App orchestration or physical accuracy |
+| Complete Android Full wall | 5,150 tests, 7 intentional skips, 0 failures; APK, lint, and instrumentation-source compilation pass; APK SHA-256 `5879762993b64ad3dccb8c3bc7ec98d24e5e2039089455617cf302e2f46724f7` | The exact Full app, analytics integration, transactional persistence repair, resources, and test sources compile together | Installation, background collection, or hardware callbacks |
 | Apple rollback regression | First full wall exposed one stale failure-injection fixture; corrected focused case passes | The atomic registration failure restores the prior source and leaves no partial supplier row | A real secure-store, radio, or vendor callback failure |
-| Complete macOS app wall | 2,317 tests, 1 intentional fixture skip, 0 failures | Shared Apple app, storage, source coordination, metrics, Watch/widget contracts, and accessibility metadata pass together | iPhone hardware, BLE, or signed distribution |
-| Unsigned Release iOS graph | Build passes without source warnings; `NOOP.app`, `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` are present | Phone, Watch, complication, widget, localization, and Release dependency graphs compile together | Signing, installation, haptics, notifications, or physical performance |
+| Complete macOS app wall | 2,324 tests, 1 intentional fixture skip, 0 failures | Shared Apple app, exact stale-estimate repair, storage, source coordination, metrics, Watch/widget contracts, and accessibility metadata pass together | iPhone hardware, BLE, or signed distribution |
+| Unsigned iOS simulator graph | Exact-current build passes; the phone app embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | Phone, Watch, complication, widget, localization, and dependency graphs compile together | Signing, installation, haptics, notifications, or physical performance |
 | Focused release-contract recovery | SDK artifact tests 9/9 and supplier app-slice tests 8/8 pass after exact generated-cache cleanup and atomic-contract update | The vendored SDK tree is exact and the source-shape gate follows the current transactional registration contract | Hosted execution or physical SDK behavior |
-| Complete repository and direct gates | Complete Tools wall passes 365 tests with one intentional dependency skip; 9 release controls, 10 required contexts, trusted self-check, 12 metrics/3 revisions/13 thresholds/16 calibration guards, final terminology snapshot, distribution provenance, private-data, 1,310-file health-claims, full localization, 96 operations records, 50 parser tests, Actionlint, shell syntax, ShellCheck, changed-Python compilation, and diff hygiene pass | Current source satisfies the listed local release/privacy/claim/localization/evidence contracts | Hosted exact-SHA checks, protected integration, physical validation, or external approvals |
+| Complete repository and direct gates | Complete Tools wall passes 571 tests with one intentional dependency skip and two non-failing FastAPI deprecation warnings. Direct checks pass: 9/9 release controls, ten required contexts, protected-main trust, 12 metrics / 3 revisions / 13 thresholds / 16 calibration guards, the reviewed terminology ratchet, full localization, 96 operations records, and diff hygiene | The exact local candidate satisfies the repository-controlled release, privacy, claims, localization, workflow, and trust contracts | Hosted exact-SHA checks, protected integration, physical validation, or external approvals |
 | Exact implementation hosted checks | Exact head `db7de8e2571b1effd8278537d63bd7019b2b0d28` passed 33 jobs with four intentional skips, including all ten protected contexts, Android, macOS, and iOS production-shell checks | The consolidated implementation builds and passes hosted policy/tests on the reviewed SHA | The later review-closeout commit until replacement hosted checks finish |
 | PR review closeout | Apple focused set passes 32/32; Android Full compile and `SupplierDeviceCardPolicyTest` pass 7/7 | Oura ownership, supplier transient live restart, archived activation policy, non-supplier reactivation, and Android supplier presentation are covered on the local replacement head | Physical BLE, Compose instrumentation, or signed installation |
 | Final source-integration review remediation | Android Full debug compile and supplier Live policy tests pass 10/10; Apple supplier recovery tests pass 2/2 | Durable source ownership now selects Android Live controls, the confirmed no-active path remains reachable, and Apple discovery continues through a cancellable low-frequency tail | Physical radios, background execution, signed installation, or supplier timing |
@@ -149,7 +194,9 @@ heart-rate elevation as proof of walking.
 - Install/update action: no physical install; source-only Android Full APK and
   unsigned generic iPhoneOS Release app were built.
 - Generalized device and OS class: local macOS host and source build graphs.
-- Data-preservation result: no schema, migration, or retention change.
+- Data-preservation result: no schema or migration. The repair removes only stale
+  computed step values on exact affected days and preserves unrelated daily and
+  imported evidence.
 - BLE/background/haptic/battery scenarios exercised: not run.
 - Unrun hardware gates: all `PHY-MET-001` through `PHY-MET-005` scenarios,
   including synchronized manual/video counts for walking and stationary wrist
@@ -157,11 +204,10 @@ heart-rate elevation as proof of walking.
 
 ## Git and release state
 
-- Changed paths: shared Apple/Android step counter, bounded trace, daily/manual
-  integration comments, matching tests, the stale Apple transactional
-  registration fixture, source-contract tests, supported-band first-run flow,
-  Android archived-device action policy, terminology snapshots, and operations
-  records.
+- Changed paths in this final local slice: shared Apple/Android step analysis and
+  daily orchestration, exact-day computed-step persistence helpers, active-source
+  workout ownership, matching store/app/formula regressions, and this operations
+  record. Earlier PR changes remain as recorded above.
 - Commits: implementation `db7de8e2571b1effd8278537d63bd7019b2b0d28`;
   review closeout `93d5ffed104d7e3b9f193c2af71c9dfb57d486c8`.
 - Branch and remote state: implementation, review-closeout, and evidence commits
@@ -170,8 +216,13 @@ heart-rate elevation as proof of walking.
   automated review found two source-integration defects outside the step
   formula: Android transient display state could expose the wrong controls,
   and Apple discovery stopped after the short retry burst. Both corrections
-  are locally verified; one replacement commit, exact-head hosted checks, and
-  protected integration remain.
+  are locally verified. The commit containing this record is the final locally
+  verified candidate. The complete 571-test Tools wall and direct release,
+  required-CI,
+  trusted-control, calibration, terminology, provenance, private-data,
+  health-claim, localization, operations-record, workflow, shell, Python, and
+  diff gates are green. PR `#17` is authoritative for the exact candidate head,
+  hosted checks, review-thread state, and protected integration result.
 - Repository visibility verified: not rechecked in this slice.
 - Version/build impact: no version bump.
 - Release or distribution impact: no release claim; physical metric validation
@@ -180,8 +231,9 @@ heart-rate elevation as proof of walking.
 ## Decisions
 
 - Durable decision added or changed: classified locomotion evidence outranks
-  raw wrist-motion ticks when available; heart rate is not gait evidence; fully
-  unclassified legacy windows retain the existing labelled estimate.
+  raw wrist-motion ticks; heart rate is not gait evidence; current production
+  paths reject fully unclassified windows while explicit compatibility analysis
+  may still inspect the historical labelled estimate.
 - Decision-log entry: none. This implements the existing motion-derived,
   source-aware metric contract without changing cloud authority or a public
   product promise.
@@ -192,21 +244,45 @@ heart-rate elevation as proof of walking.
   after ingestion.
 - The existing activity class is itself device-derived and needs exact-hardware
   false-positive and true-positive validation.
-- Legacy unclassified rows remain less trustworthy and must continue to be
-  presented as motion-derived estimates.
+- Legacy unclassified rows remain available only to explicit compatibility
+  analysis; current daily and manual production paths do not publish them.
 - A strict class gate can undercount if firmware emits missing or incorrect
   classes during true walking. That tradeoff is intentional until synchronized
   physical ground truth supports a more capable classifier.
+- If firmware labels stationary wrist motion as `walk`/`run`, or exposes only a
+  daily aggregate without per-record activity/raw-IMU evidence, application
+  software cannot reliably reconstruct the false steps. That remains a firmware
+  and synchronized physical-validation gate.
 - Server-side formula authority remains behind the recorded D-059 migration
   gates; this round does not claim backend parity or cloud authority.
 
 ## Failed attempts and cleanup
 
-- The first complete macOS rerun executed 2,317 tests and failed four assertions
-  in one stale supplier-registration fixture. The fixture still expected the
-  retired split add/activate compensation path, so its trigger did not reject
-  the current atomic insert. The corrected test injects the real transaction
-  failure, passes focused, and the complete wall then passes.
+- Independent final review found that the first stale-value repair treated any
+  observed counter with no retained count as destructive and wrote daily and
+  series cleanup separately. That candidate was not pushed. The replacement
+  distinguishes observed from authoritative evidence, preserves ambiguous
+  history, and proves transaction rollback on both platforms.
+- The first final focused Swift command was rejected before launch because the
+  bounded runner label was omitted. The corrected invocation then exposed four
+  test-helper calls using a nonexistent argument label; those fixtures were
+  corrected and the 32-test focused wall passed.
+- The first final WhoopStore compile rejected async reads inside XCTest
+  autoclosures. Values are now awaited before assertions; the focused
+  46-test set and complete 547-test wall pass.
+- The first final Android compile exposed one mismatched Kotlin enum-case
+  spelling in the new predicate. The existing case name is now used; the
+  focused 58-test wall and complete 5,150-test Full wall pass.
+- The final pre-commit source review found that Android stopped active-source
+  fallback on a storage failure but swallowed the exception before the bounded
+  presentation diagnostic could record it. The repository now propagates that
+  failure without reading an older source; the app records the fixed-category
+  failure and withholds only workout steps. Full Kotlin compilation and the
+  focused ownership suite pass.
+- The first final macOS wall executed 2,324 tests and found one stale assertion
+  that still expected rejected stationary motion to erase prior step history.
+  The corrected regression now pins the non-destructive policy; its focused
+  rerun and the complete 2,324-test wall pass.
 - The first complete Tools wall ran 365 tests with one intentional dependency
   skip. It found an Xcode-generated ignored
   `Vendor/NoopBandSDK/.swiftpm` directory, the same stale source-shape
@@ -214,13 +290,20 @@ heart-rate elevation as proof of walking.
   The generated directory was exact-deleted and the two focused contract suites
   pass. After the reviewed terminology refresh and exact source-digest repin,
   the complete 365-test Tools wall passes with one intentional dependency skip.
+- The first Tools invocation in this final slice used Homebrew's newly selected
+  Python 3.14, which does not contain pytest, so zero tests ran. The exact wall
+  was restarted with the installed Python 3.11/pytest 8.3.5 environment. It ran
+  all 365 tests: 359 passed and six correctly stopped on the regenerated empty
+  SDK `.swiftpm` cache plus the pending terminology refresh. Exact cache deletion
+  and the protected SDK/trusted-control subset then passed 24/24. After the
+  reviewed inventory refresh and digest repin, the complete wall passed 365/365.
 - Exact hosted head `b45c67bf6186e238ee1e6f23422c2dc7aceec412`
   then failed only `test_repository_snapshot_is_current` in release-controls:
   the final review fixtures and operations wording added six classified legacy
   occurrences after the previous snapshot. The reviewed snapshot and digest
   correction was pushed as `fe616b5dc7a7ea51f345e5c940af38cab3612477`,
   whose complete hosted run passed. The current final-review candidate records
-  18,374 occurrences across 1,626 path/category groups without broadening the
+  18,454 occurrences across 1,628 path/category groups without broadening the
   active allowlist.
 - The first root localization-parser invocation ran from the repository root
   and failed to import its sibling `i18n_audit` module. Running the suite from
@@ -244,6 +327,16 @@ heart-rate elevation as proof of walking.
   `/tmp/noop-20260925-ios-release-post-review-dd`,
   `/tmp/noop-20260925-macos-full-wall-after-step-filter-dd`, and
   `/tmp/noop-20260925-ios-release-graph-after-step-filter-dd`.
+  This final review also exact-deleted superseded generated trees
+  `/tmp/noop-step-apple-orchestration-dd`,
+  `/tmp/noop-step-ios-release-dd`, and `/tmp/noop-step-macos-full-dd`
+  before the final Apple walls, recovering about 10 GiB without removing logs,
+  source, simulator data, credentials, or user data.
+  The obsolete duplicate
+  `/tmp/noop-step-false-positive-20260925/ios-derived` was also exact-deleted
+  before the final iPhone graph, recovering about 5.5 GiB. The exact-current
+  `final-ios-derived` and `macos-derived` trees remain round-owned until durable
+  hosted evidence is captured.
   No source, simulator data, credentials, health data, or unidentified cache
   was removed. Free Data-volume space returned to about 21 GiB.
 

@@ -93,6 +93,8 @@ object StepsEstimateEngineTrace {
         dayKey: String,
         tzOffsetSeconds: Long,
         ticksPerStep: Double,
+        classificationPolicy: StepsCounter.ClassificationPolicy =
+            StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
         civilDayStartTs: Long? = null,
         civilDayEndTsExclusive: Long? = null,
     ): List<String> {
@@ -115,7 +117,10 @@ object StepsEstimateEngineTrace {
             }
             .sortedBy { it.ts }
 
-        val analysis = StepsCounter.analyze(sorted)
+        val analysis = StepsCounter.analyze(
+            sorted,
+            classificationPolicy = classificationPolicy,
+        )
         val status = when {
             analysis.sampleCount == 0 -> "noRawCounter"
             analysis.sampleCount < 2 -> "insufficientSamples"

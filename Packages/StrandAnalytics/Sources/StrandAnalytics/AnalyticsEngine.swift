@@ -451,6 +451,7 @@ public enum AnalyticsEngine {
                                   // pre-midnight night span the calendar day omits.
                                   dayHr: [HRSample]? = nil,
                                   daySteps: [StepSample]? = nil,
+                                  stepClassificationPolicy: StepsCounter.ClassificationPolicy = .allowLegacyRawMotion,
                                   dayGravity: [GravitySample]? = nil,
                                   // Wear-gated nightly skin-temp mean is harvested here
                                   // (baseline-independent); IntelligenceEngine seeds a personal
@@ -923,14 +924,20 @@ public enum AnalyticsEngine {
         // many steps) both ignored the high byte and summed a running total — exploding the count to
         // ~10M/day. Decoding the full u16 and summing wrap-aware DELTAS yields a sane ~14k. ESTIMATE
         // only — not cloud/clinical parity.
-        let stepsTotal: Int? = {
+        let stepAnalysis: StepsCounter.Analysis = {
             // Prefer the full-calendar-day stream for the additive total; fall back to the
             // night-window stream when the caller didn't supply one (pure-function callers/tests). The
             // day's read window may include adjacent-day samples, so filter to the LOCAL-day key first
             // (#277); the wrap-aware tick math itself lives in the shared StepsCounter kernel so the daily
             // and per-workout (#398) totals can never disagree.
             let inDay = (daySteps ?? steps).filter { tsInDay($0.ts) }
-            guard let ticks = StepsCounter.stepsInWindow(inDay) else { return nil }
+            return StepsCounter.analyze(
+                inDay,
+                classificationPolicy: stepClassificationPolicy
+            )
+        }()
+        let stepsTotal: Int? = {
+            guard let ticks = stepAnalysis.steps else { return nil }
             // @57 counts motion ticks, not validated steps — the 5/MG counter overcounts. Divide
             // by the user-calibrated ticks-per-step (default 1.0 = raw pass-through; floor 0.5 so
             // a bad pref can at most double, never explode, the total). (#139)
@@ -950,7 +957,7 @@ public enum AnalyticsEngine {
             .filter { tsInDay($0.ts) && $0.bpm > 0 }
             .prefix(StrainScorer.minSparseReadings)
             .count == StrainScorer.minSparseReadings
-        let movementGravity = hasWornMotionEvidence
+        let movementGravity = hasWornMotionEvidence && stepAnalysis.allowsMotionFallback
             ? (dayGravity ?? gravity).filter { tsInDay($0.ts) }
             : []
         let strain = DailyEffortScorer.score(

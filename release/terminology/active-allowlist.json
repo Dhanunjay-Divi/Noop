@@ -1096,7 +1096,7 @@
       "path": "Strand/Data/IntelligenceEngine.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "d1297c201e05119a8cc3eee3662a7a29d16ac7d3e7d9fc29d354411d44de6eb9"
+      "sha256": "123970d859cef5f61c846c69088939d327111583b37cf972ae746b66c525a944"
     },
     {
       "category": "core",
@@ -1172,12 +1172,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 102,
+      "occurrenceCount": 101,
       "owner": "project team",
       "path": "Strand/Data/Repository.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "8e9c2567b90422f781eb667db6bd69e8dd48f1772bf16587720dce8942529ada"
+      "sha256": "a09321160a3d31e2e0fbb691e1aede15357f7ef5c2a828759f26af32b5490a16"
     },
     {
       "category": "core",
@@ -1856,12 +1856,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 6,
+      "occurrenceCount": 5,
       "owner": "project team",
       "path": "Strand/Screens/WorkoutDetailView.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "6d21ae61dabce96c71a60cd2190199523dec8fd32e2cd538c8a867ea9190be9b"
+      "sha256": "848dbb28d0416c107dce81886b7b8956954b47469a113841c92b67a0cad215b5"
     },
     {
       "category": "customer",
@@ -3229,7 +3229,7 @@
       "path": "android/app/src/main/java/com/noop/data/WhoopRepository.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "86a3db0bc72ee6f2ada879af33abe1d2878fd760b93254c6d60e2189dbf0e67a"
+      "sha256": "83d22ef77e334b67decf79a130ac07102565a3982a5a45a02ce671cee557f49a"
     },
     {
       "category": "core",

@@ -2499,4 +2499,248 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         XCTAssertEqual(surfaced, 2,
                        "the union must surface the re-added strap's live activity class, not an empty pinned read")
     }
+
+    /// Manual-workout steps follow the same active-source ownership rule as the daily counter. If the
+    /// active source has explicit classed still motion, an older canonical legacy counter must not restore it.
+    @MainActor
+    func testStrapStepAnalysisDoesNotFallThroughAfterActiveClassedRejection() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertDevice(id: canonicalId, mac: nil, name: "WHOOP")
+        try await store.upsertDevice(id: newId, mac: nil, name: "WHOOP")
+        let base = 1_780_000_000
+        let activeStill = (0...10).map {
+            StepSample(ts: base + $0 * 60, counter: $0 * 400, activityClass: 0)
+        }
+        let canonicalLegacy = (0...10).map {
+            StepSample(ts: base + $0 * 60, counter: $0 * 100)
+        }
+        try await store.insert(Streams(steps: activeStill), deviceId: newId)
+        try await store.insert(Streams(steps: canonicalLegacy), deviceId: canonicalId)
+
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+        XCTAssertTrue(repo.adoptActiveDeviceId(newId))
+
+        let analysis = try await repo.strapStepAnalysis(
+            from: base,
+            to: base + 10 * 60
+        )
+        XCTAssertNotNil(analysis, "the rejected active counter must stay distinguishable from no counter")
+        XCTAssertNil(analysis?.steps,
+                     "active classed-still evidence must own the window and suppress every fallback")
+    }
+
+    /// Phone-pedometer fallback is allowed only when the complete active/canonical union has no counter rows.
+    @MainActor
+    func testStrapStepAnalysisReturnsNilOnlyWhenCounterIsAbsent() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertDevice(id: canonicalId, mac: nil, name: "WHOOP")
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+
+        let analysis = try await repo.strapStepAnalysis(from: 1_780_000_000, to: 1_780_000_600)
+
+        XCTAssertNil(analysis, "an actually absent counter may use the phone-pedometer fallback")
+    }
+
+    /// Calendar-day locomotion must not depend on an overnight HR window. This pins the production
+    /// orchestration, not only the pure analytics kernel.
+    @MainActor
+    func testClassifiedWalkStepsPublishWithoutOvernightHeartRate() async throws {
+        let store = try await WhoopStore.inMemory()
+        let calendar = Calendar.current
+        let yesterday = try XCTUnwrap(
+            calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: Date()))
+        )
+        let base = Int(yesterday.addingTimeInterval(12 * 3_600).timeIntervalSince1970)
+        let counters = [100, 400, 700, 1_000, 1_300, 1_600, 1_815]
+        let samples = counters.enumerated().map {
+            StepSample(ts: base + $0.offset * 60, counter: $0.element, activityClass: 1)
+        }
+        try await store.insert(Streams(steps: samples), deviceId: canonicalId)
+        let day = Repository.localDayKey(yesterday)
+        let computedId = canonicalId + "-noop"
+        _ = try await store.upsertDailyMetrics(
+            [
+                DailyMetric(
+                    day: day,
+                    totalSleepMin: 420,
+                    efficiency: 0.91,
+                    deepMin: 80,
+                    remMin: 100,
+                    lightMin: 240,
+                    disturbances: 2,
+                    restingHr: 54,
+                    avgHrv: 62,
+                    recovery: 71,
+                    strain: 8,
+                    exerciseCount: 1,
+                    spo2Pct: 97,
+                    skinTempDevC: 0.2,
+                    respRateBpm: 14.4,
+                    steps: 4_000,
+                    activeKcalEst: 560,
+                    spo2Red: 120,
+                    spo2Ir: 240,
+                    hrvMethod: .rmssd
+                ),
+            ],
+            deviceId: computedId
+        )
+
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+        let engine = analysisEngine(repo: repo)
+        let receipt = await engine.analyzeRecent(maxDays: 2, force: true)
+
+        XCTAssertNotNil(receipt)
+        let rows = try await store.dailyMetrics(
+            deviceId: computedId,
+            from: day,
+            to: day
+        )
+        XCTAssertEqual(
+            rows.first?.steps,
+            1_715,
+            "classified walking must publish even when the day has no qualifying overnight HR"
+        )
+        XCTAssertEqual(rows.first?.totalSleepMin, 420)
+        XCTAssertEqual(rows.first?.recovery, 71)
+        XCTAssertEqual(rows.first?.avgHrv, 62)
+        XCTAssertEqual(rows.first?.spo2Pct, 97)
+        XCTAssertEqual(rows.first?.activeKcalEst, 560)
+    }
+
+    /// Explicit stationary counter evidence suppresses a new gravity estimate, but it is not authoritative
+    /// evidence that an earlier same-day total was wrong. Preserve prior daily/estimate evidence until a
+    /// retained walk/run counter total supersedes it.
+    @MainActor
+    func testClassedStationaryCounterPreservesPriorStepEvidence() async throws {
+        let store = try await WhoopStore.inMemory()
+        let calendar = Calendar.current
+        let yesterday = try XCTUnwrap(
+            calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: Date()))
+        )
+        let base = Int(yesterday.addingTimeInterval(12 * 3_600).timeIntervalSince1970)
+        let samples = (0...10).map {
+            StepSample(ts: base + $0 * 60, counter: $0 * 400, activityClass: 0)
+        }
+        try await store.insert(Streams(steps: samples), deviceId: canonicalId)
+        let day = Repository.localDayKey(yesterday)
+        _ = try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "steps_est", value: 4_000)],
+            deviceId: canonicalId + "-noop"
+        )
+        _ = try await store.upsertDailyMetrics(
+            [
+                DailyMetric(
+                    day: day,
+                    totalSleepMin: 420,
+                    efficiency: 0.9,
+                    deepMin: 90,
+                    remMin: 100,
+                    lightMin: 230,
+                    disturbances: 2,
+                    restingHr: 52,
+                    avgHrv: 70,
+                    recovery: 60,
+                    strain: 8,
+                    exerciseCount: 0,
+                    steps: 4_000
+                )
+            ],
+            deviceId: canonicalId + "-noop"
+        )
+
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+        let engine = analysisEngine(repo: repo)
+        _ = await engine.analyzeRecent(maxDays: 2, force: true)
+
+        let estimates = try await store.metricSeries(
+            deviceId: canonicalId + "-noop",
+            key: "steps_est",
+            from: day,
+            to: day
+        )
+        XCTAssertEqual(estimates.map(\.value), [4_000])
+        let daily = try await store.dailyMetrics(
+            deviceId: canonicalId + "-noop",
+            from: day,
+            to: day
+        )
+        XCTAssertEqual(daily.count, 1)
+        XCTAssertEqual(daily.first?.steps, 4_000)
+        XCTAssertEqual(daily.first?.recovery, 60, "unrelated daily evidence must remain intact")
+    }
+
+    /// Mixed still plus unknown evidence is ambiguous: a normal score-window replacement may refresh the
+    /// day's sleep/Recovery fields, but it must preserve the previously stored computed step value and
+    /// motion estimate until authoritative walk/run or wholly-still evidence arrives.
+    @MainActor
+    func testAmbiguousMixedCounterPreservesStoredComputedSteps() async throws {
+        let store = try await WhoopStore.inMemory()
+        let seeded = try await seedScorableNight(
+            store: store,
+            deviceId: canonicalId,
+            daysAgo: 1
+        )
+        let calendar = Calendar.current
+        let yesterday = try XCTUnwrap(
+            calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: Date()))
+        )
+        let noon = Int(yesterday.addingTimeInterval(12 * 3_600).timeIntervalSince1970)
+        try await store.insert(
+            Streams(steps: [
+                StepSample(ts: noon, counter: 100, activityClass: 0),
+                StepSample(ts: noon + 60, counter: 200, activityClass: 0),
+                StepSample(ts: noon + 120, counter: 300, activityClass: 9),
+            ]),
+            deviceId: canonicalId
+        )
+        _ = try await store.upsertDailyMetrics(
+            [
+                DailyMetric(
+                    day: seeded.day,
+                    totalSleepMin: nil,
+                    efficiency: nil,
+                    deepMin: nil,
+                    remMin: nil,
+                    lightMin: nil,
+                    disturbances: nil,
+                    restingHr: nil,
+                    avgHrv: nil,
+                    recovery: nil,
+                    strain: nil,
+                    exerciseCount: nil,
+                    steps: 4_000
+                )
+            ],
+            deviceId: canonicalId + "-noop"
+        )
+        _ = try await store.upsertMetricSeries(
+            [MetricPoint(day: seeded.day, key: "steps_est", value: 4_000)],
+            deviceId: canonicalId + "-noop"
+        )
+
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+        let engine = analysisEngine(repo: repo)
+        let analysis = await engine.analyzeRecent(maxDays: 2, force: true)
+        XCTAssertNotNil(analysis)
+
+        let daily = try await store.dailyMetrics(
+            deviceId: canonicalId + "-noop",
+            from: seeded.day,
+            to: seeded.day
+        )
+        XCTAssertEqual(daily.first?.steps, 4_000)
+        let estimates = try await store.metricSeries(
+            deviceId: canonicalId + "-noop",
+            key: "steps_est",
+            from: seeded.day,
+            to: seeded.day
+        )
+        XCTAssertEqual(estimates.first?.value, 4_000)
+    }
 }

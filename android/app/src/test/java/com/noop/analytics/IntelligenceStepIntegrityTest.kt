@@ -1,0 +1,531 @@
+package com.noop.analytics
+
+import com.noop.data.DailyMetric
+import com.noop.data.MetricSeriesRow
+import com.noop.data.WhoopDao
+import com.noop.data.WhoopRepository
+import java.io.File
+import java.lang.reflect.Proxy
+import java.time.LocalDate
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class IntelligenceStepIntegrityTest {
+    private data class Fixture(
+        val repo: WhoopRepository,
+        val daily: MutableMap<Pair<String, String>, DailyMetric>,
+        val series: MutableMap<Triple<String, String, String>, MetricSeriesRow>,
+        val deleteChunkSizes: MutableList<Int>,
+        var failEstimateDelete: Boolean = false,
+    )
+
+    private fun fixture(): Fixture {
+        val daily = linkedMapOf<Pair<String, String>, DailyMetric>()
+        val series = linkedMapOf<Triple<String, String, String>, MetricSeriesRow>()
+        val deleteChunkSizes = mutableListOf<Int>()
+        lateinit var fixture: Fixture
+        val dao = Proxy.newProxyInstance(
+            WhoopDao::class.java.classLoader,
+            arrayOf(WhoopDao::class.java),
+        ) { _, method, args ->
+            when (method.name) {
+                "deleteMetricSeriesPoints" -> {
+                    if (fixture.failEstimateDelete) error("injected estimate delete failure")
+                    val source = args!![0] as String
+                    @Suppress("UNCHECKED_CAST")
+                    val days = (args[1] as List<String>).toSet()
+                    deleteChunkSizes += days.size
+                    val key = args[2] as String
+                    val doomed = series.keys.filter {
+                        it.first == source && it.second in days && it.third == key
+                    }
+                    doomed.forEach(series::remove)
+                    doomed.size
+                }
+                "dailyMetricsRange" -> {
+                    val source = args!![0] as String
+                    val from = args[1] as String
+                    val to = args[2] as String
+                    daily.values
+                        .filter { it.deviceId == source && it.day in from..to }
+                        .sortedBy(DailyMetric::day)
+                }
+                "deleteDailyMetricsInRange" -> {
+                    val source = args!![0] as String
+                    val from = args[1] as String
+                    val to = args[2] as String
+                    daily.keys
+                        .filter { it.first == source && it.second in from..to }
+                        .forEach(daily::remove)
+                    Unit
+                }
+                "upsertDailyMetrics" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val rows = args!![0] as List<DailyMetric>
+                    rows.forEach { daily[it.deviceId to it.day] = it }
+                    Unit
+                }
+                "replaceMetricSeriesRange" -> Unit
+                else -> throw UnsupportedOperationException(
+                    "step integrity fixture must not call ${method.name}"
+                )
+            }
+        } as WhoopDao
+        val transactor = object : WhoopRepository.Transactor {
+            override suspend fun <R> run(block: suspend () -> R): R {
+                val dailySnapshot = daily.toMap()
+                val seriesSnapshot = series.toMap()
+                return try {
+                    block()
+                } catch (error: Throwable) {
+                    daily.clear()
+                    daily.putAll(dailySnapshot)
+                    series.clear()
+                    series.putAll(seriesSnapshot)
+                    throw error
+                }
+            }
+        }
+        fixture = Fixture(
+            repo = WhoopRepository(dao, transactor),
+            daily = daily,
+            series = series,
+            deleteChunkSizes = deleteChunkSizes,
+        )
+        return fixture
+    }
+
+    @Test
+    fun authoritativeCounterRepairDeletesOnlySupersededEstimate() = runBlocking {
+        val f = fixture()
+        val targetSource = "whoop-ABC123-noop"
+        val canonicalSource = "my-whoop-noop"
+        val day = "2026-09-24"
+        val adjacentDay = "2026-09-23"
+        val target = DailyMetric(
+            deviceId = targetSource,
+            day = day,
+            totalSleepMin = 420.0,
+            recovery = 60.0,
+            strain = 8.0,
+            steps = 4_000,
+        )
+        f.daily[targetSource to day] = target
+        f.daily[targetSource to adjacentDay] = target.copy(day = adjacentDay, steps = 2_000)
+        f.daily["health-connect" to day] = target.copy(deviceId = "health-connect", steps = 5_000)
+        f.series[Triple(targetSource, day, "steps_est")] =
+            MetricSeriesRow(targetSource, day, "steps_est", 4_000.0)
+        f.series[Triple(canonicalSource, day, "steps_est")] =
+            MetricSeriesRow(canonicalSource, day, "steps_est", 4_000.0)
+        f.series[Triple(targetSource, adjacentDay, "steps_est")] =
+            MetricSeriesRow(targetSource, adjacentDay, "steps_est", 2_000.0)
+
+        assertEquals(
+            2,
+            f.repo.reconcileComputedStepEvidence(
+                deviceIds = listOf(targetSource, canonicalSource, targetSource),
+                deleteEstimateDays = listOf(day, day),
+            ),
+        )
+
+        val repaired = f.daily[targetSource to day]
+        assertEquals(4_000, repaired?.steps)
+        assertEquals(60.0, repaired?.recovery)
+        assertEquals(8.0, repaired?.strain)
+        assertEquals(2_000, f.daily[targetSource to adjacentDay]?.steps)
+        assertEquals(5_000, f.daily["health-connect" to day]?.steps)
+        assertNull(f.series[Triple(targetSource, day, "steps_est")])
+        assertNull(f.series[Triple(canonicalSource, day, "steps_est")])
+        assertEquals(2_000.0, f.series[Triple(targetSource, adjacentDay, "steps_est")]?.value)
+        assertEquals(1L, f.repo.metricDataVersion.value)
+        assertEquals(0L, f.repo.restDataVersion.value)
+    }
+
+    @Test
+    fun estimateRepairFailureLeavesDailyEvidenceUntouched() = runBlocking {
+        val f = fixture()
+        val source = "whoop-ABC123-noop"
+        val day = "2026-09-24"
+        f.daily[source to day] = DailyMetric(
+            deviceId = source,
+            day = day,
+            recovery = 60.0,
+            steps = 4_000,
+        )
+        f.series[Triple(source, day, "steps_est")] =
+            MetricSeriesRow(source, day, "steps_est", 4_000.0)
+        f.failEstimateDelete = true
+
+        val failure = runCatching {
+            f.repo.reconcileComputedStepEvidence(
+                deviceIds = listOf(source),
+                deleteEstimateDays = listOf(day),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals(4_000, f.daily[source to day]?.steps)
+        assertEquals(4_000.0, f.series[Triple(source, day, "steps_est")]?.value)
+        assertEquals(0L, f.repo.metricDataVersion.value)
+        assertEquals(0L, f.repo.restDataVersion.value)
+    }
+
+    @Test
+    fun ambiguousScoreReplacementPreservesOnlyRequestedPriorSteps() = runBlocking {
+        val f = fixture()
+        val source = "whoop-ABC123-noop"
+        val firstDay = "2026-09-22"
+        val secondDay = "2026-09-23"
+        val staleDay = "2026-09-24"
+        f.daily[source to firstDay] = DailyMetric(
+            deviceId = source,
+            day = firstDay,
+            recovery = 50.0,
+            steps = 4_000,
+        )
+        f.daily[source to secondDay] = DailyMetric(
+            deviceId = source,
+            day = secondDay,
+            recovery = 51.0,
+            steps = 3_000,
+        )
+        f.daily[source to staleDay] = DailyMetric(
+            deviceId = source,
+            day = staleDay,
+            recovery = 52.0,
+            steps = 2_000,
+        )
+
+        val receipt = f.repo.reconcileComputedScoreRange(
+            deviceId = source,
+            fromDay = firstDay,
+            toDay = staleDay,
+            dailyRows = listOf(
+                DailyMetric(deviceId = source, day = firstDay, recovery = 80.0),
+            ),
+            managedRestKeys = setOf("sleep_performance"),
+            restRows = emptyList(),
+            preserveDailyStepDays = setOf(firstDay, secondDay),
+        )
+
+        assertEquals(setOf(firstDay, secondDay), receipt)
+        assertEquals(80.0, f.daily[source to firstDay]?.recovery)
+        assertEquals(4_000, f.daily[source to firstDay]?.steps)
+        assertNull(f.daily[source to secondDay]?.recovery)
+        assertEquals(3_000, f.daily[source to secondDay]?.steps)
+        assertNull(f.daily[source to staleDay])
+    }
+
+    @Test
+    fun stepOnlyScoreReplacementPreservesPriorDailyFields() = runBlocking {
+        val f = fixture()
+        val source = "whoop-ABC123-noop"
+        val day = "2026-09-24"
+        f.daily[source to day] = DailyMetric(
+            deviceId = source,
+            day = day,
+            totalSleepMin = 420.0,
+            efficiency = 0.91,
+            deepMin = 80.0,
+            remMin = 100.0,
+            lightMin = 240.0,
+            disturbances = 2,
+            restingHr = 54,
+            avgHrv = 62.0,
+            recovery = 71.0,
+            strain = 8.0,
+            exerciseCount = 1,
+            spo2Pct = 97.0,
+            skinTempDevC = 0.2,
+            respRateBpm = 14.4,
+            steps = 4_000,
+            activeKcalEst = 560.0,
+            spo2Red = 120,
+            spo2Ir = 240,
+            hrvMethod = "RMSSD",
+        )
+
+        val receipt = f.repo.reconcileComputedScoreRange(
+            deviceId = source,
+            fromDay = day,
+            toDay = day,
+            dailyRows = listOf(
+                DailyMetric(
+                    deviceId = source,
+                    day = day,
+                    strain = 9.5,
+                    exerciseCount = 0,
+                    steps = 1_715,
+                )
+            ),
+            managedRestKeys = setOf("sleep_performance"),
+            restRows = emptyList(),
+            preserveDailyFieldsDays = setOf(day),
+        )
+
+        assertEquals(setOf(day), receipt)
+        val saved = f.daily[source to day]
+        assertEquals(420.0, saved?.totalSleepMin)
+        assertEquals(0.91, saved?.efficiency)
+        assertEquals(54, saved?.restingHr)
+        assertEquals(62.0, saved?.avgHrv)
+        assertEquals(71.0, saved?.recovery)
+        assertEquals(9.5, saved?.strain)
+        assertEquals(1, saved?.exerciseCount)
+        assertEquals(97.0, saved?.spo2Pct)
+        assertEquals(0.2, saved?.skinTempDevC)
+        assertEquals(14.4, saved?.respRateBpm)
+        assertEquals(1_715, saved?.steps)
+        assertEquals(560.0, saved?.activeKcalEst)
+        assertEquals(120, saved?.spo2Red)
+        assertEquals(240, saved?.spo2Ir)
+        assertEquals("RMSSD", saved?.hrvMethod)
+        assertEquals(1L, f.repo.metricDataVersion.value)
+        assertEquals(1L, f.repo.restDataVersion.value)
+    }
+
+    @Test
+    fun skippedCounterDayPreservesCompletePriorRowWithoutFreshScore() = runBlocking {
+        val f = fixture()
+        val source = "whoop-ABC123-noop"
+        val day = "2026-09-24"
+        f.daily[source to day] = DailyMetric(
+            deviceId = source,
+            day = day,
+            totalSleepMin = 420.0,
+            recovery = 71.0,
+            strain = 8.0,
+            exerciseCount = 2,
+            steps = 4_000,
+            activeKcalEst = 510.0,
+            spo2Pct = 97.0,
+            skinTempDevC = 0.2,
+            respRateBpm = 14.1,
+        )
+
+        val receipt = f.repo.reconcileComputedScoreRange(
+            deviceId = source,
+            fromDay = day,
+            toDay = day,
+            dailyRows = emptyList(),
+            managedRestKeys = setOf("sleep_performance"),
+            restRows = emptyList(),
+            allowEmptyReplacement = true,
+            preserveDailyFieldsDays = setOf(day),
+        )
+
+        assertEquals(setOf(day), receipt)
+        val saved = f.daily[source to day]
+        assertEquals(420.0, saved?.totalSleepMin)
+        assertEquals(71.0, saved?.recovery)
+        assertEquals(8.0, saved?.strain)
+        assertEquals(2, saved?.exerciseCount)
+        assertEquals(4_000, saved?.steps)
+        assertEquals(510.0, saved?.activeKcalEst)
+        assertEquals(97.0, saved?.spo2Pct)
+        assertEquals(0.2, saved?.skinTempDevC)
+        assertEquals(14.1, saved?.respRateBpm)
+    }
+
+    @Test
+    fun scoreAndStepRepairRollbackTogetherOnEstimateFailure() = runBlocking {
+        val f = fixture()
+        val source = "whoop-ABC123-noop"
+        val day = "2026-09-24"
+        f.daily[source to day] = DailyMetric(
+            deviceId = source,
+            day = day,
+            recovery = 60.0,
+            steps = 4_000,
+        )
+        f.series[Triple(source, day, "steps_est")] =
+            MetricSeriesRow(source, day, "steps_est", 4_000.0)
+        f.failEstimateDelete = true
+
+        val failure = runCatching {
+            f.repo.reconcileComputedScoreRange(
+                deviceId = source,
+                fromDay = day,
+                toDay = day,
+                dailyRows = listOf(
+                    DailyMetric(deviceId = source, day = day, recovery = 80.0)
+                ),
+                managedRestKeys = setOf("sleep_performance"),
+                restRows = emptyList(),
+                stepEvidenceDeviceIds = listOf(source),
+                deleteEstimateDays = setOf(day),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals(60.0, f.daily[source to day]?.recovery)
+        assertEquals(4_000, f.daily[source to day]?.steps)
+        assertEquals(4_000.0, f.series[Triple(source, day, "steps_est")]?.value)
+        assertEquals(0L, f.repo.metricDataVersion.value)
+        assertEquals(0L, f.repo.restDataVersion.value)
+    }
+
+    @Test
+    fun scoreRepairDeletesEstimateFromHistoricalDayOwnerNamespace() = runBlocking {
+        val f = fixture()
+        val activeComputed = "active-band-noop"
+        val historicalComputed = "old-band-noop"
+        val day = "2026-09-24"
+        f.daily[activeComputed to day] = DailyMetric(
+            deviceId = activeComputed,
+            day = day,
+            recovery = 60.0,
+        )
+        f.series[Triple(activeComputed, day, "steps_est")] =
+            MetricSeriesRow(activeComputed, day, "steps_est", 4_000.0)
+        f.series[Triple(historicalComputed, day, "steps_est")] =
+            MetricSeriesRow(historicalComputed, day, "steps_est", 4_000.0)
+
+        f.repo.reconcileComputedScoreRange(
+            deviceId = activeComputed,
+            fromDay = day,
+            toDay = day,
+            dailyRows = listOf(
+                DailyMetric(deviceId = activeComputed, day = day, recovery = 80.0, steps = 1_715)
+            ),
+            managedRestKeys = setOf("sleep_performance"),
+            restRows = emptyList(),
+            stepEvidenceDeviceIds = listOf(activeComputed, historicalComputed),
+            deleteEstimateDays = setOf(day),
+        )
+
+        assertNull(f.series[Triple(activeComputed, day, "steps_est")])
+        assertNull(f.series[Triple(historicalComputed, day, "steps_est")])
+        assertEquals(1_715, f.daily[activeComputed to day]?.steps)
+    }
+
+    @Test
+    fun stepEvidenceMutationChunksLargeDaySets() = runBlocking {
+        val f = fixture()
+        val start = LocalDate.parse("2022-01-01")
+        val days = (0 until 1_201).map { start.plusDays(it.toLong()).toString() }
+
+        f.repo.reconcileComputedStepEvidence(
+            deviceIds = listOf("whoop-ABC123-noop"),
+            deleteEstimateDays = days,
+        )
+
+        assertEquals(listOf(500, 500, 201), f.deleteChunkSizes)
+    }
+
+    @Test
+    fun daySliceReusesCoveredUnsaturatedWindow() {
+        val result = IntelligenceEngine.daySliceFromWindow(
+            samples = listOf(90L, 100L, 150L, 200L, 210L),
+            windowFrom = 90,
+            windowTo = 210,
+            dayFrom = 100,
+            dayTo = 200,
+            limit = 100,
+            timestamp = { it },
+        )
+
+        assertEquals(listOf(100L, 150L, 200L), result)
+    }
+
+    @Test
+    fun daySliceRejectsIncompleteOrLimitSaturatedWindow() {
+        assertNull(
+            IntelligenceEngine.daySliceFromWindow(
+                samples = listOf(100L, 150L),
+                windowFrom = 110,
+                windowTo = 200,
+                dayFrom = 100,
+                dayTo = 200,
+                limit = 100,
+                timestamp = { it },
+            )
+        )
+        assertNull(
+            IntelligenceEngine.daySliceFromWindow(
+                samples = listOf(100L, 150L),
+                windowFrom = 100,
+                windowTo = 200,
+                dayFrom = 100,
+                dayTo = 200,
+                limit = 2,
+                timestamp = { it },
+            )
+        )
+    }
+
+    @Test
+    fun ambiguousCounterDaysArePassedToScoreReplacement() {
+        val sourceFile = listOf(
+            File("src/main/java/com/noop/analytics/IntelligenceEngine.kt"),
+            File("app/src/main/java/com/noop/analytics/IntelligenceEngine.kt"),
+            File("android/app/src/main/java/com/noop/analytics/IntelligenceEngine.kt"),
+        ).firstOrNull(File::isFile)
+        requireNotNull(sourceFile) { "IntelligenceEngine.kt source root is unavailable" }
+        val source = sourceFile.readText()
+        val ownerSet = source.indexOf("val stepCounterOwnerIds")
+        val noRetained = source.indexOf("val stepCounterNoRetainedDays")
+        val computedSources = source.indexOf("val computedStepSourceIds", noRetained)
+        val reconciliation = source.indexOf("repo.reconcileComputedScoreRange(", noRetained)
+        val standaloneRepair =
+            source.indexOf("if (!shouldReconcileScoreRange &&", reconciliation)
+
+        assertTrue("counter owner tracking must exist", ownerSet >= 0)
+        assertTrue("non-retained counter-day policy must exist", noRetained >= 0)
+        assertTrue("computed source expansion must follow policy derivation", computedSources > noRetained)
+        assertTrue("score replacement must follow counter-day derivation", reconciliation > noRetained)
+        assertTrue("standalone repair guard must follow score replacement", standaloneRepair > reconciliation)
+        assertTrue(
+            source.substring(computedSources, reconciliation).contains(
+                ".plus(stepCounterOwnerIds.map"
+            )
+        )
+        val combinedTransaction = source.substring(reconciliation, standaloneRepair)
+        assertTrue(
+            combinedTransaction.contains("preserveDailyStepDays = stepCounterNoRetainedDays")
+        )
+        assertTrue(
+            combinedTransaction.contains("preserveDailyFieldsDays = preserveDailyFieldsDays")
+        )
+        assertTrue(
+            combinedTransaction.contains("deleteEstimateDays = stepCounterAuthoritativeDays")
+        )
+    }
+
+    @Test
+    fun counterIntegrityRepairRunsBeforeHistoricalProjectionGuard() {
+        val sourceFile = listOf(
+            File("src/main/java/com/noop/analytics/IntelligenceEngine.kt"),
+            File("app/src/main/java/com/noop/analytics/IntelligenceEngine.kt"),
+            File("android/app/src/main/java/com/noop/analytics/IntelligenceEngine.kt"),
+        ).firstOrNull(File::isFile)
+        requireNotNull(sourceFile) { "IntelligenceEngine.kt source root is unavailable" }
+        val source = sourceFile.readText()
+        val repair = source.indexOf("val computedStepSourceIds")
+        val historicalGuard = source.indexOf("if (!historicalCatchUp)", repair)
+
+        assertTrue("counter repair must exist", repair >= 0)
+        assertTrue(
+            "historical catch-up must repair stale step evidence before skipping current projections",
+            historicalGuard > repair,
+        )
+        assertTrue(
+            source.substring(repair, historicalGuard).contains(
+                "repo.reconcileComputedStepEvidence("
+            )
+        )
+        assertTrue(
+            source.substring(repair, historicalGuard).contains(
+                "if (!shouldReconcileScoreRange &&"
+            )
+        )
+        assertTrue(
+            source.substring(repair, historicalGuard).contains(
+                "deleteEstimateDays = stepCounterAuthoritativeDays"
+            )
+        )
+    }
+}

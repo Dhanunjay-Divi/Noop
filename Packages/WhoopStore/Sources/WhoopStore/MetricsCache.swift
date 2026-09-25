@@ -492,7 +492,11 @@ extension WhoopStore {
         to: String,
         dailyRows: [DailyMetric],
         managedMetricKeys: Set<String>,
-        metricRows: [MetricPoint]
+        metricRows: [MetricPoint],
+        preserveDailyStepDays: Set<String> = [],
+        preserveDailyFieldsDays: Set<String> = [],
+        stepEvidenceDeviceIds: [String] = [],
+        deleteEstimateDays: Set<String> = []
     ) async throws -> Set<String> {
         try reconcileComputedScoreRangeImpl(
             deviceId: deviceId,
@@ -501,7 +505,12 @@ extension WhoopStore {
             dailyRows: dailyRows,
             managedMetricKeys: managedMetricKeys,
             metricRows: metricRows,
-            beforeMetricSeriesWrite: nil
+            preserveDailyStepDays: preserveDailyStepDays,
+            preserveDailyFieldsDays: preserveDailyFieldsDays,
+            stepEvidenceDeviceIds: stepEvidenceDeviceIds,
+            deleteEstimateDays: deleteEstimateDays,
+            beforeMetricSeriesWrite: nil,
+            beforeStepEvidenceWrite: nil
         )
     }
 
@@ -513,7 +522,12 @@ extension WhoopStore {
         dailyRows: [DailyMetric],
         managedMetricKeys: Set<String>,
         metricRows: [MetricPoint],
-        beforeMetricSeriesWrite: @escaping () throws -> Void
+        preserveDailyStepDays: Set<String> = [],
+        preserveDailyFieldsDays: Set<String> = [],
+        stepEvidenceDeviceIds: [String] = [],
+        deleteEstimateDays: Set<String> = [],
+        beforeMetricSeriesWrite: @escaping () throws -> Void = {},
+        beforeStepEvidenceWrite: @escaping () throws -> Void = {}
     ) async throws -> Set<String> {
         try reconcileComputedScoreRangeImpl(
             deviceId: deviceId,
@@ -522,7 +536,12 @@ extension WhoopStore {
             dailyRows: dailyRows,
             managedMetricKeys: managedMetricKeys,
             metricRows: metricRows,
-            beforeMetricSeriesWrite: beforeMetricSeriesWrite
+            preserveDailyStepDays: preserveDailyStepDays,
+            preserveDailyFieldsDays: preserveDailyFieldsDays,
+            stepEvidenceDeviceIds: stepEvidenceDeviceIds,
+            deleteEstimateDays: deleteEstimateDays,
+            beforeMetricSeriesWrite: beforeMetricSeriesWrite,
+            beforeStepEvidenceWrite: beforeStepEvidenceWrite
         )
     }
 
@@ -533,7 +552,12 @@ extension WhoopStore {
         dailyRows: [DailyMetric],
         managedMetricKeys: Set<String>,
         metricRows: [MetricPoint],
-        beforeMetricSeriesWrite: (() throws -> Void)?
+        preserveDailyStepDays: Set<String>,
+        preserveDailyFieldsDays: Set<String>,
+        stepEvidenceDeviceIds: [String],
+        deleteEstimateDays: Set<String>,
+        beforeMetricSeriesWrite: (() throws -> Void)?,
+        beforeStepEvidenceWrite: (() throws -> Void)?
     ) throws -> Set<String> {
         guard !deviceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ComputedScoreReconciliationError.missingDeviceIdentifier
@@ -551,6 +575,36 @@ extension WhoopStore {
             guard retainedDays.insert(row.day).inserted else {
                 throw ComputedScoreReconciliationError.duplicateDailyDay
             }
+        }
+        let orderedPreservedStepDays = preserveDailyStepDays.sorted()
+        guard orderedPreservedStepDays.allSatisfy({
+            Self.validComputedDay($0) && $0 >= from && $0 <= to
+        }) else {
+            throw ComputedScoreReconciliationError.invalidDailyRow
+        }
+        let orderedPreservedFieldDays = preserveDailyFieldsDays.sorted()
+        guard orderedPreservedFieldDays.allSatisfy({
+            Self.validComputedDay($0)
+                && $0 >= from
+                && $0 <= to
+        }) else {
+            throw ComputedScoreReconciliationError.invalidDailyRow
+        }
+        let normalizedStepEvidenceDeviceIds = Array(Set(stepEvidenceDeviceIds)).sorted()
+        guard normalizedStepEvidenceDeviceIds.allSatisfy({
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) else {
+            throw ComputedScoreReconciliationError.missingDeviceIdentifier
+        }
+        let orderedDeleteEstimateDays = deleteEstimateDays.sorted()
+        guard orderedDeleteEstimateDays.allSatisfy({
+            Self.validComputedDay($0) && $0 >= from && $0 <= to
+        }) else {
+            throw ComputedScoreReconciliationError.invalidDailyRow
+        }
+        let hasStepEvidenceMutation = !orderedDeleteEstimateDays.isEmpty
+        guard !hasStepEvidenceMutation || !normalizedStepEvidenceDeviceIds.isEmpty else {
+            throw ComputedScoreReconciliationError.missingDeviceIdentifier
         }
 
         let keys = managedMetricKeys.sorted()
@@ -581,15 +635,67 @@ extension WhoopStore {
         }
 
         return try syncWrite { db in
+            var preservedDailyFields: [String: DailyMetric] = [:]
+            for day in orderedPreservedFieldDays {
+                if let row = try Self.fetchDailyMetric(
+                    deviceId: deviceId,
+                    day: day,
+                    in: db
+                ) {
+                    preservedDailyFields[day] = row
+                }
+            }
+            var preservedSteps: [String: Int] = [:]
+            for day in orderedPreservedStepDays {
+                if let steps = try Int.fetchOne(
+                    db,
+                    sql: """
+                        SELECT steps
+                        FROM dailyMetric
+                        WHERE deviceId = ? AND day = ? AND steps IS NOT NULL
+                        """,
+                    arguments: [deviceId, day]
+                ) {
+                    preservedSteps[day] = steps
+                }
+            }
+
             try db.execute(
                 sql: """
                     DELETE FROM dailyMetric
                     WHERE deviceId = ? AND day >= ? AND day <= ?
-                    """,
+                """,
                 arguments: [deviceId, from, to]
             )
-            for row in orderedDailyRows {
+            var replacementByDay = Dictionary(
+                uniqueKeysWithValues: orderedDailyRows.map { ($0.day, $0) }
+            )
+            for day in orderedPreservedFieldDays {
+                guard let prior = preservedDailyFields[day] else { continue }
+                if let fresh = replacementByDay[day] {
+                    replacementByDay[day] =
+                        Self.coalesceDailyMetric(fresh, with: prior)
+                } else {
+                    replacementByDay[day] = prior
+                }
+            }
+            let replacementRows = replacementByDay.values.sorted { $0.day < $1.day }
+            for row in replacementRows {
                 _ = try Self.upsertDailyMetric(row, deviceId: deviceId, in: db)
+            }
+            var committedDays = Set(replacementByDay.keys)
+            for day in orderedPreservedStepDays {
+                guard let steps = preservedSteps[day] else { continue }
+                try db.execute(
+                    sql: """
+                        INSERT INTO dailyMetric (deviceId, day, steps)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(deviceId, day) DO UPDATE SET
+                            steps = COALESCE(dailyMetric.steps, excluded.steps)
+                        """,
+                    arguments: [deviceId, day, steps]
+                )
+                committedDays.insert(day)
             }
 
             try beforeMetricSeriesWrite?()
@@ -617,7 +723,21 @@ extension WhoopStore {
                     arguments: [deviceId, row.day, row.key, row.value]
                 )
             }
-            return retainedDays
+
+            try beforeStepEvidenceWrite?()
+
+            for stepDeviceId in normalizedStepEvidenceDeviceIds {
+                for day in orderedDeleteEstimateDays {
+                    try db.execute(
+                        sql: """
+                            DELETE FROM metricSeries
+                            WHERE deviceId = ? AND day = ? AND key = 'steps_est'
+                            """,
+                        arguments: [stepDeviceId, day]
+                    )
+                }
+            }
+            return committedDays
         }
     }
 
@@ -653,6 +773,138 @@ extension WhoopStore {
                 """, arguments: [deviceId])
             return db.changesCount
         }
+    }
+
+    /// Atomically delete superseded `steps_est` rows across computed source namespaces.
+    ///
+    /// Only a retained walk/run counter total reaches this mutation. Still-only, unclassified, sparse,
+    /// flat, and discontinuous windows are non-destructive and never clear a stored daily total.
+    @discardableResult
+    public func reconcileComputedStepEvidence(
+        deviceIds: [String],
+        deleteEstimateDays: [String]
+    ) async throws -> Int {
+        try reconcileComputedStepEvidenceImpl(
+            deviceIds: deviceIds,
+            deleteEstimateDays: deleteEstimateDays
+        )
+    }
+
+    private func reconcileComputedStepEvidenceImpl(
+        deviceIds: [String],
+        deleteEstimateDays: [String]
+    ) throws -> Int {
+        let normalizedDeviceIds = Array(Set(deviceIds)).sorted()
+        guard normalizedDeviceIds.allSatisfy({
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) else {
+            throw ComputedScoreReconciliationError.missingDeviceIdentifier
+        }
+        let normalizedEstimateDays = Array(Set(deleteEstimateDays)).sorted()
+        guard normalizedEstimateDays.allSatisfy(Self.validComputedDay) else {
+            throw ComputedScoreReconciliationError.invalidDailyRow
+        }
+        guard !normalizedDeviceIds.isEmpty,
+              !normalizedEstimateDays.isEmpty else { return 0 }
+        return try syncWrite { db in
+            var changed = 0
+            for deviceId in normalizedDeviceIds {
+                for day in normalizedEstimateDays {
+                    try db.execute(sql: """
+                        DELETE FROM metricSeries
+                        WHERE deviceId = ? AND day = ? AND key = 'steps_est'
+                        """, arguments: [deviceId, day])
+                    changed += db.changesCount
+                }
+            }
+            return changed
+        }
+    }
+
+    private static func fetchDailyMetric(
+        deviceId: String,
+        day: String,
+        in db: Database
+    ) throws -> DailyMetric? {
+        guard let row = try Row.fetchOne(
+            db,
+            sql: """
+                SELECT day, totalSleepMin, efficiency, deepMin, remMin, lightMin, disturbances,
+                       restingHr, avgHrv, recovery, strain, exerciseCount,
+                       spo2Pct, skinTempDevC, respRateBpm, steps, activeKcalEst,
+                       spo2Red, spo2Ir, hrvMethod
+                FROM dailyMetric
+                WHERE deviceId = ? AND day = ?
+                """,
+            arguments: [deviceId, day]
+        ) else {
+            return nil
+        }
+        return DailyMetric(
+            day: row["day"],
+            totalSleepMin: row["totalSleepMin"],
+            efficiency: row["efficiency"],
+            deepMin: row["deepMin"],
+            remMin: row["remMin"],
+            lightMin: row["lightMin"],
+            disturbances: row["disturbances"],
+            restingHr: row["restingHr"],
+            avgHrv: row["avgHrv"],
+            recovery: row["recovery"],
+            strain: row["strain"],
+            exerciseCount: row["exerciseCount"],
+            spo2Pct: row["spo2Pct"],
+            skinTempDevC: row["skinTempDevC"],
+            respRateBpm: row["respRateBpm"],
+            steps: row["steps"],
+            activeKcalEst: row["activeKcalEst"],
+            spo2Red: row["spo2Red"],
+            spo2Ir: row["spo2Ir"],
+            hrvMethod: (row["hrvMethod"] as String?).flatMap(DailyHRVMethod.init(rawValue:))
+        )
+    }
+
+    /// Freshly computed fields win; prior fields fill only missing values. Sleep and raw optical
+    /// measurements move as groups so a step-only refresh cannot create a cross-window hybrid.
+    private static func coalesceDailyMetric(
+        _ fresh: DailyMetric,
+        with prior: DailyMetric
+    ) -> DailyMetric {
+        let sleepFromPrior =
+            fresh.totalSleepMin == nil
+                && fresh.efficiency == nil
+                && fresh.deepMin == nil
+                && fresh.remMin == nil
+                && fresh.lightMin == nil
+                && fresh.disturbances == nil
+        let rawSpo2FromPrior = fresh.spo2Red == nil && fresh.spo2Ir == nil
+        return DailyMetric(
+            day: fresh.day,
+            totalSleepMin: sleepFromPrior ? prior.totalSleepMin : fresh.totalSleepMin,
+            efficiency: sleepFromPrior ? prior.efficiency : fresh.efficiency,
+            deepMin: sleepFromPrior ? prior.deepMin : fresh.deepMin,
+            remMin: sleepFromPrior ? prior.remMin : fresh.remMin,
+            lightMin: sleepFromPrior ? prior.lightMin : fresh.lightMin,
+            disturbances: sleepFromPrior ? prior.disturbances : fresh.disturbances,
+            restingHr: fresh.restingHr ?? prior.restingHr,
+            avgHrv: fresh.avgHrv ?? prior.avgHrv,
+            recovery: fresh.recovery ?? prior.recovery,
+            strain: fresh.strain ?? prior.strain,
+            exerciseCount: {
+                if fresh.exerciseCount == 0, let priorCount = prior.exerciseCount {
+                    return priorCount
+                }
+                return fresh.exerciseCount ?? prior.exerciseCount
+            }(),
+            spo2Pct: fresh.spo2Pct ?? prior.spo2Pct,
+            skinTempDevC: fresh.skinTempDevC ?? prior.skinTempDevC,
+            respRateBpm: fresh.respRateBpm ?? prior.respRateBpm,
+            steps: fresh.steps ?? prior.steps,
+            activeKcalEst: fresh.activeKcalEst ?? prior.activeKcalEst,
+            spo2Red: rawSpo2FromPrior ? prior.spo2Red : fresh.spo2Red,
+            spo2Ir: rawSpo2FromPrior ? prior.spo2Ir : fresh.spo2Ir,
+            hrvMethod: fresh.avgHrv == nil ? prior.hrvMethod : fresh.hrvMethod
+        )
     }
 
     private static func upsertDailyMetric(

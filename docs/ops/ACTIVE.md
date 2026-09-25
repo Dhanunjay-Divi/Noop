@@ -140,44 +140,28 @@ Last updated: **2026-09-25**
   reactivation regressions and removes the remaining Android archived-row
   direct callback. One replacement push, exact-head hosted checks, normal
   protected integration, and physical BLE remain.
-- The September 25 step-motion false-positive correction is committed in
-  `db7de8e2571b1effd8278537d63bd7019b2b0d28` with complete local and exact-head
-  hosted verification green. Apple and Android now
-  retain WHOOP-style counter deltas only when the available activity class says
-  walk or run; still, unknown, invalid, zero, and sync-gap deltas are rejected.
-  Heart rate remains wear/effort context rather than gait proof, and fully
-  unclassified legacy rows keep the existing labelled motion estimate. Focused
-  evidence passes Swift 45/45 and Android 44/44. The complete shared analytics
-  wall passes 1,497 tests with seven intentional private-data skips; Android
-  Full passes 5,121 with seven intentional skips plus APK, lint, and
-  instrumentation compilation; macOS passes 2,317 with one intentional skip;
-  and the unsigned Release iPhone graph embeds Watch, complications, and
-  widgets without source warnings. The first macOS wall exposed one stale
-  failure-injection fixture for the newer atomic registration transaction; the
-  corrected focused case and complete rerun pass. The first Tools wall exposed
-  an Xcode-generated vendored-SDK `.swiftpm` directory, the corresponding stale
-  source-shape contract, and the intentionally pending terminology refresh.
-  Exact cleanup plus focused SDK 9/9 and supplier app-slice 8/8 tests pass.
-  The reviewed terminology snapshot and source digests are current, and the
-  complete Tools wall passes 365 tests with one intentional dependency skip.
-  Release controls, required CI, trusted self-check, calibration, distribution
-  provenance, private-data, health claims, localization, operations records,
-  parser tests, workflow/shell validation, changed-Python compilation, and diff
-  hygiene are green. Exact head `db7de8e25` passed 33 hosted jobs with four
-  intentional skips, including Android, macOS, iOS production shell, and all
-  ten protected contexts. Review-closeout commit `93d5ffed1` passes Apple
-  32/32 and Android supplier-policy 7/7 locally. Review evidence commit
-  `b45c67bf6` is pushed; its source release controls passed, while the hosted
-  248-test step found only that the terminology inventory predated the final
-  fixtures and operations wording. Follow-up `fe616b5` regenerated and
-  repinned that evidence, then passed 34 hosted checks with four intended
-  skips. Two later source-integration review defects are corrected locally:
-  Android Live controls now use durable source state, and Apple supplier
-  discovery continues through a cancellable low-frequency tail. The current
-  candidate records 18,374 classified occurrences across 1,626 groups,
-  preserves the active allowlist, and passes the exact local release gates.
-  One replacement commit/push, hosted checks, normal protected integration,
-  final exact round-owned cleanup, and physical step validation remain.
+- The September 25 step-motion false-positive correction in the commit
+  containing this record is the final locally verified candidate for PR `#17`.
+  Apple and Android now retain current counter deltas only when activity
+  evidence says walk or run;
+  still, current classless, unknown, invalid, zero, and sync-gap deltas are
+  rejected. Heart rate remains wear/effort context rather than gait proof.
+  Rejected or ambiguous partial windows suppress new gravity/step estimates but
+  do not erase prior daily or estimated history; only retained locomotion
+  removes a superseded computed `steps_est`. Manual-workout display also keeps
+  a rejected band counter distinct from a truly absent one, so the iPhone
+  pedometer is used only when no band counter rows exist. Focused evidence
+  passes Swift analytics 35/35, Swift storage 46/46, Apple app orchestration
+  57/57, and Android 58/58. Complete walls pass StrandAnalytics 1,503 with seven
+  intentional private-data skips, WhoopStore 547/547, Android Full 5,150 with
+  seven intentional skips plus APK, lint, and instrumentation compilation, and
+  macOS 2,324 with one intentional fixture skip. The exact-current unsigned
+  iPhone simulator graph also builds the Watch, complications, and widgets.
+  The complete repository-control wall passes 571 tests with one intentional
+  skip, and all direct release gates pass. PR `#17` is authoritative for the
+  candidate head, hosted exact-SHA checks, and protected integration state.
+  Exact round-owned cleanup follows durable hosted evidence. Physical step
+  validation remains external.
 - An isolated local follow-up from `60df38a2` confirms the vendored Swift and
   Kotlin `failOperation` implementations already reject non-operation failure
   categories before state mutation. Matching app-side regressions pass 2/2 on

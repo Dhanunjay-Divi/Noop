@@ -203,6 +203,7 @@ class RegistryDayOwnerSourceTest {
         val bound = IntelligenceEngine.boundDayOwnerSource("old-band", delegate)
 
         assertEquals(listOf("old-band" to 0), bound.candidatePriorities())
+        assertEquals(listOf("old-band"), bound.allSourceIds())
         assertEquals("old-band", bound.lockedOwner("2026-09-11"))
         assertEquals("old-band", bound.activeWriteId())
     }
@@ -216,6 +217,7 @@ class RegistryDayOwnerSourceTest {
         val src = RegistryDayOwnerSource(registry(dao))
         val ids = src.candidatePriorities().map { it.first }
         assertEquals(listOf("my-whoop"), ids) // archived 'old' excluded
+        assertEquals(listOf("my-whoop", "old"), src.allSourceIds())
         // With only the active strap and it having NO data, there is no owner (honest gap).
         assertNull(resolveWith(src, "2026-06-15", mapOf("my-whoop" to false)))
     }
