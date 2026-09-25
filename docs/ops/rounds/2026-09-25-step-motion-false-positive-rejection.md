@@ -2,12 +2,14 @@
 
 ## Status
 
-- State: `the commit containing this record is the independently reviewed local
-  candidate; the class-aware step correction, no-fallback boundary, and
-  non-destructive stale-estimate replacement pass the complete local shared
-  analytics, storage, Android Full, macOS, unsigned iPhone/Watch/widget, and
-  repository-control walls; PR #17 is authoritative for hosted exact-SHA and
-  protected-integration state, while physical accuracy validation remains`
+- State: `the current local replacement candidate is independently reviewed;
+  the class-aware step correction, no-fallback boundary, non-destructive
+  stale-estimate replacement, atomic source publication, supplier battery
+  mapping, day-owner resolution, and supplier-onboarding credential gates pass
+  the complete local storage, Android Full, macOS, and unsigned
+  iPhone/Watch/widget and repository-control walls; replacement hosted
+  exact-SHA checks, protected integration, and physical accuracy validation
+  remain`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `4604fd53d15b459d0c2251da8e8697134bdb30e1`
@@ -15,6 +17,7 @@
   `db7de8e2571b1effd8278537d63bd7019b2b0d28`
 - Review-closeout commit:
   `93d5ffed104d7e3b9f193c2af71c9dfb57d486c8`
+- Final review follow-up commit: commit containing this record
 - Record commit or PR: application pull request `#17`
 
 ## Objective
@@ -128,6 +131,20 @@ heart-rate elevation as proof of walking.
   measurement after transient not-worn or busy responses. The review closeout
   removes the remaining Android archived-row direct callback and adds explicit
   WHOOP/Oura behavior-preservation regressions.
+- Closed five final review findings without using heart rate as gait proof.
+  Apple source activation now publishes the exact verified registry rows from
+  the same transaction that promotes the sole active source, and a failed
+  verification rolls back both activation and ownership invalidation. Apple
+  supplier battery callbacks now normalize the vendor's level form to
+  percentage, publish charging state, and clear both values on terminal or
+  disconnected paths. Apple and Android resolve each source's own heart-rate
+  or step evidence before applying source priority, so an imported HR row
+  cannot preempt an active band's classified walking evidence. Android
+  onboarding accepts a durable supplier row only when the adapter is present
+  and the encrypted credential is available or temporarily unreadable, while a
+  proven missing credential requires repair. Android pairing returns the exact
+  device identifier from its durable commit and no longer depends on a second
+  registry read to report success.
 
 ## Data, privacy, and medical truth
 
@@ -188,6 +205,7 @@ heart-rate elevation as proof of walking.
 | Exact implementation hosted checks | Exact head `db7de8e2571b1effd8278537d63bd7019b2b0d28` passed 33 jobs with four intentional skips, including all ten protected contexts, Android, macOS, and iOS production-shell checks | The consolidated implementation builds and passes hosted policy/tests on the reviewed SHA | The later review-closeout commit until replacement hosted checks finish |
 | PR review closeout | Apple focused set passes 32/32; Android Full compile and `SupplierDeviceCardPolicyTest` pass 7/7 | Oura ownership, supplier transient live restart, archived activation policy, non-supplier reactivation, and Android supplier presentation are covered on the local replacement head | Physical BLE, Compose instrumentation, or signed installation |
 | Final source-integration review remediation | Android Full debug compile and supplier Live policy tests pass 10/10; Apple supplier recovery tests pass 2/2 | Durable source ownership now selects Android Live controls, the confirmed no-active path remains reachable, and Apple discovery continues through a cancellable low-frequency tail | Physical radios, background execution, signed installation, or supplier timing |
+| Final transaction, battery, owner, onboarding, and pairing review | Apple focused app tests 81/81; focused `WhoopStore` registry tests 22/22; complete `WhoopStore` 549/549; Android focused tests 77/77; complete Android Full 5,154 with seven intentional skips plus APK, lint, and instrumentation-source compilation; complete macOS 2,330 with one intentional fixture skip; unsigned Release iPhone graph builds and embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | Exact active-row publication is transactional, vendor battery forms agree across platforms, source priority cannot hide active walking evidence, unusable supplier rows do not complete onboarding, committed pairing is not downgraded by a later read failure, and all affected app graphs compile together | Signed installation, physical BLE, real battery callbacks, firmware activity classification, background execution, or physical step accuracy |
 
 ## Physical device and deployment
 
@@ -223,6 +241,13 @@ heart-rate elevation as proof of walking.
   health-claim, localization, operations-record, workflow, shell, Python, and
   diff gates are green. PR `#17` is authoritative for the exact candidate head,
   hosted checks, review-thread state, and protected integration result.
+- Current replacement state: the commit containing this record is the
+  consolidated final-review follow-up to remote head
+  `801446e5b34e53b0ca001d25d5d525bb71ce9254`. Its complete affected Apple,
+  Android, storage, macOS, unsigned Release iPhone/Watch/widget, repository
+  control, and direct gate walls are green. One push, replacement exact-SHA
+  hosted checks, evidence-backed review-thread resolution, normal protected
+  merge, and protected-main verification remain.
 - Repository visibility verified: not rechecked in this slice.
 - Version/build impact: no version bump.
 - Release or distribution impact: no release claim; physical metric validation
@@ -308,6 +333,29 @@ heart-rate elevation as proof of walking.
 - The first root localization-parser invocation ran from the repository root
   and failed to import its sibling `i18n_audit` module. Running the suite from
   its owning `Tools/` directory passes all 50 tests.
+- The first combined Android final-review run exposed a test-ordering defect:
+  Kotlin evaluated a registry lookup argument before awaiting the pairing
+  commit, so the fixture observed the old owner. Awaiting the committed device
+  identifier before the comparison corrected the test without changing
+  production behavior; the combined focused rerun passes 77/77.
+- A later focused Apple day-owner rerun was refused by the bounded runner at the
+  disk floor after the complete macOS wall had already covered the exact test
+  on the same source. No floor override was used; the complete wall and the
+  earlier focused 81-test run remain the applicable evidence.
+- The first final 572-case repository wall failed six cases because Xcode had
+  regenerated the ignored `Vendor/NoopBandSDK/.swiftpm` cache and the reviewed
+  terminology inventory was stale after source, test, and operations changes.
+  Exact cache deletion restored the protected SDK artifact shape. Review found
+  18,484 classified occurrences across 1,628 path/category groups, zero
+  forbidden mappings, and no active customer/core allowlist change.
+- The next repository wall passed the SDK and terminology tests but failed
+  three required-CI/trust cases because the regenerated inventory's SHA-256 was
+  still pinned to the previous reviewed bytes. The exact zero-forbidden
+  inventory digest was repinned without changing the enforcement rule. The
+  final complete wall then passed 571 tests with one intentional dependency
+  skip and two non-failing FastAPI deprecation warnings; direct release,
+  required-CI, trust-root, calibration, terminology, health-claim,
+  localization, operations, legal-inventory, private-data, and diff gates pass.
 - A blanket ShellCheck invocation included two zsh visual-QA scripts and exited
   with ShellCheck's `SC1071` unsupported-shell result. All sh/bash scripts pass
   ShellCheck and `bash -n`; the two zsh scripts pass `zsh -n`.
@@ -334,11 +382,14 @@ heart-rate elevation as proof of walking.
   source, simulator data, credentials, or user data.
   The obsolete duplicate
   `/tmp/noop-step-false-positive-20260925/ios-derived` was also exact-deleted
-  before the final iPhone graph, recovering about 5.5 GiB. The exact-current
-  `final-ios-derived` and `macos-derived` trees remain round-owned until durable
-  hosted evidence is captured.
+  before the final iPhone graph, recovering about 5.5 GiB. After the later
+  2,330-test macOS wall and exact-current Release iPhone graph were recorded,
+  `/tmp/noop-step-false-positive-20260925/review-apple-derived` was
+  exact-deleted, recovering another 5.5 GiB. The bounded review logs remain
+  until replacement hosted evidence is durable.
   No source, simulator data, credentials, health data, or unidentified cache
-  was removed. Free Data-volume space returned to about 21 GiB.
+  was removed. Free Data-volume space was about 19 GiB after the final local
+  controls.
 
 ## Next round
 

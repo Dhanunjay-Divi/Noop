@@ -309,6 +309,7 @@ class OnboardingOwnershipStepSelectionTest {
             onboardingCompletedDeviceSetupSource(
                 devices = listOf(generic, imported, untouchedSeed),
                 supplierAvailable = true,
+                supplierRegistrationUsable = { true },
             ),
         )
 
@@ -324,12 +325,13 @@ class OnboardingOwnershipStepSelectionTest {
             onboardingCompletedDeviceSetupSource(
                 devices = listOf(whoop),
                 supplierAvailable = false,
+                supplierRegistrationUsable = { true },
             ),
         )
     }
 
     @Test
-    fun supplierRowRequiresTheSupplierAdapter() {
+    fun supplierRowRequiresTheSupplierAdapterAndUsableRegistration() {
         val supplier = pairedDevice(
             id = "supplier-band",
             brand = "NOOP",
@@ -342,6 +344,14 @@ class OnboardingOwnershipStepSelectionTest {
             onboardingCompletedDeviceSetupSource(
                 devices = listOf(supplier),
                 supplierAvailable = false,
+                supplierRegistrationUsable = { true },
+            ),
+        )
+        assertNull(
+            onboardingCompletedDeviceSetupSource(
+                devices = listOf(supplier),
+                supplierAvailable = true,
+                supplierRegistrationUsable = { false },
             ),
         )
         assertEquals(
@@ -349,6 +359,9 @@ class OnboardingOwnershipStepSelectionTest {
             onboardingCompletedDeviceSetupSource(
                 devices = listOf(supplier),
                 supplierAvailable = true,
+                supplierRegistrationUsable = { deviceId ->
+                    deviceId == "supplier-band"
+                },
             ),
         )
     }
@@ -377,6 +390,7 @@ class OnboardingOwnershipStepSelectionTest {
             onboardingCompletedDeviceSetupSource(
                 devices = listOf(oldWhoop, newSupplier),
                 supplierAvailable = true,
+                supplierRegistrationUsable = { true },
             ),
         )
     }
@@ -404,6 +418,7 @@ class OnboardingOwnershipStepSelectionTest {
             onboardingCompletedDeviceSetupSource(
                 devices = listOf(oldWhoop, supplier),
                 supplierAvailable = false,
+                supplierRegistrationUsable = { true },
             ),
         )
     }
@@ -432,6 +447,7 @@ class OnboardingOwnershipStepSelectionTest {
             onboardingCompletedDeviceSetupSource(
                 devices = listOf(oldWhoop, newSupplier),
                 supplierAvailable = true,
+                supplierRegistrationUsable = { true },
             ),
         )
     }
@@ -460,6 +476,7 @@ class OnboardingOwnershipStepSelectionTest {
             onboardingCompletedDeviceSetupSource(
                 devices = listOf(emptySeed, pairedBand),
                 supplierAvailable = false,
+                supplierRegistrationUsable = { true },
             ),
         )
     }

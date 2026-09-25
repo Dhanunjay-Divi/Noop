@@ -451,6 +451,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val supplierBandPairingState = noopApp.sourceCoordinator.veepooPairingState
     val supplierBandDisplay = noopApp.sourceCoordinator.veepooDisplay
 
+    fun supplierBandRegistrationUsable(deviceId: String): Boolean =
+        noopApp.sourceCoordinator.hasUsableVeepooRegistration(deviceId)
+
     suspend fun beginSupplierBandPairing(): Boolean =
         noopApp.sourceCoordinator.beginVeepooPairing()
 
@@ -464,14 +467,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         )
 
     suspend fun commitSupplierBandPairing(nickname: String?): Boolean {
-        val committed = noopApp.sourceCoordinator.commitVeepooPairing(nickname)
-        if (committed) {
-            val id = noopApp.deviceRegistry.activeDeviceId() ?: return false
-            noopApp.noteActiveDeviceId(id)
-            _selectedDeviceId.value = id
-            refreshActiveDeviceName()
-        }
-        return committed
+        val committedDeviceId =
+            noopApp.sourceCoordinator.commitVeepooPairing(nickname) ?: return false
+        noopApp.noteActiveDeviceId(committedDeviceId)
+        _selectedDeviceId.value = committedDeviceId
+        refreshActiveDeviceName()
+        return true
     }
 
     fun cancelSupplierBandPairing() = noopApp.sourceCoordinator.cancelVeepooPairing()

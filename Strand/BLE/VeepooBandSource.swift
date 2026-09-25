@@ -523,6 +523,7 @@ final class VeepooBandSource: LiveHRSource {
         adapter.disconnect()
         live.connected = false
         live.batteryPct = nil
+        live.charging = nil
         live.clearBiometrics()
     }
 
@@ -546,7 +547,10 @@ final class VeepooBandSource: LiveHRSource {
             }
             adapter.verifyPassword(password)
         case .battery(let reading):
-            if let percent = reading.percent {
+            live.charging = reading.charging
+            if let percent =
+                reading.percent ?? reading.level.map({ $0 * 25 })
+            {
                 live.setBattery(Double(percent))
             }
             cancelLiveRestart(resetAttempt: true)
@@ -574,6 +578,7 @@ final class VeepooBandSource: LiveHRSource {
             displayFreshnessTask = nil
             live.connected = false
             live.batteryPct = nil
+            live.charging = nil
             live.clearBiometrics()
             if !credentialRejected && !terminalBatteryFailureHandled {
                 scheduleReconnect()
@@ -594,6 +599,7 @@ final class VeepooBandSource: LiveHRSource {
                 reconnectTask?.cancel()
                 reconnectTask = nil
                 live.batteryPct = nil
+                live.charging = nil
                 publishNonStreamingDisplayState()
                 adapter.disconnect()
                 if !onTerminalBatteryFailure() {

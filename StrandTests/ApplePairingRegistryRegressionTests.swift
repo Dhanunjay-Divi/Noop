@@ -172,6 +172,44 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testUnavailableSupplierFallbackVerificationFailureRollsBackAndKeepsPublishedOwner()
+        async throws
+    {
+        let (store, registry) = try await makeRegistry()
+        let persistence = DeviceRegistryStore(
+            dbQueue: store.registryWriter
+        )
+        let device = supplierDevice(
+            id: "supplier-fallback-rollback",
+            status: .paired
+        )
+        XCTAssertTrue(registry.addAndSetActive(device))
+        try await store.registryWriter.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER ignore_whoop_fallback_activation
+                BEFORE UPDATE OF status ON pairedDevice
+                WHEN OLD.id = 'my-whoop' AND NEW.status = 'active'
+                BEGIN
+                    SELECT RAISE(IGNORE);
+                END
+                """)
+        }
+
+        XCTAssertFalse(registry.reconcileUnavailableSupplier(device.id))
+
+        XCTAssertEqual(registry.activeDeviceId, device.id)
+        XCTAssertEqual(
+            registry.devices.filter { $0.status == .active }.map(\.id),
+            [device.id]
+        )
+        let durableRows = try persistence.all()
+        XCTAssertEqual(
+            durableRows.filter { $0.status == .active }.map(\.id),
+            [device.id]
+        )
+    }
+
+    @MainActor
     func testPairingCancelStartsCurrentSupplierOnlyAfterAdapterDisconnect()
         async throws
     {

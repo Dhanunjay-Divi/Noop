@@ -375,6 +375,27 @@ class SourceCoordinator(
         get() =
             (veepooBridgeProvider != null || veepooPairingSourceFactory != null) &&
                 veepooCredentials != null
+
+    /**
+     * A durable supplier row is usable when its credential exists, or when the protected store is
+     * temporarily unavailable and cannot yet prove the credential missing. Any loaded password is
+     * zeroed before this check returns.
+     */
+    fun hasUsableVeepooRegistration(deviceId: String): Boolean {
+        val credentialStore = veepooCredentials ?: return false
+        return when (val read = credentialStore.readForRetention(deviceId)) {
+            is VeepooCredentialRead.Available -> {
+                try {
+                    true
+                } finally {
+                    read.credential.close()
+                }
+            }
+            VeepooCredentialRead.Missing -> false
+            VeepooCredentialRead.Unavailable -> true
+        }
+    }
+
     private val _veepooCandidates = MutableStateFlow<List<VeepooCandidateRow>>(emptyList())
     val veepooCandidates: StateFlow<List<VeepooCandidateRow>> = _veepooCandidates.asStateFlow()
     private val _veepooDisplay = MutableStateFlow(VeepooDisplayState())
@@ -521,11 +542,11 @@ class SourceCoordinator(
         }
     }
 
-    suspend fun commitVeepooPairing(nickname: String?): Boolean =
+    suspend fun commitVeepooPairing(nickname: String?): String? =
         reconcileLock.withLock {
             val generation = veepooPairingGeneration.get()
-            val source = veepooPairingSource ?: return@withLock false
-            val deviceId = veepooPairingDeviceId ?: return@withLock false
+            val source = veepooPairingSource ?: return@withLock null
+            val deviceId = veepooPairingDeviceId ?: return@withLock null
             val credentialStore = veepooCredentials
             val credentialCleanup = veepooCredentialCleanup
             if (credentialStore == null || credentialCleanup == null) {
@@ -538,9 +559,9 @@ class SourceCoordinator(
                     restoreTransport = true,
                     expectedGeneration = generation,
                 )
-                return@withLock false
+                return@withLock null
             }
-            val commit = source.takeProvisioningCommit() ?: return@withLock false
+            val commit = source.takeProvisioningCommit() ?: return@withLock null
             val now = System.currentTimeMillis() / 1000
             val adopted = VeepooPairingAdoption(
                 registry = registry,
@@ -558,7 +579,7 @@ class SourceCoordinator(
                     restoreTransport = true,
                     expectedGeneration = generation,
                 )
-                return@withLock false
+                return@withLock null
             }
 
             clearVeepooPairingLocked(
@@ -570,7 +591,7 @@ class SourceCoordinator(
             runCatching { onDurableActiveDeviceChanged(deviceId) }
             lastSeenId = null
             reconcile(deviceId)
-            true
+            deviceId
         }
 
     /**

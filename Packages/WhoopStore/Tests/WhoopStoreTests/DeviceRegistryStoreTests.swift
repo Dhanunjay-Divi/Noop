@@ -58,6 +58,87 @@ final class DeviceRegistryStoreTests: XCTestCase {
         XCTAssertEqual(unchangedGeneration, 1)
     }
 
+    func testSetActiveVerifiedReturnsAuthoritativeRowsWithoutReinvalidatingReselection() throws {
+        let dbq = try makeDB()
+        let store = DeviceRegistryStore(dbQueue: dbq)
+        try store.add(PairedDevice(
+            id: "polar-1",
+            brand: "Polar",
+            model: "H10",
+            sourceKind: .liveBLE,
+            capabilities: [.hr, .hrv],
+            status: .paired,
+            addedAt: 1,
+            lastSeenAt: 1
+        ))
+
+        let rows = try store.setActiveVerified("polar-1", at: 300)
+
+        XCTAssertEqual(rows.filter { $0.status == .active }.map(\.id), ["polar-1"])
+        XCTAssertEqual(rows.first { $0.id == "polar-1" }?.lastSeenAt, 300)
+        XCTAssertEqual(try store.all(), rows)
+        let firstGeneration = try dbq.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT generation FROM analysisDirtySource WHERE deviceId = ?",
+                arguments: [AnalysisInputSource.ownership]
+            )
+        }
+        XCTAssertEqual(firstGeneration, 1)
+
+        let reselectedRows = try store.setActiveVerified("polar-1", at: 301)
+
+        XCTAssertEqual(reselectedRows.filter { $0.status == .active }.map(\.id), ["polar-1"])
+        XCTAssertEqual(reselectedRows.first { $0.id == "polar-1" }?.lastSeenAt, 301)
+        let unchangedGeneration = try dbq.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT generation FROM analysisDirtySource WHERE deviceId = ?",
+                arguments: [AnalysisInputSource.ownership]
+            )
+        }
+        XCTAssertEqual(unchangedGeneration, 1)
+    }
+
+    func testSetActiveVerifiedRollsBackDemotionAndInvalidationOnVerificationFailure() throws {
+        let dbq = try makeDB()
+        let store = DeviceRegistryStore(dbQueue: dbq)
+        try store.add(PairedDevice(
+            id: "polar-1",
+            brand: "Polar",
+            model: "H10",
+            sourceKind: .liveBLE,
+            capabilities: [.hr, .hrv],
+            status: .paired,
+            addedAt: 1,
+            lastSeenAt: 1
+        ))
+        try dbq.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER ignore_active_promotion
+                BEFORE UPDATE OF status ON pairedDevice
+                WHEN OLD.id = 'polar-1' AND NEW.status = 'active'
+                BEGIN
+                    SELECT RAISE(IGNORE);
+                END
+                """)
+        }
+
+        XCTAssertThrowsError(try store.setActiveVerified("polar-1", at: 300))
+
+        let rows = try store.all()
+        XCTAssertEqual(rows.filter { $0.status == .active }.map(\.id), ["my-whoop"])
+        XCTAssertEqual(rows.first { $0.id == "polar-1" }?.status, .paired)
+        let ownershipInvalidation = try dbq.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM analysisDirtySource WHERE deviceId = ?",
+                arguments: [AnalysisInputSource.ownership]
+            )
+        }
+        XCTAssertNil(ownershipInvalidation)
+    }
+
     func testAddAndSetActivePersistsCompleteRowAtomically() throws {
         let store = DeviceRegistryStore(dbQueue: try makeDB())
         let device = PairedDevice(

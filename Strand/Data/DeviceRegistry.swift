@@ -14,10 +14,6 @@ import WhoopStore
 // here are plain synchronous calls; we keep failures non-fatal and fall back to the seeded defaults.
 @MainActor
 final class DeviceRegistry: ObservableObject {
-    private enum MutationFailure: Error {
-        case verificationFailed
-    }
-
     /// All paired devices (any status), oldest-added first — the store's `all()` ordering.
     @Published private(set) var devices: [PairedDevice] = []
     /// The active device's id. Defaults to "my-whoop" so callers have a safe value before the
@@ -138,12 +134,7 @@ final class DeviceRegistry: ObservableObject {
             }
             guard let fallback = preferred ?? defaultWhoop else { return false }
 
-            try store.setActive(fallback.id)
-            let updatedRows = try store.all()
-            guard updatedRows.first(where: { $0.status == .active })?.id == fallback.id else {
-                throw MutationFailure.verificationFailed
-            }
-            publish(updatedRows)
+            publish(try store.setActiveVerified(fallback.id))
             return true
         } catch {
             return false

@@ -678,6 +678,94 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     }
 
     @MainActor
+    func testSourcePublishesPercentFormBatteryWithoutRescaling() {
+        let live = LiveState()
+        let adapter = FakeAdapter()
+        let source = VeepooBandSource(
+            live: live,
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {}
+        )
+
+        adapter.emit(
+            .battery(
+                .init(
+                    percent: 82,
+                    level: nil,
+                    charging: nil,
+                    low: false
+                )
+            )
+        )
+
+        XCTAssertEqual(live.batteryPct, 82)
+        XCTAssertEqual(adapter.liveStartCount, 1)
+        source.stop()
+    }
+
+    @MainActor
+    func testSourceMapsLevelFormBatteryUsingQuarterScalePolicy() {
+        let live = LiveState()
+        let adapter = FakeAdapter()
+        let source = VeepooBandSource(
+            live: live,
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {}
+        )
+
+        adapter.emit(
+            .battery(
+                .init(
+                    percent: nil,
+                    level: 3,
+                    charging: nil,
+                    low: nil
+                )
+            )
+        )
+
+        XCTAssertEqual(live.batteryPct, 75)
+        XCTAssertEqual(adapter.liveStartCount, 1)
+        source.stop()
+    }
+
+    @MainActor
+    func testSourcePublishesChargingBeforeBatteryCallbackAndClearsOnStop() {
+        let live = LiveState()
+        let adapter = FakeAdapter()
+        let source = VeepooBandSource(
+            live: live,
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {}
+        )
+        var chargingAtBatteryCallback: Bool?
+        live.onBatteryUpdate = { _ in
+            chargingAtBatteryCallback = live.charging
+        }
+
+        adapter.emit(
+            .battery(
+                .init(
+                    percent: 12,
+                    level: nil,
+                    charging: true,
+                    low: true
+                )
+            )
+        )
+
+        XCTAssertEqual(live.charging, true)
+        XCTAssertEqual(chargingAtBatteryCallback, true)
+
+        source.stop()
+
+        XCTAssertNil(live.charging)
+    }
+
+    @MainActor
     func testLiveHeartRatePreservesPhoneReceiptTimeAndBoundsInvalidSamples() {
         let client = FakeClient()
         let diagnostics = RecordingDiagnostics()

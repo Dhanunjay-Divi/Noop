@@ -257,6 +257,19 @@ class OnboardingAttachContractTest {
         assertFalse(addDevice.contains("supplierCommitFailed"))
     }
 
+    @Test fun supplierCommitPublishesTheCoordinatorDeviceIdWithoutASecondRegistryRead() {
+        val userDir = checkNotNull(System.getProperty("user.dir"))
+        val viewModel = source(userDir, "AppViewModel.kt").readText()
+        val commit = viewModel
+            .substringAfter("suspend fun commitSupplierBandPairing(")
+            .substringBefore("fun cancelSupplierBandPairing")
+
+        assertTrue(commit.contains("commitVeepooPairing(nickname) ?: return false"))
+        assertTrue(commit.contains("noteActiveDeviceId(committedDeviceId)"))
+        assertTrue(commit.contains("_selectedDeviceId.value = committedDeviceId"))
+        assertFalse(commit.contains("deviceRegistry.activeDeviceId()"))
+    }
+
     @Test fun dailyRhythmMapsEverydayToolsWithoutEnablingThem() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val onboarding = source(userDir, "OnboardingScreen.kt").readText()

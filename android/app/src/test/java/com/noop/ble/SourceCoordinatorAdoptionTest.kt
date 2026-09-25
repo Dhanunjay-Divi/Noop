@@ -307,6 +307,7 @@ class SourceCoordinatorAdoptionTest {
         var loadFails = false
         var unavailableReadsRemaining = 0
         var retentionReadCount = 0
+        var lastRetentionPassword: CharArray? = null
 
         override fun save(
             deviceId: String,
@@ -344,9 +345,11 @@ class SourceCoordinatorAdoptionTest {
                 return VeepooCredentialRead.Unavailable
             }
             return values[deviceId]?.let {
+                val password = it.password.toCharArray()
+                lastRetentionPassword = password
                 VeepooCredentialRead.Available(
                     VeepooStoredCredential(
-                        it.password.toCharArray(),
+                        password,
                         it.revisionBinding,
                     ),
                 )
@@ -834,6 +837,78 @@ class SourceCoordinatorAdoptionTest {
         }
 
     @Test
+    fun supplierRegistrationUsabilityClosesSecretsAndPreservesTransientState() {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+        }
+        val credentials = FakeCredentials().apply {
+            seed("supplier-band")
+        }
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            veepooCredentials = credentials,
+        )
+
+        assertTrue(coordinator.hasUsableVeepooRegistration("supplier-band"))
+        assertTrue(
+            checkNotNull(credentials.lastRetentionPassword).all {
+                it == '\u0000'
+            },
+        )
+        assertFalse(coordinator.hasUsableVeepooRegistration("missing-band"))
+
+        credentials.loadFails = true
+        assertTrue(coordinator.hasUsableVeepooRegistration("supplier-band"))
+    }
+
+    @Test
+    fun successfulSupplierCommitReturnsTheAuthoritativeCommittedDeviceId() =
+        runBlocking {
+            val dao = FakeRegistryDao().apply {
+                devices["my-whoop"] = whoopRow("my-whoop", null)
+            }
+            val pairing = FakeVeepooManagedSource(
+                provisioningCommit = provisioningCommit(),
+            )
+            val coordinator = SourceCoordinator(
+                context = null,
+                registry = registryWith(dao),
+                repository = null,
+                liveSink = { _, _ -> },
+                startWhoop = {},
+                stopWhoop = {},
+                scope = CoroutineScope(Dispatchers.Unconfined),
+                noopBandSourceFactory = { _, _ -> FakeNoopBandSource() },
+                veepooPairingSourceFactory = { pairing },
+                veepooCredentials = FakeCredentials(),
+                veepooCredentialCleanup = FakeCredentialCleanup(),
+            )
+
+            assertTrue(coordinator.beginVeepooPairing())
+            val committedDeviceId =
+                checkNotNull(coordinator.commitVeepooPairing("Band"))
+
+            assertEquals(
+                DeviceStatus.active.name,
+                dao.devices[committedDeviceId]?.status,
+            )
+            dao.activeDeviceFailuresRemaining = 1
+            assertTrue(runCatching { dao.activeDeviceId() }.isFailure)
+            assertEquals(
+                committedDeviceId,
+                dao.devices.values.single {
+                    it.status == DeviceStatus.active.name
+                }.id,
+            )
+        }
+
+    @Test
     fun pendingCleanupPreservesCredentialForSuccessfullyRegisteredSupplier() =
         runBlocking {
             val dao = FakeRegistryDao().apply {
@@ -970,7 +1045,13 @@ class SourceCoordinatorAdoptionTest {
 
             coordinator.cancelVeepooPairing()
             releaseUpsert.complete(Unit)
-            assertTrue(commit.await())
+            val committedDeviceId = checkNotNull(commit.await())
+            assertEquals(
+                committedDeviceId,
+                dao.devices.values.single {
+                    it.status == DeviceStatus.active.name
+                }.id,
+            )
 
             assertTrue(coordinator.beginVeepooPairing())
             val replacement = pairingSources.last()

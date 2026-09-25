@@ -310,6 +310,8 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
         val source = onboardingCompletedDeviceSetupSource(
             devicesResult.getOrThrow(),
             supplierAvailable = supplierOnboardingAvailable,
+            supplierRegistrationUsable =
+                viewModel::supplierBandRegistrationUsable,
         )
         if (source != null) {
             acceptDeviceSetupSource(source, recordOutcome)
@@ -712,6 +714,7 @@ internal fun onboardingPages(
 internal fun onboardingCompletedDeviceSetupSource(
     devices: List<PairedDeviceRow>,
     supplierAvailable: Boolean,
+    supplierRegistrationUsable: (String) -> Boolean,
 ): SourceKind? {
     fun eligibleSource(device: PairedDeviceRow): SourceKind? {
         if (
@@ -744,7 +747,9 @@ internal fun onboardingCompletedDeviceSetupSource(
         val isEligibleWhoop =
             SourceCoordinator.isWhoop(device) && isWhoopTransport
         val isEligibleSupplier =
-            supplierAvailable && source == SourceKind.veepoo
+            supplierAvailable &&
+                source == SourceKind.veepoo &&
+                supplierRegistrationUsable(device.id)
         if (!isEligibleWhoop && !isEligibleSupplier) {
             return null
         }

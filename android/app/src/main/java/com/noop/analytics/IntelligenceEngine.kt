@@ -3248,9 +3248,10 @@ object IntelligenceEngine {
      * Resolve the SINGLE device that owns [day] (invariant I2), so the day is scored from exactly one
      * source , never a mix. A locked override (dayOwnership) wins outright and skips the presence checks.
      * Otherwise builds one [DayOwnerResolver.Candidate] per device from [candidatePriorities] with a CHEAP
-     * per-day presence flag (one `LIMIT 1` HR read per device over the night window), and returns the
-     * lowest-priority candidate that has data. Returns [importedDeviceId] when [ownerSource] is null or
-     * the resolver yields no owner , so the legacy single-source path is preserved.
+     * per-day presence flag (one `LIMIT 1` HR read, then one step read only when HR is absent, per device),
+     * and returns the lowest-priority candidate that has data. Returns [importedDeviceId] when
+     * [ownerSource] is null or the resolver yields no owner , so the legacy single-source path is
+     * preserved.
      *
      * Single-device install: the only paired row is the seeded active 'my-whoop' (== [importedDeviceId]).
      * Its candidate is priority 0 with hasData==true for any day the strap collected HR, so the resolver
@@ -3258,7 +3259,7 @@ object IntelligenceEngine {
      * check is the same `LIMIT 1` over the same window the caller already reads. Mirrors the Swift
      * IntelligenceEngine.resolveDayOwner.
      */
-    private suspend fun resolveDayOwner(
+    internal suspend fun resolveDayOwner(
         repo: WhoopRepository,
         ownerSource: DayOwnerSource?,
         candidatePriorities: List<Pair<String, Int>>,
@@ -3285,26 +3286,23 @@ object IntelligenceEngine {
         if (candidatePriorities.size == 1 && candidatePriorities.first().first == importedDeviceId) {
             return importedDeviceId
         }
-        val hrCandidates = candidatePriorities.map { (id, priority) ->
-            // Cheap presence check: a single HR row for this device in the night window marks it a
-            // candidate. (LIMIT 1 , not the full pull the caller does once an owner is chosen.)
-            val hasData = repo.hrSamples(id, from, to, 1).isNotEmpty()
-            DayOwnerResolver.Candidate(deviceId = id, priority = priority, hasData = hasData)
-        }
-        DayOwnerResolver.resolve(day, lockedOwner = null, candidates = hrCandidates)?.let {
-            return it
-        }
-        val stepCandidates = candidatePriorities.map { (id, priority) ->
+        val candidates = candidatePriorities.map { (id, priority) ->
+            // Resolve all available evidence for this same source before applying source priority.
+            // Otherwise an import with one HR row can win before the active band's valid walking rows
+            // are checked. HR short-circuits the step probe; steps are independent gait evidence and
+            // do not require an overnight HR row.
+            val hasHeartRate = repo.hrSamples(id, from, to, 1).isNotEmpty()
+            val hasSteps = !hasHeartRate && repo.stepSamples(id, stepFrom, stepTo, 1).isNotEmpty()
             DayOwnerResolver.Candidate(
                 deviceId = id,
                 priority = priority,
-                hasData = repo.stepSamples(id, stepFrom, stepTo, 1).isNotEmpty(),
+                hasData = hasHeartRate || hasSteps,
             )
         }
         return DayOwnerResolver.resolve(
             day,
             lockedOwner = null,
-            candidates = stepCandidates,
+            candidates = candidates,
         ) ?: importedDeviceId
     }
 

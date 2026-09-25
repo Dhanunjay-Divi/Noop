@@ -5076,9 +5076,10 @@ final class IntelligenceEngine: ObservableObject {
     /// Resolve the SINGLE device that owns `day` (invariant I2), so the day is scored from exactly one
     /// source , never a mix. Builds one `DayOwnerResolver.Candidate` per non-archived device with a
     /// priority (0 = the active strap, 1 = other live straps, 2 = imports; lower wins) and a CHEAP
-    /// per-day presence flag (one `LIMIT 1` HR read per device), then applies any locked override from
-    /// the dayOwnership table. Returns `deviceId` when the registry yields no owner (no candidate has
-    /// data, or it's empty/unreadable) so the legacy single-source path is preserved.
+    /// per-day presence flag (one `LIMIT 1` HR read, then one step read only when HR is absent, per
+    /// device), then applies any locked override from the dayOwnership table. Returns `deviceId` when
+    /// the registry yields no owner (no candidate has data, or it's empty/unreadable) so the legacy
+    /// single-source path is preserved.
     ///
     /// Single-device install: the only paired row is the seeded active 'my-whoop' (== `fallbackDeviceId`).
     /// Its candidate is priority 0 with `hasData == true` for any day the strap collected HR, so the
@@ -5130,49 +5131,40 @@ final class IntelligenceEngine: ObservableObject {
             prioritiesByDevice.append((d.id, priority))
         }
 
-        var hrCandidates: [DayOwnerResolver.Candidate] = []
-        for candidate in prioritiesByDevice {
-            try Task.checkCancellation()
-            // Cheap presence check: a single HR row for this device in the night window is enough to
-            // mark it a candidate. (LIMIT 1 , not the full pull the caller does once an owner is chosen.)
-            let hasData = !(try await store.hrSamples(
-                deviceId: candidate.deviceId, from: from, to: to, limit: 1
-            )).isEmpty
-            hrCandidates.append(DayOwnerResolver.Candidate(
-                deviceId: candidate.deviceId,
-                priority: candidate.priority,
-                hasData: hasData
-            ))
-        }
-        if let owner = DayOwnerResolver.resolve(
-            day: day,
-            lockedOwner: nil,
-            candidates: hrCandidates
-        ) {
-            return owner
-        }
-
-        var stepCandidates: [DayOwnerResolver.Candidate] = []
         let stepWindowFrom = stepFrom ?? from
         let stepWindowTo = stepTo ?? to
+        var candidates: [DayOwnerResolver.Candidate] = []
         for candidate in prioritiesByDevice {
             try Task.checkCancellation()
-            let hasData = !(try await store.stepSamples(
-                deviceId: candidate.deviceId,
-                from: stepWindowFrom,
-                to: stepWindowTo,
-                limit: 1
+            // Resolve all available evidence for this same source before applying source priority.
+            // Otherwise an import with one HR row can win before the active band's valid walking rows
+            // are checked. HR short-circuits the step probe; steps are independent gait evidence and
+            // do not require an overnight HR row.
+            let hasHeartRate = !(try await store.hrSamples(
+                deviceId: candidate.deviceId, from: from, to: to, limit: 1
             )).isEmpty
-            stepCandidates.append(DayOwnerResolver.Candidate(
+            let hasSteps: Bool
+            if hasHeartRate {
+                hasSteps = false
+            } else {
+                try Task.checkCancellation()
+                hasSteps = !(try await store.stepSamples(
+                    deviceId: candidate.deviceId,
+                    from: stepWindowFrom,
+                    to: stepWindowTo,
+                    limit: 1
+                )).isEmpty
+            }
+            candidates.append(DayOwnerResolver.Candidate(
                 deviceId: candidate.deviceId,
                 priority: candidate.priority,
-                hasData: hasData
+                hasData: hasHeartRate || hasSteps
             ))
         }
         return DayOwnerResolver.resolve(
             day: day,
             lockedOwner: nil,
-            candidates: stepCandidates
+            candidates: candidates
         ) ?? fallbackDeviceId
     }
 

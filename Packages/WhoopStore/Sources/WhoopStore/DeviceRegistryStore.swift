@@ -16,6 +16,7 @@ import WhoopProtocol
 /// same synchronous `.read`/`.write` API used below.
 public struct DeviceRegistryStore: Sendable {
     private enum MutationFailure: Error {
+        case activeVerificationFailed
         case archiveVerificationFailed
         case registrationVerificationFailed
     }
@@ -81,6 +82,16 @@ public struct DeviceRegistryStore: Sendable {
 
     /// I1: promoting one device demotes whatever was active, atomically (single write transaction).
     public func setActive(_ id: String) throws {
+        _ = try setActiveVerified(id)
+    }
+
+    /// Promote `id`, fetch the complete registry, and verify the requested row is the sole active
+    /// source in the same transaction. Callers can publish the returned rows without a second read.
+    /// Any failed update or verification rolls back the promotion and ownership invalidation.
+    public func setActiveVerified(
+        _ id: String,
+        at unix: Int = Int(Date().timeIntervalSince1970)
+    ) throws -> [PairedDevice] {
         try dbQueue.write { db in
             let previous = try String.fetchOne(
                 db,
@@ -89,14 +100,30 @@ public struct DeviceRegistryStore: Sendable {
             if previous == id {
                 try db.execute(
                     sql: "UPDATE pairedDevice SET lastSeenAt = ? WHERE id = ?",
-                    arguments: [Int(Date().timeIntervalSince1970), id]
+                    arguments: [unix, id]
                 )
-                return
+            } else {
+                try db.execute(
+                    sql: "UPDATE pairedDevice SET status = 'paired' WHERE status = 'active'"
+                )
+                try db.execute(
+                    sql: "UPDATE pairedDevice SET status = 'active', lastSeenAt = ? WHERE id = ?",
+                    arguments: [unix, id]
+                )
+                try AnalysisOwnershipInvalidation.mark(db)
             }
-            try db.execute(sql: "UPDATE pairedDevice SET status = 'paired' WHERE status = 'active'")
-            try db.execute(sql: "UPDATE pairedDevice SET status = 'active', lastSeenAt = ? WHERE id = ?",
-                           arguments: [Int(Date().timeIntervalSince1970), id])
-            try AnalysisOwnershipInvalidation.mark(db)
+
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM pairedDevice ORDER BY addedAt ASC"
+            ).map(Self.decode)
+            let activeRows = rows.filter { $0.status == .active }
+            guard activeRows.count == 1,
+                  activeRows[0].id == id,
+                  activeRows[0].lastSeenAt == unix else {
+                throw MutationFailure.activeVerificationFailed
+            }
+            return rows
         }
     }
 

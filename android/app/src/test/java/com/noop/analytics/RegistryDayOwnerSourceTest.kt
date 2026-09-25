@@ -5,8 +5,13 @@ import com.noop.data.DeviceRegistry
 import com.noop.data.DeviceRegistryDao
 import com.noop.data.DeviceStatus
 import com.noop.data.AnalysisAffectedRange
+import com.noop.data.HrSample
 import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
+import com.noop.data.StepSample
+import com.noop.data.WhoopDao
+import com.noop.data.WhoopRepository
+import java.lang.reflect.Proxy
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -153,6 +158,61 @@ class RegistryDayOwnerSourceTest {
         // Strap collected nothing this day → the import (only candidate with data) owns it.
         val owner = resolveWith(src, "2026-06-15", mapOf("my-whoop" to false, "oura" to true))
         assertEquals("oura", owner)
+    }
+
+    @Test
+    fun dayOwnerResolvesEachSourcesHeartRateOrStepsBeforeApplyingPriority() = runBlocking {
+        val heartRateCalls = mutableListOf<String>()
+        val stepCalls = mutableListOf<String>()
+        val dao = Proxy.newProxyInstance(
+            WhoopDao::class.java.classLoader,
+            arrayOf(WhoopDao::class.java),
+        ) { _, method, args ->
+            when (method.name) {
+                "hrSamples" -> {
+                    val id = args!![0] as String
+                    heartRateCalls += id
+                    if (id == "oura") listOf(HrSample(id, 1_500, 60)) else emptyList<HrSample>()
+                }
+                "stepSamples" -> {
+                    val id = args!![0] as String
+                    stepCalls += id
+                    if (id == "my-whoop") {
+                        listOf(StepSample(id, 1_400, 100, activityClass = 1))
+                    } else {
+                        emptyList<StepSample>()
+                    }
+                }
+                else -> throw UnsupportedOperationException(
+                    "day-owner fixture must not call ${method.name}"
+                )
+            }
+        } as WhoopDao
+        val ownerSource = object : IntelligenceEngine.DayOwnerSource {
+            override suspend fun candidatePriorities() =
+                listOf("my-whoop" to 0, "oura" to 2)
+
+            override suspend fun lockedOwner(day: String): String? = null
+        }
+
+        val owner = IntelligenceEngine.resolveDayOwner(
+            repo = WhoopRepository(dao),
+            ownerSource = ownerSource,
+            candidatePriorities = ownerSource.candidatePriorities(),
+            day = "1970-01-01",
+            from = 1_000,
+            to = 2_000,
+            importedDeviceId = "my-whoop",
+            stepFrom = 1_000,
+            stepTo = 2_000,
+        )
+
+        assertEquals("my-whoop", owner)
+        assertEquals(listOf("my-whoop", "oura"), heartRateCalls)
+        assertEquals(
+            listOf("my-whoop"),
+            stepCalls,
+        )
     }
 
     @Test
