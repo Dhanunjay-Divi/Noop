@@ -122,4 +122,72 @@ class SupplierDisplayHeartRatePolicyTest {
             visibleSupplierBatteryPercent(liveDisplay.copy(batteryPercent = 81)),
         )
     }
+
+    @Test
+    fun durableSupplierSourceKeepsSupplierControlsWhenDisplayResetsIdle() {
+        val resetDisplay = VeepooDisplayState()
+
+        assertEquals(VeepooAdapterState.IDLE, resetDisplay.adapterState)
+        assertEquals(
+            LiveControlMode.SUPPLIER,
+            liveControlMode(ActiveDeviceSourceState.SUPPLIER),
+        )
+    }
+
+    @Test
+    fun transientSupplierDisplayCannotReplaceWhoopControls() {
+        assertEquals(VeepooAdapterState.LIVE_DISPLAY_ONLY, liveDisplay.adapterState)
+        assertEquals(
+            LiveControlMode.STANDARD,
+            liveControlMode(ActiveDeviceSourceState.STANDARD),
+        )
+    }
+
+    @Test
+    fun unresolvedDurableSourceDoesNotExposeWhoopControls() {
+        assertEquals(
+            LiveControlMode.RESOLVING,
+            liveControlMode(ActiveDeviceSourceState.UNRESOLVED),
+        )
+    }
+
+    @Test
+    fun confirmedNoActiveDeviceStillOffersStandardConnectionControls() {
+        assertEquals(
+            LiveControlMode.STANDARD,
+            liveControlMode(ActiveDeviceSourceState.NO_ACTIVE_DEVICE),
+        )
+    }
+
+    @Test
+    fun liveScreenRoutesBeforeCreatingTheWhoopConnectAction() {
+        val source = liveScreenSource().readText()
+        val routingBlock = source
+            .substringAfter("fun LiveScreen(")
+            .substringBefore("val live by viewModel.live.collectAsStateWithLifecycle()")
+
+        assertTrue(
+            routingBlock.contains(
+                "viewModel.activeDeviceSourceState.collectAsStateWithLifecycle()",
+            ),
+        )
+        assertTrue(routingBlock.contains("when (liveControlMode(activeSourceState))"))
+        assertTrue(routingBlock.contains("ResolvingLiveSourceScreen(onManageDevices)"))
+        assertTrue(routingBlock.contains("SupplierBandLiveScreen(supplierDisplay, onManageDevices)"))
+        assertFalse(routingBlock.contains("supplierDisplay.adapterState"))
+        val supplierRoute =
+            source.indexOf("SupplierBandLiveScreen(supplierDisplay, onManageDevices)")
+        val whoopConnect = source.indexOf("rememberRequestScan { viewModel.connect() }")
+        assertTrue(supplierRoute >= 0)
+        assertTrue(whoopConnect > supplierRoute)
+    }
+
+    private fun liveScreenSource(): File {
+        val userDir = checkNotNull(System.getProperty("user.dir"))
+        return listOf(
+            File(userDir, "src/main/java/com/noop/ui/LiveScreen.kt"),
+            File(userDir, "app/src/main/java/com/noop/ui/LiveScreen.kt"),
+            File(userDir, "android/app/src/main/java/com/noop/ui/LiveScreen.kt"),
+        ).firstOrNull(File::isFile) ?: error("Could not locate LiveScreen.kt from $userDir")
+    }
 }

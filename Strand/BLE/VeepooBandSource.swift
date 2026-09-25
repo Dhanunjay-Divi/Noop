@@ -371,6 +371,7 @@ final class VeepooBandSource: LiveHRSource {
     private let displayFreshnessInterval: TimeInterval
     private let reconnectDelaysNanoseconds: [UInt64]
     private let reconnectDiscoveryTimeoutNanoseconds: UInt64
+    private let reconnectTailDelayNanoseconds: UInt64
     private let liveRestartDelaysNanoseconds: [UInt64]
     private let liveRestartTailDelayNanoseconds: UInt64
     private let now: () -> Date
@@ -402,6 +403,7 @@ final class VeepooBandSource: LiveHRSource {
             15_000_000_000,
         ],
         reconnectDiscoveryTimeoutNanoseconds: UInt64 = 12_000_000_000,
+        reconnectTailDelayNanoseconds: UInt64 = 60_000_000_000,
         liveRestartDelaysNanoseconds: [UInt64] = [
             2_000_000_000,
             5_000_000_000,
@@ -424,6 +426,7 @@ final class VeepooBandSource: LiveHRSource {
         self.reconnectDelaysNanoseconds = reconnectDelaysNanoseconds
         self.reconnectDiscoveryTimeoutNanoseconds =
             reconnectDiscoveryTimeoutNanoseconds
+        self.reconnectTailDelayNanoseconds = reconnectTailDelayNanoseconds
         self.liveRestartDelaysNanoseconds = liveRestartDelaysNanoseconds
         self.liveRestartTailDelayNanoseconds =
             liveRestartTailDelayNanoseconds
@@ -451,6 +454,7 @@ final class VeepooBandSource: LiveHRSource {
             15_000_000_000,
         ],
         reconnectDiscoveryTimeoutNanoseconds: UInt64 = 12_000_000_000,
+        reconnectTailDelayNanoseconds: UInt64 = 60_000_000_000,
         liveRestartDelaysNanoseconds: [UInt64] = [
             2_000_000_000,
             5_000_000_000,
@@ -476,6 +480,7 @@ final class VeepooBandSource: LiveHRSource {
         self.reconnectDelaysNanoseconds = reconnectDelaysNanoseconds
         self.reconnectDiscoveryTimeoutNanoseconds =
             reconnectDiscoveryTimeoutNanoseconds
+        self.reconnectTailDelayNanoseconds = reconnectTailDelayNanoseconds
         self.liveRestartDelaysNanoseconds = liveRestartDelaysNanoseconds
         self.liveRestartTailDelayNanoseconds =
             liveRestartTailDelayNanoseconds
@@ -742,13 +747,19 @@ final class VeepooBandSource: LiveHRSource {
     private func scheduleReconnect() {
         guard !stopped,
               reconnectTask == nil,
-              let targetPeripheralID,
-              reconnectAttempt < reconnectDelaysNanoseconds.count
+              let targetPeripheralID
         else {
             return
         }
-        reconnectAttempt += 1
-        let delay = reconnectDelaysNanoseconds[reconnectAttempt - 1]
+        let delay: UInt64
+        if reconnectAttempt < reconnectDelaysNanoseconds.count {
+            delay = reconnectDelaysNanoseconds[reconnectAttempt]
+            reconnectAttempt += 1
+        } else {
+            // Keep one cancellable, low-frequency discovery path alive after
+            // the short burst while the active supplier selection pauses the alternate transport.
+            delay = reconnectTailDelayNanoseconds
+        }
         startBoundedDiscovery(
             targetPeripheralID: targetPeripheralID,
             delayNanoseconds: delay

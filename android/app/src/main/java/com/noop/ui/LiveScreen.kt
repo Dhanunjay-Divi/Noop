@@ -110,15 +110,35 @@ internal fun visibleSupplierBatteryPercent(
     display.adapterState == com.noop.ble.veepoo.VeepooAdapterState.LIVE_DISPLAY_ONLY
 }
 
+internal enum class LiveControlMode {
+    RESOLVING,
+    SUPPLIER,
+    STANDARD,
+}
+
+internal fun liveControlMode(activeSourceState: ActiveDeviceSourceState): LiveControlMode =
+    when (activeSourceState) {
+        ActiveDeviceSourceState.UNRESOLVED -> LiveControlMode.RESOLVING
+        ActiveDeviceSourceState.SUPPLIER -> LiveControlMode.SUPPLIER
+        ActiveDeviceSourceState.NO_ACTIVE_DEVICE,
+        ActiveDeviceSourceState.STANDARD,
+        -> LiveControlMode.STANDARD
+    }
+
 @Composable
 fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     val supplierDisplay by viewModel.supplierBandDisplay.collectAsStateWithLifecycle()
-    if (
-        supplierDisplay.adapterState != com.noop.ble.veepoo.VeepooAdapterState.IDLE &&
-        supplierDisplay.adapterState != com.noop.ble.veepoo.VeepooAdapterState.STOPPED
-    ) {
-        SupplierBandLiveScreen(supplierDisplay, onManageDevices)
-        return
+    val activeSourceState by viewModel.activeDeviceSourceState.collectAsStateWithLifecycle()
+    when (liveControlMode(activeSourceState)) {
+        LiveControlMode.RESOLVING -> {
+            ResolvingLiveSourceScreen(onManageDevices)
+            return
+        }
+        LiveControlMode.SUPPLIER -> {
+            SupplierBandLiveScreen(supplierDisplay, onManageDevices)
+            return
+        }
+        LiveControlMode.STANDARD -> Unit
     }
     val live by viewModel.live.collectAsStateWithLifecycle()
     // #628: the Oura ring's live wear/charge state (null for WHOOP / before evidence). Preferred by the
@@ -722,6 +742,38 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
             item {
             ConnectionHelp(viewModel, modifier = Modifier.fillMaxWidth())
             }
+        }
+    }
+}
+
+@Composable
+private fun ResolvingLiveSourceScreen(onManageDevices: () -> Unit) {
+    ScreenScaffold(
+        title = uiString(R.string.nav_live),
+        subtitle = uiString(R.string.nav_devices),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            CircularProgressIndicator(
+                color = Palette.accent,
+                modifier = Modifier.size(28.dp),
+            )
+            Text(
+                uiString(R.string.appwide_health_live_hr_waiting),
+                style = NoopType.body,
+                color = Palette.textSecondary,
+            )
+        }
+        OutlinedButton(
+            onClick = onManageDevices,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(uiString(R.string.l10n_live_screen_manage_devices_e5c277ff))
         }
     }
 }

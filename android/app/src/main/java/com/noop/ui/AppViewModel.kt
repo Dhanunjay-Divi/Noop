@@ -134,6 +134,13 @@ internal data class MatchedSleepObservation(
     val durationMinutes: Double,
 )
 
+internal enum class ActiveDeviceSourceState {
+    UNRESOLVED,
+    NO_ACTIVE_DEVICE,
+    SUPPLIER,
+    STANDARD,
+}
+
 /** Stable live fields the Today root is allowed to observe. Sensor values and sync counters stay in leaves. */
 internal data class DashboardLiveSnapshot(
     val connected: Boolean,
@@ -274,12 +281,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _activeDeviceName = MutableStateFlow<String?>(null)
     val activeDeviceName: StateFlow<String?> = _activeDeviceName.asStateFlow()
 
-    /** Re-read the active device row and republish its display name. Called at launch + after a setActive. */
+    /** Durable source state for the registry's active row. Presentation must not infer source ownership
+     *  from transient adapter state because secure-store or transport failures can reset that state. */
+    private val _activeDeviceSourceState =
+        MutableStateFlow(ActiveDeviceSourceState.UNRESOLVED)
+    internal val activeDeviceSourceState: StateFlow<ActiveDeviceSourceState> =
+        _activeDeviceSourceState.asStateFlow()
+
+    /** Re-read the active device row and republish its presentation. A failed read preserves the last
+     *  confirmed durable projection instead of temporarily presenting another source's controls. */
     fun refreshActiveDeviceName() {
         viewModelScope.launch {
-            val all = runCatching { noopApp.deviceRegistry.all() }.getOrDefault(emptyList())
+            val all = runCatching { noopApp.deviceRegistry.all() }.getOrNull()
+                ?: return@launch
             val active = all.firstOrNull { it.status == com.noop.data.DeviceStatus.active.name }
+            val sourceKind = active?.sourceKind?.let { rawSourceKind ->
+                com.noop.data.SourceKind.entries.firstOrNull { it.name == rawSourceKind }
+            }
             _activeDeviceName.value = active?.let { displayName(it) }
+            _activeDeviceSourceState.value = when {
+                active == null -> ActiveDeviceSourceState.NO_ACTIVE_DEVICE
+                sourceKind == com.noop.data.SourceKind.veepoo ->
+                    ActiveDeviceSourceState.SUPPLIER
+                sourceKind != null -> ActiveDeviceSourceState.STANDARD
+                else -> ActiveDeviceSourceState.UNRESOLVED
+            }
         }
     }
 

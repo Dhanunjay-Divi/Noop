@@ -979,30 +979,62 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     }
 
     @MainActor
-    func testInitialActivationDiscoveryUsesBoundedReconnectPolicy() async {
+    func testInitialActivationDiscoveryContinuesWithLowFrequencyReconnectTail()
+        async
+    {
+        let adapter = FakeAdapter()
+        var source: VeepooBandSource!
+        adapter.onDiscovery = {
+            if adapter.discoveries.count == 5 {
+                source.stop()
+            }
+        }
+        source = VeepooBandSource(
+            live: LiveState(),
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {},
+            reconnectDelaysNanoseconds: [0, 0, 0],
+            reconnectDiscoveryTimeoutNanoseconds: 0,
+            reconnectTailDelayNanoseconds: 0
+        )
+        source.connect(UUID())
+
+        for _ in 0..<200 where adapter.discoveries.count < 5 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(adapter.discoveries.count, 5)
+        XCTAssertEqual(adapter.stopDiscoveryCount, 4)
+        adapter.onDiscovery = nil
+        source.stop()
+    }
+
+    @MainActor
+    func testStoppingSourceCancelsPendingLowFrequencyReconnectTail() async {
         let adapter = FakeAdapter()
         let source = VeepooBandSource(
             live: LiveState(),
             adapter: adapter,
             password: "2468",
             onCredentialRejected: {},
-            reconnectDelaysNanoseconds: [0, 0, 0],
-            reconnectDiscoveryTimeoutNanoseconds: 0
+            reconnectDelaysNanoseconds: [],
+            reconnectDiscoveryTimeoutNanoseconds: 0,
+            reconnectTailDelayNanoseconds: 20_000_000
         )
         source.connect(UUID())
 
-        for _ in 0..<100 {
-            if adapter.discoveries.count == 4,
-               adapter.stopDiscoveryCount == 4
-            {
-                break
-            }
+        for _ in 0..<100 where adapter.stopDiscoveryCount < 1 {
             await Task.yield()
         }
+        XCTAssertEqual(adapter.discoveries.count, 1)
+        XCTAssertEqual(adapter.stopDiscoveryCount, 1)
 
-        XCTAssertEqual(adapter.discoveries.count, 4)
-        XCTAssertEqual(adapter.stopDiscoveryCount, 4)
         source.stop()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(adapter.discoveries.count, 1)
+        XCTAssertEqual(adapter.stopDiscoveryCount, 1)
     }
 
     @MainActor
