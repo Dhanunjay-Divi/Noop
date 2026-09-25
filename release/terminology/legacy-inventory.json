@@ -3,9 +3,9 @@
     "compatibility": 1737,
     "core": 5014,
     "customer": 890,
-    "fixture": 5809,
+    "fixture": 5810,
     "generated": 21,
-    "historical": 3313,
+    "historical": 3318,
     "import": 871,
     "persisted": 700
   },
@@ -14912,13 +14912,17 @@
         494,
         534,
         556,
-        640,
-        641
+        644,
+        645,
+        691,
+        692
       ],
-      "occurrenceCount": 17,
+      "occurrenceCount": 19,
       "path": "StrandTests/ApplePairingRegistryRegressionTests.swift",
-      "sha256": "5f1c7bed109786883b3df55aa8fdcf4f5c3c930f5bbaff8dbb8ba665e11ecbc2",
+      "sha256": "8a1cdecef386b744b2b2e3cb8ffb1f258fed082c25c0a35e00995bde80db89e1",
       "tokenCounts": {
+        "whoop": 1,
+        "whoop-readd": 1,
         "whoopstarts": 3,
         "whoopstops": 6,
         "whoopstore": 8
@@ -15358,15 +15362,18 @@
         93,
         94,
         148,
-        149
+        149,
+        198,
+        199
       ],
-      "occurrenceCount": 19,
+      "occurrenceCount": 21,
       "path": "StrandTests/DevicePillStateTests.swift",
-      "sha256": "dda37a3516b2ccd3a6076f358cf13ed4b1f7c985d3768ad1e009ced72ea33ba8",
+      "sha256": "dcdd285b184163a676f7dde3a79def10e040d92ea8742c9ec50cfabb6ad2fc4d",
       "tokenCounts": {
-        "whoop": 4,
+        "whoop": 5,
         "whoop-newer": 1,
         "whoop-older": 1,
+        "whoop-removed": 1,
         "whoop4": 4,
         "whoop5mg": 4,
         "whoopmodel": 4,
@@ -34695,13 +34702,15 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        119
+        45,
+        140
       ],
-      "occurrenceCount": 1,
+      "occurrenceCount": 2,
       "path": "android/app/src/test/java/com/noop/ui/SupplierDeviceCardPolicyTest.kt",
-      "sha256": "0e6efff584c7a5be8ffd77aff5b47b21350b949836440fab6377e7d440dbeeca",
+      "sha256": "1bc3b71d8111e120abf3f677f7b4835d67bbcded4e7556d22c4a81edf2620adb",
       "tokenCounts": {
-        "whoop": 1
+        "whoop": 1,
+        "whoopfirstfooter": 1
       }
     },
     {
@@ -36897,14 +36906,14 @@
         20,
         76,
         82,
-        122,
-        201,
-        249,
-        270,
-        414,
-        546,
-        651,
-        655
+        127,
+        215,
+        263,
+        284,
+        428,
+        560,
+        665,
+        669
       ],
       "occurrenceCount": 12,
       "path": "docs/ops/ACTIVE.md",
@@ -37410,17 +37419,18 @@
     {
       "category": "historical",
       "lineNumbers": [
-        25,
-        48,
-        57,
-        84,
-        123
+        28,
+        51,
+        60,
+        87,
+        95,
+        133
       ],
-      "occurrenceCount": 5,
+      "occurrenceCount": 6,
       "path": "docs/ops/rounds/2026-09-25-step-motion-false-positive-rejection.md",
-      "sha256": "2fce891e2487a0cdf1862c517a6fb5640dd7d46cb7752ce8f88716ea088dcd25",
+      "sha256": "e839e7deaa3c1b97306b797a45e4c69ed0915e9de1576cda4945db4240a3ee6e",
       "tokenCounts": {
-        "whoop": 1,
+        "whoop": 2,
         "whoop-compatible": 1,
         "whoop-style": 3
       }
@@ -39665,7 +39675,7 @@
       }
     }
   ],
-  "occurrenceCount": 18355,
+  "occurrenceCount": 18361,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

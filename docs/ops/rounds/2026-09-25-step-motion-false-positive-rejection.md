@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `implementation and review closeout committed locally with focused and complete local verification green; replacement push and hosted integration pending`
+- State: `implementation and review closeout pushed on PR #17; exact head b45c67bf exposed only a stale reviewed terminology inventory in release-controls; the reviewed inventory and digest correction is prepared, with replacement hosted verification and protected integration pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `4604fd53d15b459d0c2251da8e8697134bdb30e1`
@@ -163,9 +163,13 @@ heart-rate elevation as proof of walking.
   records.
 - Commits: implementation `db7de8e2571b1effd8278537d63bd7019b2b0d28`;
   review closeout `93d5ffed104d7e3b9f193c2af71c9dfb57d486c8`.
-- Branch and remote state: implementation commit is pushed on PR `#17`; the
-  review-closeout commit and this record remain local pending one replacement
-  push and exact-head hosted checks.
+- Branch and remote state: implementation, review-closeout, and evidence commits
+  through `b45c67bf6186e238ee1e6f23422c2dc7aceec412` are pushed on PR `#17`.
+  That exact head passed source release controls but its 248-test
+  release-control step found the reviewed terminology inventory stale after
+  the final review fixtures and operations wording changed. The regenerated
+  inventory, matching reviewed-source digest, replacement exact-head checks,
+  and protected integration remain.
 - Repository visibility verified: not rechecked in this slice.
 - Version/build impact: no version bump.
 - Release or distribution impact: no release claim; physical metric validation
@@ -208,6 +212,13 @@ heart-rate elevation as proof of walking.
   The generated directory was exact-deleted and the two focused contract suites
   pass. After the reviewed terminology refresh and exact source-digest repin,
   the complete 365-test Tools wall passes with one intentional dependency skip.
+- Exact hosted head `b45c67bf6186e238ee1e6f23422c2dc7aceec412`
+  then failed only `test_repository_snapshot_is_current` in release-controls:
+  the final review fixtures and operations wording added six classified legacy
+  occurrences after the previous snapshot. The regenerated inventory contains
+  18,361 occurrences across 1,623 path/category groups with no active-allowlist
+  change. Its reviewed-source digest was repinned, and the exact hosted
+  248-test command now passes locally.
 - The first root localization-parser invocation ran from the repository root
   and failed to import its sibling `i18n_audit` module. Running the suite from
   its owning `Tools/` directory passes all 50 tests.

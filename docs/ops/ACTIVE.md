@@ -147,9 +147,14 @@ Last updated: **2026-09-25**
   hygiene are green. Exact head `db7de8e25` passed 33 hosted jobs with four
   intentional skips, including Android, macOS, iOS production shell, and all
   ten protected contexts. Review-closeout commit `93d5ffed1` passes Apple
-  32/32 and Android supplier-policy 7/7 locally. Replacement hosted checks,
-  normal protected integration, final exact round-owned cleanup, and physical
-  step validation remain.
+  32/32 and Android supplier-policy 7/7 locally. Review evidence commit
+  `b45c67bf6` is pushed; its source release controls passed, while the hosted
+  248-test step found only that the terminology inventory predated the final
+  fixtures and operations wording. The current candidate regenerates 18,361
+  classified occurrences across 1,623 groups, preserves the active allowlist,
+  and repins the reviewed digest; the exact hosted command passes locally.
+  Replacement hosted checks, normal protected integration, final exact
+  round-owned cleanup, and physical step validation remain.
 - An isolated local follow-up from `60df38a2` confirms the vendored Swift and
   Kotlin `failOperation` implementations already reject non-operation failure
   categories before state mutation. Matching app-side regressions pass 2/2 on
