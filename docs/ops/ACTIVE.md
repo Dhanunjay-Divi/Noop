@@ -64,6 +64,25 @@ Last updated: **2026-09-25**
   collection, history retention, haptics, battery, firmware, egress, provider
   delivery, production load, and physiological accuracy remain external or
   physical gates.
+- A September 25 Android review follow-up is committed locally at
+  `12e7819c968eea5006e18f4d000874dac6b4673b`.
+  Live now selects supplier versus standard controls from the durable active
+  registry source kind, preserves the last confirmed projection across a
+  registry-read failure, blocks standard controls while source ownership is
+  unresolved or malformed, and still exposes ordinary connection controls
+  after a successful read confirms there is no active band. Therefore a
+  temporary supplier credential-store failure that resets display state to
+  `IDLE` cannot expose or invoke WHOOP Scan & Connect under the supplier row.
+  Full debug production/test Kotlin compiled and the focused supplier Live
+  suite passed 10/10 with zero skips or failures. No emulator, physical device,
+  or push was performed.
+- A September 25 Apple review follow-up is committed locally in the same
+  `12e7819c968eea5006e18f4d000874dac6b4673b` implementation.
+  Supplier discovery keeps the existing short retry burst and then continues
+  through one cancellable 60-second recovery tail while that durable source
+  keeps WHOOP paused. The tail stops with the source and resets after a
+  successful live sample. Focused macOS tests passed 2/2 with zero failures.
+  Physical iPhone and supplier-band reconnect timing remains unverified.
 - Final September 25 local replacement review is green and remains unpushed.
   Apple now restores supplier transport after early pairing failure, binds
   handoff to the exact current registry owner, and removes stale day ownership
@@ -150,11 +169,15 @@ Last updated: **2026-09-25**
   32/32 and Android supplier-policy 7/7 locally. Review evidence commit
   `b45c67bf6` is pushed; its source release controls passed, while the hosted
   248-test step found only that the terminology inventory predated the final
-  fixtures and operations wording. The current candidate regenerates 18,361
-  classified occurrences across 1,623 groups, preserves the active allowlist,
-  and repins the reviewed digest; the exact hosted command passes locally.
-  Replacement hosted checks, normal protected integration, final exact
-  round-owned cleanup, and physical step validation remain.
+  fixtures and operations wording. Follow-up `fe616b5` regenerated and
+  repinned that evidence, then passed 34 hosted checks with four intended
+  skips. Two later source-integration review defects are corrected locally:
+  Android Live controls now use durable source state, and Apple supplier
+  discovery continues through a cancellable low-frequency tail. The current
+  candidate records 18,374 classified occurrences across 1,626 groups,
+  preserves the active allowlist, and passes the exact local release gates.
+  One replacement commit/push, hosted checks, normal protected integration,
+  final exact round-owned cleanup, and physical step validation remain.
 - An isolated local follow-up from `60df38a2` confirms the vendored Swift and
   Kotlin `failOperation` implementations already reject non-operation failure
   categories before state mutation. Matching app-side regressions pass 2/2 on

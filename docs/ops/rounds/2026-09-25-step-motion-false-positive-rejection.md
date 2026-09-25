@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `implementation and review closeout pushed on PR #17; exact head b45c67bf exposed only a stale reviewed terminology inventory in release-controls; the reviewed inventory and digest correction is prepared, with replacement hosted verification and protected integration pending`
+- State: `step correction and first review closeout are pushed on PR #17; exact head fe616b5 passed all hosted checks; two later source-integration review corrections are locally verified, with one replacement commit, hosted verification, and protected integration pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `4604fd53d15b459d0c2251da8e8697134bdb30e1`
@@ -139,9 +139,10 @@ heart-rate elevation as proof of walking.
 | Complete macOS app wall | 2,317 tests, 1 intentional fixture skip, 0 failures | Shared Apple app, storage, source coordination, metrics, Watch/widget contracts, and accessibility metadata pass together | iPhone hardware, BLE, or signed distribution |
 | Unsigned Release iOS graph | Build passes without source warnings; `NOOP.app`, `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` are present | Phone, Watch, complication, widget, localization, and Release dependency graphs compile together | Signing, installation, haptics, notifications, or physical performance |
 | Focused release-contract recovery | SDK artifact tests 9/9 and supplier app-slice tests 8/8 pass after exact generated-cache cleanup and atomic-contract update | The vendored SDK tree is exact and the source-shape gate follows the current transactional registration contract | Hosted execution or physical SDK behavior |
-| Complete repository and direct gates | Complete Tools wall passes 365 tests with one intentional dependency skip; 9 release controls, 10 required contexts, trusted self-check, 12 metrics/3 revisions/13 thresholds/16 calibration guards, final terminology snapshot, distribution provenance, private-data, 1,310-file health-claims, full localization, 94 operations records, 50 parser tests, Actionlint, shell syntax, ShellCheck, changed-Python compilation, and diff hygiene pass | Current source satisfies the listed local release/privacy/claim/localization/evidence contracts | Hosted exact-SHA checks, protected integration, physical validation, or external approvals |
+| Complete repository and direct gates | Complete Tools wall passes 365 tests with one intentional dependency skip; 9 release controls, 10 required contexts, trusted self-check, 12 metrics/3 revisions/13 thresholds/16 calibration guards, final terminology snapshot, distribution provenance, private-data, 1,310-file health-claims, full localization, 96 operations records, 50 parser tests, Actionlint, shell syntax, ShellCheck, changed-Python compilation, and diff hygiene pass | Current source satisfies the listed local release/privacy/claim/localization/evidence contracts | Hosted exact-SHA checks, protected integration, physical validation, or external approvals |
 | Exact implementation hosted checks | Exact head `db7de8e2571b1effd8278537d63bd7019b2b0d28` passed 33 jobs with four intentional skips, including all ten protected contexts, Android, macOS, and iOS production-shell checks | The consolidated implementation builds and passes hosted policy/tests on the reviewed SHA | The later review-closeout commit until replacement hosted checks finish |
 | PR review closeout | Apple focused set passes 32/32; Android Full compile and `SupplierDeviceCardPolicyTest` pass 7/7 | Oura ownership, supplier transient live restart, archived activation policy, non-supplier reactivation, and Android supplier presentation are covered on the local replacement head | Physical BLE, Compose instrumentation, or signed installation |
+| Final source-integration review remediation | Android Full debug compile and supplier Live policy tests pass 10/10; Apple supplier recovery tests pass 2/2 | Durable source ownership now selects Android Live controls, the confirmed no-active path remains reachable, and Apple discovery continues through a cancellable low-frequency tail | Physical radios, background execution, signed installation, or supplier timing |
 
 ## Physical device and deployment
 
@@ -164,12 +165,13 @@ heart-rate elevation as proof of walking.
 - Commits: implementation `db7de8e2571b1effd8278537d63bd7019b2b0d28`;
   review closeout `93d5ffed104d7e3b9f193c2af71c9dfb57d486c8`.
 - Branch and remote state: implementation, review-closeout, and evidence commits
-  through `b45c67bf6186e238ee1e6f23422c2dc7aceec412` are pushed on PR `#17`.
-  That exact head passed source release controls but its 248-test
-  release-control step found the reviewed terminology inventory stale after
-  the final review fixtures and operations wording changed. The regenerated
-  inventory, matching reviewed-source digest, replacement exact-head checks,
-  and protected integration remain.
+  through `fe616b5dc7a7ea51f345e5c940af38cab3612477` are pushed on PR `#17`.
+  That exact head passed 34 hosted checks with four intended skips. A later
+  automated review found two source-integration defects outside the step
+  formula: Android transient display state could expose the wrong controls,
+  and Apple discovery stopped after the short retry burst. Both corrections
+  are locally verified; one replacement commit, exact-head hosted checks, and
+  protected integration remain.
 - Repository visibility verified: not rechecked in this slice.
 - Version/build impact: no version bump.
 - Release or distribution impact: no release claim; physical metric validation
@@ -215,10 +217,11 @@ heart-rate elevation as proof of walking.
 - Exact hosted head `b45c67bf6186e238ee1e6f23422c2dc7aceec412`
   then failed only `test_repository_snapshot_is_current` in release-controls:
   the final review fixtures and operations wording added six classified legacy
-  occurrences after the previous snapshot. The regenerated inventory contains
-  18,361 occurrences across 1,623 path/category groups with no active-allowlist
-  change. Its reviewed-source digest was repinned, and the exact hosted
-  248-test command now passes locally.
+  occurrences after the previous snapshot. The reviewed snapshot and digest
+  correction was pushed as `fe616b5dc7a7ea51f345e5c940af38cab3612477`,
+  whose complete hosted run passed. The current final-review candidate records
+  18,374 occurrences across 1,626 path/category groups without broadening the
+  active allowlist.
 - The first root localization-parser invocation ran from the repository root
   and failed to import its sibling `i18n_audit` module. Running the suite from
   its owning `Tools/` directory passes all 50 tests.
