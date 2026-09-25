@@ -99,8 +99,9 @@ Last updated: **2026-09-25**
   commit/push, exact-SHA hosted checks, evidence-backed thread resolution,
   protected merge/main verification, and final exact round-owned cleanup
   remain.
-- The September 25 first-run and supported-band milestone is also locally
-  green and unpushed. Apple and Android now use the same eight-stage first-run
+- The September 25 first-run and supported-band milestone is committed in
+  `db7de8e2571b1effd8278537d63bd7019b2b0d28`; its exact hosted head is green.
+  Apple and Android now use the same eight-stage first-run
   sequence, with account before band setup and no Home surface mounted under
   incomplete onboarding. Normal customer entry points say `Connect band` and
   list only pairable launch transports: the supplier `NOOP Band` appears only
@@ -114,11 +115,15 @@ Last updated: **2026-09-25**
   intentional skip, 50 root localization-parser tests, and the full direct
   policy wall. The terminology ratchet records 18,330 occurrences across 1,621
   groups with zero forbidden mappings. The API 35 emulator was shut down and
-  the exact 5.7-GiB round-owned Apple DerivedData tree was removed.
-  Consolidated commit/push, replacement exact-SHA hosted checks, normal
+  the exact 5.7-GiB round-owned Apple DerivedData tree was removed. Exact
+  implementation head `db7de8e25` passed every hosted job and all ten protected
+  contexts. Review-closeout commit `93d5ffed1` adds explicit non-supplier
+  reactivation regressions and removes the remaining Android archived-row
+  direct callback. One replacement push, exact-head hosted checks, normal
   protected integration, and physical BLE remain.
-- The September 25 step-motion false-positive correction is locally implemented
-  with platform verification green and remains unpushed. Apple and Android now
+- The September 25 step-motion false-positive correction is committed in
+  `db7de8e2571b1effd8278537d63bd7019b2b0d28` with complete local and exact-head
+  hosted verification green. Apple and Android now
   retain WHOOP-style counter deltas only when the available activity class says
   walk or run; still, unknown, invalid, zero, and sync-gap deltas are rejected.
   Heart rate remains wear/effort context rather than gait proof, and fully
@@ -139,8 +144,12 @@ Last updated: **2026-09-25**
   Release controls, required CI, trusted self-check, calibration, distribution
   provenance, private-data, health claims, localization, operations records,
   parser tests, workflow/shell validation, changed-Python compilation, and diff
-  hygiene are green. Consolidated commit/push, exact-SHA hosted checks, normal
-  protected integration, and physical step validation remain.
+  hygiene are green. Exact head `db7de8e25` passed 33 hosted jobs with four
+  intentional skips, including Android, macOS, iOS production shell, and all
+  ten protected contexts. Review-closeout commit `93d5ffed1` passes Apple
+  32/32 and Android supplier-policy 7/7 locally. Replacement hosted checks,
+  normal protected integration, final exact round-owned cleanup, and physical
+  step validation remain.
 - An isolated local follow-up from `60df38a2` confirms the vendored Swift and
   Kotlin `failOperation` implementations already reject non-operation failure
   categories before state mutation. Matching app-side regressions pass 2/2 on
