@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `September 24 final local candidate green; commit, hosted checks, protected merge, and cleanup pending`
+- State: `final implementation head 9474ffbb is local- and hosted-green; documentation closeout, protected merge/main verification, and cleanup pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
@@ -24,16 +24,18 @@
   `78eba788b337c3472d32f8bd789965f84ef67b8a`
 - Final runtime and SDK-repin candidate:
   `e12b71fb55d620a642ef340c4503b4b15970091c`
+- Final hosted-green app implementation candidate:
+  `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16`
 - Record commit or PR: app PR `#17`, remote app head
-  `aa3fa63c401fc60e486055ada3676df0f5f02d5b`; SDK PR `#32` upstream merge
+  `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16`; SDK PR `#32` upstream merge
   `50a16fbc75f9ae604e773ff6608c87f0b96b67f7`. The source-only app artifact
   and provenance pins consume that exact merge. Exact local app, simulator,
-  and onboarding verification are green; final repository-control verification
-  follows this documentation repin. Independent final review found no P0/P1
-  blocker. The remote head passed every hosted context
-  except one iOS profile-entry UI assertion; its narrow local correction passes
-  three focused executions. One follow-up push, replacement hosted exact-SHA
-  checks, protected integration, and protected-main verification remain.
+  onboarding, repository-control, and hosted verification are green.
+  Independent final review found no P0/P1 blocker. The first Apple attempt lost
+  two batched XCTest keystrokes in one profile-entry assertion; the exact case
+  passed six consecutive local executions and the unchanged implementation SHA
+  passed the complete hosted iOS shell on retry. Final documentation controls,
+  protected integration, protected-main verification, and cleanup remain.
 
 ## Objective
 

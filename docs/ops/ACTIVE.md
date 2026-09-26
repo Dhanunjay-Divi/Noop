@@ -12,6 +12,18 @@ Last updated: **2026-09-26**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
+- PR `#17` implementation head
+  `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16` is now hosted-green across all
+  ten protected contexts. Its first iOS production-shell attempt failed only
+  the profile height re-entry assertion after retaining the first batched
+  keystroke. The exact UI case passed six consecutive local executions,
+  including five app-relaunched repetitions, and failed-jobs-only retry run
+  `36207653817` passed the complete unmodified iOS shell and
+  `apple-ci-required`. No unresolved PR review thread remains. Final
+  documentation/terminology closeout, one protected merge, protected-main
+  verification, and exact round-owned cleanup remain; signed devices, physical
+  BLE/background behavior, supplier firmware classification, and metric
+  accuracy remain explicit external gates.
 - September 26 final-review remediation is local and green. Remote PR `#17`
   head `65e4b0ab5f5ae7695ad2199b90fd50cacc1e5ba1` passed 34 hosted jobs with four
   intentional skips, including all ten protected contexts. Final review found
@@ -622,14 +634,12 @@ Resume from:
 
 ## Immediate next actions
 
-1. Run the final operations, terminology, private-data, health-claim,
-   release-control, required-CI, trusted-control, and diff gates on the
-   protected-data replacement.
-2. Commit and push the one consolidated replacement to PR `#17`; do not send an
-   intermediate hosted candidate.
-3. Require every protected exact-SHA context and resolve the final review thread
-   with code-and-test evidence, without
-   bypassing branch protection, then merge normally.
+1. Regenerate and review the terminology inventory after this final evidence
+   update, repin only its exact reviewed digest, and run the lightweight
+   operations/release/trust/diff wall.
+2. Commit and push the documentation-only closeout to PR `#17`.
+3. Require all ten protected contexts on the final head without bypassing
+   branch protection, then merge normally.
 4. Verify protected `main` through the trusted and required-context gates, then
    remove the remaining exact round-owned Apple DerivedData, Python environment,
    and temporary logs.

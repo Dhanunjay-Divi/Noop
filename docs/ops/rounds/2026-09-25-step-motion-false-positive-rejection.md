@@ -2,17 +2,19 @@
 
 ## Status
 
-- State: `the final local replacement candidate is independently reviewed; the
+- State: `the final implementation candidate is independently reviewed; the
   class-aware step correction, no-fallback boundary, non-destructive
   stale-estimate replacement, archive-before-credential-cleanup lifecycle,
   bounded first-unlock credential cleanup, battery-confirmed supplier pairing,
   approved warm revision rebind, atomic source publication, supplier battery
   mapping, day-owner resolution, and supplier-onboarding credential gates pass
   the complete local Android Full, macOS, unsigned iPhone/Watch/widget,
-  repository/server/SDK, and direct policy walls; remote head 65e4b0ab passed
-  every hosted context before the final protected-data review finding; one
-  consolidated replacement commit/push, replacement hosted exact-SHA checks,
-  protected integration, and physical accuracy validation remain`
+  repository/server/SDK, and direct policy walls; exact implementation head
+  9474ffbb passes every hosted required context after the sole first-attempt
+  iOS profile-entry event-loss failure passed six local repetitions and the
+  complete hosted retry; documentation closeout, protected integration,
+  protected-main verification, cleanup, and physical accuracy validation
+  remain`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `4604fd53d15b459d0c2251da8e8697134bdb30e1`
@@ -22,6 +24,8 @@
   `93d5ffed104d7e3b9f193c2af71c9dfb57d486c8`
 - Previous all-green remote review candidate:
   `65e4b0ab5f5ae7695ad2199b90fd50cacc1e5ba1`
+- Final hosted-green implementation candidate:
+  `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16`
 - Protected-data review follow-up commit: commit containing this record
 - Record commit or PR: application pull request `#17`
 
@@ -250,6 +254,7 @@ heart-rate elevation as proof of walking.
 | Unsigned iOS Release graph | Exact-current generic iPhoneOS Release build passes; the phone app embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | Phone, Watch, complication, widget, localization, and dependency graphs compile together | Signing, installation, haptics, notifications, or physical performance |
 | Focused release-contract recovery | SDK artifact tests 9/9 and supplier app-slice tests 8/8 pass after exact generated-cache cleanup and atomic-contract update | The vendored SDK tree is exact and the source-shape gate follows the current transactional registration contract | Hosted execution or physical SDK behavior |
 | Complete repository and direct gates | Broad pinned repository/server/SDK wall passes 1,173 tests with 215 declared optional/environment skips and 78 subtests; focused artifact, supplier-wrapper, terminology, trust, required-CI, and release controls pass 137 tests plus 62 subtests. Direct checks pass 9/9 release controls, all ten required contexts, trusted-main verification, 12 metrics / 3 revisions / 13 thresholds / 16 calibration guards, the reviewed 18,512-occurrence terminology ratchet, full localization, all 96 operations records, distribution/private-data, the 1,310-file health-claims scan, syntax, workflow lint, and diff hygiene. | The exact local candidate satisfies the broad local repository, server, SDK-artifact, privacy, claims, localization, workflow, and trust contracts | Hosted exact-SHA checks, protected integration, physical validation, or external approvals |
+| Final exact-SHA hosted replacement | Implementation head `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16` passes every required hosted context. The first Apple attempt completed 38 production-shell cases, skipped the intentional private pilot, and lost two batched XCTest keystrokes only in the profile-height assertion. The exact case then passed once locally and five more times with app relaunch between repetitions; the same unmodified SHA passed the complete hosted iOS production shell on retry, and `apple-ci-required` is green. | The final implementation graph, including iPhone, Watch, widgets, macOS, Android, packages, policy, claims, localization, operations, runtime licenses, and trust controls, is hosted-green on the exact reviewed source | Signed installation, physical BLE/background behavior, or step accuracy |
 | Exact implementation hosted checks | Exact head `db7de8e2571b1effd8278537d63bd7019b2b0d28` passed 33 jobs with four intentional skips, including all ten protected contexts, Android, macOS, and iOS production-shell checks | The consolidated implementation builds and passes hosted policy/tests on the reviewed SHA | The later review-closeout commit until replacement hosted checks finish |
 | PR review closeout | Apple focused set passes 32/32; Android Full compile and `SupplierDeviceCardPolicyTest` pass 7/7 | Oura ownership, supplier transient live restart, archived activation policy, non-supplier reactivation, and Android supplier presentation are covered on the local replacement head | Physical BLE, Compose instrumentation, or signed installation |
 | Final source-integration review remediation | Android Full debug compile and supplier Live policy tests pass 10/10; Apple supplier recovery tests pass 2/2 | Durable source ownership now selects Android Live controls, the confirmed no-active path remains reachable, and Apple discovery continues through a cancellable low-frequency tail | Physical radios, background execution, signed installation, or supplier timing |
@@ -277,24 +282,20 @@ heart-rate elevation as proof of walking.
   recorded above.
 - Commits: implementation `db7de8e2571b1effd8278537d63bd7019b2b0d28`;
   review closeout `93d5ffed104d7e3b9f193c2af71c9dfb57d486c8`.
-- Branch and remote state: remote PR `#17` is at
-  `65e4b0ab5f5ae7695ad2199b90fd50cacc1e5ba1`; 34 hosted jobs passed and four
-  intentional jobs skipped, including all ten protected contexts, Android,
-  macOS, iOS, Swift packages, server applicability, policy, localization,
-  health-claim, runtime-license, operations, and trusted-control gates. Final
-  review then found one Apple first-unlock cleanup gap. The uncommitted
-  replacement closes that gap; Apple supplier lifecycle passes 51/51 and the
-  exact-current unsigned iPhone/Watch/widget Release graph is green. PR `#17`
-  remains authoritative for replacement exact-SHA checks, review-thread state,
-  and protected integration after the consolidated push.
-- Current replacement state: the commit containing this record is the
-  consolidated protected-data follow-up to remote head `65e4b0ab`. Its affected
-  Apple tests and unsigned Release iPhone/Watch/widget graph are green; the
-  unchanged Android, server, SDK, shared-metric, localization, accessibility,
-  safety, privacy, and policy surfaces retain the complete evidence above. One
-  consolidated replacement commit/push, replacement exact-SHA hosted checks,
-  evidence-backed review-thread resolution, normal protected merge, and
-  protected-main verification remain.
+- Branch and remote state: PR `#17` implementation head
+  `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16` passes all ten required hosted
+  contexts. Its first Apple attempt failed only the profile measurement
+  re-entry assertion after the field retained the first of three batched
+  keystrokes. The exact case passed six consecutive local executions, including
+  five process-relaunched repetitions, and the unchanged hosted SHA then passed
+  the complete iOS production shell plus `apple-ci-required`.
+- Current replacement state: implementation, local verification, hosted
+  exact-SHA verification, and review-thread audit are complete. This
+  documentation-only closeout, its terminology/policy verification, normal
+  protected merge, protected-main verification, and exact temporary-output
+  cleanup remain. Physical BLE, supplier firmware classification, signed
+  installation, background behavior, and synchronized step-accuracy validation
+  remain external or device gates.
 - Repository visibility verified: not rechecked in this slice.
 - Version/build impact: no version bump.
 - Release or distribution impact: no release claim; physical metric validation
@@ -505,6 +506,13 @@ heart-rate elevation as proof of walking.
 - The first protected-data regression compile failed only because the test
   double added a read counter without an explicit Swift `return`. The corrected
   test passed, then the complete supplier lifecycle class passed 51/51.
+- The first exact replacement Apple run failed only
+  `testProfileMeasurementsCanBeClearedAndRetyped`: XCTest reported the height
+  field as `"1"` after asking the simulator to type `"183"`. The product source
+  was unchanged because the exact test passed once locally, then 5/5 additional
+  process-relaunched repetitions. A failed-jobs-only retry of run
+  `36207653817` passed the complete iOS production shell and aggregate
+  `apple-ci-required` context on the same exact implementation SHA.
 - Two exact-current iPhone Release attempts stopped at the bounded runner's
   10 GiB disk floor; no floor override was used. One orphaned compiler owned by
   the stopped build was terminated by its exact process group. The incomplete
