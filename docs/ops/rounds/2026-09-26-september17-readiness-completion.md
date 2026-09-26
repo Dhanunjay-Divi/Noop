@@ -96,6 +96,9 @@ explicitly gated migration work open.
   as a clearly secondary, non-operational path.
 - Apple and Android onboarding progress now names the current step as well as
   showing its numeric position, with combined screen-reader semantics.
+- Apple and Android Daily Signal empty rationale now explains that current
+  baseline-relative signals are insufficient instead of claiming that no
+  recovery signal has enough history when a Recovery score is already visible.
 - The two formula-review findings were reconciled against current source:
   Recovery education already names only the five production inputs and rejects
   recent-load wording in tests; Rest already publishes as `noop-rest-v2` with
@@ -149,6 +152,7 @@ explicitly gated migration work open.
 | Apple Review Sample contract suite | 5/5 pass | Real setup precedes the fictional sample and the sample remains isolated from operational dependencies | Physical-device visual fit or VoiceOver navigation |
 | Android Full/Demo compilation plus `OwnershipVerificationRecoveryTest` through the bounded runner | 7/7 pass | Both Android flavors compile; monotonic countdowns, provider mapping, UI disable/countdown state, nine resource sets, and payload-free diagnostics agree | Real provider throttling, OTP delivery, or physical UI |
 | Android Full/Demo compilation plus `ReviewSampleModeContractTest` | Pass | Both Android source graphs compile with the new progress semantics and real setup remains the primary entry action | Physical TalkBack behavior or OEM rendering |
+| Apple `DailyActionTodayContractTests` plus Android Full/Demo compilation and focused `DailyActionTodayContractTest` | Apple 5/5 pass; Android pass | A visible Recovery score can coexist with a Building Daily Signal without contradictory empty-state copy on either mobile implementation | Physical visual fit, real physiological inputs, or recommendation accuracy |
 | `xcodebuild -scheme NOOPiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` through the bounded runner | Pass | iOS-only ownership code type-checks and the app embeds/validates Watch, Watch complications, and widgets | Signing, physical devices, WatchConnectivity, BLE, background execution, or delivery |
 | `python3 Tools/i18n_audit.py --platform all --full` | Pass; tracked Apple baseline remains 129 | No localization regression; all existing focus-locale catalog keys and Android locale resources are complete | Native-speaker review or visual fit |
 | Live `gh pr view 16`, `gh pr view 17`, and remote-ref queries | PR 16 merged at `9c5141754`; PR 17 exact head `169230a9a` is open, mergeable, and 10/10 required contexts pass | The release-blocker handoff is refreshed from current protected repository state | Approval, integration of this follow-on branch, or physical behavior |
@@ -169,10 +173,11 @@ explicitly gated migration work open.
   this operations record.
 - Commits: macOS/Watch checkpoint `50d41e5c8` and `6b36f035e`;
   account-recovery and Watch-policy correction checkpoint `7b3250b9e`;
-  first-run hierarchy and named-progress checkpoint `c71dde298`.
+  first-run hierarchy and named-progress checkpoint `c71dde298`; Daily Signal
+  baseline-state copy checkpoint `cf967394c`.
 - Branch and remote state:
   `codex/sept17-readiness-closeout-20260926` tracks its public remote.
-  Checkpoints through `c71dde298` are pushed and triggered zero workflows
+  Checkpoints through `cf967394c` are pushed and triggered zero workflows
   because the branch has no pull request and push workflows are scoped to
   `main`.
 - Repository visibility verified: public.
