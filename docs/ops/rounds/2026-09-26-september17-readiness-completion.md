@@ -91,6 +91,15 @@ explicitly gated migration work open.
   payload-free diagnostic categories.
 - Recovery/countdown UI is localized across the supported Android resource
   sets and the eight Apple application locales.
+- Fresh-install Review Sample entry now makes real account/band setup the
+  primary action on iPhone and Android. The fictional sample remains available
+  as a clearly secondary, non-operational path.
+- Apple and Android onboarding progress now names the current step as well as
+  showing its numeric position, with combined screen-reader semantics.
+- The two formula-review findings were reconciled against current source:
+  Recovery education already names only the five production inputs and rejects
+  recent-load wording in tests; Rest already publishes as `noop-rest-v2` with
+  full-history rescore gates. No formula change was justified in this round.
 - The release-blocker handoff now reflects protected `main` after PR `#16`,
   exact hosted-green PR `#17`, its outstanding non-author review, and this
   follow-on branch without confusing an intermittent checkpoint with protected
@@ -137,7 +146,9 @@ explicitly gated migration work open.
 | `gh pr checks 17 --required` on exact head `169230a9a` | 10/10 pass | Existing PR checkpoint is hosted green | New changes or physical behavior |
 | Apple hosted run `36266411704` | Pass | macOS build/tests and iOS production shell pass at the starting SHA | Physical devices, signing, or the pending fixes |
 | `xcodebuild ... -only-testing:StrandTests/OwnershipVerificationRecoveryContractTests -only-testing:StrandTests/WatchScoreSnapshotTests test` through the bounded runner | 12/12 pass | Monotonic cooldown/source contracts, stable failure categories, payload-free diagnostics, eight-locale Apple coverage, Watch wire compatibility, HR freshness, locked scrub, and transport-independent publication policy | Live Firebase delivery or WatchConnectivity |
+| Apple Review Sample contract suite | 5/5 pass | Real setup precedes the fictional sample and the sample remains isolated from operational dependencies | Physical-device visual fit or VoiceOver navigation |
 | Android Full/Demo compilation plus `OwnershipVerificationRecoveryTest` through the bounded runner | 7/7 pass | Both Android flavors compile; monotonic countdowns, provider mapping, UI disable/countdown state, nine resource sets, and payload-free diagnostics agree | Real provider throttling, OTP delivery, or physical UI |
+| Android Full/Demo compilation plus `ReviewSampleModeContractTest` | Pass | Both Android source graphs compile with the new progress semantics and real setup remains the primary entry action | Physical TalkBack behavior or OEM rendering |
 | `xcodebuild -scheme NOOPiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` through the bounded runner | Pass | iOS-only ownership code type-checks and the app embeds/validates Watch, Watch complications, and widgets | Signing, physical devices, WatchConnectivity, BLE, background execution, or delivery |
 | `python3 Tools/i18n_audit.py --platform all --full` | Pass; tracked Apple baseline remains 129 | No localization regression; all existing focus-locale catalog keys and Android locale resources are complete | Native-speaker review or visual fit |
 | Live `gh pr view 16`, `gh pr view 17`, and remote-ref queries | PR 16 merged at `9c5141754`; PR 17 exact head `169230a9a` is open, mergeable, and 10/10 required contexts pass | The release-blocker handoff is refreshed from current protected repository state | Approval, integration of this follow-on branch, or physical behavior |
@@ -157,12 +168,13 @@ explicitly gated migration work open.
   behavior, Apple and Android ownership recovery UI/services/tests/locales, and
   this operations record.
 - Commits: macOS/Watch checkpoint `50d41e5c8` and `6b36f035e`;
-  account-recovery and Watch-policy correction checkpoint `7b3250b9e`.
+  account-recovery and Watch-policy correction checkpoint `7b3250b9e`;
+  first-run hierarchy and named-progress checkpoint `c71dde298`.
 - Branch and remote state:
   `codex/sept17-readiness-closeout-20260926` tracks its public remote.
-  Checkpoints `6b36f035e` and `7b3250b9e` are pushed and triggered zero
-  workflows because the branch has no pull request and push workflows are
-  scoped to `main`.
+  Checkpoints through `c71dde298` are pushed and triggered zero workflows
+  because the branch has no pull request and push workflows are scoped to
+  `main`.
 - Repository visibility verified: public.
 - Version/build impact: none planned.
 - Release or distribution impact: no deployment or signed artifact.

@@ -764,6 +764,8 @@ Last updated: **2026-09-26**
 
 Resume from:
 
+- [September 17 readiness completion](rounds/2026-09-26-september17-readiness-completion.md)
+- [PR 17 final review closure](rounds/2026-09-26-pr17-final-review-closure.md)
 - [PR 16 final readiness closeout](rounds/2026-09-21-pr16-final-readiness-closeout.md)
 - [Cloud authority, Safety paging, and live surfaces](rounds/2026-09-19-cloud-authority-safety-live-surfaces.md)
 - [Current UI/cloud readiness review](rounds/2026-09-17-ui-cloud-readiness-review.md)
@@ -803,15 +805,21 @@ Resume from:
 
 ## Immediate next actions
 
-1. Commit and push the documentation-only hosted closeout to PR `#17`, then
-   require the applicable protected contexts without bypassing branch
-   protection.
-2. Obtain the requested non-author approval. Auto-merge is already armed.
-3. Verify the resulting protected `main` SHA through required and trusted-main
-   checks.
-4. Execute the physical step-validation matrix with synchronized manual counts
+1. Finish the September 17 Claude/source reconciliation, including the two
+   formula-documentation findings, without enabling the gated D-059 authority
+   flip.
+2. Publish each coherent locally green checkpoint to
+   `codex/sept17-readiness-closeout-20260926` without opening a pull request;
+   these branch pushes do not run the repository's `main`/pull-request-scoped
+   workflows.
+3. Run the applicable complete Apple, Android, package, server, and repository
+   control walls on the consolidated follow-on candidate.
+4. Integrate the follow-on through normal protected review only after local
+   evidence is green. Require exact-head hosted contexts, non-author approval,
+   protected integration, and protected-main verification without bypass.
+5. Execute the physical step-validation matrix with synchronized manual counts
    and exact band/firmware classification.
-5. Keep both repositories public under D-056 while excluding supplier
+6. Keep both repositories public under D-056 while excluding supplier
    binaries, firmware, credentials, signing material, private inputs, and user
    or health data. Begin signed physical validation only after the exact
    supplier rights/SBOM/security inputs and representative devices are
