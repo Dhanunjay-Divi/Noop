@@ -266,27 +266,19 @@ enum VeepooSupplierRemoval {
     static func remove(
         deviceID: String,
         credentials: any VeepooCredentialAccess,
+        cleanup: any VeepooCredentialCleanupAccess,
         archive: () -> Bool
     ) -> Bool {
         VeepooSupplierLifecycleDiagnostics.record(
             stage: .removal,
             outcome: .began
         )
-        let priorCredential: String?
-        switch credentials.load(deviceID: deviceID) {
-        case .available(let credential):
-            priorCredential = credential
-        case .missing, .malformed:
-            priorCredential = nil
-        case .unavailable:
+        guard cleanup.markPending(deviceID: deviceID) else {
             VeepooSupplierLifecycleDiagnostics.record(
-                stage: .removal,
+                stage: .secureCleanup,
                 outcome: .failed,
-                failure: .secureReadUnavailable
+                failure: .cleanupFailed
             )
-            return false
-        }
-        guard credentials.clear(deviceID: deviceID) else {
             VeepooSupplierLifecycleDiagnostics.record(
                 stage: .removal,
                 outcome: .failed,
@@ -294,17 +286,34 @@ enum VeepooSupplierRemoval {
             )
             return false
         }
+
         guard archive() else {
-            let restored = priorCredential.map {
-                credentials.save($0, deviceID: deviceID)
-            } ?? true
+            let markerCleared = cleanup.clearPending(deviceID: deviceID)
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .secureCleanup,
+                outcome: markerCleared ? .completed : .failed,
+                failure: markerCleared ? nil : .cleanupFailed
+            )
             VeepooSupplierLifecycleDiagnostics.record(
                 stage: .removal,
                 outcome: .failed,
-                failure: restored ? .registryPersistence : .credentialRestore
+                failure: .registryPersistence
             )
             return false
         }
+
+        let credentialCleared = credentials.clear(deviceID: deviceID)
+        let markerCleared = credentialCleared
+            && cleanup.clearPending(deviceID: deviceID)
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .secureCleanup,
+            outcome: credentialCleared && markerCleared
+                ? .completed
+                : .failed,
+            failure: credentialCleared && markerCleared
+                ? nil
+                : .cleanupFailed
+        )
         VeepooSupplierLifecycleDiagnostics.record(
             stage: .removal,
             outcome: .completed
@@ -1055,7 +1064,6 @@ final class VeepooBandPairingSession: ObservableObject {
         case connecting
         case password
         case checkingBattery
-        case checkingLiveHeartRate
         case ready
         case failed(VeepooBandAdapterFailure)
     }
@@ -1150,8 +1158,7 @@ final class VeepooBandPairingSession: ObservableObject {
     ) -> Bool {
         guard phase == .ready,
               let selectedCandidate,
-              battery != nil,
-              heartRate != nil
+              battery != nil
         else {
             return false
         }
@@ -1275,12 +1282,21 @@ final class VeepooBandPairingSession: ObservableObject {
             phase = .checkingBattery
         case .battery(let reading):
             battery = reading
-            phase = .checkingLiveHeartRate
+            phase = .ready
             adapter.startLiveHeartRate()
         case .heartRate(let reading):
             heartRate = reading
-            phase = .ready
-        case .failed(_, let failure):
+            if battery != nil {
+                phase = .ready
+            }
+        case .failed(let stage, let failure):
+            if stage == .live,
+               battery != nil,
+               failure == .notWorn || failure == .busy {
+                lastFailure = nil
+                phase = .ready
+                return
+            }
             lastFailure = failure
             if failure == .identifierMismatch {
                 phase = .confirmPrintedIdentifier

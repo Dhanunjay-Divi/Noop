@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-25**
+Last updated: **2026-09-26**
 
 ## Authoritative context
 
@@ -164,27 +164,28 @@ Last updated: **2026-09-25**
   validation remains external.
 - The uncommitted final September 25 replacement keeps the step policy
   unchanged and closes the remaining source-integration findings. Day ownership
-  now requires a retained classified walk/run delta rather than a raw or
-  singleton counter row. Apple incompatibility is terminal, clears stale live
-  state, disconnects, and reconciles the durable source. Android accepts
-  approved firmware/hardware revision drift through a durable non-authentication
-  rebind; a secure-write failure preserves the credential and supplier retry
-  path. Supplier archive, picker failure/idle presentation, and stale HR state
-  now follow their transactional source state. Exact local evidence is green:
-  Apple supplier compatibility 18/18 and day ownership 20/20; Android supplier
-  adapter/coordinator 73/73; Android Full 5,162 with seven intentional skips
-  plus APK/lint/instrumentation-source compilation; macOS 2,332 with one
+  requires a retained classified walk/run delta rather than a raw or singleton
+  counter row. Supplier removal on Apple and Android now archives while the
+  credential remains available, then performs restart-safe secure cleanup
+  through the pending ledger. Apple registration becomes ready after verified
+  battery and treats live HR as optional; not-worn or busy does not force
+  re-pairing. Android accepts approved hardware/firmware revision drift only
+  for the established peripheral, model, and capabilities, persists the new
+  binding before continuing, and rejects model or peripheral substitution.
+  Exact local evidence is green: Apple supplier lifecycle 49/49; Android
+  supplier adapter/coordinator 75/75; Android Full 5,164 with seven intentional
+  skips plus APK/lint/instrumentation-source compilation; macOS 2,336 with one
   intentional fixture skip; and the generic iPhoneOS Release graph embeds
-  Watch, complications, and widgets. The broad pinned repository/server/SDK
-  wall passes 1,017 tests with 214 declared optional/environment skips and 78
-  subtests; focused artifact, terminology, trust, required-CI, and release
-  controls pass 90/90. The reviewed terminology ratchet records 18,511
-  occurrences across 1,628 groups with zero forbidden mappings. The obsolete
-  iPhone DerivedData tree is removed. Final direct gates pass 9/9 release
-  controls, all ten required contexts, trusted-main verification, calibration,
-  terminology, localization, all 96 operations records, distribution/private
-  data, health claims, syntax, workflow lint, and diff hygiene. One consolidated
-  replacement commit/push, replacement exact-SHA hosted checks,
+  Watch, complications, and widgets. The configured complete
+  repository/server/SDK wall passes 1,173 tests with 215 declared skips and
+  78 subtests; the focused release-policy wall passes 137 tests plus
+  62 subtests; direct release, required-CI, trusted-control, calibration,
+  terminology, localization, operations, legal, distribution, private-data,
+  claims, SDK-artifact, and diff gates pass. The reviewed terminology ratchet
+  records 18,512 classified occurrences across 1,628 groups with no active-use
+  regression. Remote PR `#17` head `e92efc51e` passed every applicable hosted
+  job and all ten protected contexts, but it predates these final fixes. One
+  consolidated replacement commit/push, replacement exact-SHA hosted checks,
   evidence-backed review-thread resolution, normal protected merge,
   protected-main verification, and final bounded-log/test-environment cleanup
   remain.

@@ -1974,7 +1974,7 @@ final class AppModel: ObservableObject {
     }
 
     /// Decide whether a Devices-screen activation can use the existing registration directly. Removing a
-    /// supplier band intentionally deletes its transport credential before archiving the row, so that row
+    /// supplier band intentionally deletes its transport credential after archiving the row, so that row
     /// can only return through the authenticated pairing flow. Import-only rows never own live transport.
     nonisolated static func activationRoute(for device: PairedDevice) -> DeviceActivationRoute {
         if device.isImportSource { return .unavailable }
@@ -2006,6 +2006,7 @@ final class AppModel: ObservableObject {
             guard VeepooSupplierRemoval.remove(
                 deviceID: device.id,
                 credentials: VeepooCredentialStore.shared,
+                cleanup: VeepooCredentialCleanupStore.shared,
                 archive: { registry.archive(device.id) }
             ) else {
                 return false

@@ -1183,6 +1183,65 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     }
 
     @MainActor
+    func testBatteryVerificationAllowsRegistrationWithoutLiveHeartRate()
+        throws
+    {
+        let credentials = FakeCredentials()
+        let (session, client) = try readyPairingSession(
+            credentials: credentials,
+            emitHeartRate: false
+        )
+        var registeredDevice: PairedDevice?
+
+        let committed = session.commitPairedDevice(nickname: nil) { device in
+            registeredDevice = device
+            return true
+        }
+
+        XCTAssertTrue(committed)
+        XCTAssertNotNil(registeredDevice)
+        XCTAssertNil(session.heartRate)
+        XCTAssertEqual(client.liveStarts.count, 1)
+    }
+
+    @MainActor
+    func testTransientLiveFailureAfterBatteryPreservesReadyRegistration()
+        throws
+    {
+        for failure in [
+            VeepooBandAdapterFailure.notWorn,
+            VeepooBandAdapterFailure.busy,
+        ] {
+            let credentials = FakeCredentials()
+            let (session, adapter) = try readyDirectPairingSession(
+                credentials: credentials
+            )
+
+            adapter.emit(.failed(stage: .live, failure: failure))
+
+            XCTAssertEqual(session.phase, .ready)
+            XCTAssertTrue(
+                session.commitPairedDevice(nickname: nil) { _ in true }
+            )
+        }
+    }
+
+    @MainActor
+    func testNonTransientLiveFailureAfterBatteryRemainsTerminal() throws {
+        let credentials = FakeCredentials()
+        let (session, adapter) = try readyDirectPairingSession(
+            credentials: credentials
+        )
+
+        adapter.emit(.failed(stage: .live, failure: .internalFailure))
+
+        XCTAssertEqual(session.phase, .failed(.internalFailure))
+        XCTAssertFalse(
+            session.commitPairedDevice(nickname: nil) { _ in true }
+        )
+    }
+
+    @MainActor
     func testFailedRegistrationClearsSavedCredentialAndStaysFailed() throws {
         let credentials = FakeCredentials()
         let (session, client) = try readyPairingSession(
@@ -1369,59 +1428,73 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     }
 
     @MainActor
-    func testSupplierRemovalRequiresCredentialCleanupBeforeArchive() {
+    func testSupplierRemovalRequiresDurableCleanupMarkerBeforeArchive() {
         let credentials = FakeCredentials()
         credentials.values["supplier"] = "2468"
-        credentials.clearSucceeds = false
+        let cleanup = FakeCredentialCleanup()
+        cleanup.markSucceeds = false
         var archiveCalls = 0
-
-        let removed = VeepooSupplierRemoval.remove(
-            deviceID: "supplier",
-            credentials: credentials
-        ) {
-            archiveCalls += 1
-            return true
-        }
-
-        XCTAssertFalse(removed)
-        XCTAssertEqual(archiveCalls, 0)
-        XCTAssertEqual(credentials.values["supplier"], "2468")
-    }
-
-    @MainActor
-    func testSupplierRemovalStopsWhenCredentialReadIsUnavailable() {
-        let credentials = FakeCredentials()
-        credentials.values["supplier"] = "2468"
-        credentials.loadOverride = .unavailable
-        var archiveCalls = 0
-
-        let removed = VeepooSupplierRemoval.remove(
-            deviceID: "supplier",
-            credentials: credentials
-        ) {
-            archiveCalls += 1
-            return true
-        }
-
-        XCTAssertFalse(removed)
-        XCTAssertEqual(credentials.clearCount, 0)
-        XCTAssertEqual(archiveCalls, 0)
-        XCTAssertEqual(credentials.values["supplier"], "2468")
-    }
-
-    @MainActor
-    func testSupplierRemovalRestoresCredentialWhenArchiveFails() {
-        let credentials = FakeCredentials()
-        credentials.values["supplier"] = "2468"
 
         let removed = VeepooSupplierRemoval.remove(
             deviceID: "supplier",
             credentials: credentials,
+            cleanup: cleanup
+        ) {
+            archiveCalls += 1
+            return true
+        }
+
+        XCTAssertFalse(removed)
+        XCTAssertEqual(archiveCalls, 0)
+        XCTAssertEqual(credentials.values["supplier"], "2468")
+    }
+
+    @MainActor
+    func testSupplierRemovalArchiveFailurePreservesCredentialAndClearsMarker() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        let cleanup = FakeCredentialCleanup()
+
+        let removed = VeepooSupplierRemoval.remove(
+            deviceID: "supplier",
+            credentials: credentials,
+            cleanup: cleanup,
             archive: { false }
         )
 
         XCTAssertFalse(removed)
-        XCTAssertEqual(credentials.clearCount, 1)
+        XCTAssertEqual(credentials.clearCount, 0)
+        XCTAssertEqual(credentials.values["supplier"], "2468")
+        XCTAssertTrue(cleanup.pending.isEmpty)
+    }
+
+    @MainActor
+    func testSupplierRemovalArchiveFailureRetainsMarkerWhenMarkerClearFails() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        let cleanup = FakeCredentialCleanup()
+        cleanup.clearSucceeds = false
+
+        let removed = VeepooSupplierRemoval.remove(
+            deviceID: "supplier",
+            credentials: credentials,
+            cleanup: cleanup,
+            archive: { false }
+        )
+
+        XCTAssertFalse(removed)
+        XCTAssertEqual(credentials.clearCount, 0)
+        XCTAssertEqual(credentials.values["supplier"], "2468")
+        XCTAssertEqual(cleanup.pending, Set(["supplier"]))
+
+        cleanup.clearSucceeds = true
+        VeepooPendingCredentialCleanup.reconcile(
+            registeredDeviceIDs: ["supplier"],
+            credentials: credentials,
+            cleanup: cleanup
+        )
+
+        XCTAssertTrue(cleanup.pending.isEmpty)
         XCTAssertEqual(credentials.values["supplier"], "2468")
     }
 
@@ -1429,16 +1502,48 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     func testSupplierRemovalLeavesNoCredentialAfterVerifiedArchive() {
         let credentials = FakeCredentials()
         credentials.values["supplier"] = "2468"
+        let cleanup = FakeCredentialCleanup()
 
         let removed = VeepooSupplierRemoval.remove(
             deviceID: "supplier",
             credentials: credentials,
+            cleanup: cleanup,
             archive: { true }
         )
 
         XCTAssertTrue(removed)
         XCTAssertEqual(credentials.clearCount, 1)
         XCTAssertNil(credentials.values["supplier"])
+        XCTAssertTrue(cleanup.pending.isEmpty)
+    }
+
+    @MainActor
+    func testSupplierRemovalDefersCredentialDeletionAfterVerifiedArchive() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        credentials.clearSucceeds = false
+        let cleanup = FakeCredentialCleanup()
+
+        let removed = VeepooSupplierRemoval.remove(
+            deviceID: "supplier",
+            credentials: credentials,
+            cleanup: cleanup,
+            archive: { true }
+        )
+
+        XCTAssertTrue(removed)
+        XCTAssertEqual(credentials.values["supplier"], "2468")
+        XCTAssertEqual(cleanup.pending, Set(["supplier"]))
+
+        credentials.clearSucceeds = true
+        VeepooPendingCredentialCleanup.reconcile(
+            registeredDeviceIDs: [],
+            credentials: credentials,
+            cleanup: cleanup
+        )
+
+        XCTAssertNil(credentials.values["supplier"])
+        XCTAssertTrue(cleanup.pending.isEmpty)
     }
 
     @MainActor
@@ -1506,9 +1611,47 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     }
 
     @MainActor
+    private func readyDirectPairingSession(
+        credentials: FakeCredentials
+    ) throws -> (VeepooBandPairingSession, FakeAdapter) {
+        let adapter = FakeAdapter()
+        let session = VeepooBandPairingSession(
+            adapter: adapter,
+            credentials: credentials,
+            credentialCleanup: FakeCredentialCleanup()
+        )
+        session.start()
+        let candidate = VeepooBandCandidate(
+            handle: 7,
+            peripheralID: UUID(),
+            printedIdentifier: "AA:BB:12:34"
+        )
+        adapter.emit(.candidate(candidate))
+        session.select(candidate)
+        session.confirmPrintedIdentifier("AABB1234")
+        adapter.emit(.state(.connected))
+        session.submitPassword("2468")
+        adapter.emit(.authenticated)
+        adapter.emit(
+            .battery(
+                .init(
+                    percent: 80,
+                    level: nil,
+                    charging: false,
+                    low: false
+                )
+            )
+        )
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(adapter.liveStartCount, 1)
+        return (session, adapter)
+    }
+
+    @MainActor
     private func readyPairingSession(
         credentials: FakeCredentials,
-        credentialCleanup: FakeCredentialCleanup? = nil
+        credentialCleanup: FakeCredentialCleanup? = nil,
+        emitHeartRate: Bool = true
     ) throws -> (VeepooBandPairingSession, FakeClient) {
         let client = FakeClient()
         let core = VeepooBandAdapterCore(
@@ -1554,16 +1697,19 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
                 )
             )
         )
-        client.emit(.live(generation: generation, .started))
-        client.emit(
-            .live(
-                generation: generation,
-                .sample(
-                    bpm: 72,
-                    receivedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        if emitHeartRate {
+            client.emit(.live(generation: generation, .started))
+            client.emit(
+                .live(
+                    generation: generation,
+                    .sample(
+                        bpm: 72,
+                        receivedAt:
+                            Date(timeIntervalSince1970: 1_800_000_000)
+                    )
                 )
             )
-        )
+        }
         XCTAssertEqual(session.phase, .ready)
         return (session, client)
     }

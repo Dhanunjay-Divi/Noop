@@ -595,9 +595,9 @@ class SourceCoordinator(
         }
 
     /**
-     * Stop and archive a supplier row as one compensated lifecycle. Credential retention is verified before
-     * the active source is stopped, the credential is cleared before the registry archive, and an archive
-     * failure restores the credential and reconciles the still-active row before returning false.
+     * Stop and archive a supplier row as one durable lifecycle. A pending-cleanup marker is written before
+     * the source stops, the registry archive commits while the credential remains usable, and secure
+     * deletion follows. Post-archive cleanup failure leaves the marker for startup reconciliation.
      */
     suspend fun archiveVeepooDevice(id: String): Boolean = reconcileLock.withLock {
         val row = runCatching { registry.all().firstOrNull { it.id == id } }.getOrNull()
@@ -616,7 +616,8 @@ class SourceCoordinator(
         )
 
         val credentialStore = veepooCredentials
-        if (credentialStore == null) {
+        val credentialCleanup = veepooCredentialCleanup
+        if (credentialStore == null || credentialCleanup == null) {
             veepooLifecycleDiagnostics.recordSafely(
                 stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
                 outcome = VeepooSupplierLifecycleOutcome.FAILED,
@@ -631,24 +632,22 @@ class SourceCoordinator(
             )
             return@withLock false
         }
-        val retainedCredential = when (val read = credentialStore.readForRetention(id)) {
-            is VeepooCredentialRead.Available -> read.credential
-            VeepooCredentialRead.Missing -> null
-            VeepooCredentialRead.Unavailable -> {
-                veepooLifecycleDiagnostics.recordSafely(
-                    stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
-                    outcome = VeepooSupplierLifecycleOutcome.FAILED,
-                    trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
-                    failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
-                )
-                veepooLifecycleDiagnostics.recordSafely(
-                    stage = VeepooSupplierLifecycleStage.REMOVAL,
-                    outcome = VeepooSupplierLifecycleOutcome.FAILED,
-                    trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
-                    failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
-                )
-                return@withLock false
-            }
+        val markedPending =
+            runCatching { credentialCleanup.markPending(id) }.getOrDefault(false)
+        if (!markedPending) {
+            veepooLifecycleDiagnostics.recordSafely(
+                stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
+                outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
+                failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
+            )
+            veepooLifecycleDiagnostics.recordSafely(
+                stage = VeepooSupplierLifecycleStage.REMOVAL,
+                outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
+                failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
+            )
+            return@withLock false
         }
         val wasDurablyActive = row.status == DeviceStatus.active.name
         val stoppedActiveSource = wasDurablyActive && activeStrapId == id
@@ -659,95 +658,71 @@ class SourceCoordinator(
             // removal is rolled back or reconciled to a fallback.
             onStrap = true
         }
-        try {
-            val cleared = runCatching { credentialStore.clear(id) }.getOrDefault(false)
+
+        val archiveOutcome = registry.archiveSupplierAndSelectFallback(id)
+        if (archiveOutcome == null) {
+            val markerCleared =
+                runCatching { credentialCleanup.clearPending(id) }.getOrDefault(false)
             veepooLifecycleDiagnostics.recordSafely(
                 stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
-                outcome = if (cleared) {
+                outcome = if (markerCleared) {
                     VeepooSupplierLifecycleOutcome.COMPLETED
                 } else {
                     VeepooSupplierLifecycleOutcome.FAILED
                 },
                 trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
-                failure = if (cleared) null else VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
-            )
-            if (!cleared) {
-                val restored = retainedCredential?.let {
-                    runCatching {
-                        credentialStore.save(
-                            deviceId = id,
-                            password = it.password,
-                            revisionBinding = it.revisionBinding,
-                        )
-                    }.getOrDefault(false)
-                } ?: true
-                if (!restored) {
-                    veepooLifecycleDiagnostics.recordSafely(
-                        stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
-                        outcome = VeepooSupplierLifecycleOutcome.FAILED,
-                        trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
-                        failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
-                    )
-                }
-                veepooLifecycleDiagnostics.recordSafely(
-                    stage = VeepooSupplierLifecycleStage.REMOVAL,
-                    outcome = VeepooSupplierLifecycleOutcome.FAILED,
-                    trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
-                    failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
-                )
-                if (stoppedActiveSource) reconcileCurrentDurableSource()
-                return@withLock false
-            }
-
-            val archiveOutcome = registry.archiveSupplierAndSelectFallback(id)
-            if (archiveOutcome == null) {
-                val restored = retainedCredential?.let {
-                    runCatching {
-                        credentialStore.save(
-                            deviceId = id,
-                            password = it.password,
-                            revisionBinding = it.revisionBinding,
-                        )
-                    }.getOrDefault(false)
-                } ?: true
-                if (!restored) {
-                    veepooLifecycleDiagnostics.recordSafely(
-                        stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
-                        outcome = VeepooSupplierLifecycleOutcome.FAILED,
-                        trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
-                        failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
-                    )
-                }
-                veepooLifecycleDiagnostics.recordSafely(
-                    stage = VeepooSupplierLifecycleStage.REMOVAL,
-                    outcome = VeepooSupplierLifecycleOutcome.FAILED,
-                    trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
-                    failure = VeepooSupplierLifecycleFailure.REGISTRY_PERSISTENCE,
-                )
-                if (stoppedActiveSource) reconcileCurrentDurableSource()
-                return@withLock false
-            }
-
-            if (wasDurablyActive) {
-                activeStrapId = null
-                lastSeenId = null
-                val fallback = archiveOutcome.activeDeviceId
-                if (fallback != null) {
-                    runCatching { onDurableActiveDeviceChanged(fallback) }
-                    reconcile(fallback)
+                failure = if (markerCleared) {
+                    null
                 } else {
-                    onStrap = false
-                }
-            }
+                    VeepooSupplierLifecycleFailure.CLEANUP_FAILED
+                },
+            )
             veepooLifecycleDiagnostics.recordSafely(
                 stage = VeepooSupplierLifecycleStage.REMOVAL,
-                outcome = VeepooSupplierLifecycleOutcome.COMPLETED,
+                outcome = VeepooSupplierLifecycleOutcome.FAILED,
                 trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
+                failure = VeepooSupplierLifecycleFailure.REGISTRY_PERSISTENCE,
             )
-            true
-        } finally {
-            retainedCredential?.close()
+            if (stoppedActiveSource) reconcileCurrentDurableSource()
+            return@withLock false
         }
+
+        if (wasDurablyActive) {
+            activeStrapId = null
+            lastSeenId = null
+            val fallback = archiveOutcome.activeDeviceId
+            if (fallback != null) {
+                runCatching { onDurableActiveDeviceChanged(fallback) }
+                reconcile(fallback)
+            } else {
+                onStrap = false
+            }
+        }
+
+        val credentialCleared =
+            runCatching { credentialStore.clear(id) }.getOrDefault(false)
+        val markerCleared = credentialCleared &&
+            runCatching { credentialCleanup.clearPending(id) }.getOrDefault(false)
+        veepooLifecycleDiagnostics.recordSafely(
+            stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
+            outcome = if (credentialCleared && markerCleared) {
+                VeepooSupplierLifecycleOutcome.COMPLETED
+            } else {
+                VeepooSupplierLifecycleOutcome.FAILED
+            },
+            trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
+            failure = if (credentialCleared && markerCleared) {
+                null
+            } else {
+                VeepooSupplierLifecycleFailure.CLEANUP_FAILED
+            },
+        )
+        veepooLifecycleDiagnostics.recordSafely(
+            stage = VeepooSupplierLifecycleStage.REMOVAL,
+            outcome = VeepooSupplierLifecycleOutcome.COMPLETED,
+            trigger = VeepooSupplierLifecycleTrigger.DEVICE_REMOVAL,
+        )
+        true
     }
 
     fun cancelVeepooPairing() {

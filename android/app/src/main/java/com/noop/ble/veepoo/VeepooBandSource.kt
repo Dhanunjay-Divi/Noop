@@ -477,9 +477,10 @@ class VeepooBandSource(
         val connection = connectionToken
         val reconnect = reconnectToken
         if (reconnect != null) {
+            val priorIdentity = establishedIdentity
             if (
                 this.binding?.peripheralId != binding.peripheralId ||
-                establishedIdentity != identity ||
+                priorIdentity?.modelCode != identity.modelCode ||
                 establishedCapabilities != capabilities
             ) {
                 failAttempt(VeepooDiagnosticCategory.RECONNECT, VeepooDiagnosticFailure.REJECTED)
@@ -547,6 +548,7 @@ class VeepooBandSource(
                 return
             }
             reconnectRevisionBinding = observedRevisionBinding
+            establishedIdentity = identity
         }
         if (intent == VeepooConnectionIntent.PAIRING) {
             val password = pendingPassword ?: return failAttempt(

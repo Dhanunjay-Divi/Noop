@@ -2166,10 +2166,6 @@ private struct VeepooPairingFace: View {
                 progress(
                     "appwide.onboarding.device_wizard.supplier_progress_battery"
                 )
-            case .checkingLiveHeartRate:
-                progress(
-                    "appwide.onboarding.device_wizard.supplier_progress_live_heart_rate"
-                )
             case .ready:
                 ready
             case .failed:

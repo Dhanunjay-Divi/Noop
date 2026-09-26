@@ -68,8 +68,16 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
         self.assertIn(
             "case .battery(let reading):\n"
             "            battery = reading\n"
-            "            phase = .checkingLiveHeartRate\n"
+            "            phase = .ready\n"
             "            adapter.startLiveHeartRate()",
+            self.read("Strand/BLE/VeepooBandSource.swift"),
+        )
+        self.assertIn(
+            "if stage == .live,\n"
+            "               battery != nil,\n"
+            "               failure == .notWorn || failure == .busy {\n"
+            "                lastFailure = nil\n"
+            "                phase = .ready",
             self.read("Strand/BLE/VeepooBandSource.swift"),
         )
 
