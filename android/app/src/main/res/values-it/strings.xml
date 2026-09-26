@@ -38,6 +38,8 @@
     <string name="sleep_planner_duration_hours">%1$d h</string>
     <string name="sleep_planner_duration_hours_minutes">%1$d h %2$d min</string>
     <string name="nav_alarms">Pianificatore del sonno</string>
+    <string name="nav_backup_sync">Dati e sincronizzazione</string>
+    <string name="data_sync_subtitle">Scopri dove si trova la tua cronologia, proteggi i dati locali e gestisci la continuità facoltativa dell’account.</string>
     <string name="strength_title">Allenamento di forza</string>
     <string name="strength_subtitle">Routine, serie, ripetizioni, recupero e registrazioni oggettive, private su questo dispositivo.</string>
     <string name="strength_close_trainer">Chiudi allenamento di forza</string>

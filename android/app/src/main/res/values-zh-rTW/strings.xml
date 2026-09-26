@@ -38,6 +38,8 @@
     <string name="sleep_planner_duration_hours">%1$d 小時</string>
     <string name="sleep_planner_duration_hours_minutes">%1$d 小時 %2$d 分鐘</string>
     <string name="nav_alarms">睡眠規劃</string>
+    <string name="nav_backup_sync">資料與同步</string>
+    <string name="data_sync_subtitle">查看歷史記錄的儲存位置、保護本機資料，並管理選用的帳戶連續性。</string>
     <string name="strength_title">肌力訓練</string>
     <string name="strength_subtitle">訓練計畫、組數、次數、休息與客觀紀錄，僅保存在此裝置。</string>
     <string name="strength_close_trainer">關閉肌力訓練</string>

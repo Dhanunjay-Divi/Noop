@@ -1614,7 +1614,8 @@
     <string name="nav_safety">Sécurité</string>
     <string name="nav_devices">Appareils</string>
     <string name="nav_data_sources">Sources de données</string>
-    <string name="nav_backup_sync">Sauvegarde et synchronisation</string>
+    <string name="nav_backup_sync">Données et synchronisation</string>
+    <string name="data_sync_subtitle">Voyez où se trouve votre historique, protégez les données locales et gérez la continuité facultative du compte.</string>
     <string name="nav_fused_record">Vos données, fusionnées</string>
     <string name="nav_notifications">Notifications</string>
     <string name="nav_support">Assistance</string>

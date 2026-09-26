@@ -1108,7 +1108,7 @@ struct RootTabView: View {
         NoopCard(padding: 0) {
             VStack(spacing: 0) {
                 MoreRow("Band Account", "person.badge.key.fill", .bandAccount)
-                MoreRow("Backup & Sync", "externaldrive.fill.badge.icloud", .backupSync)
+                MoreRow("Data & Sync", "externaldrive.fill.badge.icloud", .backupSync)
             }
             .clipShape(
                 RoundedRectangle(

@@ -76,7 +76,7 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         case .appleHealth: return "Apple Health"
         case .xiaomi: return "Mi Band"
         case .dataSources: return "Data Sources"
-        case .backupSync: return "Backup & Sync"
+        case .backupSync: return "Data & Sync"
         case .fusedRecord: return "Your Data, Fused"
         case .devices: return "Devices"
         case .notifications: return "Notifications"
@@ -121,7 +121,7 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         case .appleHealth: return String(localized: "Apple Health")
         case .xiaomi: return String(localized: "Mi Band")
         case .dataSources: return String(localized: "Data Sources")
-        case .backupSync: return String(localized: "Backup & Sync")
+        case .backupSync: return String(localized: "Data & Sync")
         case .fusedRecord: return String(localized: "Your Data, Fused")
         case .devices: return String(localized: "Devices")
         case .notifications: return String(localized: "Notifications")

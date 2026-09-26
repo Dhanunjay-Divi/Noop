@@ -107,7 +107,8 @@
     <string name="nav_safety">安全</string>
     <string name="nav_devices">设备管理</string>
     <string name="nav_data_sources">数据源</string>
-    <string name="nav_backup_sync">备份与同步</string>
+    <string name="nav_backup_sync">数据与同步</string>
+    <string name="data_sync_subtitle">查看历史记录的存储位置，保护本地数据，并管理可选的账户连续性。</string>
     <string name="nav_fused_record">融合数据</string>
     <string name="nav_notifications">通知</string>
     <string name="nav_support">帮助与支持</string>

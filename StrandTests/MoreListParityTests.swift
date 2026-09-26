@@ -65,7 +65,7 @@ final class MoreListParityTests: XCTestCase {
     }
 
     /// NOOP+ remains a conventional Data row whose destination renders the unavailable state honestly.
-    /// Account and Backup & Sync are the always-visible setup rows; the former NOOP+ hero must not
+    /// Account and Data & Sync are the always-visible setup rows; the former NOOP+ hero must not
     /// compete with those core setup actions or duplicate the Data catalogue.
     func testNoopPlusIsDiscoverableAndHonestWhenUnavailable() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
@@ -73,7 +73,7 @@ final class MoreListParityTests: XCTestCase {
 
         XCTAssertTrue(shell.contains("moreAccountDataAccess"))
         XCTAssertTrue(shell.contains("MoreRow(\"Band Account\", \"person.badge.key.fill\", .bandAccount)"))
-        XCTAssertTrue(shell.contains("MoreRow(\"Backup & Sync\", \"externaldrive.fill.badge.icloud\", .backupSync)"))
+        XCTAssertTrue(shell.contains("MoreRow(\"Data & Sync\", \"externaldrive.fill.badge.icloud\", .backupSync)"))
         XCTAssertTrue(shell.contains("MoreRow(\"NOOP+\", \"icloud.fill\", .noopPlus)"))
         XCTAssertFalse(shell.contains("noopPlusEntry"))
         XCTAssertFalse(shell.contains("NoopPlusDiscoveryLabel"))
@@ -82,6 +82,34 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(managed.contains("struct NoopPlusView: View"))
         XCTAssertTrue(managed.contains("if service.phase == .unavailable"))
         XCTAssertTrue(managed.contains("Local NOOP and folder backup continue to work."))
+    }
+
+    func testDataSyncKeepsLocalControlsPrimaryAndSelfHostingAdvanced() throws {
+        let screen = try sourceText("Strand/Screens/BackupSyncView.swift")
+        let root = try sourceText("Strand/App/RootView.swift")
+
+        XCTAssertTrue(screen.contains(#"title: "Data & Sync""#))
+        XCTAssertTrue(screen.contains(
+            #"subtitle: "See where your history lives, protect local data, and manage optional account continuity.""#
+        ))
+        XCTAssertTrue(root.contains(#"case .backupSync: return "Data & Sync""#))
+        XCTAssertTrue(root.contains(
+            #"case .backupSync: return String(localized: "Data & Sync")"#
+        ))
+
+        let folder = try XCTUnwrap(screen.range(of: "folderCard"))
+        let restore = try XCTUnwrap(screen.range(of: "restoreCard"))
+        let advanced = try XCTUnwrap(screen.range(of: "advancedServerSection"))
+        XCTAssertLessThan(folder.lowerBound, restore.lowerBound)
+        XCTAssertLessThan(restore.lowerBound, advanced.lowerBound)
+
+        let advancedBody = try XCTUnwrap(
+            screen.range(of: "private var advancedServerSection")
+        )
+        let advancedSource = String(screen[advancedBody.lowerBound...])
+        XCTAssertTrue(advancedSource.contains("if advancedServerOpen"))
+        XCTAssertTrue(advancedSource.contains("serverCard"))
+        XCTAssertFalse(screen.contains("serverCard\n                folderCard"))
     }
 
     func testManagedHistoryImportIsReachableFromEnrolledNoopPlusUI()

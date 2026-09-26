@@ -38,6 +38,8 @@
     <string name="sleep_planner_duration_hours">%1$d ч</string>
     <string name="sleep_planner_duration_hours_minutes">%1$d ч %2$d мин</string>
     <string name="nav_alarms">Планировщик сна</string>
+    <string name="nav_backup_sync">Данные и синхронизация</string>
+    <string name="data_sync_subtitle">Узнайте, где хранится ваша история, защитите локальные данные и настройте дополнительную синхронизацию аккаунта.</string>
     <string name="strength_title">Силовые тренировки</string>
     <string name="strength_subtitle">Программы, подходы, повторения, отдых и точные записи - конфиденциально на этом устройстве.</string>
     <string name="strength_close_trainer">Закрыть силовые тренировки</string>

@@ -110,7 +110,8 @@
     <string name="nav_safety">Sicherheit</string>
     <string name="nav_devices">Geräte</string>
     <string name="nav_data_sources">Datenquellen</string>
-    <string name="nav_backup_sync">Backup &amp; Sync</string>
+    <string name="nav_backup_sync">Daten &amp; Synchronisierung</string>
+    <string name="data_sync_subtitle">Sieh, wo dein Verlauf gespeichert ist, schütze lokale Daten und verwalte die optionale Kontinuität deines Kontos.</string>
     <string name="nav_fused_record">Deine Daten, vereint</string>
     <string name="nav_notifications">Mitteilungen</string>
     <string name="nav_support">Support</string>

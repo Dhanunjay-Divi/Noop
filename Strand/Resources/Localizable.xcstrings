@@ -29111,6 +29111,110 @@
         }
       }
     },
+    "Data & Sync": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daten & Synchronisierung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Datos y sincronización"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Données et synchronisation"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dati e sincronizzazione"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dados e sincronização"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Данные и синхронизация"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "数据与同步"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "資料與同步"
+          }
+        }
+      }
+    },
+    "See where your history lives, protect local data, and manage optional account continuity.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sieh, wo dein Verlauf gespeichert ist, schütze lokale Daten und verwalte die optionale Kontinuität deines Kontos."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consulta dónde se guarda tu historial, protege los datos locales y gestiona la continuidad opcional de tu cuenta."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voyez où se trouve votre historique, protégez les données locales et gérez la continuité facultative du compte."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scopri dove si trova la tua cronologia, proteggi i dati locali e gestisci la continuità facoltativa dell’account."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vê onde está o teu histórico, protege os dados locais e gere a continuidade opcional da conta."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Узнайте, где хранится ваша история, защитите локальные данные и настройте дополнительную синхронизацию аккаунта."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看历史记录的存储位置，保护本地数据，并管理可选的账户连续性。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看歷史記錄的儲存位置、保護本機資料，並管理選用的帳戶連續性。"
+          }
+        }
+      }
+    },
     "Backup & Sync": {
       "localizations": {
         "de": {

@@ -116,7 +116,8 @@
     <string name="nav_safety">Safety</string>
     <string name="nav_devices">Devices</string>
     <string name="nav_data_sources">Data Sources</string>
-    <string name="nav_backup_sync">Backup &amp; Sync</string>
+    <string name="nav_backup_sync">Data &amp; Sync</string>
+    <string name="data_sync_subtitle">See where your history lives, protect local data, and manage optional account continuity.</string>
     <string name="nav_fused_record">Your Data, Fused</string>
     <string name="nav_notifications">Notifications</string>
     <string name="nav_support">Support</string>
