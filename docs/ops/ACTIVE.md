@@ -12,6 +12,18 @@ Last updated: **2026-09-26**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
+- September 26 final-review remediation is local and green. Remote PR `#17`
+  head `65e4b0ab5f5ae7695ad2199b90fd50cacc1e5ba1` passed 34 hosted jobs with four
+  intentional skips, including all ten protected contexts. Final review found
+  one Apple lifecycle gap: a pending supplier credential cleanup ledger could
+  be unreadable before first unlock and never be retried. The local replacement
+  retains one bounded cleanup owner, retries once on protected-data availability
+  plus at 1s/5s/15s, stops after success, and cannot re-arm an unbounded unlock
+  loop. Apple supplier lifecycle passes 51/51, and the exact-current unsigned
+  Release iPhone app builds with Watch, Watch complications, and widgets
+  embedded. One consolidated commit/push, replacement exact-SHA checks,
+  evidence-backed resolution of the final thread, normal protected merge,
+  protected-main verification, and exact temporary-output cleanup remain.
 - Current integration state: PR `#17` includes the supplier qualification
   candidate whose first hosted run used exact head
   `25b239a9cca9b5f5da15bc882d51fc344fe122b0`. The same Full/iPhone app
@@ -610,15 +622,17 @@ Resume from:
 
 ## Immediate next actions
 
-1. Commit the September 24 closeout documentation after implementation commit
-   `ddb0315f76d7551916ef8b6bf54de5a2a5653d07`.
-2. Push the final two local commits once to PR `#17`; do not send an
+1. Run the final operations, terminology, private-data, health-claim,
+   release-control, required-CI, trusted-control, and diff gates on the
+   protected-data replacement.
+2. Commit and push the one consolidated replacement to PR `#17`; do not send an
    intermediate hosted candidate.
-3. Require every protected exact-SHA context and resolve review threads without
+3. Require every protected exact-SHA context and resolve the final review thread
+   with code-and-test evidence, without
    bypassing branch protection, then merge normally.
 4. Verify protected `main` through the trusted and required-context gates, then
-   remove the remaining exact round-owned Apple DerivedData, OpenTofu provider
-   cache, and temporary logs.
+   remove the remaining exact round-owned Apple DerivedData, Python environment,
+   and temporary logs.
 5. Keep both repositories public under D-056 while excluding supplier
    binaries, firmware, credentials, signing material, private inputs, and user
    or health data. Begin signed physical validation only after the exact

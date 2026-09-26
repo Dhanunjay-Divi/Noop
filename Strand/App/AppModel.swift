@@ -318,6 +318,10 @@ final class AppModel: ObservableObject {
     /// session. Mirrors how `SourceCoordinator` drives the WRITE side off the same publisher. Retained for
     /// the app's lifetime (the registry outlives the session); `removeDuplicates` collapses redundant emits.
     private var readSpineCancellable: AnyCancellable?
+    /// Startup reconciliation may begin before the first device unlock makes Keychain rows readable.
+    /// Retain the bounded first-unlock/timed retry owner until cleanup either succeeds or the app exits.
+    private var supplierCredentialCleanupReconciler:
+        VeepooPendingCredentialCleanupReconciler?
     /// Daily re-arm timer for the single-instant firmware smart alarm (see scheduleDailySmartAlarmRearm).
     private var smartAlarmRearmTimer: Timer?
     /// The temporary launch gate may construct the observable graph while deliberately leaving every
@@ -1042,12 +1046,15 @@ final class AppModel: ObservableObject {
     private func wireSourceCoordinator() async {
         guard sourceCoordinator == nil,
               let registry = await wireDeviceRegistry() else { return }
-        VeepooPendingCredentialCleanup.reconcile(
-            registeredDeviceIDs:
-                registry.registeredSupplierCredentialDeviceIDs(),
+        let cleanupReconciler = VeepooPendingCredentialCleanupReconciler(
+            registeredDeviceIDs: { [weak registry] in
+                registry?.registeredSupplierCredentialDeviceIDs()
+            },
             credentials: VeepooCredentialStore.shared,
             cleanup: VeepooCredentialCleanupStore.shared
         )
+        supplierCredentialCleanupReconciler = cleanupReconciler
+        cleanupReconciler.start()
         // BLE writes connected GATT/DIS identity directly to the durable registry. Refresh this observable
         // cache on each actual identity change so Devices immediately shows WHOOP MG vs WHOOP 5.0 rather
         // than waiting for a disconnect or relaunch.

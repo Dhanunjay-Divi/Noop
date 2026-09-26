@@ -5,11 +5,13 @@
 - State: `the final local replacement candidate is independently reviewed; the
   class-aware step correction, no-fallback boundary, non-destructive
   stale-estimate replacement, archive-before-credential-cleanup lifecycle,
-  battery-confirmed supplier pairing, approved warm revision rebind, atomic
-  source publication, supplier battery mapping, day-owner resolution, and
-  supplier-onboarding credential gates pass the complete local Android Full,
-  macOS, unsigned iPhone/Watch/widget, repository/server/SDK, and direct policy
-  walls; the consolidated commit/push, replacement hosted exact-SHA checks,
+  bounded first-unlock credential cleanup, battery-confirmed supplier pairing,
+  approved warm revision rebind, atomic source publication, supplier battery
+  mapping, day-owner resolution, and supplier-onboarding credential gates pass
+  the complete local Android Full, macOS, unsigned iPhone/Watch/widget,
+  repository/server/SDK, and direct policy walls; remote head 65e4b0ab passed
+  every hosted context before the final protected-data review finding; one
+  consolidated replacement commit/push, replacement hosted exact-SHA checks,
   protected integration, and physical accuracy validation remain`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
@@ -18,7 +20,9 @@
   `db7de8e2571b1effd8278537d63bd7019b2b0d28`
 - Review-closeout commit:
   `93d5ffed104d7e3b9f193c2af71c9dfb57d486c8`
-- Final review follow-up commit: commit containing this record
+- Previous all-green remote review candidate:
+  `65e4b0ab5f5ae7695ad2199b90fd50cacc1e5ba1`
+- Protected-data review follow-up commit: commit containing this record
 - Record commit or PR: application pull request `#17`
 
 ## Objective
@@ -176,6 +180,14 @@ heart-rate elevation as proof of walking.
   source accepts only approved hardware or firmware revision drift for the same
   peripheral, model, and capabilities, persists the replacement binding before
   continuing, and still rejects model or peripheral substitution.
+- Closed the final Apple protected-data review finding. Startup credential
+  cleanup now reports whether it actually completed and is owned by one retained
+  reconciler. An unavailable Keychain ledger or failed deletion receives one
+  protected-data-available retry plus a finite 1s/5s/15s retry budget. Success
+  cancels both owners; consuming the unlock edge cannot re-arm an unbounded
+  lock/unlock loop. Registered supplier rows still retain their credential,
+  archived rows still delete it, and an unreadable registry or ledger remains
+  fail-closed.
 
 ## Data, privacy, and medical truth
 
@@ -200,14 +212,19 @@ heart-rate elevation as proof of walking.
   opt-in Steps test trace reports bounded class-filter mode and kept/rejected
   delta counts. A manual-workout counter read failure records one bounded
   `workouts.step_summary` event on Apple and Android with only fixed outcome and
-  failure-kind categories.
+  failure-kind categories. Supplier credential cleanup uses the existing
+  `band.supplier_lifecycle` event with fixed `secure_cleanup` stage,
+  completed/failed outcome, and `protected_data_available` or
+  `scheduled_retry` trigger.
 - Why existing evidence is sufficient, or why new evidence is required: the
   production calculation is pure and synchronous; no new lifecycle operation
   exists. The existing trace must change because the prior trace would otherwise
   disagree with the filtered total.
 - Existing evidence reused: `StepsEstimateEngine.rawCounterTrace`.
 - New bounded events or operation spans: one failure-only
-  `workouts.step_summary` event; no success or per-sample event.
+  `workouts.step_summary` event; no success or per-sample event. The cleanup
+  retry adds no event family and only supplies a fixed trigger to the existing
+  lifecycle event.
 - Redaction, retention, and high-frequency controls: aggregate counts and fixed
   categories only, emitted solely through the existing opt-in test mode.
 - Cross-platform/backend correlation: identical Swift/Kotlin result and trace
@@ -237,6 +254,7 @@ heart-rate elevation as proof of walking.
 | PR review closeout | Apple focused set passes 32/32; Android Full compile and `SupplierDeviceCardPolicyTest` pass 7/7 | Oura ownership, supplier transient live restart, archived activation policy, non-supplier reactivation, and Android supplier presentation are covered on the local replacement head | Physical BLE, Compose instrumentation, or signed installation |
 | Final source-integration review remediation | Android Full debug compile and supplier Live policy tests pass 10/10; Apple supplier recovery tests pass 2/2 | Durable source ownership now selects Android Live controls, the confirmed no-active path remains reachable, and Apple discovery continues through a cancellable low-frequency tail | Physical radios, background execution, signed installation, or supplier timing |
 | Final supplier compatibility, pairing, revision, owner, picker, and archive review | Apple supplier lifecycle tests pass 49/49; Android supplier adapter/coordinator tests pass 75/75; complete Android Full passes 5,164 with seven intentional skips; complete macOS passes 2,336 with one intentional fixture skip; the unsigned Release iPhone graph embeds Watch, complications, and widgets | A singleton/raw step row cannot own the day, battery verification is sufficient for supplier registration, archive failure cannot destroy a credential, post-archive cleanup is restart-safe, approved warm revision drift rebinds durably, and model/peripheral substitution remains rejected | Signed installation, physical BLE, real revision callbacks, secure-store faults on devices, firmware activity classification, background execution, or physical step accuracy |
+| Final protected-data cleanup lifecycle | Apple supplier lifecycle tests pass 51/51; exact-current unsigned generic iPhoneOS Release builds and embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | A ledger unavailable before first unlock is retried on the protected-data edge, cleanup stops after success, and a failed unlock retry cannot create an unbounded observer loop | A physical device Keychain fault, signed install, background relaunch, or supplier hardware behavior |
 
 ## Physical device and deployment
 
@@ -253,31 +271,28 @@ heart-rate elevation as proof of walking.
 
 ## Git and release state
 
-- Changed paths in this final local slice: Apple/Android day-owner evidence,
-  terminal Apple supplier compatibility handling, Android durable revision
-  rebind and stale-live cleanup, supplier picker/archive presentation, matching
-  regressions, reviewed terminology evidence, and this operations record.
-  Earlier PR changes remain as recorded above.
+- Changed paths in this final local slice: the Apple pending-credential cleanup
+  reconciler, its AppModel lifetime owner, two protected-data/bounded-retry
+  regressions, and closeout operations records. Earlier PR changes remain as
+  recorded above.
 - Commits: implementation `db7de8e2571b1effd8278537d63bd7019b2b0d28`;
   review closeout `93d5ffed104d7e3b9f193c2af71c9dfb57d486c8`.
-- Branch and remote state: remote PR `#17` remains at
-  `e92efc51efd3d87e44ae1e9e82e8747b19976090`; every applicable hosted job and
-  all ten protected contexts passed on that superseded SHA. The uncommitted
-  replacement additionally closes archive-before-cleanup, battery-only pairing,
-  and warm-reconnect identity findings. Its Android Full wall passes 5,164 with
-  seven intentional skips, its macOS wall passes 2,336 with one intentional
-  skip, Apple supplier lifecycle passes 49/49, Android supplier
-  adapter/coordinator passes 75/75, and the unsigned iPhone/Watch/widget Release
-  graph is green. PR `#17` remains authoritative for replacement exact-SHA
-  checks, review-thread state, and protected integration after the consolidated
-  push.
+- Branch and remote state: remote PR `#17` is at
+  `65e4b0ab5f5ae7695ad2199b90fd50cacc1e5ba1`; 34 hosted jobs passed and four
+  intentional jobs skipped, including all ten protected contexts, Android,
+  macOS, iOS, Swift packages, server applicability, policy, localization,
+  health-claim, runtime-license, operations, and trusted-control gates. Final
+  review then found one Apple first-unlock cleanup gap. The uncommitted
+  replacement closes that gap; Apple supplier lifecycle passes 51/51 and the
+  exact-current unsigned iPhone/Watch/widget Release graph is green. PR `#17`
+  remains authoritative for replacement exact-SHA checks, review-thread state,
+  and protected integration after the consolidated push.
 - Current replacement state: the commit containing this record is the
-  consolidated final-review follow-up to remote head
-  `e92efc51efd3d87e44ae1e9e82e8747b19976090`. Its complete affected Apple,
-  Android, storage, macOS, and unsigned Release iPhone/Watch/widget walls are
-  green. The complete 1,173-pass repository/server/SDK wall, 137-pass focused
-  release-policy wall, and direct controls are also green. One consolidated
-  replacement commit/push, replacement exact-SHA hosted checks,
+  consolidated protected-data follow-up to remote head `65e4b0ab`. Its affected
+  Apple tests and unsigned Release iPhone/Watch/widget graph are green; the
+  unchanged Android, server, SDK, shared-metric, localization, accessibility,
+  safety, privacy, and policy surfaces retain the complete evidence above. One
+  consolidated replacement commit/push, replacement exact-SHA hosted checks,
   evidence-backed review-thread resolution, normal protected merge, and
   protected-main verification remain.
 - Repository visibility verified: not rechecked in this slice.
@@ -487,6 +502,21 @@ heart-rate elevation as proof of walking.
   `find -depth -delete`, reclaiming 4.4 GiB. No Xcode build process owned the
   tree. The bounded status and logs remain under the round-owned temporary
   directory until replacement hosted evidence is durable.
+- The first protected-data regression compile failed only because the test
+  double added a read counter without an explicit Swift `return`. The corrected
+  test passed, then the complete supplier lifecycle class passed 51/51.
+- Two exact-current iPhone Release attempts stopped at the bounded runner's
+  10 GiB disk floor; no floor override was used. One orphaned compiler owned by
+  the stopped build was terminated by its exact process group. The incomplete
+  DerivedData, two obsolete round-owned Apple DerivedData trees, active-worktree
+  Gradle/Swift package outputs, global Xcode DerivedData, the global Gradle
+  cache, and the SwiftPM cache were removed only after process/open-handle
+  checks. Source, simulators, SDK inputs, credentials, screenshots, logs, and
+  user data were preserved. The third bounded invocation succeeded and
+  produced the verified embedded phone/Watch/complication/widget bundle.
+- The current 3.5 GiB round-owned iPhone DerivedData is retained only until the
+  replacement hosted evidence is durable; free Data-volume space was about
+  13 GiB after the successful build.
 
 ## Next round
 

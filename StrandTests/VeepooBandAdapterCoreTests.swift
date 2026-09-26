@@ -179,6 +179,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     {
         var pending = Set<String>()
         var readsAvailable = true
+        var readCount = 0
         var markSucceeds = true
         var clearSucceeds = true
 
@@ -189,7 +190,8 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         }
 
         func pendingDeviceIDs() -> Set<String>? {
-            readsAvailable ? pending : nil
+            readCount += 1
+            return readsAvailable ? pending : nil
         }
 
         @discardableResult
@@ -1374,6 +1376,68 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
 
         XCTAssertEqual(credentials.clearCount, 0)
         XCTAssertEqual(credentials.values["supplier"], "2468")
+        XCTAssertEqual(cleanup.pending, Set(["supplier"]))
+    }
+
+    @MainActor
+    func testPendingCleanupRetriesAfterProtectedDataBecomesAvailable() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        let cleanup = FakeCredentialCleanup()
+        cleanup.pending.insert("supplier")
+        cleanup.readsAvailable = false
+        let protectedData = PassthroughSubject<Void, Never>()
+        let reconciler = VeepooPendingCredentialCleanupReconciler(
+            registeredDeviceIDs: { [] },
+            credentials: credentials,
+            cleanup: cleanup,
+            protectedDataAvailablePublisher:
+                protectedData.eraseToAnyPublisher(),
+            retryDelaysNanoseconds: []
+        )
+
+        reconciler.start()
+
+        XCTAssertEqual(cleanup.readCount, 1)
+        XCTAssertEqual(credentials.clearCount, 0)
+        XCTAssertEqual(cleanup.pending, Set(["supplier"]))
+
+        cleanup.readsAvailable = true
+        protectedData.send()
+
+        XCTAssertEqual(cleanup.readCount, 2)
+        XCTAssertEqual(credentials.clearCount, 1)
+        XCTAssertNil(credentials.values["supplier"])
+        XCTAssertTrue(cleanup.pending.isEmpty)
+
+        protectedData.send()
+        XCTAssertEqual(cleanup.readCount, 2)
+        XCTAssertEqual(credentials.clearCount, 1)
+    }
+
+    @MainActor
+    func testPendingCleanupProtectedDataRetryIsOneShotWhenStorageStaysUnavailable() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        let cleanup = FakeCredentialCleanup()
+        cleanup.pending.insert("supplier")
+        cleanup.readsAvailable = false
+        let protectedData = PassthroughSubject<Void, Never>()
+        let reconciler = VeepooPendingCredentialCleanupReconciler(
+            registeredDeviceIDs: { [] },
+            credentials: credentials,
+            cleanup: cleanup,
+            protectedDataAvailablePublisher:
+                protectedData.eraseToAnyPublisher(),
+            retryDelaysNanoseconds: []
+        )
+
+        reconciler.start()
+        protectedData.send()
+        protectedData.send()
+
+        XCTAssertEqual(cleanup.readCount, 2)
+        XCTAssertEqual(credentials.clearCount, 0)
         XCTAssertEqual(cleanup.pending, Set(["supplier"]))
     }
 

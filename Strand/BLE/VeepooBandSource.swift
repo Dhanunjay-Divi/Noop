@@ -224,6 +224,7 @@ enum VeepooSupplierLifecycleTrigger: String {
     case authenticationRejected = "authentication_rejected"
     case terminalBatteryFailure = "terminal_battery_failure"
     case protectedDataAvailable = "protected_data_available"
+    case scheduledRetry = "scheduled_retry"
 }
 
 enum VeepooSupplierLifecycleFailure: String {
@@ -324,27 +325,32 @@ enum VeepooSupplierRemoval {
 
 @MainActor
 enum VeepooPendingCredentialCleanup {
+    @discardableResult
     static func reconcile(
         registeredDeviceIDs: Set<String>?,
         credentials: any VeepooCredentialAccess,
-        cleanup: any VeepooCredentialCleanupAccess
-    ) {
+        cleanup: any VeepooCredentialCleanupAccess,
+        trigger: VeepooSupplierLifecycleTrigger? = nil
+    ) -> Bool {
         guard let registeredDeviceIDs else {
             VeepooSupplierLifecycleDiagnostics.record(
                 stage: .secureCleanup,
                 outcome: .failed,
+                trigger: trigger,
                 failure: .cleanupFailed
             )
-            return
+            return false
         }
         guard let pending = cleanup.pendingDeviceIDs() else {
             VeepooSupplierLifecycleDiagnostics.record(
                 stage: .secureCleanup,
                 outcome: .failed,
+                trigger: trigger,
                 failure: .cleanupFailed
             )
-            return
+            return false
         }
+        var allCompleted = true
         for deviceID in pending.sorted() {
             let completed: Bool
             if registeredDeviceIDs.contains(deviceID) {
@@ -356,9 +362,122 @@ enum VeepooPendingCredentialCleanup {
             VeepooSupplierLifecycleDiagnostics.record(
                 stage: .secureCleanup,
                 outcome: completed ? .completed : .failed,
+                trigger: trigger,
                 failure: completed ? nil : .cleanupFailed
             )
+            allCompleted = allCompleted && completed
         }
+        return allCompleted
+    }
+}
+
+@MainActor
+final class VeepooPendingCredentialCleanupReconciler {
+    private let registeredDeviceIDs: () -> Set<String>?
+    private let credentials: any VeepooCredentialAccess
+    private let cleanup: any VeepooCredentialCleanupAccess
+    private let protectedDataAvailablePublisher: AnyPublisher<Void, Never>
+    private let retryDelaysNanoseconds: [UInt64]
+    private var protectedDataCancellable: AnyCancellable?
+    private var retryTask: Task<Void, Never>?
+    private var retryAttempt = 0
+    private var protectedDataRetryConsumed = false
+    private var finished = false
+
+    init(
+        registeredDeviceIDs: @escaping () -> Set<String>?,
+        credentials: any VeepooCredentialAccess,
+        cleanup: any VeepooCredentialCleanupAccess,
+        protectedDataAvailablePublisher: AnyPublisher<Void, Never>? = nil,
+        retryDelaysNanoseconds: [UInt64] = [
+            1_000_000_000,
+            5_000_000_000,
+            15_000_000_000,
+        ]
+    ) {
+        self.registeredDeviceIDs = registeredDeviceIDs
+        self.credentials = credentials
+        self.cleanup = cleanup
+        self.protectedDataAvailablePublisher =
+            protectedDataAvailablePublisher
+                ?? VeepooBandSource.systemProtectedDataAvailablePublisher()
+        self.retryDelaysNanoseconds = retryDelaysNanoseconds
+    }
+
+    func start() {
+        guard !finished else { return }
+        reconcile(trigger: nil, resetRetryBudget: true)
+    }
+
+    private func reconcile(
+        trigger: VeepooSupplierLifecycleTrigger?,
+        resetRetryBudget: Bool
+    ) {
+        guard !finished else { return }
+        if resetRetryBudget {
+            retryAttempt = 0
+        }
+        if VeepooPendingCredentialCleanup.reconcile(
+            registeredDeviceIDs: registeredDeviceIDs(),
+            credentials: credentials,
+            cleanup: cleanup,
+            trigger: trigger
+        ) {
+            finish()
+            return
+        }
+        installProtectedDataRetryIfNeeded()
+        scheduleRetryIfNeeded()
+    }
+
+    private func installProtectedDataRetryIfNeeded() {
+        guard !protectedDataRetryConsumed,
+              protectedDataCancellable == nil
+        else {
+            return
+        }
+        protectedDataCancellable = protectedDataAvailablePublisher
+            .prefix(1)
+            .sink { [weak self] in
+                guard let self, !self.finished else { return }
+                self.protectedDataRetryConsumed = true
+                self.protectedDataCancellable = nil
+                self.retryTask?.cancel()
+                self.retryTask = nil
+                self.reconcile(
+                    trigger: .protectedDataAvailable,
+                    resetRetryBudget: true
+                )
+            }
+    }
+
+    private func scheduleRetryIfNeeded() {
+        guard retryTask == nil,
+              retryAttempt < retryDelaysNanoseconds.count
+        else {
+            return
+        }
+        let delay = retryDelaysNanoseconds[retryAttempt]
+        retryAttempt += 1
+        retryTask = Task { @MainActor [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+            }
+            guard !Task.isCancelled, let self, !self.finished else { return }
+            self.retryTask = nil
+            self.reconcile(
+                trigger: .scheduledRetry,
+                resetRetryBudget: false
+            )
+        }
+    }
+
+    private func finish() {
+        finished = true
+        retryTask?.cancel()
+        retryTask = nil
+        protectedDataCancellable?.cancel()
+        protectedDataCancellable = nil
     }
 }
 
@@ -901,7 +1020,7 @@ final class VeepooBandSource: LiveHRSource {
         live.connected = false
     }
 
-    private static func systemProtectedDataAvailablePublisher()
+    fileprivate static func systemProtectedDataAvailablePublisher()
         -> AnyPublisher<Void, Never>
     {
         #if canImport(UIKit)
