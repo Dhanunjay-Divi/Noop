@@ -538,6 +538,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                 OnboardingTopBar(
                     page = pageIndex + 1,
                     total = pages.size,
+                    pageTitle = stringResource(page.progressTitleRes),
                     canGoBack = pageIndex > 0 && !ownershipState.busy,
                     onBack = goBack,
                 )
@@ -931,6 +932,27 @@ internal enum class OnboardingPage(val cta: String) {
     Plan("Continue"),
     Done("Enter NOOP");
 
+    val progressTitleRes: Int
+        get() = when (this) {
+            Welcome -> R.string.app_name
+            Account -> R.string.appwide_onboarding_account_unconfigured_title
+            WhatItDoes -> R.string.l10n_onboarding_screen_what_noop_does_b25b362d
+            Expectations -> R.string.l10n_onboarding_screen_what_to_expect_ed98f851
+            Bluetooth -> R.string.l10n_onboarding_screen_a_quick_word_before_you_connect_5a29015a
+            Wear -> R.string.l10n_onboarding_screen_put_your_strap_on_031d4807
+            Connect -> R.string.appwide_onboarding_device_setup_title
+            Bonded -> R.string.l10n_onboarding_screen_you_re_connected_7e06aee0
+            Ownership -> R.string.ownership_screen_title
+            Profile -> R.string.l10n_onboarding_screen_about_you_5c4698b6
+            Import -> R.string.l10n_onboarding_screen_bring_your_history_5b8775c9
+            Notifications -> R.string.l10n_notifications_settings_screen_notifications_753a22b2
+            SafetyContacts -> R.string.safety_setup_title
+            Appearance -> R.string.l10n_settings_screen_appearance_41def7a0
+            DailyRhythm -> R.string.onboarding_rhythm_title
+            Plan -> R.string.ownership_plan_title
+            Done -> R.string.appwide_onboarding_device_wizard_idle
+        }
+
     val storageValue: String
         get() = when (this) {
             Welcome -> "welcome"
@@ -1196,6 +1218,7 @@ private fun OnboardingBackdrop() {
 private fun OnboardingTopBar(
     page: Int,
     total: Int,
+    pageTitle: String,
     canGoBack: Boolean,
     onBack: () -> Unit,
 ) {
@@ -1233,11 +1256,24 @@ private fun OnboardingTopBar(
             Spacer(Modifier.width(64.dp))
         }
         Spacer(Modifier.weight(1f))
-        Text(
-            uiString(R.string.l10n_onboarding_screen_page_total_50b38f9a, page, total),
-            style = NoopType.captionNumber,
-            color = Palette.textTertiary,
-        )
+        Column(
+            horizontalAlignment = Alignment.End,
+            modifier = Modifier.semantics(mergeDescendants = true) {
+                contentDescription = "$pageTitle, $page / $total"
+            },
+        ) {
+            Text(
+                pageTitle,
+                style = NoopType.caption,
+                color = Palette.textSecondary,
+                maxLines = 1,
+            )
+            Text(
+                uiString(R.string.l10n_onboarding_screen_page_total_50b38f9a, page, total),
+                style = NoopType.captionNumber,
+                color = Palette.textTertiary,
+            )
+        }
     }
 }
 

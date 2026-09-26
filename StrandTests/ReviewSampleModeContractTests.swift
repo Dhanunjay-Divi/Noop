@@ -40,6 +40,25 @@ final class ReviewSampleModeContractTests: XCTestCase {
         }
     }
 
+    func testRealSetupIsPrimaryAndReviewSampleIsSecondary() throws {
+        let source = try text("StrandiOS/App/ReviewSampleMode.swift")
+        let entry = try slice(
+            source,
+            from: "struct ReviewSampleEntryView: View",
+            to: "struct ReviewSampleDisclosureView: View"
+        )
+
+        let setup = try XCTUnwrap(entry.range(of: "\"Continue setup\"")?.lowerBound)
+        let sample = try XCTUnwrap(entry.range(of: "\"Explore Review Sample\"")?.lowerBound)
+        XCTAssertLessThan(setup, sample)
+        XCTAssertTrue(entry.contains(
+            "\"Continue setup\",\n                            systemImage: \"arrow.right\",\n                            kind: .primary"
+        ))
+        XCTAssertTrue(entry.contains(
+            "\"Explore Review Sample\",\n                            systemImage: \"eye.fill\",\n                            kind: .secondary"
+        ))
+    }
+
     func testReleaseRootKeepsReviewSampleAheadOfTermsAndOperationalShell() throws {
         let source = try text("StrandiOS/App/StrandiOSApp.swift")
         let root = try slice(

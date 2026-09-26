@@ -108,6 +108,28 @@ public struct OnboardingWizard: View {
             case .done: return "done"
             }
         }
+
+        var progressTitle: LocalizedStringKey {
+            switch self {
+            case .welcome: return "Welcome to NOOP"
+            case .account: return "appwide.onboarding.account.unconfigured_title"
+            case .what: return "What NOOP does"
+            case .expectations: return "What to expect"
+            case .bluetooth: return "Bluetooth"
+            case .wear: return "Put your strap on"
+            case .scan: return "Connect band"
+            case .bonded: return "You're connected."
+            case .ownership: return "Band Account"
+            case .profile: return "About you"
+            case .importData: return "Bring your history"
+            case .notifications: return "Notifications"
+            case .safetyContacts: return "Safety contacts"
+            case .appearance: return "Appearance"
+            case .dailyRhythm: return "onboarding.rhythm.title"
+            case .plan: return "Choose your NOOP"
+            case .done: return "Ready"
+            }
+        }
     }
 
     static func onboardingSteps(ownershipConfigured _: Bool) -> [Step] {
@@ -403,9 +425,16 @@ public struct OnboardingWizard: View {
 
             Spacer()
 
-            Text("\(currentStepIndex + 1) / \(activeSteps.count)")
-                .font(StrandFont.captionNumber)
-                .foregroundStyle(StrandPalette.textTertiary)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(step.progressTitle)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .lineLimit(1)
+                Text("\(currentStepIndex + 1) / \(activeSteps.count)")
+                    .font(StrandFont.captionNumber)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+            .accessibilityElement(children: .combine)
         }
     }
 

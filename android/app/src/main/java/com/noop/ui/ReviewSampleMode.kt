@@ -122,19 +122,19 @@ internal fun ReviewSampleEntry(
             }
         }
         NoopButton(
-            text = stringResource(R.string.review_sample_explore),
-            leadingIcon = Icons.AutoMirrored.Filled.ArrowForward,
-            fullWidth = true,
-            modifier = Modifier.testTag("noop.review.entry.explore"),
-            onClick = onExplore,
-        )
-        NoopButton(
             text = stringResource(R.string.review_sample_continue_setup),
             leadingIcon = Icons.AutoMirrored.Filled.ArrowForward,
-            kind = NoopButtonKind.Secondary,
             fullWidth = true,
             modifier = Modifier.testTag("noop.review.entry.continue"),
             onClick = onContinueSetup,
+        )
+        NoopButton(
+            text = stringResource(R.string.review_sample_explore),
+            leadingIcon = Icons.Filled.Visibility,
+            kind = NoopButtonKind.Secondary,
+            fullWidth = true,
+            modifier = Modifier.testTag("noop.review.entry.explore"),
+            onClick = onExplore,
         )
         Spacer(Modifier.height(24.dp))
     }
