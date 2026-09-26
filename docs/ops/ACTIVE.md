@@ -24,9 +24,10 @@ Last updated: **2026-09-26**
   verification passes 12/12; Android Full/Demo compile and focused recovery
   passes 7/7; the complete unsigned iPhone Simulator graph embeds Watch,
   complications, and widgets; and all-platform localization passes. The first
-  checkpoint `6b36f035e` is public and triggered zero workflows. The second
-  checkpoint, remaining Claude/release-record reconciliation, complete walls,
-  exact-head hosted review, protected integration/main verification, and
+  checkpoint `6b36f035e` is public. The account-recovery/Watch-policy
+  checkpoint `7b3250b9e` is also public; both triggered zero workflows.
+  Remaining Claude/release-record reconciliation, complete walls, exact-head
+  hosted review, protected integration/main verification, and
   physical/provider gates remain pending.
 - The newest September 26 step-source correction supersedes older statements
   below that describe a classification-gated band counter as valid primary

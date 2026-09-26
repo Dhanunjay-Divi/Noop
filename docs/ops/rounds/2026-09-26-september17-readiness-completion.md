@@ -8,7 +8,8 @@
 - Start commit:
   `169230a9ae38ac8b4ca4b690489cd29f5af47ee4`
 - End implementation commit: pending
-- Record commit or PR: pending
+- Record checkpoint:
+  `7b3250b9ef255a9786a8fa6be1cb519fc96dac81`
 
 ## Objective
 
@@ -150,12 +151,13 @@ explicitly gated migration work open.
 - Changed paths: macOS runtime entry, Watch snapshot/publication/complication
   behavior, Apple and Android ownership recovery UI/services/tests/locales, and
   this operations record.
-- Commits: first checkpoint `50d41e5c8` and `6b36f035e`; account-recovery
-  checkpoint pending commit.
+- Commits: macOS/Watch checkpoint `50d41e5c8` and `6b36f035e`;
+  account-recovery and Watch-policy correction checkpoint `7b3250b9e`.
 - Branch and remote state:
   `codex/sept17-readiness-closeout-20260926` tracks its public remote.
-  Checkpoint `6b36f035e` is pushed and triggered zero workflows because the
-  branch has no pull request and push workflows are scoped to `main`.
+  Checkpoints `6b36f035e` and `7b3250b9e` are pushed and triggered zero
+  workflows because the branch has no pull request and push workflows are
+  scoped to `main`.
 - Repository visibility verified: public.
 - Version/build impact: none planned.
 - Release or distribution impact: no deployment or signed artifact.
@@ -178,11 +180,9 @@ explicitly gated migration work open.
 
 ## Next round
 
-1. Commit and push the locally green ownership/Watch correction checkpoint
-   without opening a pull request.
-2. Reconcile the remaining Claude findings and stale release-readiness records.
-3. Run the applicable complete Apple/Android/repository-control walls.
-4. Open or update the normal protected review only after the consolidated
+1. Reconcile the remaining Claude findings and stale release-readiness records.
+2. Run the applicable complete Apple/Android/repository-control walls.
+3. Open or update the normal protected review only after the consolidated
    candidate is locally green, then require exact-head hosted checks,
    non-author approval, protected integration, and protected-main verification.
 
