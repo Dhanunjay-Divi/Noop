@@ -2,8 +2,10 @@ package com.noop.data
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -32,6 +34,7 @@ class DeviceRegistryTest {
         val analysisGenerations = LinkedHashMap<String, Long>()
         val analysisBounds = LinkedHashMap<String, Pair<Long?, Long?>>()
         var ownershipInputRange = AnalysisAffectedRange(null, null)
+        var failUpsertFor: String? = null
 
         override suspend fun pairedDevices(): List<PairedDeviceRow> =
             devices.values.sortedBy { it.addedAt }
@@ -40,6 +43,7 @@ class DeviceRegistryTest {
             devices.values.firstOrNull { it.status == DeviceStatus.active.name }?.id
 
         override suspend fun upsertPairedDevice(row: PairedDeviceRow) {
+            if (row.id == failUpsertFor) error("injected registry failure")
             devices[row.id] = row // INSERT OR REPLACE by id PK
         }
 
@@ -178,12 +182,36 @@ class DeviceRegistryTest {
         }
     }
 
-    /** Registry over the fake DAO with a pass-through transactor (Room's withTransaction stand-in). */
+    /** Registry over a rollback-capable fake transaction, matching Room's throw-to-rollback contract. */
     private fun registryWith(dao: FakeRegistryDao) =
         DeviceRegistry(
             dao,
             object : DeviceRegistry.Transactor {
-                override suspend fun <R> run(block: suspend () -> R): R = block()
+                override suspend fun <R> run(block: suspend () -> R): R {
+                    val devices = LinkedHashMap(dao.devices)
+                    val legacyNames = LinkedHashMap(dao.legacyNames)
+                    val owners = LinkedHashMap(dao.owners)
+                    val generations = LinkedHashMap(dao.analysisGenerations)
+                    val bounds = LinkedHashMap(dao.analysisBounds)
+                    val deletedTables = dao.deletedTables.toList()
+                    return try {
+                        block()
+                    } catch (failure: Throwable) {
+                        dao.devices.clear()
+                        dao.devices.putAll(devices)
+                        dao.legacyNames.clear()
+                        dao.legacyNames.putAll(legacyNames)
+                        dao.owners.clear()
+                        dao.owners.putAll(owners)
+                        dao.analysisGenerations.clear()
+                        dao.analysisGenerations.putAll(generations)
+                        dao.analysisBounds.clear()
+                        dao.analysisBounds.putAll(bounds)
+                        dao.deletedTables.clear()
+                        dao.deletedTables.addAll(deletedTables)
+                        throw failure
+                    }
+                }
             },
         )
 
@@ -203,6 +231,62 @@ class DeviceRegistryTest {
         val all = reg.all()
         assertEquals(1, all.size)
         assertEquals("my-whoop", all.first().id)
+        assertEquals("my-whoop", reg.activeDeviceId())
+    }
+
+    @Test
+    fun legacyWhoopCapabilityTokensAreSanitizedAtReadTime() = runBlocking {
+        val dao = seededDao()
+        dao.devices["my-whoop"] = checkNotNull(dao.devices["my-whoop"]).copy(
+            capabilities = "hr,spo2,steps,strainLoad",
+        )
+
+        assertEquals(
+            "hr,strainLoad",
+            registryWith(dao).all().single().capabilities,
+        )
+    }
+
+    @Test
+    fun addCommitsOnlyAfterVerifiedReadBack() = runBlocking {
+        val dao = seededDao()
+        val reg = registryWith(dao)
+        val paired = PairedDeviceRow(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            model = "Compatible band 5.0 / MG",
+            nickname = null,
+            peripheralId = "opaque-whoop",
+            sourceKind = SourceKind.liveBLE.name,
+            capabilities = "hr,hrv",
+            status = DeviceStatus.paired.name,
+            addedAt = 200,
+            lastSeenAt = 200,
+        )
+
+        assertTrue(reg.add(paired))
+        assertEquals(paired, dao.devices["whoop-test-band"])
+    }
+
+    @Test
+    fun addRollsBackAndReportsFailureWhenPersistenceFails() = runBlocking {
+        val dao = seededDao().apply { failUpsertFor = "whoop-test-band" }
+        val reg = registryWith(dao)
+        val paired = PairedDeviceRow(
+            id = "whoop-test-band",
+            brand = "WHOOP",
+            model = "Compatible band 5.0 / MG",
+            nickname = null,
+            peripheralId = "opaque-whoop",
+            sourceKind = SourceKind.liveBLE.name,
+            capabilities = "hr,hrv",
+            status = DeviceStatus.paired.name,
+            addedAt = 200,
+            lastSeenAt = 200,
+        )
+
+        assertFalse(reg.add(paired))
+        assertFalse(dao.devices.containsKey("whoop-test-band"))
         assertEquals("my-whoop", reg.activeDeviceId())
     }
 
@@ -228,6 +312,279 @@ class DeviceRegistryTest {
         // Invariant I1: exactly one active row.
         assertEquals(1, reg.all().count { it.status == DeviceStatus.active.name })
         assertEquals(999L, reg.all().first { it.id == "polar-1" }.lastSeenAt) // promote stamped lastSeenAt
+    }
+
+    @Test
+    fun addAndSetActiveCommitsOneVerifiedActiveRow() = runBlocking {
+        val dao = seededDao()
+        val reg = registryWith(dao)
+        val supplier = PairedDeviceRow(
+            id = "supplier-1",
+            brand = "NOOP",
+            model = "Supplier band",
+            nickname = null,
+            peripheralId = "AA:BB:CC:DD:EE:10",
+            sourceKind = SourceKind.veepoo.name,
+            capabilities = "hr",
+            status = DeviceStatus.paired.name,
+            addedAt = 200,
+            lastSeenAt = 200,
+        )
+
+        assertTrue(reg.addAndSetActive(supplier, now = 999))
+
+        assertEquals("supplier-1", reg.activeDeviceId())
+        assertEquals(1, reg.all().count { it.status == DeviceStatus.active.name })
+        assertEquals(DeviceStatus.paired.name, dao.devices.getValue("my-whoop").status)
+    }
+
+    @Test
+    fun addAndSetActiveRollsBackWhenTheRegistryMutationFails() = runBlocking {
+        val dao = seededDao().apply { failUpsertFor = "supplier-1" }
+        val reg = registryWith(dao)
+        val supplier = PairedDeviceRow(
+            id = "supplier-1",
+            brand = "NOOP",
+            model = "Supplier band",
+            nickname = null,
+            peripheralId = "AA:BB:CC:DD:EE:10",
+            sourceKind = SourceKind.veepoo.name,
+            capabilities = "hr",
+            status = DeviceStatus.paired.name,
+            addedAt = 200,
+            lastSeenAt = 200,
+        )
+
+        assertFalse(reg.addAndSetActive(supplier, now = 999))
+
+        assertEquals("my-whoop", reg.activeDeviceId())
+        assertFalse(dao.devices.containsKey("supplier-1"))
+        assertEquals(DeviceStatus.active.name, dao.devices.getValue("my-whoop").status)
+    }
+
+    @Test
+    fun unavailableSupplierReconcilesToPreferredRunningTransport() = runBlocking {
+        val dao = seededDao().apply {
+            devices["my-whoop"] = devices.getValue("my-whoop")
+                .copy(status = DeviceStatus.paired.name)
+            devices["polar-1"] = PairedDeviceRow(
+                id = "polar-1",
+                brand = "Polar",
+                model = "H10",
+                nickname = null,
+                sourceKind = SourceKind.liveBLE.name,
+                capabilities = "hr",
+                status = DeviceStatus.paired.name,
+                addedAt = 150,
+                lastSeenAt = 150,
+            )
+            devices["supplier-1"] = PairedDeviceRow(
+                id = "supplier-1",
+                brand = "NOOP",
+                model = "Supplier band",
+                nickname = null,
+                sourceKind = SourceKind.veepoo.name,
+                capabilities = "hr",
+                status = DeviceStatus.active.name,
+                addedAt = 200,
+                lastSeenAt = 200,
+            )
+        }
+        val reg = registryWith(dao)
+
+        val fallback = reg.reconcileUnavailableSupplier(
+            unavailableDeviceId = "supplier-1",
+            preferredTransportDeviceId = "polar-1",
+            now = 999,
+        )
+
+        assertEquals("polar-1", fallback)
+        assertEquals("polar-1", reg.activeDeviceId())
+        assertEquals(DeviceStatus.paired.name, dao.devices.getValue("supplier-1").status)
+    }
+
+    @Test
+    fun unavailableSupplierFallsBackToNonArchivedWhoop() = runBlocking {
+        val dao = seededDao().apply {
+            devices["my-whoop"] = devices.getValue("my-whoop")
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-1"] = PairedDeviceRow(
+                id = "supplier-1",
+                brand = "NOOP",
+                model = "Supplier band",
+                nickname = null,
+                sourceKind = SourceKind.veepoo.name,
+                capabilities = "hr",
+                status = DeviceStatus.active.name,
+                addedAt = 200,
+                lastSeenAt = 200,
+            )
+        }
+        val reg = registryWith(dao)
+
+        val fallback = reg.reconcileUnavailableSupplier("supplier-1", now = 999)
+
+        assertEquals("my-whoop", fallback)
+        assertEquals("my-whoop", reg.activeDeviceId())
+    }
+
+    @Test
+    fun activeSupplierArchivePromotesFallbackInTheSameTransaction() = runBlocking {
+        val dao = seededDao().apply {
+            devices["my-whoop"] = devices.getValue("my-whoop")
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-1"] = PairedDeviceRow(
+                id = "supplier-1",
+                brand = "NOOP",
+                model = "Supplier band",
+                nickname = null,
+                peripheralId = "AA:BB:CC:DD:EE:10",
+                sourceKind = SourceKind.veepoo.name,
+                capabilities = "hr",
+                status = DeviceStatus.active.name,
+                addedAt = 200,
+                lastSeenAt = 200,
+            )
+        }
+        val reg = registryWith(dao)
+
+        val outcome = reg.archiveSupplierAndSelectFallback("supplier-1", now = 999)
+
+        assertNotNull(outcome)
+        assertEquals("my-whoop", outcome?.activeDeviceId)
+        assertEquals("my-whoop", reg.activeDeviceId())
+        assertEquals(DeviceStatus.archived.name, dao.devices.getValue("supplier-1").status)
+        assertEquals(DeviceStatus.active.name, dao.devices.getValue("my-whoop").status)
+    }
+
+    @Test
+    fun supplierArchiveFallbackSkipsEveryImportOnlySource() = runBlocking {
+        val dao = seededDao().apply {
+            devices["my-whoop"] = devices.getValue("my-whoop")
+                .copy(status = DeviceStatus.archived.name)
+            listOf(
+                "cloud" to SourceKind.cloudImport,
+                "file" to SourceKind.fileImport,
+                "activity" to SourceKind.activityFile,
+            ).forEachIndexed { index, (id, kind) ->
+                devices[id] = PairedDeviceRow(
+                    id = id,
+                    brand = "Import",
+                    model = kind.name,
+                    nickname = null,
+                    sourceKind = kind.name,
+                    capabilities = "hr",
+                    status = DeviceStatus.paired.name,
+                    addedAt = 110L + index,
+                    lastSeenAt = 110L + index,
+                )
+            }
+            devices["polar-1"] = PairedDeviceRow(
+                id = "polar-1",
+                brand = "Polar",
+                model = "H10",
+                nickname = null,
+                sourceKind = SourceKind.liveBLE.name,
+                capabilities = "hr",
+                status = DeviceStatus.paired.name,
+                addedAt = 150,
+                lastSeenAt = 150,
+            )
+            devices["supplier-1"] = PairedDeviceRow(
+                id = "supplier-1",
+                brand = "NOOP",
+                model = "Supplier band",
+                nickname = null,
+                peripheralId = "AA:BB:CC:DD:EE:10",
+                sourceKind = SourceKind.veepoo.name,
+                capabilities = "hr",
+                status = DeviceStatus.active.name,
+                addedAt = 200,
+                lastSeenAt = 200,
+            )
+        }
+        val reg = registryWith(dao)
+
+        val outcome = reg.archiveSupplierAndSelectFallback("supplier-1", now = 999)
+
+        assertEquals("polar-1", outcome?.activeDeviceId)
+        assertEquals("polar-1", reg.activeDeviceId())
+        assertTrue(
+            listOf("cloud", "file", "activity").all {
+                dao.devices.getValue(it).status == DeviceStatus.paired.name
+            },
+        )
+    }
+
+    @Test
+    fun supplierArchiveLeavesNoActiveFallbackWhenOnlyNonLiveSourcesRemain() = runBlocking {
+        val dao = seededDao().apply {
+            devices["my-whoop"] = devices.getValue("my-whoop")
+                .copy(status = DeviceStatus.archived.name)
+            listOf(
+                "cloud" to SourceKind.cloudImport.name,
+                "file" to SourceKind.fileImport.name,
+                "activity" to SourceKind.activityFile.name,
+                "unknown" to "future-import",
+            ).forEachIndexed { index, (id, kind) ->
+                devices[id] = PairedDeviceRow(
+                    id = id,
+                    brand = "Import",
+                    model = kind,
+                    nickname = null,
+                    sourceKind = kind,
+                    capabilities = "hr",
+                    status = DeviceStatus.paired.name,
+                    addedAt = 110L + index,
+                    lastSeenAt = 110L + index,
+                )
+            }
+            devices["supplier-1"] = PairedDeviceRow(
+                id = "supplier-1",
+                brand = "NOOP",
+                model = "Supplier band",
+                nickname = null,
+                peripheralId = "AA:BB:CC:DD:EE:10",
+                sourceKind = SourceKind.veepoo.name,
+                capabilities = "hr",
+                status = DeviceStatus.active.name,
+                addedAt = 200,
+                lastSeenAt = 200,
+            )
+        }
+        val reg = registryWith(dao)
+
+        val outcome = reg.archiveSupplierAndSelectFallback("supplier-1", now = 999)
+
+        assertNotNull(outcome)
+        assertNull(outcome?.activeDeviceId)
+        assertNull(reg.activeDeviceId())
+        assertEquals(DeviceStatus.archived.name, dao.devices.getValue("supplier-1").status)
+        assertTrue(
+            listOf("cloud", "file", "activity", "unknown").all {
+                dao.devices.getValue(it).status == DeviceStatus.paired.name
+            },
+        )
+    }
+
+    @Test
+    fun activatableLiveTransportPredicateFailsClosedForImportsAndUnknownKinds() {
+        assertTrue(SourceKind.liveBLE.isActivatableLiveTransport)
+        assertTrue(SourceKind.historyBLE.isActivatableLiveTransport)
+        assertTrue(SourceKind.ftms.isActivatableLiveTransport)
+        assertTrue(SourceKind.huami.isActivatableLiveTransport)
+        assertTrue(SourceKind.oura.isActivatableLiveTransport)
+        assertTrue(SourceKind.veepoo.isActivatableLiveTransport)
+        assertFalse(SourceKind.cloudImport.isActivatableLiveTransport)
+        assertFalse(SourceKind.fileImport.isActivatableLiveTransport)
+        assertFalse(SourceKind.activityFile.isActivatableLiveTransport)
+
+        val unknown = seededDao().devices.getValue("my-whoop").copy(
+            id = "unknown",
+            brand = "Import",
+            sourceKind = "future-import",
+        )
+        assertFalse(unknown.isActivatableLiveTransport)
     }
 
     @Test

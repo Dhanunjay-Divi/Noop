@@ -647,6 +647,7 @@ struct CoachView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(StrandPalette.accent)
+                        .foregroundStyle(StrandPalette.accentInk)
                         .disabled(memoryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityLabel(editingMemoryID == nil
                             ? Text("coach.memory.add")
@@ -947,7 +948,7 @@ struct CoachView: View {
                 Spacer(minLength: 48)
                 Text(message.text)
                     .font(StrandFont.body)
-                    .foregroundStyle(StrandPalette.surfaceBase)
+                    .foregroundStyle(StrandPalette.accentInk)
                     .textSelection(.enabled)
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, 14)
@@ -1080,14 +1081,14 @@ struct CoachView: View {
             } label: {
                 Group {
                     if coach.sending {
-                        ProgressView().controlSize(.small).tint(StrandPalette.goldDeepText)
+                        ProgressView().controlSize(.small).tint(StrandPalette.accentInk)
                     } else {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 15, weight: .semibold))
                     }
                 }
                 .frame(width: 44, height: 38)
-                .foregroundStyle(StrandPalette.goldDeepText)
+                .foregroundStyle(StrandPalette.accentInk)
                 .background(StrandPalette.accent,
                             in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }

@@ -69,16 +69,20 @@ position without changing its ID. This inbox intentionally starts empty.
   later fallback; band-triggered and automatic origins follow their separate
   gates. (Evidence:
   `ops/rounds/2026-09-07-launch-owner-decisions.md`, 2026-09-07)
-- [ ] DEC-070 [OWNER] Confirm that automatic medical, anomaly, Rhythm, SpO2,
-  temperature, stress, and fall paging remains unavailable.
+- [x] DEC-070 [OWNER] Confirm that automatic medical, anomaly, Rhythm, SpO2,
+  temperature, stress, and fall paging remains unavailable. (Evidence:
+  decisions D-023 and D-052, `FEATURE_PARITY.md`,
+  `ops/rounds/2026-09-07-launch-owner-decisions.md`)
 - [ ] DEC-080 [OWNER] Confirm the public product and band names after trademark
   review.
 - [ ] DEC-090 [OWNER] Confirm the public app version and monotonic Apple and
   Android build numbers.
 - [ ] DEC-100 [OWNER] Confirm free NOOP versus NOOP+ pricing and entitlement
   boundaries.
-- [ ] DEC-110 [OWNER] Confirm that every core local metric remains account-free
-  and available without a subscription.
+- [x] DEC-110 [OWNER] Confirm that every core local metric remains account-free
+  and available without a subscription. (Evidence: decisions D-046 and D-049,
+  `PLATFORM_ARCHITECTURE.md`,
+  `ops/rounds/2026-09-05-band-ownership-onboarding.md`)
 - [x] DEC-115 [OWNER] Keep v1 bands bound to the claiming account for the
   band's ordinary lifetime with no user-facing unpair or transfer; permit
   consumer release only through an eligible successor-band upgrade while
@@ -105,8 +109,8 @@ position without changing its ID. This inbox intentionally starts empty.
 
 ## 2. Mainline, CI, and release controls
 
-- [x] CI-010 [ENG] Reproduce and fix the current iOS production-shell test
-  failure on current `main`. (Evidence:
+- [x] CI-010 [ENG] Reproduce and fix the September 6 iOS production-shell test
+  failure on its protected `main` baseline. (Evidence:
   `ops/rounds/2026-09-06-hosted-release-gates.md`, GitHub Actions run
   `34080116658`)
 - [x] CI-020 [ENG] Make the Android managed-emulator production-shell test
@@ -117,13 +121,16 @@ position without changing its ID. This inbox intentionally starts empty.
   immutable migration checks cannot inherit another test engine's state.
   (Evidence: `ops/rounds/2026-09-06-hosted-release-gates.md`, GitHub Actions
   run `34078811154`)
-- [x] CI-040 [ENG] Make Apple application CI green on the release commit.
+- [x] CI-040 [ENG] Establish green Apple application CI on a protected
+  baseline; CI-100 still requires the final release candidate's exact SHA.
   (Evidence: exact-main GitHub Actions run `34080116658`)
-- [x] CI-050 [ENG] Make Android build, unit, lint, and instrumentation CI green
-  on the release commit. (Evidence: exact-main GitHub Actions run
+- [x] CI-050 [ENG] Establish green Android build, unit, lint, and
+  instrumentation CI on a protected baseline; CI-100 still requires the final
+  release candidate's exact SHA. (Evidence: exact-main GitHub Actions run
   `34079190997`)
-- [x] CI-060 [ENG] Make server lint, dependency, migration, database, backup,
-  restore, and container CI green on the release commit. (Evidence: exact-main
+- [x] CI-060 [ENG] Establish green server lint, dependency, migration,
+  database, backup, restore, and container CI on a protected baseline; CI-100
+  still requires the final release candidate's exact SHA. (Evidence: exact-main
   GitHub Actions run `34078811154`)
 - [x] CI-070 [ENG] Keep Swift package, localization, health-claims, legal,
   privacy, dependency, and operations-record gates green. (Evidence:
@@ -132,7 +139,7 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] CI-080 [OWNER] Restore or fund hosted CI capacity sufficient for all
   required release gates.
 - [x] CI-090 [OWNER] Enable protected `main` or an equivalent reviewed release
-  control for the private repository. (Evidence: strict live branch protection
+  control for the public repository. (Evidence: strict live branch protection
   with administrator enforcement, conversation resolution, linear history,
   ten app-bound required contexts, and no force-push or deletion bypass;
   `ops/rounds/2026-09-08-trusted-release-control-activation.md`)
@@ -272,10 +279,18 @@ position without changing its ID. This inbox intentionally starts empty.
   network findings, claims boundary, and physical acceptance matrix without
   copying the private package into Git. (Evidence:
   `docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`)
-- [x] SDK-006 [ENG] Establish a separate private, English-only, binary-free
+- [x] SDK-006 [ENG] Establish a separate English-only, binary-free
   `Dhanunjay-Divi/NoopBandSDK` repository with local language/binary/JSON
-  validation and no hosted Actions workflow. (Evidence: initial `main` commit
-  `ee82cc0`, `docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`)
+  validation and no hosted Actions workflow; keep it public under D-056's
+  source-only exclusion boundary. (Evidence: initial `main` commit `ee82cc0`,
+  `docs/NOOP_BAND_SUPPLIER_SDK_ASSESSMENT.md`)
+- [x] SDK-006A [ENG] Implement the supplier-neutral Swift/Kotlin session core,
+  bounded diagnostics, deterministic virtual conformance, and one
+  digest-pinned source-only app boundary. Keep every production NOOP-band
+  factory disabled and retain WHOOP as the comparison transport until the
+  supplier and physical gates pass. (Evidence: reviewed SDK merge
+  `b02808372b7c537f22058c7ebc75d92c750373be`,
+  `ops/rounds/2026-09-21-noop-band-sdk-app-integration.md`)
 - [ ] SDK-007 [ENG] Build quarantined Apple and Android supplier adapters behind
   neutral NOOP session/sample types; keep vendor callbacks, persistence, and
   errors out of screens, analytics, storage, and cloud code.
@@ -285,8 +300,10 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] SDK-009 [ENG] Enforce one active phone collector and one serialized
   per-band operation queue; implement an explicit durable collector-handoff
   protocol before allowing another supported phone to collect.
-- [ ] SDK-010 [ENG] Create the canonical versioned protocol and capability
-  schema.
+- [ ] SDK-010 [ENG] Complete the canonical versioned protocol and capability
+  schema. Supplier-neutral capability schema v3 is implemented; exact
+  supplier-approved protocol, firmware, command, and calibration truth remains
+  gated on the dossier and physical acceptance.
 - [ ] SDK-020 [ENG] Create synthetic golden, malformed, replay, duplicate, and
   out-of-order protocol fixtures.
 - [ ] SDK-030 [ENG] Implement device-neutral measured sample types with units,
@@ -550,8 +567,10 @@ position without changing its ID. This inbox intentionally starts empty.
   occurrence. (Evidence: `release/terminology/legacy-inventory.json`,
   `Tools/terminology-audit.py`,
   `ops/rounds/2026-09-07-production-readiness-execution.md`)
-- [ ] MIG-020 [JOINT] Approve categories for customer, core, persisted, import,
+- [x] MIG-020 [JOINT] Approve categories for customer, core, persisted, import,
   compatibility, legal, fixture, generated, and historical references.
+  (Evidence: decision D-044, `release/terminology/README.md`,
+  `ops/rounds/2026-09-05-first-production-release-plan.md`)
 - [x] MIG-030 [ENG] Create a machine-readable exception allowlist with reason,
   owner, and removal condition. (Evidence:
   `release/terminology/active-allowlist.json`,
@@ -596,7 +615,10 @@ position without changing its ID. This inbox intentionally starts empty.
   required legal notices.
 - [ ] MIG-230 [ENG] Isolate or remove the direct legacy adapter only after NOOP
   Band physical parity.
-- [ ] MIG-240 [ENG] Reach zero unallowlisted customer and active-core matches.
+- [x] MIG-240 [ENG] Reach zero unallowlisted customer and active-core matches.
+  (Evidence: `Tools/terminology-audit.py`,
+  `release/terminology/legacy-inventory.json`, final 2026-09-23 terminology
+  gate with zero forbidden mappings)
 
 ## 8. Apple and Android product experience
 

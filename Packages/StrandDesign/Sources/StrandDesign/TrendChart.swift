@@ -53,9 +53,8 @@ public struct TrendChart: View {
     public var accessibilityLabel: String?
     /// Optional stable identifier for UI automation of this specific series.
     public var accessibilityIdentifier: String?
-    /// Optional fallback for a short chart tap when the chart sits inside another interactive control.
-    /// Long-press scrubbing remains owned here; callers can route the ordinary tap without layering a
-    /// second hit-testing plane over the plot.
+    /// Optional action for a short chart tap. On iOS it is mutually exclusive with hold-to-scrub,
+    /// so inspecting a date cannot also trigger navigation.
     public var tapAction: (() -> Void)?
     /// When set, draws a glowing "now" end-cap on the most-recent point - IN the chart's own
     /// coordinate space (via the overlay proxy), so it sits exactly on the line. nil = no cap.
@@ -135,6 +134,10 @@ public struct TrendChart: View {
     #if os(iOS)
     /// Separates a deliberate hold-to-inspect interaction from the surrounding card's normal tap.
     @State private var scrubEngaged = false
+    /// A long-press release can also satisfy SwiftUI's simultaneous tap recognizer. Keep a short
+    /// suppression deadline instead of scheduling a delayed state mutation, so an immediate second
+    /// scrub cannot be cleared by the first scrub's stale timer.
+    @State private var suppressChartTapUntil: Date?
     /// The plot bounds measured by the noninteractive chart overlay. The touch gesture lives on the
     /// concrete Chart itself, then maps its local x through this rect so no transparent hit plane sits
     /// between the chart and a surrounding NavigationLink.
@@ -208,6 +211,7 @@ public struct TrendChart: View {
                 guard case .second(true, let drag) = value else { return }
                 if !scrubEngaged {
                     scrubEngaged = true
+                    suppressChartTapUntil = .distantFuture
                     StrandHaptic.selection.play()
                 }
                 if let drag, plot.width > 0,
@@ -233,7 +237,26 @@ public struct TrendChart: View {
                 scrubEngaged = false
                 // Keep the selected date visible after the finger lifts. A second scrub replaces it,
                 // while leaving the screen naturally clears this view-local state.
+                // If the overlapping tap already consumed the latch, do not re-arm it.
+                if suppressChartTapUntil != nil {
+                    suppressChartTapUntil = Date().addingTimeInterval(0.3)
+                }
             }
+    }
+
+    private func handleChartTap() {
+        if let deadline = suppressChartTapUntil {
+            suppressChartTapUntil = nil
+            if Date() <= deadline {
+                return
+            }
+        }
+        tapAction?()
+    }
+
+    private var guardedChartTapAction: (() -> Void)? {
+        guard tapAction != nil else { return nil }
+        return handleChartTap
     }
     #endif
 
@@ -409,7 +432,7 @@ public struct TrendChart: View {
             touchScrubGesture(plot: touchPlotRect),
             including: showsHover ? .all : .subviews
         )
-        .modifier(OptionalChartTapModifier(action: tapAction))
+        .modifier(OptionalChartTapModifier(action: guardedChartTapAction))
         #endif
         .frame(height: height)
         // NOTE: no outer `.clipped()` here. The PLOT is already clipped to its own bounds by
@@ -451,6 +474,8 @@ private struct OptionalChartTapModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if let action {
+            // The explicit tap keeps chart-area navigation reliable inside NavigationLink. A scrub
+            // latches its release first, so this recognizer consumes that event without navigating.
             content.simultaneousGesture(
                 TapGesture().onEnded(action),
                 including: .all

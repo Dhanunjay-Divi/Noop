@@ -1720,6 +1720,7 @@
     <string name="key_metrics_selection_count">%1$d of %2$d pinned</string>
     <string name="key_metrics_show_selected">Show selected metrics</string>
     <string name="key_metrics_show_all_count">Show all metrics (%1$d)</string>
+    <string name="key_metrics_open_history">Open all metric history</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
     <string name="l10n_today_screen_data_unit_c768ef8c"> %1$s</string>
     <string name="l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96">%1$s, %2$s. Tap to pick a day, swipe to change day.</string>

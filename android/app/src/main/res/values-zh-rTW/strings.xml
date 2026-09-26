@@ -229,6 +229,7 @@
     <string name="key_metrics_selection_count">已置頂 %1$d/%2$d 項</string>
     <string name="key_metrics_show_selected">顯示已選指標</string>
     <string name="key_metrics_show_all_count">顯示所有指標（%1$d）</string>
+    <string name="key_metrics_open_history">開啟完整指標記錄</string>
     <string name="hydration_adaptive_timing_label">自動調整時間</string>
     <string name="hydration_adaptive_timing_help">根據今天的運動負荷和已確認飲水量調整間隔。不會推估缺少的資料。</string>
     <string name="hydration_adaptive_timing_status">目前每 %1$d 分鐘一次。只有在今天的資料充分支持時才會調整時間。</string>

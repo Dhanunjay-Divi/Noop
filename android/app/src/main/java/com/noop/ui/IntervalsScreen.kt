@@ -277,7 +277,7 @@ fun IntervalsScreen(vm: AppViewModel) {
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Palette.accent,
-                                contentColor = Palette.surfaceBase,
+                                contentColor = Palette.accentInk,
                             ),
                         ) {
                             Icon(

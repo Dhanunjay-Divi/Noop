@@ -216,9 +216,9 @@ private fun ExpandedContextualAction(
             shape = RoundedCornerShape(8.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = tint,
-                contentColor = Color.White,
+                contentColor = contrastInk(tint),
                 disabledContainerColor = tint.copy(alpha = 0.52f),
-                disabledContentColor = Color.White.copy(alpha = 0.76f),
+                disabledContentColor = contrastInk(tint).copy(alpha = 0.76f),
             ),
             modifier = Modifier
                 .fillMaxWidth()

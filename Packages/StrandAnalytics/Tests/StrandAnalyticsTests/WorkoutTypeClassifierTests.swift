@@ -213,37 +213,47 @@ final class WorkoutTypeFeatureExtractorTests: XCTestCase {
         (0..<durS).map { StepSample(ts: start + $0, counter: $0, activityClass: activityClass) }
     }
 
-    func testExtractRunWindow_recoversRunDominantComposition() {
+    func testExtractRunWindowIgnoresLegacyRunClass() {
         let start = 1_000_000, dur = 20 * 60
         let hr = hrBlock(start, dur, 160)
         let gravity = gravityBlock(start, dur, deltaMag: 0.4)
-        let steps = stepBlock(start, dur, activityClass: 2)  // 2 = run
+        let steps = stepBlock(start, dur, activityClass: 2)
         let f = WorkoutTypeFeatureExtractor.extract(hr: hr, gravity: gravity, steps: steps,
                                                      start: start, end: start + dur,
                                                      restingHR: 60, maxHR: 190, caloriesKcal: 240)
+        let withoutLegacySteps = WorkoutTypeFeatureExtractor.extract(
+            hr: hr, gravity: gravity, steps: [],
+            start: start, end: start + dur,
+            restingHR: 60, maxHR: 190, caloriesKcal: 240
+        )
         XCTAssertNotNil(f)
         guard let f else { return }
-        XCTAssertEqual(f.runFraction, 1.0, accuracy: 0.001)
-        XCTAssertEqual(f.tickCoverage, 1.0, accuracy: 0.05)
+        XCTAssertEqual(f, withoutLegacySteps)
+        XCTAssertEqual(f.runFraction, 0)
+        XCTAssertEqual(f.tickCoverage, 0)
         XCTAssertGreaterThan(f.meanHRRPct ?? 0, 50)
         XCTAssertGreaterThan(f.motionVariance, 0)
         XCTAssertEqual(f.kcalPerMin ?? 0, 12.0, accuracy: 0.01)
-        // Round-trips into a RUN classification end-to-end.
-        XCTAssertEqual(WorkoutTypeClassifier.classify(f).predictedClass, .run, "scores: \(WorkoutTypeClassifier.classify(f).scores)")
     }
 
-    func testExtractWalkWindow_recoversWalkDominantComposition() {
+    func testExtractWalkWindowIgnoresLegacyWalkClass() {
         let start = 2_000_000, dur = 30 * 60
         let hr = hrBlock(start, dur, 95)
         let gravity = gravityBlock(start, dur, deltaMag: 0.05)
-        let steps = stepBlock(start, dur, activityClass: 1)  // 1 = walk
+        let steps = stepBlock(start, dur, activityClass: 1)
         let f = WorkoutTypeFeatureExtractor.extract(hr: hr, gravity: gravity, steps: steps,
                                                      start: start, end: start + dur,
                                                      restingHR: 60, maxHR: 180, caloriesKcal: 105)
+        let withoutLegacySteps = WorkoutTypeFeatureExtractor.extract(
+            hr: hr, gravity: gravity, steps: [],
+            start: start, end: start + dur,
+            restingHR: 60, maxHR: 180, caloriesKcal: 105
+        )
         XCTAssertNotNil(f)
         guard let f else { return }
-        XCTAssertEqual(f.walkFraction, 1.0, accuracy: 0.001)
-        XCTAssertEqual(WorkoutTypeClassifier.classify(f).predictedClass, .walk, "scores: \(WorkoutTypeClassifier.classify(f).scores)")
+        XCTAssertEqual(f, withoutLegacySteps)
+        XCTAssertEqual(f.walkFraction, 0)
+        XCTAssertEqual(f.tickCoverage, 0)
     }
 
     func testExtractWithNoStepData_tickCoverageIsZero() {

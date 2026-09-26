@@ -38,6 +38,12 @@ class DeviceRegistry(
     private val dao: DeviceRegistryDao,
     private val transactor: Transactor,
 ) {
+    private class MutationVerificationFailure : IllegalStateException()
+
+    data class ArchiveOutcome(
+        val activeDeviceId: String?,
+    )
+
     /** A single-transaction boundary. Production wraps Room's `withTransaction`; tests pass through.
      *  Not a `fun interface` — a SAM method may not be generic — so implementors use the object form. */
     interface Transactor {
@@ -85,7 +91,7 @@ class DeviceRegistry(
     suspend fun all(): List<PairedDeviceRow> = dao.pairedDevices().map { row ->
         val whoop = row.brand.equals("WHOOP", ignoreCase = true) || row.id == "my-whoop" || row.id.startsWith("whoop-")
         if (!whoop) row else {
-            val stripped = WhoopLiveCapabilities.stripSpo2Token(row.capabilities)
+            val stripped = WhoopLiveCapabilities.stripUnvalidatedLiveTokens(row.capabilities)
             if (stripped == row.capabilities) row else row.copy(capabilities = stripped)
         }
     }
@@ -93,8 +99,82 @@ class DeviceRegistry(
     /** The single active device id, or null if none. */
     suspend fun activeDeviceId(): String? = dao.activeDeviceId()
 
-    /** Add (or update) a device. */
-    suspend fun add(row: PairedDeviceRow) = dao.upsertPairedDevice(row)
+    /**
+     * Add (or update) a non-active device and verify the authoritative row before reporting success.
+     * A false result means the transaction threw or the committed row did not match [row].
+     */
+    suspend fun add(row: PairedDeviceRow): Boolean = try {
+        transactor.run {
+            dao.upsertPairedDevice(row)
+            if (dao.pairedDevices().firstOrNull { it.id == row.id } != row) {
+                throw MutationVerificationFailure()
+            }
+        }
+        true
+    } catch (_: Throwable) {
+        false
+    }
+
+    /**
+     * Insert a newly authenticated device and make it the sole active source in one transaction.
+     * A false result means the transaction threw or its authoritative read-back did not name [row].
+     */
+    suspend fun addAndSetActive(
+        row: PairedDeviceRow,
+        now: Long = System.currentTimeMillis() / 1000,
+    ): Boolean = try {
+        transactor.run {
+            dao.demoteActive()
+            dao.upsertPairedDevice(
+                row.copy(
+                    status = DeviceStatus.active.name,
+                    lastSeenAt = now,
+                ),
+            )
+            markOwnershipDirty()
+            if (dao.activeDeviceId() != row.id) throw MutationVerificationFailure()
+        }
+        true
+    } catch (_: Throwable) {
+        false
+    }
+
+    /**
+     * Move an unavailable active supplier row back to the source that still owns transport. A valid
+     * preferred source wins; otherwise the seeded or first non-archived WHOOP is restored. The returned id
+     * is the verified durable active source, including when another mutation already reconciled it.
+     */
+    suspend fun reconcileUnavailableSupplier(
+        unavailableDeviceId: String,
+        preferredTransportDeviceId: String? = null,
+        now: Long = System.currentTimeMillis() / 1000,
+    ): String? = try {
+        transactor.run {
+            val rows = dao.pairedDevices()
+            val active = rows.firstOrNull { it.status == DeviceStatus.active.name } ?: return@run null
+            if (active.id != unavailableDeviceId) return@run active.id
+            if (active.sourceKind != SourceKind.veepoo.name) return@run null
+
+            val activatableFallbacks = rows.filter {
+                it.canActivateAsFallback(excludingDeviceId = unavailableDeviceId)
+            }
+            val preferred = preferredTransportDeviceId?.let { preferredId ->
+                activatableFallbacks.firstOrNull { it.id == preferredId }
+            }
+            val fallback = preferred
+                ?: activatableFallbacks.firstOrNull { it.id == "my-whoop" }
+                ?: activatableFallbacks.firstOrNull(::isWhoop)
+                ?: return@run null
+
+            dao.demoteActive()
+            dao.promote(fallback.id, now)
+            markOwnershipDirty()
+            if (dao.activeDeviceId() != fallback.id) throw MutationVerificationFailure()
+            fallback.id
+        }
+    } catch (_: Throwable) {
+        null
+    }
 
     /**
      * Make [id] the single active device. The demote-old + promote-new pair is ONE transaction so the
@@ -127,6 +207,62 @@ class DeviceRegistry(
             dao.deleteDayOwnershipFor(id)
             markOwnershipDirty()
         }
+    }
+
+    /**
+     * Archive [id] and, when it was active, promote a deterministic non-archived fallback in the same
+     * transaction. A null result means the mutation failed or [id] was not an eligible supplier row.
+     */
+    suspend fun archiveSupplierAndSelectFallback(
+        id: String,
+        now: Long = System.currentTimeMillis() / 1000,
+    ): ArchiveOutcome? = try {
+        transactor.run {
+            val rows = dao.pairedDevices()
+            val row = rows.firstOrNull { it.id == id }
+                ?: throw MutationVerificationFailure()
+            if (
+                row.sourceKind != SourceKind.veepoo.name ||
+                row.status == DeviceStatus.archived.name
+            ) {
+                throw MutationVerificationFailure()
+            }
+
+            val wasActive = row.status == DeviceStatus.active.name
+            val fallback = if (wasActive) {
+                val activatableFallbacks = rows.filter {
+                    it.canActivateAsFallback(excludingDeviceId = id)
+                }
+                activatableFallbacks.firstOrNull { it.id == "my-whoop" }
+                    ?: activatableFallbacks.firstOrNull(::isWhoop)
+                    ?: activatableFallbacks.firstOrNull()
+            } else {
+                null
+            }
+
+            dao.archiveDevice(id)
+            dao.deleteDayOwnershipFor(id)
+            if (wasActive && fallback != null) {
+                dao.promote(fallback.id, now)
+            }
+            markOwnershipDirty()
+
+            val archived = dao.pairedDevices()
+                .firstOrNull { it.id == id }
+                ?.status == DeviceStatus.archived.name
+            if (!archived) throw MutationVerificationFailure()
+
+            val activeId = dao.activeDeviceId()
+            when {
+                wasActive && fallback != null && activeId != fallback.id ->
+                    throw MutationVerificationFailure()
+                wasActive && fallback == null && activeId != null ->
+                    throw MutationVerificationFailure()
+            }
+            ArchiveOutcome(activeId)
+        }
+    } catch (_: Throwable) {
+        null
     }
 
     /** Atomically update the paired model and matching legacy-device name for this exact id. */
@@ -221,4 +357,12 @@ class DeviceRegistry(
 
     /** The owner override for a day, or null if none. */
     suspend fun dayOwner(day: String): DayOwnershipRow? = dao.dayOwner(day)
+
+    private fun PairedDeviceRow.canActivateAsFallback(excludingDeviceId: String): Boolean =
+        id != excludingDeviceId &&
+            status != DeviceStatus.archived.name &&
+            isActivatableLiveTransport
+
+    private fun isWhoop(row: PairedDeviceRow): Boolean =
+        row.id == "my-whoop" || row.brand.equals("WHOOP", ignoreCase = true)
 }

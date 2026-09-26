@@ -44,7 +44,7 @@ RELEASE_SOURCE_DIGESTS = {
         "75020df9587cc34387f41b3b9482bd71187639e39a79a3db97cb1dfd13552719"
     ),
     ".github/workflows/release-controls.yml": (
-        "98f9b95510411d6c84aa3e78233c73cb8e2263b2b0d798c23104b775f1b876ce"
+        "1b0a3034daf10964b99da99c81ac02fd40d3bcc86509d515e43fdbe04b047bd8"
     ),
     ".github/workflows/release.yml": (
         "08751fb8e82e0c14fdb4630f45262892077b42e644d740219e7750494c34c01b"
@@ -68,10 +68,10 @@ RELEASE_SOURCE_DIGESTS = {
         "74f6978e7244bff50d17270a772b64d5b7f60a6cdc64f4d777e19dfb7231ec05"
     ),
     "release/terminology/active-allowlist.json": (
-        "53e4cf11c307ba0dd22c30811dade78806b6451ff09ba3d3ed483f10868c8955"
+        "8552e36df65789eb80a4a4dddf8d189d8122e2be4b18d7a3c376f8241eeb4ab0"
     ),
     "release/terminology/legacy-inventory.json": (
-        "200e881ddcc96546a96378635be327223c83bf6bdbe2ba507e3ed3f6a42871a4"
+        "a788ef83831e79016b87057561c77d0ca72355646b7037448fff679dce1c335a"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -140,7 +140,7 @@ RELEASE_SOURCE_DIGESTS = {
         "8cb907cd981db978a895668bfc97e9c66d9ae632957032dec727ea5c8450b983"
     ),
     "Tools/trusted-release-controls.py": (
-        "b8471dbafd2260e630f6a676c6b42ddd72b8f827c838a97e1ce039f33f0da37a"
+        "cb4260aae16ace02a58c69655414db649199c104bd09c116dad719341a9f11ab"
     ),
     "Tools/update-homebrew-cask.sh": (
         "1733e7b43266ac7f16ed3043cef4bea51f8353ebe533fb9aa3d260fa76639989"
@@ -1499,6 +1499,7 @@ def check_release_control_test_suite(root: Path) -> None:
         "Tools.tests.test_github_release_tag_gate",
         "Tools.tests.test_homebrew_helper",
         "Tools.tests.test_homebrew_version_gate",
+        "Tools.tests.test_noop_band_sdk_artifact",
         "Tools.tests.test_testing_release_workflow",
         "Tools.tests.test_trusted_release_controls",
     )

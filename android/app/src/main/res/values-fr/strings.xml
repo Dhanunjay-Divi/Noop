@@ -1518,6 +1518,7 @@
     <string name="key_metrics_selection_count">%1$d sur %2$d épinglées</string>
     <string name="key_metrics_show_selected">Afficher les métriques sélectionnées</string>
     <string name="key_metrics_show_all_count">Afficher toutes les métriques (%1$d)</string>
+    <string name="key_metrics_open_history">Ouvrir tout l’historique des mesures</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
     <string name="l10n_today_screen_data_unit_c768ef8c">%1$s</string>
     <string name="l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96">%1$s, %2$s. Tapez pour choisir un jour, faites glisser pour changer le jour.</string>

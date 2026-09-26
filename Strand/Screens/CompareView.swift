@@ -1274,7 +1274,7 @@ private struct ReferenceComparisonExportSheet: View {
         HStack(alignment: .top, spacing: NoopMetrics.space3) {
             Text(number)
                 .font(StrandFont.caption)
-                .foregroundStyle(StrandPalette.surfaceBase)
+                .foregroundStyle(StrandPalette.accentInk)
                 .frame(width: 24, height: 24)
                 .background(Circle().fill(StrandPalette.accent))
                 .accessibilityHidden(true)

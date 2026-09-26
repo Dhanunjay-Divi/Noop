@@ -1,5 +1,7 @@
 import Foundation
 import XCTest
+@testable import Strand
+import WhoopStore
 
 final class LiveHeartRatePresentationContractTests: XCTestCase {
     func testPhoneSurfaceRemainsConfigurableAndViewerHasNoFalseLiveSurface() throws {
@@ -50,7 +52,8 @@ final class LiveHeartRatePresentationContractTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(source.contains("live.heartRateSample?.receivedAt"))
+        XCTAssertTrue(source.contains("live.displayedHeartRate"))
+        XCTAssertTrue(source.contains("live.displayedHeartRateReceivedAt"))
         XCTAssertTrue(source.contains("LiveHeartRateSurfacePolicy.isLive"))
         XCTAssertTrue(source.contains("ViewThatFits(in: .horizontal)"))
         XCTAssertTrue(source.contains("case reconnecting"))
@@ -78,6 +81,53 @@ final class LiveHeartRatePresentationContractTests: XCTestCase {
         XCTAssertTrue(source.contains(#"failureKind: "platform""#))
         XCTAssertFalse(source.contains(#""bpm": bpm"#))
         XCTAssertFalse(source.contains(#""error": error"#))
+    }
+
+    func testSupplierDisplayHeartRatePrecedesAcceptedFallbackOnLiveSurface() throws {
+        let source = try String(
+            contentsOf: repositoryRoot().appendingPathComponent(
+                "Strand/Screens/LiveView.swift"
+            ),
+            encoding: .utf8
+        )
+        let precedence = "live.displayOnlyHeartRate ?? model.bpm"
+
+        XCTAssertEqual(
+            source.components(separatedBy: precedence).count - 1,
+            2,
+            "Both the focal readout and signal rail must prefer fresh supplier display HR."
+        )
+        XCTAssertFalse(source.contains("model.bpm ?? live.displayOnlyHeartRate"))
+    }
+
+    func testSupplierSourceHidesWhoopControlSurface() throws {
+        XCTAssertFalse(
+            LiveView.shouldShowWhoopControls(activeSourceKind: .veepoo)
+        )
+        XCTAssertTrue(
+            LiveView.shouldShowWhoopControls(activeSourceKind: .liveBLE)
+        )
+        XCTAssertFalse(
+            LiveView.shouldShowWhoopControls(activeSourceKind: nil)
+        )
+
+        let source = try String(
+            contentsOf: repositoryRoot().appendingPathComponent(
+                "Strand/Screens/LiveView.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            source.contains(
+                "if showsWhoopControls {\n                        sessionConsole"
+            )
+        )
+        XCTAssertTrue(source.contains("} else if supplierSourceActive {"))
+        XCTAssertTrue(
+            source.contains(
+                "Supplier transport is owned by SourceCoordinator, not BLEManager."
+            )
+        )
     }
 
     private func repositoryRoot() -> URL {

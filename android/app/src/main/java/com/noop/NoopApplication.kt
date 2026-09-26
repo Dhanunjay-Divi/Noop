@@ -12,6 +12,8 @@ import com.noop.analytics.RegistryDayOwnerSource
 import com.noop.ble.SourceCoordinator
 import com.noop.ble.WhoopBleClient
 import com.noop.ble.WhoopModel
+import com.noop.ble.veepoo.VeepooBridgeProviderLoader
+import com.noop.ble.veepoo.VeepooCredentialStore
 import com.noop.data.BackupSettingsBridge
 import com.noop.data.DeviceRegistry
 import com.noop.data.WhoopDatabase
@@ -479,6 +481,10 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
      * the other `ble`-flow collectors there (this Application owns no CoroutineScope of its own).
      */
     private val sourceCoordinatorDelegate = lazy {
+        val supplierBridgeProvider = VeepooBridgeProviderLoader.load()
+        val supplierCredentials = VeepooCredentialStore(applicationContext)
+        val supplierCredentialCleanup =
+            com.noop.ble.veepoo.VeepooCredentialCleanupStore(applicationContext)
         SourceCoordinator(
             context = applicationContext,
             registry = deviceRegistry,
@@ -501,6 +507,15 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             straplog = { ble.externalLog(it) },
             // A generic strap's standard battery (0x180F) → the same live battery field the WHOOP uses.
             batterySink = { pct -> ble.publishExternalBattery(pct) },
+            veepooBridgeProvider = supplierBridgeProvider,
+            // Keep secure cleanup available even when this build cannot load the optional provider. A
+            // durable supplier row from an earlier build must still be removable and reconcilable.
+            veepooCredentials = supplierCredentials,
+            veepooCredentialCleanup = supplierCredentialCleanup,
+            // After the short unlock burst, retain one cancellable low-frequency recovery loop so a
+            // temporarily unavailable encrypted store cannot strand the durable supplier selection.
+            supplierCredentialRecoveryDelayMillis = 60_000L,
+            onDurableActiveDeviceChanged = ::noteActiveDeviceId,
         )
     }
     val sourceCoordinator: SourceCoordinator get() = sourceCoordinatorDelegate.value

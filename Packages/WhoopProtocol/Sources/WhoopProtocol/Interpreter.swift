@@ -449,14 +449,11 @@ private func decodeWhoop5Historical(_ frame: [UInt8], fb: FieldBuilder, payloadE
         fb.add(59, 1, "step_cadence", "activity", value: .int(cad), note: "cadence-like byte (raw)")
     }
     if let wear = readDType(frame, 63, "u8"), (0...2).contains(wear) {
-        fb.add(63, 1, "motion_wear_quality", "quality", value: .int(wear), note: "0=still/good, 1, 2=poor contact")
-    }
-    // @63 also reads as a small validated ACTIVITY-CLASS enum (community finding, #316): 0=still, 1=walk,
-    // 2=run, 0xFF=invalid. A lightweight, no-cloud per-record activity readout that rides alongside the
-    // step counter. Only the four known codes are surfaced — anything else (incl. 0xFF) stores nothing so
-    // an unmapped firmware can't inject garbage.
-    if let cls = readDType(frame, 63, "u8"), cls == 0 || cls == 1 || cls == 2 {
-        fb.add(63, 1, "activity_class", "activity", value: .int(cls), note: "0=still, 1=walk, 2=run (0xFF=invalid)")
+        // Keep this byte raw. Historical code also called 0/1/2 still/walk/run, but that interpretation
+        // conflicts with the observed wear/contact-quality interpretation and has no synchronized gait
+        // validation. It must not be emitted as activity evidence.
+        fb.add(63, 1, "motion_wear_quality", "quality", value: .int(wear),
+               note: "raw 3-valued wear/motion quality; semantics unpinned")
     }
     // Two auxiliary thermal channels just before skin_temp. Each is a signed i16 whose value/10 reads as
     // °C, tracks skin_temp@73 closely (corr ~0.92 and ~0.97 across the captured corpus) and follows the

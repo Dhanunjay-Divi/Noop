@@ -1,5 +1,7 @@
 package com.noop.analytics
 
+import com.noop.data.GravitySample
+import com.noop.data.HrSample
 import com.noop.data.StepSample
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -19,11 +21,38 @@ class StepsAnalyticsTest {
     private val dayUtc = "2026-01-02"
     private val noonUtc = 1_767_355_200L
 
-    private fun step(tsOffsetSec: Long, counter: Int) =
-        StepSample(deviceId = "my-whoop", ts = noonUtc + tsOffsetSec, counter = counter)
+    private fun step(tsOffsetSec: Long, counter: Int, activityClass: Int? = null) =
+        StepSample(
+            deviceId = "my-whoop",
+            ts = noonUtc + tsOffsetSec,
+            counter = counter,
+            activityClass = activityClass,
+        )
 
     private fun stepsFor(samples: List<StepSample>): Int? =
-        AnalyticsEngine.analyzeDay(day = dayUtc, steps = samples, profile = profile).daily.steps
+        AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = profile,
+        ).daily.steps
+
+    private val lowHeartRateWearEvidence: List<HrSample>
+        get() = (0 until StrainScorer.minSparseReadings).map {
+            HrSample(deviceId = "my-whoop", ts = noonUtc + it, bpm = 50)
+        }
+
+    private val activeWristGravity: List<GravitySample>
+        get() = (0..10).map { index ->
+            GravitySample(
+                deviceId = "my-whoop",
+                ts = noonUtc + index * 60L,
+                x = if (index % 2 == 0) 0.0 else 0.30,
+                y = 0.0,
+                z = 1.0,
+            )
+        }
 
     @Test
     fun sumsPositiveConsecutiveDeltas() {
@@ -104,7 +133,12 @@ class StepsAnalyticsTest {
             step(11 * 3_600, 1_100),
         )
         val total = AnalyticsEngine.analyzeDay(
-            day = dayUtc, steps = nightWindow, daySteps = fullDay, profile = profile,
+            day = dayUtc,
+            steps = nightWindow,
+            daySteps = fullDay,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = profile,
         ).daily.steps
         // deltas over the full day: 100->300=200, 300->700=400, 700->1100=400 => 1000 (all < 512 guard).
         assertEquals(1_000, total)
@@ -115,14 +149,27 @@ class StepsAnalyticsTest {
         // No calendar-day stream supplied (pure-function callers / old tests) -> total falls back to
         // the night-window `steps` exactly as before.
         val s = listOf(step(0, 100), step(60, 150), step(120, 220)) // 50 + 70 = 120
-        assertEquals(120, AnalyticsEngine.analyzeDay(day = dayUtc, steps = s, profile = profile).daily.steps)
+        assertEquals(
+            120,
+            AnalyticsEngine.analyzeDay(
+                day = dayUtc,
+                steps = s,
+                stepClassificationPolicy =
+                    StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+                profile = profile,
+            ).daily.steps,
+        )
     }
 
     // MARK: - Step-scale calibration (#139). Mirrors the Swift StepsDailyTests vectors.
 
     private fun stepsFor(samples: List<StepSample>, ticksPerStep: Double): Int? =
         AnalyticsEngine.analyzeDay(
-            day = dayUtc, steps = samples, profile = UserProfile(stepTicksPerStep = ticksPerStep),
+            day = dayUtc,
+            steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = UserProfile(stepTicksPerStep = ticksPerStep),
         ).daily.steps
 
     @Test
@@ -157,12 +204,117 @@ class StepsAnalyticsTest {
     }
 
     @Test
-    fun dailyEffortIncludesOrdinaryWalkingWithoutExerciseHr() {
-        val counters = listOf(100, 400, 700, 1_000, 1_300, 1_600, 1_815)
-        val samples = counters.mapIndexed { index, counter -> step(index * 60L, counter) }
+    fun dailyStationaryClassedBurstDoesNotBecomeSteps() {
+        val samples = (0..10).map { index ->
+            step(index * 60L, index * 400, activityClass = 0)
+        }
+
         val result = AnalyticsEngine.analyzeDay(
             day = dayUtc,
             steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.requireActivityClass,
+            profile = profile,
+        )
+
+        assertNull(result.daily.steps)
+    }
+
+    @Test
+    fun currentClasslessBurstDoesNotBecomeStepsOrGravityEffort() {
+        val samples = (0..10).map { index -> step(index * 60L, index * 400) }
+        val result = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            hr = lowHeartRateWearEvidence,
+            gravity = activeWristGravity,
+            steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.requireActivityClass,
+            profile = profile,
+        )
+
+        assertNull(result.daily.steps)
+        assertNull(result.daily.strain)
+    }
+
+    @Test
+    fun productionHighHrContextCannotTurnLegacyClassedFourThousandTicksIntoSteps() {
+        val counters = listOf(
+            10_000, 10_180, 10_600, 10_860, 11_360, 11_670,
+            12_060, 12_510, 12_790, 13_280, 13_600, 14_000,
+        )
+        val samples = counters.mapIndexed { index, counter ->
+            step(
+                tsOffsetSec = index * 20L,
+                counter = counter,
+                activityClass = if (index % 2 == 0) 1 else 2,
+            )
+        }
+        val hrContext = (0 until StrainScorer.minSparseReadings).map { index ->
+            HrSample(
+                deviceId = "my-whoop",
+                ts = noonUtc + index,
+                bpm = 145,
+            )
+        }
+
+        val result = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            hr = hrContext,
+            dayHr = hrContext,
+            steps = samples,
+            daySteps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.rejectUnverifiedBandCounter,
+            profile = profile,
+        )
+
+        assertNull("HR is effort context, not proof that wrist motion was gait", result.daily.steps)
+    }
+
+    @Test
+    fun dailyStationaryClassedBurstDoesNotReappearAsGravityEffort() {
+        val samples = (0..10).map { index ->
+            step(index * 60L, index * 400, activityClass = 0)
+        }
+        val result = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            hr = lowHeartRateWearEvidence,
+            gravity = activeWristGravity,
+            steps = samples,
+            profile = profile,
+        )
+
+        assertNull(result.daily.steps)
+        assertNull(result.daily.strain)
+    }
+
+    @Test
+    fun dailyNoCounterStillAllowsWornGravityEffortFallback() {
+        val result = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            hr = lowHeartRateWearEvidence,
+            gravity = activeWristGravity,
+            steps = emptyList(),
+            profile = profile,
+        )
+
+        assertNull(result.daily.steps)
+        org.junit.Assert.assertTrue((result.daily.strain ?: 0.0) > 0.0)
+    }
+
+    @Test
+    fun dailyNoHrWalkClassStepsStillCount() {
+        // Research compatibility policy only: retain the former class-filter behavior explicitly.
+        val counters = listOf(100, 400, 700, 1_000, 1_300, 1_600, 1_815)
+        val samples = counters.mapIndexed { index, counter ->
+            step(index * 60L, counter, activityClass = 1)
+        }
+        val result = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.requireActivityClass,
             profile = profile,
         )
 

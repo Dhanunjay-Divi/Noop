@@ -3,7 +3,49 @@ import StrandDesign
 import WhoopStore
 import OuraProtocol
 
-// MARK: - Add a device — guided, branching wizard
+@MainActor
+struct VeepooPairingTransportHandoff {
+    private(set) var lease: SourceCoordinator.SupplierPairingLease?
+
+    mutating func begin(
+        acquireLease: () -> SourceCoordinator.SupplierPairingLease?,
+        makeSession: () -> VeepooBandPairingSession?,
+        cancelLease: (SourceCoordinator.SupplierPairingLease) -> Void
+    ) -> VeepooBandPairingSession? {
+        guard lease == nil, let acquiredLease = acquireLease() else {
+            return nil
+        }
+        lease = acquiredLease
+
+        guard let session = makeSession() else {
+            lease = nil
+            cancelLease(acquiredLease)
+            return nil
+        }
+        return session
+    }
+
+    mutating func endPairing(
+        cancelPairing: () -> Void,
+        cancelLease: (SourceCoordinator.SupplierPairingLease) -> Void
+    ) {
+        cancelPairing()
+        guard let lease else { return }
+        self.lease = nil
+        cancelLease(lease)
+    }
+
+    mutating func commitReplacement(
+        commitLease: (SourceCoordinator.SupplierPairingLease) -> Bool
+    ) -> Bool {
+        guard let lease else { return false }
+        guard commitLease(lease) else { return false }
+        self.lease = nil
+        return true
+    }
+}
+
+// MARK: - Connect a band — guided, branching wizard
 //
 // Different bands pair COMPLETELY differently, so this wizard asks the device TYPE first, then gives
 // type-specific prep guidance and runs the RIGHT scan/connect for that type:
@@ -16,13 +58,15 @@ import OuraProtocol
 //
 // Registration goes through `model.registerDevice(_:makeActive:)` → DeviceRegistry; the
 // SourceCoordinator reacts to the active-device change and connects. The wizard never touches
-// BLEManager directly — only the AppModel pass-throughs. WHOOP-FIRST: WHOOP is the primary band; the
-// type list shows it first and a footer reiterates it. Renders cleanly with nothing nearby (the type
+// BLEManager directly — only the AppModel pass-throughs. Customer-facing launch paths constrain this
+// catalog to adapters the current build can actually use. Renders cleanly with nothing nearby (the type
 // picker, every prep step, and the searching/empty pick state all need no hardware).
 
 struct AddDeviceWizard: View {
     @EnvironmentObject var model: AppModel
     let onClose: () -> Void
+    let onAddedSource: (SourceKind) -> Void
+    let selectionScope: SelectionScope
     /// Captured explicitly instead of resolving the environment during scanner construction. The wizard
     /// keeps no discovery source alive until a user-initiated Scan action calls one of the `ensure*Scanner`
     /// helpers below; merely presenting this sheet must not create a `CBCentralManager` or prompt for
@@ -44,6 +88,7 @@ struct AddDeviceWizard: View {
         case miBand        // Xiaomi Mi Band (Huami; no-auth live HR path, honest message if auth needed)
         case garmin        // Garmin watch (standard Broadcast HR path + an enable hint)
         case oura          // Oura ring (factory-reset-and-adopt: NOOP installs its own key, becomes owner)
+        case veepoo        // Optional device-only supplier adapter, default-off
         var id: Self { self }
 
         var isWhoop: Bool { self == .whoop4 || self == .whoop5mg }
@@ -58,7 +103,7 @@ struct AddDeviceWizard: View {
         /// True for the EXPERIMENTAL tier (shown under a clearly-labelled "Experimental" heading).
         var isExperimental: Bool {
             switch self {
-            case .amazfit, .miBand, .garmin, .oura: return true
+            case .amazfit, .miBand, .garmin, .oura, .veepoo: return true
             default:                                return false
             }
         }
@@ -72,9 +117,92 @@ struct AddDeviceWizard: View {
             case .miBand:  return .miBand
             case .garmin:  return .garmin
             case .oura:    return .oura
+            case .veepoo:  return nil
             default:       return nil
             }
         }
+
+        var accessibilityID: String {
+            switch self {
+            case .whoop5mg:          return "whoop-5-mg"
+            case .whoop4:            return "whoop-4"
+            case .hrStrap:           return "heart-rate-strap"
+            case .gymEquipment:      return "gym-equipment"
+            case .amazfit:           return "amazfit"
+            case .miBand:            return "mi-band"
+            case .garmin:            return "garmin"
+            case .oura:              return "oura"
+            case .veepoo:            return "supplier-band"
+            }
+        }
+    }
+
+    enum SelectionScope {
+        case allDevices
+        case launchBands
+        case claimEligibleBands
+
+        func allows(
+            _ type: DeviceType,
+            supplierPairingAvailable: Bool
+        ) -> Bool {
+            guard type != .veepoo || supplierPairingAvailable else {
+                return false
+            }
+            switch self {
+            case .allDevices:
+                return true
+            case .launchBands, .claimEligibleBands:
+                return type.isWhoop || type == .veepoo
+            }
+        }
+    }
+
+    struct CompatibleBandIdentity: Equatable {
+        let displayName: String
+        let registryModel: String
+    }
+
+    static func compatibleBandIdentity(
+        for model: WhoopModel
+    ) -> CompatibleBandIdentity {
+        switch model {
+        case .whoop4:
+            return CompatibleBandIdentity(
+                displayName: String(
+                    localized:
+                        "appwide.onboarding.device_wizard.compatible_4_title"
+                ),
+                registryModel: "4.0"
+            )
+        case .whoop5mg:
+            return CompatibleBandIdentity(
+                displayName: String(
+                    localized:
+                        "appwide.onboarding.device_wizard.compatible_5_title"
+                ),
+                registryModel: "5.0 MG"
+            )
+        }
+    }
+
+    static func supplierLaunchAvailable(
+        adapterAvailable: Bool,
+        ownershipConfigured: Bool
+    ) -> Bool {
+        adapterAvailable && ownershipConfigured
+    }
+
+    static var supplierPairingAvailableForCurrentBuild: Bool {
+        #if os(iOS)
+        return supplierLaunchAvailable(
+            adapterAvailable: VeepooBandAdapterFactory.productionEnabled,
+            ownershipConfigured:
+                OwnershipConfiguration.load(bundle: .main) != nil
+        )
+        #else
+        return false
+        #endif
     }
 
     enum Step { case type, prep, pick, confirm }
@@ -145,16 +273,29 @@ struct AddDeviceWizard: View {
     /// its `@Published discovered` / `scanning` / `needsPairing` while scanning. The chosen ring is adopted
     /// for real on `finishAdd`, where the registered `PairedDevice` carries the ring generation.
     @State private var ouraScanner: OuraLiveSource?
+    @State private var veepooSession: VeepooBandPairingSession?
+    @State private var veepooCommitted = false
+    @State private var veepooHandoff = VeepooPairingTransportHandoff()
+    @State private var veepooFailure: VeepooPairingFailurePresentation?
+    @State private var registrationFailed = false
 
-    /// - Parameter startAt: DEBUG-only deep-link into a specific (type, step) so a seeded simulator build
-    ///   can screenshot one wizard step deterministically (e.g. the Oura onboarding gate) without tapping
-    ///   through. nil in production: the wizard starts on the type list. Pre-seeds the `@State` so the first
-    ///   render is already on that step.
+    /// - Parameter startAt: Optional route into a specific (type, step). Devices uses it to send a removed
+    ///   supplier row back through mandatory pairing after its credential is cleared. DEBUG seeded builds
+    ///   also use it to capture a wizard step deterministically. nil starts on the type list.
     init(live: LiveState, onClose: @escaping () -> Void,
+         onAddedSource: @escaping (SourceKind) -> Void = { _ in },
+         selectionScope: SelectionScope,
          startAt: (type: DeviceType, step: Step)? = nil) {
         self.onClose = onClose
+        self.onAddedSource = onAddedSource
+        self.selectionScope = selectionScope
         self.scannerLive = live
-        if let startAt {
+        if let startAt,
+           selectionScope.allows(
+               startAt.type,
+               supplierPairingAvailable:
+                   Self.supplierPairingAvailableForCurrentBuild
+           ) {
             _type = State(initialValue: startAt.type)
             _step = State(initialValue: startAt.step)
         }
@@ -199,7 +340,9 @@ struct AddDeviceWizard: View {
         .background(StrandPalette.surfaceBase)
         // Stop whichever scan is live whenever the sheet goes away (belt-and-braces alongside the
         // per-transition stops below) so neither central keeps scanning after dismiss.
-        .onDisappear { stopAllScans() }
+        .onDisappear {
+            stopAllScans()
+        }
         // After adding, offer to make the new device active (generic non-Oura paths only).
         .alert("Make this your active device?",
                isPresented: $askMakeActive) {
@@ -291,10 +434,20 @@ struct AddDeviceWizard: View {
             }
         }
         switch step {
-        case .type:    return "Add a device"
-        case .prep:    return LocalizedStringKey(type.map(typeTitle) ?? String(localized: "Add a device"))
-        case .pick:    return "Pick your device"
-        case .confirm: return "Name & confirm"
+        case .type:
+            return "appwide.onboarding.device_wizard.add_title"
+        case .prep:
+            return LocalizedStringKey(
+                type.map(typeTitle)
+                    ?? String(
+                        localized:
+                            "appwide.onboarding.device_wizard.add_title"
+                    )
+            )
+        case .pick:
+            return "appwide.onboarding.device_wizard.pick_title"
+        case .confirm:
+            return "appwide.onboarding.device_wizard.confirm_title"
         }
     }
 
@@ -308,9 +461,12 @@ struct AddDeviceWizard: View {
             }
         }
         switch step {
-        case .type:    return "What are you adding?"
-        case .prep:    return "Get it ready, then scan."
-        case .pick:    return "Tap the one that's yours."
+        case .type:
+            return "appwide.onboarding.device_wizard.add_body"
+        case .prep:
+            return "appwide.onboarding.device_wizard.prep_body"
+        case .pick:
+            return "appwide.onboarding.device_wizard.pick_body"
         case .confirm: return nil
         }
     }
@@ -319,54 +475,79 @@ struct AddDeviceWizard: View {
 
     @ViewBuilder private var typeStep: some View {
         VStack(alignment: .leading, spacing: 10) {
-            typeRow(.whoop4, icon: "applewatch.side.right",
-                    title: "Noop Band",
-                    subtitle: String(localized: "Automatically detects compatible band hardware"))
-            typeRow(.hrStrap, icon: "heart.circle",
-                    title: String(localized: "Heart-rate strap"),
-                    subtitle: String(localized: "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast"))
-            typeRow(.gymEquipment, icon: "figure.run.treadmill",
-                    title: String(localized: "Gym equipment"),
-                    subtitle: String(localized: "Treadmill, indoor bike, rower or cross-trainer (Bluetooth FTMS)"))
+            if Self.supplierPairingAvailableForCurrentBuild {
+                typeRow(
+                    .veepoo,
+                    icon: "waveform.path.ecg.rectangle",
+                    title: String(
+                        localized:
+                            "appwide.devices.supplier_display_model"
+                    ),
+                    subtitle: String(
+                        localized:
+                        "appwide.onboarding.device_wizard.supplier_subtitle"
+                    )
+                )
+            }
+            typeRow(
+                .whoop5mg,
+                icon: "applewatch.side.right",
+                title: String(
+                    localized:
+                        "appwide.onboarding.device_wizard.compatible_5_title"
+                ),
+                subtitle: String(
+                    localized:
+                        "appwide.onboarding.device_wizard.compatible_band"
+                )
+            )
+            typeRow(
+                .whoop4,
+                icon: "applewatch.side.right",
+                title: String(
+                    localized:
+                        "appwide.onboarding.device_wizard.compatible_4_title"
+                ),
+                subtitle: String(
+                    localized:
+                        "appwide.onboarding.device_wizard.compatible_band"
+                )
+            )
+            if selectionScope == .allDevices {
+                typeRow(.hrStrap, icon: "heart.circle",
+                        title: String(localized: "Heart-rate strap"),
+                        subtitle: String(localized: "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast"))
+                typeRow(.gymEquipment, icon: "figure.run.treadmill",
+                        title: String(localized: "Gym equipment"),
+                        subtitle: String(localized: "Treadmill, indoor bike, rower or cross-trainer (Bluetooth FTMS)"))
 
-            // EXPERIMENTAL tier — clearly labelled, opt-in, best-effort. Each is honest about what it can
-            // actually read; none fabricates data.
-            Text("Experimental").strandOverline().padding(.top, 8)
-            experimentalTierNote
-            typeRow(.oura, icon: "circle.circle",
-                    title: String(localized: "Oura ring"),
-                    subtitle: String(localized: "Take over your ring locally. Beta. This replaces the Oura app."))
-            typeRow(.amazfit, icon: "waveform.path.ecg.rectangle",
-                    title: "Amazfit / Zepp",
-                    subtitle: String(localized: "Incl. Helio. Live heart rate where the band exposes it. Help us test."))
-            typeRow(.miBand, icon: "waveform.path.ecg",
-                    title: "Xiaomi Mi Band",
-                    subtitle: String(localized: "Live heart rate on bands that don't need pairing. Help us test."))
-            typeRow(.garmin, icon: "applewatch",
-                    title: String(localized: "Garmin watch"),
-                    subtitle: String(localized: "Uses the watch's Broadcast Heart Rate. We'll show you how."))
+                // EXPERIMENTAL tier — clearly labelled, opt-in, best-effort. Each is honest about what it can
+                // actually read; none fabricates data.
+                Text("Experimental").strandOverline().padding(.top, 8)
+                experimentalTierNote
+                typeRow(.oura, icon: "circle.circle",
+                        title: String(localized: "Oura ring"),
+                        subtitle: String(localized: "Take over your ring locally. Beta. This replaces the Oura app."))
+            }
+            if selectionScope == .allDevices {
+                typeRow(.amazfit, icon: "waveform.path.ecg.rectangle",
+                        title: "Amazfit / Zepp",
+                        subtitle: String(localized: "Incl. Helio. Live heart rate where the band exposes it. Help us test."))
+                typeRow(.miBand, icon: "waveform.path.ecg",
+                        title: "Xiaomi Mi Band",
+                        subtitle: String(localized: "Live heart rate on bands that don't need pairing. Help us test."))
+                typeRow(.garmin, icon: "applewatch",
+                        title: String(localized: "Garmin watch"),
+                        subtitle: String(localized: "Uses the watch's Broadcast Heart Rate. We'll show you how."))
 
-            whoopFirstNote
+                whoopFirstNote
+            }
         }
     }
 
     private func typeRow(_ t: DeviceType, icon: String, title: String, subtitle: String) -> some View {
         Button {
-            type = t
-            nameDraft = ""
-            // The Oura factory-reset-and-adopt gate is destructive, so every fresh entry into the Oura flow
-            // re-requires the irreversible-consent tick and clears any stale Advanced-key / adopt state, and
-            // enters the Oura sub-flow at its gate rather than the generic prep step.
-            if t == .oura {
-                ouraConsented = false
-                ouraAdvancedKeyMode = false
-                ouraKeyDraft = ""
-                ouraConfirmAdopt = false
-                pickedOura = nil
-                ouraStep = .gate
-            } else {
-                step = .prep
-            }
+            selectType(t)
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: icon)
@@ -392,6 +573,32 @@ struct AddDeviceWizard: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title). \(subtitle)")
+        .accessibilityIdentifier("noop.device-wizard.type.\(t.accessibilityID)")
+    }
+
+    private func selectType(_ selectedType: DeviceType) {
+        guard selectionScope.allows(
+            selectedType,
+            supplierPairingAvailable:
+                Self.supplierPairingAvailableForCurrentBuild
+        ) else {
+            return
+        }
+        type = selectedType
+        nameDraft = ""
+        // The Oura factory-reset-and-adopt gate is destructive, so every fresh entry into the Oura flow
+        // re-requires the irreversible-consent tick and clears any stale Advanced-key / adopt state, and
+        // enters the Oura sub-flow at its gate rather than the generic prep step.
+        if selectedType == .oura {
+            ouraConsented = false
+            ouraAdvancedKeyMode = false
+            ouraKeyDraft = ""
+            ouraConfirmAdopt = false
+            pickedOura = nil
+            ouraStep = .gate
+        } else {
+            step = .prep
+        }
     }
 
     // MARK: Step 2 — type-specific prep + guidance
@@ -452,6 +659,7 @@ struct AddDeviceWizard: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(StrandPalette.accent)
+                .foregroundStyle(StrandPalette.accentInk)
                 .accessibilityLabel("Scan for \(typeTitle(type))")
             }
         }
@@ -462,9 +670,18 @@ struct AddDeviceWizard: View {
         switch t {
         case .whoop4, .whoop5mg:
             return [
-                String(localized: "Put your Noop Band on your wrist and make sure it is awake."),
-                String(localized: "Close any other app currently connected to the band."),
-                String(localized: "NOOP detects the compatible hardware generation automatically."),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.whoop_prep_wear"
+                ),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.whoop_prep_close"
+                ),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.whoop_prep_detect"
+                ),
             ]
         case .hrStrap:
             return [
@@ -492,6 +709,25 @@ struct AddDeviceWizard: View {
             ]
         case .garmin:
             return GarminBroadcast.broadcastHint
+        case .veepoo:
+            return [
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.supplier_prep_wake"
+                ),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.supplier_prep_choose"
+                ),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.supplier_prep_identifier_gate"
+                ),
+                String(
+                    localized:
+                        "appwide.onboarding.device_wizard.supplier_prep_password_scope"
+                ),
+            ]
         case .oura:
             // The factory-reset-and-adopt checklist, shown only AFTER the irreversible-consent gate. NOOP
             // installs its own key on a reset ring and becomes its sole owner (clean-room facts, see
@@ -604,6 +840,7 @@ struct AddDeviceWizard: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(StrandPalette.accent)
+        .foregroundStyle(StrandPalette.accentInk)
         .disabled(!ouraConsented)
         .accessibilityHint("Continue to get your ring ready")
 
@@ -685,6 +922,7 @@ struct AddDeviceWizard: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(StrandPalette.accent)
+        .foregroundStyle(StrandPalette.accentInk)
         .accessibilityLabel("Scan for your Oura ring")
     }
 
@@ -743,6 +981,7 @@ struct AddDeviceWizard: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(StrandPalette.accent)
+        .foregroundStyle(StrandPalette.accentInk)
         .disabled(ouraKeyBytes == nil)
         .accessibilityLabel("Scan for your Oura ring")
 
@@ -833,6 +1072,10 @@ struct AddDeviceWizard: View {
                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .accessibilityLabel("Device name")
 
+            if registrationFailed {
+                deviceRegistrationFailure
+            }
+
             if ouraAdvancedKeyMode {
                 // Non-destructive: the user's own key authenticates without resetting the ring, so this reads
                 // as a plain accent connect and skips the destructive confirm.
@@ -846,6 +1089,7 @@ struct AddDeviceWizard: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(StrandPalette.accent)
+                .foregroundStyle(StrandPalette.accentInk)
                 .accessibilityLabel("Connect to this ring")
                 Text("Both NOOP and the Oura app can use a ring you own by key, but only one can hold the Bluetooth link at a time.")
                     .font(StrandFont.footnote)
@@ -920,6 +1164,7 @@ struct AddDeviceWizard: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(StrandPalette.accent)
+                .foregroundStyle(StrandPalette.accentInk)
                 .accessibilityLabel("Try again")
 
                 Button {
@@ -1028,6 +1273,7 @@ struct AddDeviceWizard: View {
         case .miBand:            return "waveform.path.ecg"
         case .garmin:            return "applewatch"
         case .oura:              return "circle.circle"
+        case .veepoo:            return "waveform.path.ecg.rectangle"
         }
     }
 
@@ -1043,7 +1289,9 @@ struct AddDeviceWizard: View {
                     pickedStrap = nil
                     pickedMachine = nil
                     pickedHuami = nil
-                    nameDraft = String(localized: "Noop Band")
+                    nameDraft = Self.compatibleBandIdentity(
+                        for: strap.model
+                    ).displayName
                     model.stopWhoopScan()
                     step = .confirm
                 } onRescan: {
@@ -1069,6 +1317,23 @@ struct AddDeviceWizard: View {
                     step = .confirm
                 } onRescan: {
                     startScan(for: type)
+                }
+            } else if type == .veepoo {
+                if let veepooFailure {
+                    VeepooPairingFailureFace(
+                        registrationFailed: veepooFailure == .registration,
+                        onRetry: { startScan(for: .veepoo) }
+                    )
+                } else if let veepooSession {
+                    VeepooPairingFace(
+                        session: veepooSession,
+                        nameDraft: $nameDraft,
+                        onAdd: finishVeepooAdd,
+                        onRetry: { startScan(for: .veepoo) },
+                        onFailure: handleVeepooFailure
+                    )
+                } else {
+                    scanNotStarted(for: type)
                 }
             } else if let hrScanner {
                 // Heart-rate strap AND Garmin (Broadcast HR is the standard 0x180D path).
@@ -1111,6 +1376,7 @@ struct AddDeviceWizard: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(StrandPalette.accent)
+                .foregroundStyle(StrandPalette.accentInk)
             }
         }
     }
@@ -1123,7 +1389,7 @@ struct AddDeviceWizard: View {
         case .hrStrap, .garmin:    pickedHuami = nil; pickedMachine = nil; pickedOura = nil
         case .gymEquipment:        pickedStrap = nil; pickedHuami = nil; pickedOura = nil
         case .amazfit, .miBand:    pickedStrap = nil; pickedMachine = nil; pickedOura = nil
-        case .oura:                pickedStrap = nil; pickedMachine = nil; pickedHuami = nil
+        case .oura, .veepoo:       pickedStrap = nil; pickedMachine = nil; pickedHuami = nil
         default:                   pickedStrap = nil; pickedMachine = nil; pickedHuami = nil; pickedOura = nil
         }
     }
@@ -1156,9 +1422,14 @@ struct AddDeviceWizard: View {
                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .accessibilityLabel("Device name")
 
+            if registrationFailed {
+                deviceRegistrationFailure
+            }
+
             Button("Add") { askMakeActive = true }
                 .buttonStyle(.borderedProminent)
                 .tint(StrandPalette.accent)
+                .foregroundStyle(StrandPalette.accentInk)
                 .frame(maxWidth: .infinity)
                 .disabled(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .padding(.top, 4)
@@ -1172,7 +1443,11 @@ struct AddDeviceWizard: View {
         return n.isEmpty ? confirmAdvertisedName : n
     }
     private var confirmAdvertisedName: String {
-        if pickedWhoop != nil { return String(localized: "Noop Band") }
+        if let pickedWhoop {
+            return Self.compatibleBandIdentity(
+                for: pickedWhoop.model
+            ).displayName
+        }
         if let pickedStrap { return CustomerFacingBrand.text(pickedStrap.name) }
         if let pickedMachine { return CustomerFacingBrand.text(pickedMachine.name) }
         if let pickedHuami { return CustomerFacingBrand.text(pickedHuami.name) }
@@ -1248,11 +1523,42 @@ struct AddDeviceWizard: View {
     }
 
     private func startScan(for type: DeviceType) {
+        registrationFailed = false
         switch type {
         case .whoop4, .whoop5mg: model.presentWhoopScan(model: type.whoopModel ?? .whoop4)
         case .gymEquipment:      ensureFTMSScanner().scan()
         case .amazfit, .miBand:  ensureHuamiScanner().scan()
         case .oura:              ensureOuraScanner().scan()
+        case .veepoo:
+            guard Self.supplierPairingAvailableForCurrentBuild else {
+                endVeepooPairing()
+                veepooFailure = nil
+                self.type = nil
+                step = .type
+                return
+            }
+            endVeepooPairing()
+            veepooFailure = nil
+            let session = veepooHandoff.begin(
+                acquireLease: {
+                    model.sourceCoordinator?
+                        .acquireSupplierPairingLease()
+                },
+                makeSession: {
+                    VeepooBandPairingSession
+                        .makeForApprovedLocalDeviceBuild()
+                },
+                cancelLease: { lease in
+                    _ = model.sourceCoordinator?
+                        .cancelSupplierPairingLease(lease)
+                }
+            )
+            veepooSession = session
+            guard let session else {
+                veepooFailure = .connection
+                return
+            }
+            session.start()
         // Heart-rate strap AND Garmin both use the standard 0x180D scanner (Garmin Broadcast HR).
         case .hrStrap, .garmin:  ensureHRScanner().scan()
         }
@@ -1303,6 +1609,7 @@ struct AddDeviceWizard: View {
         ftmsScanner?.stopScan()
         huamiScanner?.stopScan()
         ouraScanner?.stop()
+        endVeepooPairing()
     }
 
     /// Build the right `PairedDevice` for the chosen path, register it, optionally activate, then close.
@@ -1313,17 +1620,21 @@ struct AddDeviceWizard: View {
         let device: PairedDevice
 
         if let pickedWhoop {
-            // WHOOP: full capability set; id namespaced by uuid; model "4.0" / "5.0 MG".
-            let wm = pickedWhoop.model
-            let modelLabel = (wm == .whoop4) ? "4.0" : "5.0 MG"
+            // Preserve the selected compatibility family in both the visible default name and the
+            // canonical registry model used by family resolution.
+            let identity = Self.compatibleBandIdentity(
+                for: pickedWhoop.model
+            )
             device = PairedDevice(
                 id: "whoop-\(pickedWhoop.uuid)",
                 brand: "WHOOP",
-                model: modelLabel,
+                model: identity.registryModel,
                 nickname: name,
                 peripheralId: pickedWhoop.uuid,
                 sourceKind: .liveBLE,
-                capabilities: WhoopLiveCapabilities.metrics(forModel: modelLabel),
+                capabilities: WhoopLiveCapabilities.metrics(
+                    forModel: identity.registryModel
+                ),
                 status: .paired,
                 addedAt: now, lastSeenAt: now)
         } else if let pickedStrap {
@@ -1375,7 +1686,12 @@ struct AddDeviceWizard: View {
             onClose(); return
         }
 
-        model.registerDevice(device, makeActive: makeActive)
+        registrationFailed = false
+        guard model.registerDevice(device, makeActive: makeActive) else {
+            registrationFailed = true
+            return
+        }
+        onAddedSource(device.sourceKind)
         onClose()
     }
 
@@ -1414,8 +1730,12 @@ struct AddDeviceWizard: View {
     private func commitOuraAdopt() {
         guard let device = buildOuraDevice() else { onClose(); return }
         stopAllScans()
+        registrationFailed = false
+        guard model.adoptOuraRing(device) else {
+            registrationFailed = true
+            return
+        }
         ouraStep = .adopting
-        model.adoptOuraRing(device)   // grants adopt consent + registers active; never prompts make-active
     }
 
     /// COMMIT the non-destructive Advanced-key path: persist the user-supplied 16-byte key, register the ring
@@ -1425,11 +1745,87 @@ struct AddDeviceWizard: View {
     private func finishAdvancedOura() {
         guard let device = buildOuraDevice(), let key = ouraKeyBytes else { onClose(); return }
         stopAllScans()
-        OuraKeyStore.save(key, deviceId: device.id)
+        registrationFailed = false
+        let previousKey = OuraKeyStore.read(deviceId: device.id)
+        guard OuraKeyStore.save(key, deviceId: device.id) else {
+            restoreOuraKey(previousKey, deviceId: device.id)
+            registrationFailed = true
+            return
+        }
         // The user supplied their own key; this is their new live source. Register active (no adopt consent,
         // so the live source can NEVER install a key on this path).
-        model.registerDevice(device, makeActive: true)
+        guard model.registerDevice(device, makeActive: true) else {
+            restoreOuraKey(previousKey, deviceId: device.id)
+            registrationFailed = true
+            return
+        }
+        onAddedSource(device.sourceKind)
         onClose()
+    }
+
+    private func restoreOuraKey(_ previousKey: Data?, deviceId: String) {
+        if let previousKey {
+            _ = OuraKeyStore.save(previousKey, deviceId: deviceId)
+        } else {
+            OuraKeyStore.clear(deviceId: deviceId)
+        }
+    }
+
+    private var deviceRegistrationFailure: some View {
+        Label(
+            String(localized: "appwide.device_registration_failed"),
+            systemImage: "exclamationmark.triangle.fill"
+        )
+        .font(StrandFont.footnote)
+        .foregroundStyle(StrandPalette.statusCritical)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("noop.device-registration-failed")
+    }
+
+    private func finishVeepooAdd() {
+        guard let session = veepooSession else { return }
+        var addedDevice: PairedDevice?
+        let committed = session.commitPairedDevice(nickname: nameDraft) { device in
+            let added = model.deviceRegistry?.addAndSetActive(device) ?? false
+            if added {
+                addedDevice = device
+            }
+            return added
+        }
+        guard committed, let addedDevice else { return }
+        guard veepooHandoff.commitReplacement(
+            commitLease: { lease in
+                model.sourceCoordinator?
+                    .commitSupplierPairingLease(lease) ?? false
+            }
+        ) else {
+            veepooFailure = .connection
+            return
+        }
+        veepooCommitted = true
+        veepooFailure = nil
+        veepooSession = nil
+        onAddedSource(addedDevice.sourceKind)
+        onClose()
+    }
+
+    private func handleVeepooFailure(registrationFailed: Bool) {
+        guard !veepooCommitted else { return }
+        veepooFailure = registrationFailed ? .registration : .connection
+        endVeepooPairing()
+    }
+
+    private func endVeepooPairing() {
+        guard !veepooCommitted else { return }
+        let session = veepooSession
+        veepooSession = nil
+        veepooHandoff.endPairing(
+            cancelPairing: { session?.cancel() },
+            cancelLease: { lease in
+                _ = model.sourceCoordinator?
+                    .cancelSupplierPairingLease(lease)
+            }
+        )
     }
 
     /// Map the protocol package's per-gen `OuraMetric` set onto the app's `Metric` set for registration.
@@ -1454,13 +1850,27 @@ struct AddDeviceWizard: View {
 
     private func typeTitle(_ t: DeviceType) -> String {
         switch t {
-        case .whoop5mg, .whoop4: return String(localized: "Noop Band")
+        case .whoop5mg:
+            return String(
+                localized:
+                    "appwide.onboarding.device_wizard.compatible_5_title"
+            )
+        case .whoop4:
+            return String(
+                localized:
+                    "appwide.onboarding.device_wizard.compatible_4_title"
+            )
         case .hrStrap:      return String(localized: "Heart-rate strap")
         case .gymEquipment: return String(localized: "Gym equipment")
         case .amazfit:      return "Amazfit / Zepp"
         case .miBand:       return "Xiaomi Mi Band"
         case .garmin:       return String(localized: "Garmin watch")
         case .oura:         return String(localized: "Oura ring")
+        case .veepoo:
+            return String(
+                localized:
+                    "appwide.devices.supplier_display_model"
+            )
         }
     }
 
@@ -1508,11 +1918,15 @@ struct AddDeviceWizard: View {
                 .foregroundStyle(StrandPalette.statusWarning)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Your band uses one active app at a time.")
+                Text(
+                    "appwide.onboarding.device_wizard.whoop_one_phone_title"
+                )
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Close any other band app first, or pairing may fail.")
+                Text(
+                    "appwide.onboarding.device_wizard.whoop_one_phone_body"
+                )
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1524,7 +1938,6 @@ struct AddDeviceWizard: View {
         .background(StrandPalette.statusWarning.opacity(0.10),
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Heads-up. Your band uses one active app at a time. Close any other band app first, or pairing may fail.")
     }
 
     private var whoopFirstNote: some View {
@@ -1564,9 +1977,17 @@ private struct WhoopPickList: View {
                 SearchingCard(whoopHint: true)
             } else {
                 ForEach(found, id: \.uuid) { strap in
-                    DiscoveredRow(name: "Noop Band",
-                                  subtitle: String(localized: "Compatible band"),
-                                  rssi: strap.rssi) {
+                    DiscoveredRow(
+                        name: AddDeviceWizard
+                            .compatibleBandIdentity(
+                                for: strap.model
+                            ).displayName,
+                        subtitle: String(
+                            localized:
+                                "appwide.onboarding.device_wizard.compatible_band"
+                        ),
+                        rssi: strap.rssi
+                    ) {
                         onSelect(strap)
                     }
                 }
@@ -1685,6 +2106,7 @@ private struct OuraPickList: View {
                     Button("Use file import") { onUseImport() }
                         .buttonStyle(.borderedProminent)
                         .tint(StrandPalette.accent)
+                        .foregroundStyle(StrandPalette.accentInk)
                         .accessibilityLabel("Use file import for Oura")
                 }
                 .padding(16)
@@ -1709,6 +2131,315 @@ private struct OuraPickList: View {
             }
         }
     }
+}
+
+private enum VeepooPairingFailurePresentation {
+    case connection
+    case registration
+}
+
+private struct VeepooPairingFace: View {
+    @ObservedObject var session: VeepooBandPairingSession
+    @Binding var nameDraft: String
+    let onAdd: () -> Void
+    let onRetry: () -> Void
+    let onFailure: (Bool) -> Void
+
+    @State private var printedIdentifier = ""
+    @State private var password = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            experimentalNotice
+            switch session.phase {
+            case .idle, .scanning:
+                candidateList
+            case .confirmPrintedIdentifier:
+                printedIdentifierEntry
+            case .connecting:
+                progress(
+                    "appwide.onboarding.device_wizard.supplier_progress_connecting"
+                )
+            case .password:
+                passwordEntry
+            case .checkingBattery:
+                progress(
+                    "appwide.onboarding.device_wizard.supplier_progress_battery"
+                )
+            case .ready:
+                ready
+            case .failed:
+                VeepooPairingFailureFace(
+                    registrationFailed: session.registrationFailed,
+                    onRetry: onRetry
+                )
+            }
+        }
+        .onChangeCompat(of: session.phase) { phase in
+            guard case .failed = phase else { return }
+            onFailure(session.registrationFailed)
+        }
+        .onAppear {
+            guard case .failed = session.phase else { return }
+            onFailure(session.registrationFailed)
+        }
+    }
+
+    private var experimentalNotice: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(
+                "appwide.onboarding.device_wizard.supplier_notice_title"
+            )
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.statusWarning)
+            Text(
+                "appwide.onboarding.device_wizard.supplier_notice_body"
+            )
+            .font(StrandFont.footnote)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(
+            StrandPalette.statusWarning.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+    }
+
+    @ViewBuilder
+    private var candidateList: some View {
+        if session.candidates.isEmpty {
+            SearchingCard()
+        } else {
+            Text(
+                "appwide.onboarding.device_wizard.supplier_choose_band"
+            )
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+            ForEach(Array(session.candidates.enumerated()), id: \.element.id) {
+                index, candidate in
+                let ordinal = index + 1
+                Button {
+                    printedIdentifier = ""
+                    session.select(candidate)
+                } label: {
+                    HStack {
+                        Image(systemName: "waveform.path.ecg.rectangle")
+                            .foregroundStyle(StrandPalette.accent)
+                        Text(
+                            String.localizedStringWithFormat(
+                                String(
+                                    localized:
+                                        "appwide.onboarding.device_wizard.supplier_candidate_format"
+                                ),
+                                ordinal
+                            )
+                        )
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    .padding(14)
+                    .background(
+                        StrandPalette.surfaceInset,
+                        in: RoundedRectangle(cornerRadius: 8)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    String.localizedStringWithFormat(
+                        String(
+                            localized:
+                                "appwide.onboarding.device_wizard.supplier_candidate_accessibility_format"
+                        ),
+                        ordinal
+                    )
+                )
+            }
+        }
+    }
+
+    private var printedIdentifierEntry: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(
+                "appwide.onboarding.device_wizard.supplier_identifier_title"
+            )
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text(
+                "appwide.onboarding.device_wizard.supplier_identifier_body"
+            )
+            .font(StrandFont.subhead)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            TextField(
+                "appwide.onboarding.device_wizard.supplier_identifier_field",
+                text: $printedIdentifier
+            )
+                .textFieldStyle(.roundedBorder)
+                #if os(iOS)
+                .textInputAutocapitalization(.characters)
+                #endif
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("noop.veepoo.printed-identifier")
+            if session.lastFailure == .identifierMismatch {
+                Text(
+                    "appwide.onboarding.device_wizard.supplier_identifier_mismatch"
+                )
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                session.confirmPrintedIdentifier(printedIdentifier)
+            } label: {
+                Label(
+                    "appwide.onboarding.device_wizard.supplier_identifier_confirm",
+                    systemImage: "checkmark.shield"
+                )
+                    .font(StrandFont.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StrandPalette.accent)
+            .foregroundStyle(StrandPalette.accentInk)
+            .disabled(printedIdentifier.isEmpty)
+        }
+    }
+
+    private var passwordEntry: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(
+                "appwide.onboarding.device_wizard.supplier_password_title"
+            )
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text(
+                "appwide.onboarding.device_wizard.supplier_password_body"
+            )
+            .font(StrandFont.subhead)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            SecureField(
+                "appwide.onboarding.device_wizard.supplier_password_field",
+                text: $password
+            )
+                .textFieldStyle(.roundedBorder)
+                #if os(iOS)
+                .keyboardType(.numberPad)
+                #endif
+                .accessibilityIdentifier("noop.veepoo.password")
+            if session.lastFailure == .credentialRejected
+                || session.lastFailure == .invalidCredential
+            {
+                Text(
+                    "appwide.onboarding.device_wizard.supplier_password_rejected"
+                )
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                let value = password
+                password = ""
+                session.submitPassword(value)
+            } label: {
+                Label(
+                    "appwide.onboarding.device_wizard.supplier_password_verify",
+                    systemImage: "key.fill"
+                )
+                    .font(StrandFont.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StrandPalette.accent)
+            .foregroundStyle(StrandPalette.accentInk)
+            .disabled(!VeepooBandAdapterCore.isValidPassword(password))
+        }
+    }
+
+    private var ready: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(
+                "appwide.onboarding.device_wizard.supplier_ready_title"
+            )
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text(
+                "appwide.onboarding.device_wizard.supplier_ready_body"
+            )
+            .font(StrandFont.subhead)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "appwide.onboarding.device_wizard.name"
+            ).strandOverline()
+            TextField(
+                "appwide.onboarding.device_wizard.compatible_band",
+                text: $nameDraft
+            )
+                .textFieldStyle(.roundedBorder)
+            Button(action: onAdd) {
+                Label(
+                    "appwide.onboarding.device_wizard.supplier_add_active",
+                    systemImage: "checkmark.circle.fill"
+                )
+                    .font(StrandFont.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StrandPalette.accent)
+            .foregroundStyle(StrandPalette.accentInk)
+        }
+    }
+
+    private func progress(_ title: LocalizedStringKey) -> some View {
+        HStack(spacing: 12) {
+            ProgressView().tint(StrandPalette.accent)
+            Text(title)
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textSecondary)
+        }
+    }
+}
+
+private struct VeepooPairingFailureFace: View {
+    let registrationFailed: Bool
+    let onRetry: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Group {
+                if registrationFailed {
+                    Text(
+                        "appwide.onboarding.device_wizard.supplier_registration_failed"
+                    )
+                } else {
+                    Text(
+                        "appwide.onboarding.device_wizard.supplier_connection_failed"
+                    )
+                }
+            }
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.statusWarning)
+            Button {
+                onRetry()
+            } label: {
+                Label(
+                    "appwide.onboarding.device_wizard.supplier_try_again",
+                    systemImage: "arrow.clockwise"
+                )
+                    .font(StrandFont.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StrandPalette.accent)
+            .foregroundStyle(StrandPalette.accentInk)
+        }
+    }
+
 }
 
 // MARK: - Shared pick-step pieces
@@ -1746,7 +2477,9 @@ private struct SearchingCard: View {
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             if whoopHint {
-                Text("Not showing up? Another band app may still be holding the connection. Force-quit it, then tap Rescan.")
+                Text(
+                    "appwide.onboarding.device_wizard.whoop_search_hint"
+                )
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1796,7 +2529,11 @@ private struct DiscoveredRow: View {
 #if DEBUG
 #Preview("Add device wizard") {
     let model = AppModel()
-    return AddDeviceWizard(live: model.live, onClose: {})
+    return AddDeviceWizard(
+        live: model.live,
+        onClose: {},
+        selectionScope: .launchBands
+    )
         .environmentObject(model)
         .environmentObject(model.live)
         .frame(width: 480, height: 760)

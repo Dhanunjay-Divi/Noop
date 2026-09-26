@@ -130,6 +130,7 @@ final class MacViewerRuntimeContractTests: XCTestCase {
         XCTAssertFalse(friends.contains("FriendsSource"))
         XCTAssertFalse(friends.contains("selfHostedBody"))
         XCTAssertFalse(friends.contains("FriendsService"))
+        XCTAssertFalse(friends.contains("Enter invite details"))
         XCTAssertFalse(ios.contains("FriendsSourcePicker"))
         XCTAssertFalse(ios.contains("selectedSource"))
         XCTAssertFalse(mac.contains("FriendsSourcePicker"))
@@ -284,7 +285,7 @@ final class MacViewerRuntimeContractTests: XCTestCase {
         )
     }
 
-    func testTodayDoesNotOfferBandControlledLiveSessionToManagedViewer() {
+    func testBandControlledLiveSessionIsCollectorOnlyAcrossTodayAndSettings() {
         XCTAssertFalse(
             LiquidTodayView.showsCollectorLiveSessionEntry(
                 liveSessionsBeta: true,
@@ -300,6 +301,16 @@ final class MacViewerRuntimeContractTests: XCTestCase {
         XCTAssertFalse(
             LiquidTodayView.showsCollectorLiveSessionEntry(
                 liveSessionsBeta: false,
+                runtimeRole: .phoneCollector
+            )
+        )
+        XCTAssertFalse(
+            SettingsView.showsCollectorLiveSessionControl(
+                runtimeRole: .managedViewer
+            )
+        )
+        XCTAssertTrue(
+            SettingsView.showsCollectorLiveSessionControl(
                 runtimeRole: .phoneCollector
             )
         )

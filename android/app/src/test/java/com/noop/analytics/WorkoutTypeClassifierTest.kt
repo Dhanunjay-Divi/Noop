@@ -47,8 +47,8 @@ class WorkoutTypeClassifierTest {
     // ── RUN: two distinct injected patterns ─────────────────────────────────────
 
     @Test
-    fun runShapedWindowDominantRunTicksIsClassifiedRun() {
-        // Dominant run-classified ticks, elevated %HRR, higher-impact motion, smooth (low-CV) HR.
+    fun runShapedWindowIsClassifiedFromHrAndMotion() {
+        // Legacy tick fields are populated but ignored; elevated %HRR plus higher-impact motion wins.
         val f = features(
             meanHR = 155.0, peakHR = 168, meanHRRPct = 70.0, hrCV = 0.04,
             stillFraction = 0.05, walkFraction = 0.1, runFraction = 0.8, tickCoverage = 0.9,
@@ -75,7 +75,7 @@ class WorkoutTypeClassifierTest {
 
     @Test
     fun lowHRWalkIsClassifiedWalk() {
-        // The brief's canonical case: a low-HR walk. Dominant walk ticks, LOW %HRR, modest motion.
+        // The brief's canonical case: LOW %HRR and modest motion. Legacy tick fields are ignored.
         val f = features(
             meanHR = 96.0, peakHR = 104, meanHRRPct = 22.0, hrCV = 0.05,
             stillFraction = 0.1, walkFraction = 0.85, runFraction = 0.05, tickCoverage = 0.9,
@@ -115,15 +115,15 @@ class WorkoutTypeClassifierTest {
     }
 
     @Test
-    fun moderateHRBurstySetsIsClassifiedStrength() {
-        // A gentler lifting session: moderate %HRR (not a cardio spike), still bursty HR, no gait ticks.
+    fun moderateHRBurstySetsAreWithheldWhenFallbackIsAmbiguous() {
+        // Without validated gait evidence, this gentler pattern is too close to the walk fallback.
         val f = features(
             meanHR = 110.0, peakHR = 145, meanHRRPct = 42.0, hrCV = 0.14,
             stillFraction = 0.8, walkFraction = 0.1, runFraction = 0.1, tickCoverage = 0.7,
             motionVariance = 0.02, kcalPerMin = 4.0,
         )
         val out = WorkoutTypeClassifier.classify(f)
-        assertEquals("scores: ${out.scores}", CoarseWorkoutClass.STRENGTH, out.predictedClass)
+        assertEquals("scores: ${out.scores}", CoarseWorkoutClass.OTHER, out.predictedClass)
     }
 
     // ── CYCLE: two distinct injected patterns ───────────────────────────────────
@@ -229,6 +229,31 @@ class WorkoutTypeClassifierTest {
         assertTrue(cleanOut.confidence > ambiguousOut.confidence)
     }
 
+    @Test
+    fun legacyTickCompositionDoesNotChangeScoresOrConfidence() {
+        val base = features(
+            meanHR = 118.0,
+            peakHR = 135,
+            meanHRRPct = 45.0,
+            hrCV = 0.08,
+            motionVariance = 0.045,
+            kcalPerMin = 5.2,
+        )
+        val disputedTicks = base.copy(
+            stillFraction = 0.05,
+            walkFraction = 0.45,
+            runFraction = 0.50,
+            tickCoverage = 1.0,
+        )
+
+        assertEquals(
+            WorkoutTypeClassifier.classify(base),
+            WorkoutTypeClassifier.classify(disputedTicks),
+        )
+        assertEquals(0.0, WorkoutTypeClassifier.tickReliability(disputedTicks), 0.0)
+        assertEquals(0.5, WorkoutTypeClassifier.gaitAbsenceScore(disputedTicks), 0.0)
+    }
+
     // ── `scores` always covers all five concrete classes, never OTHER ───────────
 
     @Test
@@ -291,7 +316,7 @@ class WorkoutTypeFeatureExtractorTest {
         (0 until durS).map { StepSample(deviceId = dev, ts = start + it, counter = it, activityClass = activityClass) }
 
     @Test
-    fun extractRunWindowRecoversRunDominantComposition() {
+    fun extractRunWindowIgnoresLegacyRunComposition() {
         val start = 1_000_000L
         val dur = 20 * 60
         val hr = hrBlock(start, dur, 160)
@@ -304,18 +329,28 @@ class WorkoutTypeFeatureExtractorTest {
         )
         assertNotNull(f)
         f!!
-        assertEquals(1.0, f.runFraction, 0.001)
-        assertEquals(1.0, f.tickCoverage, 0.05)
+        assertEquals(0.0, f.stillFraction, 0.0)
+        assertEquals(0.0, f.walkFraction, 0.0)
+        assertEquals(0.0, f.runFraction, 0.0)
+        assertEquals(0.0, f.tickCoverage, 0.0)
         assertTrue((f.meanHRRPct ?: 0.0) > 50)
         assertTrue(f.motionVariance > 0)
         assertEquals(12.0, f.kcalPerMin ?: 0.0, 0.01)
-        // Round-trips into a RUN classification end-to-end.
-        val out = WorkoutTypeClassifier.classify(f)
-        assertEquals("scores: ${out.scores}", CoarseWorkoutClass.RUN, out.predictedClass)
+        val withoutLegacyClasses = WorkoutTypeFeatureExtractor.extract(
+            hr = hr,
+            gravity = gravity,
+            steps = emptyList(),
+            start = start,
+            end = start + dur,
+            restingHR = 60.0,
+            maxHR = 190.0,
+            caloriesKcal = 240.0,
+        )
+        assertEquals(withoutLegacyClasses, f)
     }
 
     @Test
-    fun extractWalkWindowRecoversWalkDominantComposition() {
+    fun extractWalkWindowIgnoresLegacyWalkComposition() {
         val start = 2_000_000L
         val dur = 30 * 60
         val hr = hrBlock(start, dur, 95)
@@ -328,9 +363,21 @@ class WorkoutTypeFeatureExtractorTest {
         )
         assertNotNull(f)
         f!!
-        assertEquals(1.0, f.walkFraction, 0.001)
-        val out = WorkoutTypeClassifier.classify(f)
-        assertEquals("scores: ${out.scores}", CoarseWorkoutClass.WALK, out.predictedClass)
+        assertEquals(0.0, f.stillFraction, 0.0)
+        assertEquals(0.0, f.walkFraction, 0.0)
+        assertEquals(0.0, f.runFraction, 0.0)
+        assertEquals(0.0, f.tickCoverage, 0.0)
+        val withoutLegacyClasses = WorkoutTypeFeatureExtractor.extract(
+            hr = hr,
+            gravity = gravity,
+            steps = emptyList(),
+            start = start,
+            end = start + dur,
+            restingHR = 60.0,
+            maxHR = 180.0,
+            caloriesKcal = 105.0,
+        )
+        assertEquals(withoutLegacyClasses, f)
     }
 
     @Test

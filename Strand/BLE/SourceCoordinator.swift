@@ -30,6 +30,9 @@ import OuraProtocol
 /// the BLE engine — `connectedPeripheralUUID` — arrives as a plain publisher, not the manager itself.
 @MainActor
 final class SourceCoordinator: ObservableObject {
+    struct SupplierPairingLease: Equatable {
+        fileprivate let generation: UInt64
+    }
 
     /// Source-aware teardown chosen before a registry row is archived. The old Devices path forwarded
     /// only an optional peripheral id to BLEManager; nil (Apple Watch/import/legacy rows) was therefore
@@ -74,6 +77,10 @@ final class SourceCoordinator: ObservableObject {
     /// previously invisible). Passed straight into `StandardHRSource`. Defaults to a no-op so existing
     /// call sites (and tests) compile unchanged.
     private let straplog: (String) -> Void
+    /// Default-off app seam for the supplier-neutral NOOP Band SDK adapter. Every production
+    /// composition root leaves this nil until a reviewed supplier transport exists. Tests inject a
+    /// source to prove lifecycle ownership without changing WHOOP.
+    private let noopBandSourceFactory: ((String) -> (any LiveHRSource)?)?
 
     // MARK: - State
 
@@ -99,6 +106,11 @@ final class SourceCoordinator: ObservableObject {
     private var activeStrapId: String?
     /// Ownership token for callbacks that can outlive a graceful source teardown.
     private var sourceGeneration: UInt64 = 0
+    /// The supplier SDK owns a process-wide manager. Pairing leases that manager
+    /// here, rather than in the view, so registry publications cannot start a
+    /// competing supplier source before the pairing adapter has disconnected.
+    private var supplierPairingLease: SupplierPairingLease?
+    private var supplierPairingLeaseGeneration: UInt64 = 0
     /// True once we've transitioned onto a generic strap. While false (the default / WHOOP-active
     /// state), switching to WHOOP is a pure no-op — we never issue a redundant WHOOP (re)scan.
     private var onStrap = false
@@ -106,6 +118,9 @@ final class SourceCoordinator: ObservableObject {
     /// every WHOOP→WHOOP re-point. nil until the first WHOOP activation is handled. Lets us tell "same
     /// WHOOP, no change" (no churn) from "a DIFFERENT WHOOP became active" (re-point + reconnect).
     private var activeWhoopId: String?
+    /// `activeWhoopId == nil` also describes normal launch before the existing WHOOP flow starts.
+    /// Preserve an explicit teardown edge so a later selection restarts BLE instead of only repointing.
+    private var whoopRestartRequired = false
     /// The uuid of the strap the WHOOP link is CURRENTLY connected to (from `connectedPeripheralUUID`).
     /// Lets a WHOOP→WHOOP make-active adopt IN PLACE when the newly-activated row is the same physical
     /// strap (#74 keep): a stop/start churn there would drop the live link and reconnect via scan. Cleared
@@ -135,7 +150,8 @@ final class SourceCoordinator: ObservableObject {
          setWhoopPreferredPeripheral: @escaping (String?) -> Void,
          setWhoopActiveDeviceId: @escaping (String) -> Void,
          connectedPeripheralUUID: AnyPublisher<String?, Never>,
-         straplog: @escaping (String) -> Void = { _ in }) {
+         straplog: @escaping (String) -> Void = { _ in },
+         noopBandSourceFactory: ((String) -> (any LiveHRSource)?)? = nil) {
         self.registry = registry
         self.live = live
         self.storeHandle = storeHandle
@@ -145,6 +161,7 @@ final class SourceCoordinator: ObservableObject {
         self.setWhoopActiveDeviceId = setWhoopActiveDeviceId
         self.connectedPeripheralUUID = connectedPeripheralUUID
         self.straplog = straplog
+        self.noopBandSourceFactory = noopBandSourceFactory
     }
 
     // MARK: - Wiring
@@ -177,7 +194,19 @@ final class SourceCoordinator: ObservableObject {
     ///   • A DIFFERENT WHOOP → re-point the WHOOP connection (preferred peripheral + deviceId) + reconnect.
     ///   • WHOOP active after a strap → stop the strap source + resume WHOOP.
     ///   • A generic strap → pause WHOOP + (re)start `StandardHRSource` for that strap's id.
-    func activeDeviceChanged(to id: String) {
+    func activeDeviceChanged(to id: String?) {
+        guard let id else {
+            clearActiveDevice()
+            return
+        }
+
+        if supplierPairingLease != nil {
+            if let device = activeDevice(for: id),
+               device.sourceKind == .veepoo {
+                return
+            }
+        }
+
         // The Apple Watch is a HealthKit source with `peripheralId: nil` (see `AppleWatchDevice`): there is
         // no BLE peripheral to connect, and the M1 live read happens entirely in `HealthKitBridge`'s
         // observers + sync, off this BLE coordinator. Short-circuit BEFORE the WHOOP branch so we never
@@ -193,6 +222,24 @@ final class SourceCoordinator: ObservableObject {
         } else {
             switchToStrap(id: id)
         }
+    }
+
+    /// A readable registry with no active row owns no live transport. Stop the current source and clear
+    /// source-specific guidance while preserving stored history for a later selection.
+    private func clearActiveDevice() {
+        if onStrap || activeSource != nil {
+            tearDownNonWhoopSource()
+        } else {
+            stopWhoop()
+        }
+        activeStrapId = nil
+        activeWhoopId = nil
+        onStrap = false
+        whoopRestartRequired = true
+        setWhoopPreferredPeripheral(nil)
+        live.pairingHint = nil
+        live.reconnectGuide = nil
+        BluetoothAvailabilityNotifications.setMonitoringExpected(false)
     }
 
     /// Active device is the Apple Watch (a `.liveAppleWatch` HealthKit pseudo-device). It has no BLE
@@ -230,13 +277,17 @@ final class SourceCoordinator: ObservableObject {
             activeStrapId = nil
             onStrap = false
             pointWhoop(at: id, peripheralId: peripheralId)
-            startWhoop()
+            restartWhoop()
         } else if activeWhoopId == nil {
             // First WHOOP activation of the session (the normal launch path). Set the targeting so the
             // existing WHOOP flow — already kicked off elsewhere on launch — uses it. For the single
             // seeded source (peripheralId nil) this is setPreferredPeripheral(nil), an idempotent writer
-            // re-point, and no scan/disconnect.
+            // re-point, and no scan/disconnect. After an explicit no-active-device teardown, however,
+            // selecting WHOOP again must restart the scan entry point that teardown stopped.
             pointWhoop(at: id, peripheralId: peripheralId)
+            if whoopRestartRequired {
+                restartWhoop()
+            }
         } else if let peripheralId, peripheralId.caseInsensitiveCompare(connectedWhoopUuid ?? "") == .orderedSame {
             // WHOOP → the SAME physical strap (make-active on the row we're already connected to): adopt IN
             // PLACE. A stop/start churn here would drop the #74-kept live link and force a scan reconnect.
@@ -246,8 +297,13 @@ final class SourceCoordinator: ObservableObject {
             // WHOOP → a DIFFERENT WHOOP: drop the current link, re-point, and reconnect.
             stopWhoop()
             pointWhoop(at: id, peripheralId: peripheralId)
-            startWhoop()
+            restartWhoop()
         }
+    }
+
+    private func restartWhoop() {
+        whoopRestartRequired = false
+        startWhoop()
     }
 
     /// Apply the band targeting for the now-active `id`. Always sets both the preferred peripheral and
@@ -272,16 +328,65 @@ final class SourceCoordinator: ObservableObject {
 
         guard activeStrapId != id else { return }   // already streaming this strap → no churn
 
+        let sourceKind = sourceKind(for: id)
+        let preflightedSupplierSource: (any LiveHRSource)?
+        if sourceKind == .veepoo {
+            preflightedSupplierSource = noopBandSourceFactory?(id)
+        } else {
+            preflightedSupplierSource = nil
+        }
+
+        if sourceKind == .veepoo, preflightedSupplierSource == nil {
+            // An optional supplier source must fail closed before disturbing a working WHOOP or another
+            // live source. Reconcile the durable active row with that still-running transport so reads and
+            // writes cannot remain pointed at a supplier source that has no provider or usable credential.
+            let actualTransportDeviceID = onStrap ? activeStrapId : activeWhoopId
+            let reconciled = registry.reconcileUnavailableSupplier(
+                id,
+                preferredTransportDeviceID: actualTransportDeviceID
+            )
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .reconciliation,
+                outcome: reconciled ? .completed : .failed,
+                trigger: .sourceUnavailable,
+                failure: reconciled ? nil : .fallbackUnavailable
+            )
+            return
+        }
+
+        if sourceKind == .veepoo {
+            // These guides describe WHOOP encrypted-bond recovery only. Clear them after supplier
+            // preflight succeeds but before its source is activated, so the supplier card cannot inherit
+            // stale WHOOP pairing or reconnect instructions during the transport handoff.
+            live.pairingHint = nil
+            live.reconnectGuide = nil
+        }
+
         // Leaving WHOOP for the first non-WHOOP source: pause WHOOP's BLE via its existing teardown.
         if !onStrap { stopWhoop() }
 
         // Switching source→source: stop the previous non-WHOOP source before starting the new one.
+        // This also advances `sourceGeneration` before constructing Oura, so its delayed-callback owner
+        // token is current from the first callback. Supplier construction remains above this edge because
+        // its optional factory must fail closed without disturbing the transport that is still running.
         tearDownNonWhoopSource(clearMonitoringExpectation: false)
 
-        // Build the isolated source for this device's registered kind (the ONE place that maps a kind to a
-        // concrete driver), then bring it up. `.liveAppleWatch` never reaches here — it's short-circuited
-        // above — so `makeSource` only ever sees a real BLE source kind.
-        let source = makeSource(for: id)
+        // Build ordinary sources only after teardown/ownership advancement. The supplier source was
+        // preflighted above and is reused here without exposing vendor types to the coordinator.
+        guard let source = preflightedSupplierSource ?? makeSource(for: id) else {
+            return
+        }
+
+        // Publish ownership before entering source code. A supplier source can synchronously reconcile a
+        // permanently unavailable credential from connect(), which re-enters activeDeviceChanged; that
+        // fallback must see and tear down this source, with no stale ownership writes after connect returns.
+        activeSource = source
+        activeStrapId = id
+        onStrap = true
+        // All non-Watch sources owned here are BLE-backed. This durable expectation lets the shared WHOOP
+        // central's radio callback provide the same one-shot Bluetooth-off alert without another scanner.
+        BluetoothAvailabilityNotifications.setMonitoringExpected(true)
+
         // CONNECT to the active strap's known peripheral, don't just scan. scan() only discovered + listed
         // it but never connected, so a Polar etc. showed as "found" yet never streamed (#421). connect()
         // reaches the cached peripheral by identifier (or scans-then-connects if not yet cached); a bare
@@ -291,12 +396,6 @@ final class SourceCoordinator: ObservableObject {
         } else {
             source.scan()
         }
-        activeSource = source
-        activeStrapId = id
-        onStrap = true
-        // All non-Watch sources owned here are BLE-backed. This durable expectation lets the shared WHOOP
-        // central's radio callback provide the same one-shot Bluetooth-off alert without another scanner.
-        BluetoothAvailabilityNotifications.setMonitoringExpected(true)
     }
 
     /// Build the isolated `LiveHRSource` for a device id from its registered `sourceKind` — the ONE place
@@ -304,11 +403,14 @@ final class SourceCoordinator: ObservableObject {
     /// nothing else in the coordinator changes. Each arm keeps its own bespoke construction (persist / log /
     /// onBattery closures, plus Oura's ringGen / authKey / adoptIntent). Returns the source WITHOUT
     /// connecting — the caller (`switchToStrap`) does the connect-by-identifier-else-scan bring-up.
-    private func makeSource(for id: String) -> any LiveHRSource {
+    /// Supplier sources are preflighted separately before teardown so an unavailable optional adapter
+    /// cannot interrupt the transport already running.
+    private func makeSource(for id: String) -> (any LiveHRSource)? {
         switch sourceKind(for: id) {
         case .ftms:  return makeFTMSSource(id: id)
         case .huami: return makeHuamiSource(id: id)
         case .oura:  return makeOuraSource(id: id)
+        case .veepoo: return nil
         default:     return makeStandardSource(id: id)
         }
     }
@@ -428,6 +530,13 @@ final class SourceCoordinator: ObservableObject {
         pendingAdoptDeviceId = deviceId
     }
 
+    /// Revoke a still-pending adopt intent when durable device registration fails. The device-id check
+    /// prevents an obsolete wizard attempt from cancelling a newer ring's consent.
+    func cancelOuraAdopt(deviceId: String) {
+        guard pendingAdoptDeviceId == deviceId else { return }
+        pendingAdoptDeviceId = nil
+    }
+
     /// Stop the live non-WHOOP source (standard strap, FTMS machine, Huami device, or Oura ring) and drop
     /// the reference. Idempotent — exactly one source is ever live. Also nils the published `ouraSource`
     /// handle so the adopt mirror resets to `.idle` (when an Oura ring was live it is the same object as
@@ -450,6 +559,77 @@ final class SourceCoordinator: ObservableObject {
         guard activeStrapId == deviceId else { return }
         tearDownNonWhoopSource()
         activeStrapId = nil
+    }
+
+    /// Lease the supplier SDK's process-wide manager to the pairing session.
+    /// A currently active supplier source is stopped before the lease is
+    /// returned. Other source families keep their independent transports.
+    func acquireSupplierPairingLease() -> SupplierPairingLease? {
+        guard supplierPairingLease == nil else { return nil }
+
+        if let active = activeDevice(for: registry.activeDeviceId),
+           active.sourceKind == .veepoo {
+            if activeStrapId == active.id {
+                tearDownNonWhoopSource()
+                activeStrapId = nil
+            } else if activeStrapId != nil || activeSource != nil {
+                return nil
+            }
+        }
+
+        supplierPairingLeaseGeneration &+= 1
+        let lease = SupplierPairingLease(
+            generation: supplierPairingLeaseGeneration
+        )
+        supplierPairingLease = lease
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .managerLease,
+            outcome: .began
+        )
+        return lease
+    }
+
+    /// Release a cancelled pairing lease after the pairing adapter has
+    /// disconnected. The current durable owner wins over the device that was
+    /// active when pairing began.
+    @discardableResult
+    func cancelSupplierPairingLease(_ lease: SupplierPairingLease) -> Bool {
+        releaseSupplierPairingLease(lease)
+    }
+
+    /// Commit a pairing lease after registration and pairing-adapter teardown.
+    /// The method is generation-fenced so an obsolete wizard cannot release a
+    /// newer pairing session or start its source.
+    @discardableResult
+    func commitSupplierPairingLease(_ lease: SupplierPairingLease) -> Bool {
+        releaseSupplierPairingLease(lease)
+    }
+
+    private func releaseSupplierPairingLease(
+        _ lease: SupplierPairingLease
+    ) -> Bool {
+        guard supplierPairingLease == lease else {
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .managerLease,
+                outcome: .failed,
+                failure: .staleLease
+            )
+            return false
+        }
+
+        supplierPairingLease = nil
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .managerLease,
+            outcome: .completed
+        )
+
+        guard let current = activeDevice(for: registry.activeDeviceId),
+              current.sourceKind == .veepoo
+        else {
+            return true
+        }
+        activeDeviceChanged(to: current.id)
+        return true
     }
 
     // MARK: - Identity adoption
@@ -476,8 +656,8 @@ final class SourceCoordinator: ObservableObject {
         let previousUuid = connectedWhoopUuid
         connectedWhoopUuid = uuid
 
-        let activeId = registry.activeDeviceId
-        guard isWhoop(activeId),
+        guard let activeId = registry.activeDeviceId,
+              isWhoop(activeId),
               let device = registry.devices.first(where: { $0.id == activeId }) else { return }
 
         // Connection recency is a transition fact, not a sample counter. Touch once when a link comes up
@@ -521,6 +701,13 @@ final class SourceCoordinator: ObservableObject {
     /// `.oura` → OuraLiveSource, anything else → StandardHRSource).
     private func sourceKind(for id: String) -> SourceKind? {
         registry.devices.first(where: { $0.id == id })?.sourceKind
+    }
+
+    private func activeDevice(for id: String?) -> PairedDevice? {
+        guard let id else { return nil }
+        return registry.devices.first {
+            $0.id == id && $0.status == .active
+        }
     }
 
     /// The stored `model` string for a device id ("Oura Ring 3/4/5"), if the registry knows it. Used to

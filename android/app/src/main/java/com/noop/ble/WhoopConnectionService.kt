@@ -1,5 +1,6 @@
 package com.noop.ble
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -840,6 +841,7 @@ class WhoopConnectionService : Service() {
 
     /** Promote to the foreground. Returns false (rather than throwing) if the platform refuses. When
      *  [locationActive] we add the location FGS type for a GPS workout or active Safety page. */
+    @SuppressLint("ForegroundServiceType") // Declared on this service in the merged Full and Demo manifests.
     private fun startForegroundCompat(
         notification: Notification,
         locationActive: Boolean = false,

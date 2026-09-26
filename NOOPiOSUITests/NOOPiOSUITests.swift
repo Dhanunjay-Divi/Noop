@@ -249,6 +249,10 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "app-report-review")
 
         app.buttons["Send feedback"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["noop.app-report.delivery"]
+                .waitForExistence(timeout: 20)
+        )
         XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Cancel feedback"].exists)
         XCTAssertTrue(
@@ -261,7 +265,11 @@ final class NOOPiOSUITests: XCTestCase {
         )
         XCTAssertTrue(app.buttons["Close app report"].isEnabled)
         app.buttons["Close app report"].tap()
-        XCTAssertFalse(app.navigationBars["App report"].exists)
+        XCTAssertTrue(
+            waitUntil(timeout: 5) {
+                !app.navigationBars["App report"].exists
+            }
+        )
     }
 
     func testAppReportScreenSnapshotIsReviewableAndRemovable() {
@@ -320,14 +328,44 @@ final class NOOPiOSUITests: XCTestCase {
             ]
         )
 
-        XCTAssertTrue(app.navigationBars["App report"].waitForExistence(timeout: 20))
-        app.buttons["Build report"].tap()
-        XCTAssertTrue(app.staticTexts["Report ready"].waitForExistence(timeout: 20))
-        app.buttons["Send feedback"].tap()
-        XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 10))
+        guard app.navigationBars["App report"].waitForExistence(timeout: 20) else {
+            XCTFail("The app report sheet did not open.")
+            return
+        }
+        let buildReport = app.buttons["noop.app-report.build"]
+        guard buildReport.waitForExistence(timeout: 10),
+              scrollToHittable(buildReport, in: app) else {
+            XCTFail("The build-report action was not available.")
+            return
+        }
+        buildReport.tap()
 
-        app.buttons["Cancel feedback"].tap()
-        XCTAssertTrue(app.staticTexts["Canceled"].waitForExistence(timeout: 10))
+        let sendFeedback = app.buttons["noop.app-report.send"]
+        guard sendFeedback.waitForExistence(timeout: 60),
+              scrollToHittable(sendFeedback, in: app) else {
+            XCTFail("The report did not reach its review state.")
+            return
+        }
+        sendFeedback.tap()
+
+        guard app.descendants(matching: .any)["noop.app-report.delivery"]
+            .waitForExistence(timeout: 60),
+              app.staticTexts["Queued"].waitForExistence(timeout: 30) else {
+            XCTFail("The report did not reach its queued delivery state.")
+            return
+        }
+
+        let cancelFeedback = app.buttons["noop.app-report.cancel-feedback"]
+        guard cancelFeedback.waitForExistence(timeout: 10),
+              scrollToHittable(cancelFeedback, in: app) else {
+            XCTFail("The queued report did not expose its cancellation action.")
+            return
+        }
+        cancelFeedback.tap()
+        guard app.staticTexts["Canceled"].waitForExistence(timeout: 30) else {
+            XCTFail("The queued report did not reach its canceled state.")
+            return
+        }
         XCTAssertTrue(
             app.staticTexts.matching(
                 NSPredicate(
@@ -779,58 +817,64 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "terms-readable-primary-action")
     }
 
-    func testOnboardingPairingUsesGenericNoopBandAndAutomaticDetection() {
+    func testOnboardingDeviceSetupShowsOnlyAvailableLaunchBands() {
         let app = launchDemoScreen(
             "onboarding",
-            extraArguments: ["--demo-onboarding-step", "5"]
+            extraArguments: ["--demo-onboarding-page", "scan"]
         )
 
-        let band = app.staticTexts["noop.onboarding.band"]
-        XCTAssertTrue(band.waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["noop.onboarding.scan"].exists)
-        XCTAssertFalse(app.staticTexts["Which strap are you pairing?"].exists)
-        XCTAssertFalse(app.staticTexts["WHOOP 4.0"].exists)
-        XCTAssertFalse(app.staticTexts["WHOOP 5.0 / MG"].exists)
-        keepScreenshot(app, name: "onboarding-noop-band")
+        let chooseDevice = app.buttons["noop.onboarding.choose-device"]
+        XCTAssertTrue(chooseDevice.waitForExistence(timeout: 20))
+        XCTAssertEqual(chooseDevice.label, "Connect band")
+        XCTAssertFalse(app.staticTexts["Compatible band 5.0 / MG"].exists)
+        XCTAssertFalse(app.staticTexts["Compatible band 4.0"].exists)
+        chooseDevice.tap()
+
+        let whoop5 = app.buttons["noop.device-wizard.type.whoop-5-mg"]
+        let whoop4 = app.buttons["noop.device-wizard.type.whoop-4"]
+        XCTAssertTrue(whoop5.waitForExistence(timeout: 10))
+        XCTAssertTrue(whoop4.waitForExistence(timeout: 5))
+        XCTAssertTrue(whoop5.label.hasPrefix("Compatible band 5.0 / MG."))
+        XCTAssertTrue(whoop4.label.hasPrefix("Compatible band 4.0."))
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.supplier-band"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.heart-rate-strap"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.gym-equipment"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.oura"].exists)
+        XCTAssertFalse(app.staticTexts["Experimental"].exists)
+        keepScreenshot(app, name: "onboarding-supported-band-picker")
     }
 
-    func testOnboardingScanEndpointClearsFooterAtAccessibilitySize() {
+    func testOnboardingDeviceSetupClearsFooterAtAccessibilitySize() {
         let app = launchDemoScreen(
             "onboarding",
-            extraArguments: ["--demo-onboarding-step", "5"],
+            extraArguments: ["--demo-onboarding-page", "scan"],
             preferredContentSize: PreferredContentSize.accessibilityLarge
         )
         let primaryAction = app.buttons["noop.onboarding.primary"]
         let footer = app.descendants(matching: .any)["noop.onboarding.footer"]
-        let scanHelp = app.buttons["Don't see it?"]
-        let scanFootnote = app.staticTexts["noop.onboarding.scan-footnote"]
+        let chooseDevice = app.buttons["noop.onboarding.choose-device"]
         XCTAssertTrue(primaryAction.waitForExistence(timeout: 20))
         XCTAssertTrue(footer.waitForExistence(timeout: 5))
-        XCTAssertTrue(scanHelp.waitForExistence(timeout: 5))
-        XCTAssertTrue(scanFootnote.waitForExistence(timeout: 5))
-        XCTAssertFalse(
-            scanHelp.isHittable && scanHelp.frame.intersects(footer.frame),
-            "Visible Scan help must not be exposed underneath the fixed onboarding footer."
-        )
+        XCTAssertTrue(chooseDevice.waitForExistence(timeout: 5))
 
         for _ in 0..<8
-            where !scanFootnote.isHittable
-                || scanFootnote.frame.maxY + 12 > footer.frame.minY {
+            where !chooseDevice.isHittable
+                || chooseDevice.frame.maxY + 12 > footer.frame.minY {
             app.swipeUp()
         }
 
         XCTAssertTrue(
-            scanFootnote.isHittable,
-            "The final Scan guidance must be reachable above the fixed onboarding footer."
+            chooseDevice.isHittable,
+            "The Connect band action must remain reachable at large text sizes."
         )
         XCTAssertLessThanOrEqual(
-            scanFootnote.frame.maxY + 12,
+            chooseDevice.frame.maxY + 12,
             footer.frame.minY,
-            "The fixed onboarding footer must not cover the Scan step's final guidance."
+            "The fixed onboarding footer must not cover the Connect band action."
         )
-        XCTAssertFalse(scanFootnote.frame.intersects(footer.frame))
-        XCTAssertFalse(scanFootnote.frame.intersects(primaryAction.frame))
-        keepScreenshot(app, name: "se-accessibility-onboarding-clear-footer")
+        XCTAssertFalse(chooseDevice.frame.intersects(footer.frame))
+        XCTAssertFalse(chooseDevice.frame.intersects(primaryAction.frame))
+        keepScreenshot(app, name: "se-accessibility-device-setup-clear-footer")
     }
 
     func testOnboardingDailyRhythmKeepsAutomationsReachableAboveFooter() {
@@ -916,7 +960,17 @@ final class NOOPiOSUITests: XCTestCase {
             textFieldIsEmpty(weight, placeholder: "Weight"),
             "Clearing weight must not restore the previously validated value."
         )
-        weight.typeText("82.5")
+        let focusedWeight = app.textFields.matching(
+            NSPredicate(
+                format: "identifier == %@ AND hasKeyboardFocus == true",
+                weight.identifier
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            focusedWeight.waitForExistence(timeout: 3),
+            "Clearing weight must preserve keyboard focus for immediate re-entry."
+        )
+        focusedWeight.typeText("82.5")
         XCTAssertEqual(weight.value as? String, "82.5")
 
         let height = app.textFields["noop.profile.height.cm"]
@@ -931,7 +985,17 @@ final class NOOPiOSUITests: XCTestCase {
             textFieldIsEmpty(height, placeholder: "Height"),
             "Clearing height must not restore the previously validated value."
         )
-        height.typeText("183")
+        let focusedHeight = app.textFields.matching(
+            NSPredicate(
+                format: "identifier == %@ AND hasKeyboardFocus == true",
+                height.identifier
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            focusedHeight.waitForExistence(timeout: 3),
+            "Clearing height must preserve keyboard focus for immediate re-entry."
+        )
+        focusedHeight.typeText("183")
         XCTAssertEqual(height.value as? String, "183")
         keepScreenshot(app, name: "onboarding-editable-measurements")
     }
@@ -969,49 +1033,49 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "key-metrics-accessible-color-boundaries")
     }
 
-    func testTodayKeepsTheCompleteMetricCatalogVisible() {
+    func testTodayKeepsPinnedMetricsAndFullHistoryReachable() {
         let app = XCUIApplication()
         app.launchArguments = [
+            "-today.keyMetrics", "charge,effort,rest",
             "--demo-seed",
             "--demo-tab", "today",
             "--demo-key-metrics",
         ]
         app.launch()
 
-        let metricIDs = [
-            "charge", "effort", "rest", "hrv", "restingHr",
+        let pinnedMetricIDs = ["charge", "effort", "rest"]
+        let unpinnedMetricIDs = [
+            "hrv", "restingHr",
             "bloodOxygen", "respiratory", "steps", "weight", "calories",
         ]
         let scroll = app.scrollViews["noop.today.scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 20))
-        let readinessTile = app.descendants(matching: .any)["noop.today.key-metric.charge"]
-        for _ in 0..<12 where !readinessTile.exists {
+        let history = app.buttons["noop.today.key-metrics.open-history"]
+        for _ in 0..<12 where !history.isHittable {
             scroll.swipeUp()
         }
-        XCTAssertTrue(
-            readinessTile.waitForExistence(timeout: 15),
-            "The demo Key Metrics section must finish loading before catalog traversal."
-        )
-        let calendar = app.buttons["noop.today.calendar"]
-        for _ in 0..<12 where !calendar.isHittable {
-            scroll.swipeDown()
-        }
-        XCTAssertTrue(calendar.isHittable, "Today must return to the top before catalog traversal.")
 
-        var missing = Set(metricIDs)
-        for _ in 0..<16 {
-            let visible = missing.filter { id in
-                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists
-            }
-            missing.subtract(visible)
-            if missing.isEmpty { break }
-            scroll.swipeUp()
+        for id in pinnedMetricIDs {
+            XCTAssertTrue(
+                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists,
+                "Pinned Today metric \(id) must remain visible."
+            )
         }
+        for id in unpinnedMetricIDs {
+            XCTAssertFalse(
+                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists,
+                "Unpinned metric \(id) must stay out of the focused Today grid."
+            )
+        }
+        XCTAssertTrue(history.isHittable, "The full metric history action must remain reachable.")
+        keepScreenshot(app, name: "today-pinned-key-metrics")
+
+        history.tap()
         XCTAssertTrue(
-            missing.isEmpty,
-            "Every Today metric must remain reachable; missing: \(missing.sorted().joined(separator: ", "))."
+            app.staticTexts["Explore"].waitForExistence(timeout: 10),
+            "The Today history action must open the complete metric explorer."
         )
-        keepScreenshot(app, name: "today-complete-key-metric-catalog")
+        keepScreenshot(app, name: "today-full-metric-history")
     }
 
     func testHydrationAndSleepScreensExposeReminderControls() {
@@ -1201,9 +1265,10 @@ final class NOOPiOSUITests: XCTestCase {
 
     func testRecoveryTrendSupportsExactDateScrubbing() {
         let app = launchApp(tab: "trends")
+        let chartIdentifier = "noop.trends.recovery.chart"
         // NavigationLink mirrors child accessibility metadata onto its button. Select the chart's
         // concrete element so the gesture lands in the plot instead of matching both elements.
-        let chart = app.otherElements["noop.trends.recovery.chart"].firstMatch
+        let chart = app.otherElements[chartIdentifier].firstMatch
         XCTAssertTrue(chart.waitForExistence(timeout: 20))
         let quickActions = app.buttons["noop.quick-actions"]
         XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
@@ -1221,7 +1286,15 @@ final class NOOPiOSUITests: XCTestCase {
         let nearby = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.50))
         july29Area.press(forDuration: 0.35, thenDragTo: nearby)
 
-        let selected = String(describing: chart.value)
+        // SwiftUI may replace the chart's accessibility node after its value changes. Xcode 26.6
+        // classifies the replacement as StaticText even though the stable identifier and semantics
+        // are unchanged, so re-query without pinning the stale pre-scrub `Other` element type.
+        let selectedChart = app.descendants(matching: .any)[chartIdentifier].firstMatch
+        XCTAssertTrue(selectedChart.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            String(describing: selectedChart.value) != summary
+        })
+        let selected = String(describing: selectedChart.value)
         XCTAssertNotEqual(selected, summary)
         XCTAssertFalse(selected.localizedCaseInsensitiveContains("points"))
         keepScreenshot(app, name: "trends-recovery-date-selection")
@@ -1277,19 +1350,19 @@ final class NOOPiOSUITests: XCTestCase {
         // scrolling signpost payload and can starve XCTest's event-loop observer across repeated gestures.
         // XCTest also invokes a measurement closure for an uncounted calibration pass even when
         // iterationCount is one, so wrapping this interaction in `measure` silently performs more than the
-        // requested round trip and can wedge the observer. Execute exactly one timed round trip instead.
-        // Re-query before each event because interruption handling can invalidate a cached XCUIElement.
+        // requested gesture and can wedge the observer. A second opposite-direction gesture can trigger the
+        // same simulator-only 60-second idle-observer timeout after both events were delivered. Execute one
+        // timed upward gesture instead; the dedicated compaction test owns bidirectional navigation.
         // The dedicated compaction test owns navigation semantics; production's bounded CADisplayLink
         // monitor records 50 ms and 150 ms hitches, and real devices retain five iterations of Apple's
         // scrolling/deceleration metric below.
         let startedAt = ProcessInfo.processInfo.systemUptime
         app.scrollViews[scrollIdentifier].swipeUp()
-        app.scrollViews[scrollIdentifier].swipeDown()
-        let smokeRoundTrip = ProcessInfo.processInfo.systemUptime - startedAt
+        let smokeGesture = ProcessInfo.processInfo.systemUptime - startedAt
         XCTAssertLessThan(
-            smokeRoundTrip,
+            smokeGesture,
             15,
-            "A simulator Today scroll round trip must not stall."
+            "A simulator Today scroll gesture must not stall."
         )
         #else
         let options = XCTMeasureOptions()

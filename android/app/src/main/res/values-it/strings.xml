@@ -229,6 +229,7 @@
     <string name="key_metrics_selection_count">%1$d di %2$d fissate</string>
     <string name="key_metrics_show_selected">Mostra metriche selezionate</string>
     <string name="key_metrics_show_all_count">Mostra tutte le metriche (%1$d)</string>
+    <string name="key_metrics_open_history">Apri tutta la cronologia delle metriche</string>
     <string name="hydration_adaptive_timing_label">Programmazione adattiva</string>
     <string name="hydration_adaptive_timing_help">Regola l’intervallo di oggi usando lo Sforzo e l’assunzione confermata. I dati mancanti non vengono mai stimati.</string>
     <string name="hydration_adaptive_timing_status">Attualmente ogni %1$d min. La programmazione cambia solo quando i dati di oggi lo supportano.</string>

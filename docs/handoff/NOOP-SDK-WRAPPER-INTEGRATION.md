@@ -1,9 +1,9 @@
 # NOOP Band SDK wrapper integration
 
-**Status:** implementation handoff; supplier transport and physical validation
-remain gated
+**Status:** candidate native wrappers integrated for verified local Debug
+qualification; physical validation and release remain gated
 
-**Last reviewed:** 2026-09-19
+**Last reviewed:** 2026-09-25
 
 ## 1. Purpose
 
@@ -67,9 +67,10 @@ authoritative for the physical scenarios and evidence package.
 - D-055 permits exactly one phone collector. Mac, Watch, and additional
   signed-in devices are viewers or companions unless a future collector
   handoff is separately validated.
-- D-056 keeps the NOOP-owned neutral SDK in the private `NoopBandSDK`
-  repository and consumes only approved, pinned platform artifacts. Supplier
-  binaries and the original supplier drop remain outside this repository.
+- D-056 keeps the NOOP-owned neutral SDK in the public, source-only
+  `NoopBandSDK` repository and consumes only approved, pinned platform
+  artifacts. Supplier binaries and the original supplier drop remain outside
+  both public repositories.
 - D-059 targets cloud authority for durable account history, canonical
   versioned metric publication, recommendations, and cross-device state
   through per-data-class and per-formula gates. The phone remains the encrypted
@@ -130,6 +131,7 @@ authoritative for the physical scenarios and evidence package.
 | Boundary | Current source state | Still required |
 |---|---|---|
 | Single active source | Implemented by `SourceCoordinator` on Apple and Android | Supplier adapter registration and physical source-switch tests |
+| Neutral SDK core | Digest-pinned Swift and Kotlin state machines, bounded diagnostics, virtual fixtures, conformance scenarios, and app build boundaries are integrated default-off | Supplier-specific transport mapping and physical validation |
 | WHOOP transport | Implemented and retained | Continue regression coverage until supplier acceptance completes |
 | Device registry | Implemented with one active source and source-specific provenance | First-party identity mapping and migration fixtures |
 | Live persistence | Implemented for current transports | Supplier sample normalization, units, quality, deduplication, and physical comparison |
@@ -145,9 +147,29 @@ authoritative for the physical scenarios and evidence package.
 | Android supplier runtime | Candidate AARs reviewed | Signed Android integration, OEM/background matrix, and physical runs |
 | Production band accuracy | Not established | Bench and participant validation for every shipped signal and firmware revision |
 
-The supplier wrapper described here is not yet implemented in this app
-repository. Existing source seams make the integration possible; they do not
-close the supplier or hardware gates.
+The binary-free neutral SDK core is integrated in this app repository through
+one exact source manifest. Apple consumes the pinned Swift package and Android
+compiles the pinned Kotlin sources. Candidate native adapters are also present
+behind verified, local, physical-device Debug wiring:
+
+- Apple imports the restricted supplier framework only in
+  `Strand/BLE/VeepooBandAdapter.swift`. The private
+  `VeepooBleSDKClient` maps it into the NOOP-owned `VeepooBandSDKClient`,
+  `VeepooBandAdapterControlling`, and event models.
+- Android imports supplier classes only in the local `veepoo` source set's
+  `VeepooBridgeProviderImpl.kt`. That provider maps calls into
+  `VeepooVendorClient`; the app-facing lifecycle depends on the NOOP-owned
+  `VeepooBridge` and `VeepooManagedSource` contracts.
+- Source coordinators, onboarding, registry, storage, metrics, UI, cloud, and
+  diagnostics do not receive supplier objects.
+
+The candidate wrappers currently cover bounded discovery, connection,
+authentication, compatibility, battery, and display-only live heart rate.
+They do not establish printed-label identity truth, possession proof, durable
+supplier samples, history offload, haptic/alarm commands, OTA, firmware
+flashing, background behavior, redistribution authority, or physiological
+accuracy. The integrated source and synthetic evidence do not close any
+physical or release gate.
 
 ## 4. Target topology
 
@@ -268,11 +290,11 @@ the neutral store models used by the platform.
 
 ### 5.6 Repository and artifact boundary
 
-The separate private `Dhanunjay-Divi/NoopBandSDK` repository is the only home
-for the NOOP-owned neutral wrapper contract. At this review its binary-free
-scaffold is pinned at `ee82cc0`; its local gate reports 14 repository files
-passing language, binary, and JSON checks. That proves only repository hygiene,
-not an implemented adapter or hardware behavior.
+The separate public, source-only `Dhanunjay-Divi/NoopBandSDK` repository is the
+only home for the NOOP-owned neutral wrapper contract. At this review its
+binary-free scaffold is pinned at `ee82cc0`; its local gate reports 14
+repository files passing language, binary, and JSON checks. That proves only
+repository hygiene, not an implemented adapter or hardware behavior.
 
 The intended module split is:
 
@@ -316,6 +338,59 @@ Artifact flow is one-way:
 | NOOP phone app | permissions, one collector, activation UX, durable store, freshness, managed outbox, bounded diagnostics | claiming force-quit execution, repairing firmware gaps |
 | Ownership/cloud | atomic owner, installations, optional managed history/viewers, gated canonical publication | physical possession without band proof, live BLE freshness |
 | Operator/supplier | provisioning, rights, signing, manufacturing, RMA/wipe, support and security response | undocumented waivers or hidden production exceptions |
+
+### 5.8 Replaceable SDK boundary
+
+An SDK update must remain a wrapper replacement, not an application rewrite.
+The stable app-facing contracts are:
+
+- Apple: `VeepooBandAdapterControlling`, `VeepooBandSDKClient`,
+  `VeepooBandSDKEvent`, and `VeepooBandAdapterCore`;
+- Android: `VeepooBridge`, `VeepooManagedSource`, `VeepooVendorClient`, and
+  `VeepooBandSource`; and
+- both platforms: the pinned `NoopBandSDK` session/capability contract and the
+  shared product compatibility manifest.
+
+For an API-compatible supplier release, the expected edit surface is limited
+to:
+
+1. the immutable external framework/AAR drop and its reviewed hashes,
+   inventory, licenses, SBOM, vulnerability, privacy, and egress evidence;
+2. Apple `VeepooBleSDKClient` in `VeepooBandAdapter.swift`;
+3. Android `VpOperateClient` in `VeepooBridgeProviderImpl.kt`;
+4. the platform artifact trust manifests and local configuration verifiers;
+5. the compatibility manifest when the approved hardware, firmware, protocol,
+   or wrapper tuple changes; and
+6. wrapper fakes, conformance fixtures, and focused adapter tests.
+
+`VeepooVendorBridge.kt` may change only when callback ordering or lifecycle
+semantics change. The NOOP-owned neutral SDK may change only when the
+cross-platform capability contract itself changes; that requires matched
+Swift/Kotlin conformance and an explicit schema/revision update.
+
+The update must stop and be redesigned if it requires supplier imports or
+objects in source coordinators, onboarding, registry, storage, analytics,
+screens, notifications, cloud code, Watch/widgets, or shared packages. The
+source-boundary regression in
+`Tools/tests/test_supplier_sdk_wrapper_boundary.py` enforces the current import
+quarantine on both platforms.
+
+Use this replacement sequence:
+
+1. Preserve the incoming drop read-only outside Git and inventory every file.
+2. Diff public headers/classes and callback behavior against the pinned drop.
+3. Review rights, dependencies, egress, privacy, vulnerabilities, and exact
+   hardware/firmware support before changing trust data.
+4. Update the native client mapping without changing app-facing contracts.
+5. Repin hashes and compatibility tuples only after independent review.
+6. Run wrapper boundary, artifact verifier, conformance, focused lifecycle,
+   complete platform, and repository policy walls.
+7. Repeat the affected physical-device matrix before accepting the new tuple.
+
+Rollback is the reverse pin operation: restore the previous reviewed artifacts,
+native client mapping, trust manifests, and compatibility tuple. Registry,
+history, account, and UI schemas must not require rollback changes for a
+transport-only SDK update.
 
 ## 6. Platform-neutral wrapper contract
 
@@ -764,10 +839,26 @@ The first accepted session for each hardware/firmware pair persists:
 - model and hardware revision;
 - firmware and protocol revision;
 - capability report revision;
-- supported stream and command set;
-- history categories and limits;
+- capability schema version;
+- supported live stream set;
+- supported history stream set and limits;
 - timestamp, quality, and calibration semantics; and
 - incompatibility or degradation state.
+
+Capability schema v3 treats live and stored-history support as independent,
+binds every lane/stream pair to its negotiated unit, cadence, quality,
+timestamp, parser, and calibration semantics, and declares which bounded
+operation classes may run while live collection is active. A stream advertised
+only in `historyStreams` does not authorize live delivery, and a stream
+advertised only in `liveStreams` does not authorize history offload. Schema v1
+and v2 reports are superseded and fail closed at this boundary; they are not
+silently expanded or upgraded.
+
+When circular history has overwritten data, an overflow chunk carries both the
+retained device-time range and the first lost device-time range. Those ranges
+must survive the accepted chunk and match the exact durable receipt before the
+cursor advances. They are storage/provenance metadata and never enter
+diagnostics.
 
 The app compares every later report with the accepted report:
 
@@ -1149,7 +1240,8 @@ These steps can be completed and verified without claiming access to the
 production band, supplier binary behavior, or firmware capability:
 
 1. Complete the binary-free neutral contract, synthetic fixtures, virtual
-   band, and conformance scenarios in the private `NoopBandSDK` repository.
+   band, and conformance scenarios in the public, source-only `NoopBandSDK`
+   repository.
 2. Define Apple and Android adapter composition points without exposing
    supplier types in public NOOP APIs or linking a supplier binary into
    simulator, macOS, Watch, widget, or pure-package targets.

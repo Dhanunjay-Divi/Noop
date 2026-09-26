@@ -575,7 +575,7 @@ enum AppleDemoSeeder {
                     referenceText: nil
                 ),
             ])
-            NSLog("AppleDemoSeeder: nutrition fixture ready for \(today)")
+            VisualQALog.emit("AppleDemoSeeder: nutrition fixture ready mixed=true")
         } catch {
             NSLog("AppleDemoSeeder: nutrition fixture failed - \(error)")
         }

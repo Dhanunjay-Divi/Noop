@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.graphics.Color
@@ -633,3 +634,10 @@ internal fun appearanceTokens(mode: AppearanceMode, systemDark: Boolean): Palett
     AppearanceMode.DARK -> DarkTokens
     AppearanceMode.BLACK -> BlackTokens
 }
+
+/**
+ * Highest-contrast black-or-white ink for a runtime fill that has no semantic ink token.
+ * Canonical palette fills should still use their paired token, such as [Palette.accentInk].
+ */
+internal fun contrastInk(background: Color): Color =
+    if (background.luminance() > 0.179f) Color.Black else Color.White

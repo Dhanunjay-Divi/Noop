@@ -106,10 +106,6 @@ struct RootTabView: View {
     /// A discoverable quick finish control in the More header. The full visual selector remains in
     /// Settings; this menu changes the same shared preference without adding clutter to Today's masthead.
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.defaultMode.rawValue
-    /// V8 liquid redesign is the default Today; the Settings toggle lets a user fall back to the classic
-    /// Today if they prefer it (keyed identically to the SettingsView toggle). Default ON.
-    @AppStorage("noop.liquidTodayEnabled") private var liquidTodayEnabled = true
-
     private static var initialSelectedTab: Int {
         #if DEBUG
         if ProcessInfo.processInfo.environment["NOOP_STRENGTH_GUIDE_DEMO"] != nil {
@@ -168,10 +164,8 @@ struct RootTabView: View {
         return paths
     }
 
-    /// The Today tab root, honouring the liquid/classic preference.
-    @ViewBuilder private var todayTabRoot: some View {
-        if liquidTodayEnabled { LiquidTodayView() } else { TodayView() }
-    }
+    /// One canonical Today surface across Apple platforms.
+    private var todayTabRoot: some View { LiquidTodayView() }
 
     init() {
         // Plain Titanium bar: pin the background to `surfaceBase` and clear the system
@@ -2275,6 +2269,7 @@ private struct LighterWorkoutOptionsSheet: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(StrandPalette.accent)
+                        .foregroundStyle(StrandPalette.accentInk)
 
                         Button(action: onOpenStrength) {
                             Label(

@@ -242,6 +242,40 @@ class ComputedScoreReconciliationInstrumentedTest {
     }
 
     @Test
+    fun stepCleanupRejectsImportedPrimaryTargetBeforeAnyMutation() = runBlocking {
+        val imported = "health-connect"
+        val computed = "compatible-band-noop"
+        val day = "2026-05-02"
+        dao.upsertDailyMetrics(
+            listOf(
+                DailyMetric(imported, day, recovery = 90.0, steps = 8_000),
+                DailyMetric(computed, day, recovery = 60.0, steps = 4_000),
+            ),
+        )
+
+        val failure = runCatching {
+            repository.reconcileComputedScoreRange(
+                deviceId = imported,
+                fromDay = day,
+                toDay = day,
+                dailyRows = listOf(DailyMetric(imported, day, recovery = 50.0)),
+                managedRestKeys = setOf("sleep_performance"),
+                restRows = emptyList(),
+                stepEvidenceDeviceIds = listOf(computed),
+                clearComputedStepDays = listOf(day),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalArgumentException)
+        val importedRow = dao.dailyMetricsRange(imported, day, day).single()
+        assertEquals(90.0, importedRow.recovery!!, 0.0)
+        assertEquals(8_000, importedRow.steps)
+        val computedRow = dao.dailyMetricsRange(computed, day, day).single()
+        assertEquals(60.0, computedRow.recovery!!, 0.0)
+        assertEquals(4_000, computedRow.steps)
+    }
+
+    @Test
     fun orphanRestEvidenceFailsBeforeAnyMutation() = runBlocking {
         val computed = "compatible-band-noop"
         dao.upsertDailyMetrics(listOf(DailyMetric(computed, "2026-05-02", recovery = 52.0)))

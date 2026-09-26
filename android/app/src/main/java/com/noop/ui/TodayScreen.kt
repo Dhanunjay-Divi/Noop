@@ -55,7 +55,6 @@ import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
@@ -561,6 +560,8 @@ fun TodayScreen(
     // wrongly dumping into the Health monitor). Mirrors the iOS liquidCard `metricDetail(key)`. Takes the
     // vital_detail key; defaults to the Health screen so an unbound caller keeps the old behaviour.
     onOpenMetric: (String) -> Unit = { onOpenHealth() },
+    // The selected Today cards stay compact; the complete longitudinal metric surface remains one tap away.
+    onOpenMetricHistory: () -> Unit = {},
     onOpenSleep: () -> Unit = {},
     // Optional Coupled view card (task #43): a tap-through to the WHOOP-style day screen. Defaulted to a
     // no-op so the call site stays compiling; AppRoot binds it to nav.navigate(CoupledView).
@@ -1244,8 +1245,8 @@ fun TodayScreen(
     val journalReminderOn = remember { NoopPrefs.journalReminderEnabled(context) }
     // S4: the Synthesis card collapses to a one-liner that expands on tap (default collapsed). Mirrors iOS.
     var synthesisExpanded by remember { mutableStateOf(false) }
-    // Key Metrics always shows the complete catalog with the user's three-to-five pins first. Data Sources
-    // still collapses to its summary.
+    // Key Metrics stays focused on the user's selected three-to-five signals. Data Sources still
+    // collapses to its summary, and the complete metric catalog remains in history.
     var sourcesExpanded by remember { mutableStateOf(false) }
     var scoringCardSeen by remember { mutableStateOf(ScoringGuidePrefs.cardSeen(context)) }
 
@@ -1359,11 +1360,12 @@ fun TodayScreen(
     var importedStepsByDay by remember(activeStrapId) {
         mutableStateOf<Map<String, Int>>(emptyMap())
     }
-    LaunchedEffect(days, selectedDayKey, activeStrapId, deferHistoricalQueries) {
+    LaunchedEffect(selectedDayKey, activeStrapId, deferHistoricalQueries) {
         if (deferHistoricalQueries) return@LaunchedEffect
         // Today's steps keep moving after the manual one-shot HC import, so the stored row goes
-        // stale within minutes, top it up with ONE live StepsRecord read before the stored-row
-        // read below. Best-effort: any HC hiccup just falls through to whatever is stored. (#150)
+        // stale within minutes. Top it up once for this selected-day/device state. This write is
+        // intentionally separate from the metric-version-keyed read below, otherwise its own version
+        // increment would form an unbounded refresh loop. Best-effort: any HC hiccup leaves storage.
         if (selectedDayOffset == 0) {
             try {
                 HealthConnectImporter.refreshTodaySteps(context, viewModel.repo)
@@ -1371,6 +1373,16 @@ fun TodayScreen(
                 throw cancelled
             } catch (_: Exception) { /* best-effort */ }
         }
+    }
+
+    LaunchedEffect(
+        days,
+        selectedDayKey,
+        activeStrapId,
+        deferHistoricalQueries,
+        ageMetricDataVersion,
+    ) {
+        if (deferHistoricalQueries) return@LaunchedEffect
         val fromDay = minOf(
             days.minOfOrNull { it.day } ?: selectedDayKey,
             selectedDayKey,
@@ -1389,8 +1401,10 @@ fun TodayScreen(
             fromDay,
             toDay,
         )
-        val loaded = (apple + healthConnect).filter { it.steps != null }
-            .groupBy { it.day }.mapValues { (_, rows) -> rows.mapNotNull { it.steps }.max() }
+        val loaded = (apple + healthConnect)
+            .filter { row -> row.steps?.let { it >= 0 } == true }
+            .groupBy { it.day }
+            .mapValues { (_, rows) -> rows.mapNotNull { it.steps }.max() }
         currentCoroutineContext().ensureActive()
         if (viewModel.activeStrapId == activeStrapId) {
             importedStepsByDay = loaded
@@ -1398,11 +1412,10 @@ fun TodayScreen(
         }
     }
 
-    // On-device steps ESTIMATE for the selected day (key "steps_est", computed "-noop" source). The
-    // Steps tile prefers a measured phone import, then the @57 motion-derived value; only when a day has
-    // neither does it fall back to this calibrated estimate. Every strap-derived path is labelled as an
-    // estimate. resolvedSeries reads the computed source for the my-whoop key, exactly like
-    // the Explore "steps_est" metric. Null until loaded / no estimate for the day. (#150)
+    // On-device steps ESTIMATE for the selected day (key "steps_est", computed "-noop" source). It remains
+    // available to the explicitly labelled calibration/research screen but cannot fill primary Steps.
+    // resolvedSeries reads the computed source for the my-whoop key. Null until loaded or when no
+    // estimate exists for the day. (#150)
     var stepsEstForDay by remember(activeStrapId) { mutableStateOf<Int?>(null) }
     var stepsEstByDay by remember(activeStrapId) {
         mutableStateOf<Map<String, Int>>(emptyMap())
@@ -1428,31 +1441,6 @@ fun TodayScreen(
             stepsEstByDay = loaded
             stepsEstForDay = loaded[selectedDayKey]
         }
-    }
-
-    // The selected day's representative activity class for the Steps tile icon (#316 / @63). Reads the day's
-    // step samples (now carrying `activityClass` after the v13 column) over the local-day window and takes the
-    // LAST non-null class as "what the wrist was doing most recently today" (0=still, 1=walk, 2=run). null when
-    // the day has no classed sample (a 4.0 strap, a pre-v13 row, or every record's @63 byte was invalid), then
-    // the tile shows NO icon. Mirrors the iOS Today step-activity read exactly. Best-effort: a read hiccup just
-    // drops the optional icon.
-    var stepActivityClassForDay by remember(activeStrapId) { mutableStateOf<Int?>(null) }
-    LaunchedEffect(days, selectedDay, today, activeStrapId, deferHistoricalQueries) {
-        if (deferHistoricalQueries) return@LaunchedEffect
-        val zone = ZoneId.systemDefault()
-        val start = selectedDay.atStartOfDay(zone).toEpochSecond()
-        val nextStart = selectedDay.plusDays(1).atStartOfDay(zone).toEpochSecond()
-        val now = System.currentTimeMillis() / 1000
-        val end = if (selectedDayOffset == 0) now else (nextStart - 1)
-        // #908 family: read the active strap ∪ canonical "my-whoop" union, NOT a hardcoded "my-whoop". A strap
-        // re-added through the device manager banks its live step samples (which carry the @63 class) under its
-        // own fresh id, so a pinned "my-whoop" read dropped the tile icon for a re-added strap. Single-WHOOP ⇒
-        // one id ⇒ byte-identical read. Mirrors the iOS Repository.stepActivityClassLatest union.
-        val loaded = loadTodayBestEffort {
-            viewModel.repo.stepActivityClassLatestUnion(activeStrapId, start, end)
-        }
-        currentCoroutineContext().ensureActive()
-        if (viewModel.activeStrapId == activeStrapId) stepActivityClassForDay = loaded
     }
 
     // Rest number + sparkline share one resolved history read. The day/value map lives on the ViewModel so
@@ -2439,7 +2427,6 @@ fun TodayScreen(
                                     estimatedStepsForDay = stepsEstForDay,
                                     caloriesForDay = caloriesByDay[selectedDayKey],   // #616: imported-first per day
                                     caloriesSpark = caloriesSpark,                    // #616: imported-first trend
-                                    stepActivityClassForDay = stepActivityClassForDay,
                                     stepsEstimateCaption = stepsEstimateCaption(profileStore),
                                     restScore = restScoreForDay,
                                     restSpark = restCompositeSpark,
@@ -2448,6 +2435,26 @@ fun TodayScreen(
                                     onScoreInfo = openGuide,
                                     detailed = keyMetricsDetailed,
                                     onOpenMetric = onOpenMetric,
+                                )
+                            }
+                            TextButton(
+                                onClick = onOpenMetricHistory,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 44.dp),
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = Palette.textSecondary,
+                                ),
+                            ) {
+                                Icon(
+                                    Icons.Filled.History,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(Metrics.iconSmall),
+                                )
+                                Spacer(Modifier.width(Metrics.space8))
+                                Text(
+                                    stringResource(R.string.key_metrics_open_history),
+                                    style = NoopType.subhead,
                                 )
                             }
                         }
@@ -2976,118 +2983,115 @@ private fun DailyPlanTargetSection(
                     )
                 }
 
-                HorizontalDivider(color = Palette.hairline)
-                when (plan.availability) {
-                    DailyActionPlanner.Availability.CHECK_IN_NEEDED -> DailyPlanStateRow(
-                        icon = Icons.Filled.Check,
-                        title = stringResource(R.string.daily_plan_state_check_in_title),
-                        body = stringResource(R.string.daily_plan_state_check_in_body),
-                        tint = Palette.textTertiary,
-                    )
-                    DailyActionPlanner.Availability.CALIBRATING -> DailyPlanStateRow(
-                        icon = Icons.Filled.Autorenew,
-                        title = stringResource(R.string.daily_plan_state_calibrating_title),
-                        body = stringResource(R.string.daily_plan_state_calibrating_body),
-                        action = dailyPlanActionLabel(plan.action),
-                        tint = Palette.statusWarning,
-                    )
-                    DailyActionPlanner.Availability.RECOVERY_SHIFT -> DailyPlanStateRow(
-                        icon = Icons.AutoMirrored.Filled.DirectionsWalk,
-                        title = stringResource(R.string.daily_plan_state_recovery_shift_title),
-                        body = stringResource(R.string.daily_plan_state_recovery_shift_body),
-                        action = dailyPlanActionLabel(plan.action),
-                        tint = Palette.statusWarning,
-                    )
-                    DailyActionPlanner.Availability.STOP -> DailyPlanStateRow(
-                        icon = Icons.Filled.Warning,
-                        title = stringResource(R.string.daily_plan_state_stop_title),
-                        body = stringResource(R.string.daily_plan_state_stop_body),
-                        action = dailyPlanActionLabel(plan.action),
-                        tint = Palette.statusCritical,
-                    )
-                    DailyActionPlanner.Availability.READY -> {
-                        val target = plan.target
-                        if (target == null) {
-                            DailyPlanStateRow(
-                                icon = Icons.Filled.Autorenew,
-                                title = stringResource(R.string.daily_plan_state_calibrating_title),
-                                body = stringResource(R.string.daily_plan_state_calibrating_body),
-                                tint = Palette.statusWarning,
-                            )
-                        } else {
-                            val guidance = DailyEffortGuidance.evaluate(currentEffort, target)
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(Metrics.space10),
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.Bottom,
-                                    horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                if (plan.availability != DailyActionPlanner.Availability.CHECK_IN_NEEDED) {
+                    HorizontalDivider(color = Palette.hairline)
+                    when (plan.availability) {
+                        DailyActionPlanner.Availability.CHECK_IN_NEEDED -> Unit
+                        DailyActionPlanner.Availability.CALIBRATING -> DailyPlanStateRow(
+                            icon = Icons.Filled.Autorenew,
+                            title = stringResource(R.string.daily_plan_state_calibrating_title),
+                            body = stringResource(R.string.daily_plan_state_calibrating_body),
+                            action = dailyPlanActionLabel(plan.action),
+                            tint = Palette.statusWarning,
+                        )
+                        DailyActionPlanner.Availability.RECOVERY_SHIFT -> DailyPlanStateRow(
+                            icon = Icons.AutoMirrored.Filled.DirectionsWalk,
+                            title = stringResource(R.string.daily_plan_state_recovery_shift_title),
+                            body = stringResource(R.string.daily_plan_state_recovery_shift_body),
+                            action = dailyPlanActionLabel(plan.action),
+                            tint = Palette.statusWarning,
+                        )
+                        DailyActionPlanner.Availability.STOP -> DailyPlanStateRow(
+                            icon = Icons.Filled.Warning,
+                            title = stringResource(R.string.daily_plan_state_stop_title),
+                            body = stringResource(R.string.daily_plan_state_stop_body),
+                            action = dailyPlanActionLabel(plan.action),
+                            tint = Palette.statusCritical,
+                        )
+                        DailyActionPlanner.Availability.READY -> {
+                            val target = plan.target
+                            if (target == null) {
+                                DailyPlanStateRow(
+                                    icon = Icons.Filled.Autorenew,
+                                    title = stringResource(R.string.daily_plan_state_calibrating_title),
+                                    body = stringResource(R.string.daily_plan_state_calibrating_body),
+                                    tint = Palette.statusWarning,
+                                )
+                            } else {
+                                val guidance = DailyEffortGuidance.evaluate(currentEffort, target)
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(Metrics.space10),
                                 ) {
-                                    Text(
-                                        stringResource(
-                                            R.string.appwide_range_format,
-                                            target.lower,
-                                            target.upper,
-                                        ),
-                                        style = NoopType.number(30f),
-                                        color = Palette.textPrimary,
-                                    )
-                                    Text(
-                                        stringResource(R.string.daily_plan_effort_scale),
-                                        style = NoopType.overline,
-                                        color = Palette.textTertiary,
-                                    )
-                                }
-                                Text(
-                                    stringResource(R.string.daily_plan_state_ready_body),
-                                    style = NoopType.subhead,
-                                    color = Palette.textSecondary,
-                                )
-                                if (guidance.state != DailyEffortGuidance.State.UNAVAILABLE) {
-                                    DailyPlanEffortProgress(guidance)
-                                }
-                                DailyPlanActionRow(
-                                    text = dailyPlanActionLabel(plan.action),
-                                    tint = Palette.accent,
-                                )
-                                if (showNotificationControl) {
-                                    HorizontalDivider(color = Palette.hairline)
                                     Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                onNotificationEnabledChange(!notificationEnabled)
-                                            }
-                                            .padding(vertical = Metrics.space4),
-                                        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
-                                        verticalAlignment = Alignment.CenterVertically,
+                                        verticalAlignment = Alignment.Bottom,
+                                        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
                                     ) {
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            verticalArrangement = Arrangement.spacedBy(Metrics.space4),
-                                        ) {
-                                            Text(
-                                                stringResource(R.string.daily_plan_notification_toggle),
-                                                style = NoopType.subhead,
-                                                color = Palette.textPrimary,
-                                            )
-                                            Text(
-                                                stringResource(R.string.daily_plan_notification_help),
-                                                style = NoopType.footnote,
-                                                color = Palette.textTertiary,
-                                            )
-                                        }
-                                        NoopToggleSwitch(
-                                            checked = notificationEnabled,
-                                            onCheckedChange = null,
+                                        Text(
+                                            stringResource(
+                                                R.string.appwide_range_format,
+                                                target.lower,
+                                                target.upper,
+                                            ),
+                                            style = NoopType.number(30f),
+                                            color = Palette.textPrimary,
+                                        )
+                                        Text(
+                                            stringResource(R.string.daily_plan_effort_scale),
+                                            style = NoopType.overline,
+                                            color = Palette.textTertiary,
                                         )
                                     }
-                                    if (notificationPermissionDenied) {
-                                        Text(
-                                            stringResource(R.string.appwide_notifications_system_disabled),
-                                            style = NoopType.footnote,
-                                            color = Palette.statusCritical,
-                                        )
+                                    Text(
+                                        stringResource(R.string.daily_plan_state_ready_body),
+                                        style = NoopType.subhead,
+                                        color = Palette.textSecondary,
+                                    )
+                                    if (guidance.state != DailyEffortGuidance.State.UNAVAILABLE) {
+                                        DailyPlanEffortProgress(guidance)
+                                    }
+                                    DailyPlanActionRow(
+                                        text = dailyPlanActionLabel(plan.action),
+                                        tint = Palette.accent,
+                                    )
+                                    if (showNotificationControl) {
+                                        HorizontalDivider(color = Palette.hairline)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    onNotificationEnabledChange(!notificationEnabled)
+                                                }
+                                                .padding(vertical = Metrics.space4),
+                                            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                                            ) {
+                                                Text(
+                                                    stringResource(R.string.daily_plan_notification_toggle),
+                                                    style = NoopType.subhead,
+                                                    color = Palette.textPrimary,
+                                                )
+                                                Text(
+                                                    stringResource(R.string.daily_plan_notification_help),
+                                                    style = NoopType.footnote,
+                                                    color = Palette.textTertiary,
+                                                )
+                                            }
+                                            NoopToggleSwitch(
+                                                checked = notificationEnabled,
+                                                onCheckedChange = null,
+                                            )
+                                        }
+                                        if (notificationPermissionDenied) {
+                                            Text(
+                                                stringResource(R.string.appwide_notifications_system_disabled),
+                                                style = NoopType.footnote,
+                                                color = Palette.statusCritical,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -3469,7 +3473,7 @@ private fun DailyPlanCheckInOption(
                 Icon(
                     Icons.Filled.Check,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = Palette.accentInk,
                     modifier = Modifier.size(14.dp),
                 )
             }
@@ -3792,7 +3796,7 @@ private fun WorkoutInProgressCard(
                     onClick = onReturn,
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
+                        containerColor = Palette.accent, contentColor = Palette.accentInk,
                     ),
                 ) {
                     Text(uiString(R.string.l10n_today_screen_return_to_workout_30dc5509), style = NoopType.captionNumber)
@@ -6698,7 +6702,7 @@ private fun dashboardCardMetricKey(card: DashboardCard): String? = when (card) {
     DashboardCard.SKIN_TEMP -> "skin"
     DashboardCard.FITNESS_AGE -> "fitness_age"
     DashboardCard.VITALITY -> "vitality"
-    DashboardCard.STEPS -> "steps_est"
+    DashboardCard.STEPS -> "steps"
     DashboardCard.CALORIES -> "active_kcal"
     // These carry their own full screen, not a per-metric trend.
     DashboardCard.STRESS, DashboardCard.SLEEP, DashboardCard.HYDRATION, DashboardCard.COUPLED -> null
@@ -6814,10 +6818,11 @@ private fun dashboardCardValue(
             } ?: NO_DATA
         DashboardCard.SLEEP -> sleepValue(vd)
         DashboardCard.STEPS -> {
-            val real = importedStepsForDay?.let { intStringGrouped(it.toDouble()) }
-                ?: day?.steps?.let { intStringGrouped(it.toDouble()) }
-            val est = estimatedStepsForDay?.let { intStringGrouped(it.toDouble()) }
-            real ?: est ?: NO_DATA
+            resolvedSteps(
+                imported = importedStepsForDay,
+                motionDerived = day?.steps,
+                calibratedEstimate = estimatedStepsForDay,
+            )?.let { intStringGrouped(it.toDouble()) } ?: NO_DATA
         }
         DashboardCard.CALORIES ->
             withUnit(caloriesForDay?.let { intStringGrouped(it) } ?: NO_DATA)
@@ -7078,7 +7083,7 @@ private fun DashboardCardsEditorDialog(
                         enabled = items.any { it.enabled },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.accent,
-                            contentColor = Palette.surfaceBase,
+                            contentColor = Palette.accentInk,
                         ),
                     ) { Text(uiString(R.string.l10n_today_screen_done_e9b450d1), style = NoopType.captionNumber) }
                 }
@@ -7421,7 +7426,7 @@ private fun TodayLayoutEditorDialog(
                         onClick = { onSave(listOf(TodaySection.HERO) + items.toList()) },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.accent,
-                            contentColor = Palette.surfaceBase,
+                            contentColor = Palette.accentInk,
                         ),
                     ) { Text(uiString(R.string.l10n_today_screen_done_e9b450d1), style = NoopType.captionNumber) }
                 }
@@ -8033,9 +8038,6 @@ private fun MetricGrid(
     // #616: the Calories tile's imported-first 14-day trend (see caloriesSpark above) — threaded like
     // restSpark because it isn't a plain DailyMetric column (it unions the imported + on-device series).
     caloriesSpark: List<Double> = emptyList(),
-    // #316 / @63, the selected day's representative activity class (0=still, 1=walk, 2=run), shown beside
-    // the WHOOP 5/MG motion estimate. null hides it when no classed sample exists for the day.
-    stepActivityClassForDay: Int? = null,
     // #760/#792: the caption under an ESTIMATED Steps tile: the engine's STATUS line (manual k, or
     // k=… from N days + confidence tier) so a frozen-looking estimate self-explains. Built from the SAME
     // persisted calibration the estimate used; defaults to a bare "est." for callers that don't supply it.
@@ -8045,7 +8047,7 @@ private fun MetricGrid(
     // mini-graph tracks the Rest SCORE rather than raw sleep minutes (#614 follow-up). Other tiles still
     // read their series off `w` (the DailyMetric windows).
     restSpark: List<Double> = emptyList(),
-    enabledMetrics: List<KeyMetric> = KeyMetric.defaultOrder,
+    enabledMetrics: List<KeyMetric> = KeyMetric.defaultSelection,
     isToday: Boolean = false,
     onScoreInfo: (ScoreSection) -> Unit = {},
     // Detailed tiles (the #251 editor's switch): squarer tiles with a 14-day trend graph under the bar.
@@ -8054,8 +8056,8 @@ private fun MetricGrid(
     // night-detail pattern) via [onOpenMetric].
     onOpenMetric: (String) -> Unit = {},
 ) {
-    // Current iOS parity: two readable columns, a dimensional semantic glyph, large value, and either a
-    // real trend or a bounded-score liquid rail. The editor's pin order still leads the complete catalog.
+    // Current iOS parity: selected metrics only, dimensional semantic glyphs, and either a real trend or a
+    // bounded-score liquid rail. The full catalog remains in metric history.
     val descriptors: Map<KeyMetric, KeyTileData> = mapOf(
         KeyMetric.CHARGE to run {
             val v = d?.recovery ?: lastScoredCharge?.value
@@ -8146,7 +8148,8 @@ private fun MetricGrid(
             )
         },
         KeyMetric.STEPS to run {
-            // A measured phone count wins; @57 and calibration are explicitly motion-derived fallbacks.
+            // Primary Steps requires a measured phone/watch pedometer count. DailyMetric remains a
+            // compatibility read only and cannot fill this value.
             val steps = resolvedSteps(importedStepsForDay, d?.steps, estimatedStepsForDay)
             KeyTileData(
                 label = stepsTileLabel(d?.steps, importedStepsForDay, estimatedStepsForDay),
@@ -8182,8 +8185,7 @@ private fun MetricGrid(
         },
     )
 
-    // Always show the complete catalog. The saved three-to-five pins only determine which tiles lead.
-    val tiles = KeyMetricPrefs.catalogOrder(enabledMetrics)
+    val tiles = enabledMetrics
         .mapNotNull { m -> descriptors[m]?.let { m to it } }
     // Tile tap -> its focused trend TIMELINE (the Sleep night-detail pattern), uniformly for every tile
     // with a windowed series: Recovery/Effort/Rest open their new trend details; the vitals +
@@ -8198,14 +8200,14 @@ private fun MetricGrid(
         KeyMetric.RESTING_HR -> ({ onOpenMetric("rhr") })
         KeyMetric.BLOOD_OXYGEN -> ({ onOpenMetric("spo2") })
         KeyMetric.RESPIRATORY -> ({ onOpenMetric("resp") })
-        KeyMetric.STEPS -> ({ onOpenMetric("steps_est") })
+        KeyMetric.STEPS -> ({ onOpenMetric("steps") })
         KeyMetric.CALORIES -> ({ onOpenMetric("active_kcal") })
         KeyMetric.WEIGHT -> null
     }
-    // iOS `keyMetricsSection` LazyVGrid: 2 columns, spacing 8. Build from rows so tile heights stay uniform
-    // and a partial last row pads with empty weight so the columns stay aligned.
+    val metricColumnCount = if (LocalDensity.current.fontScale >= 1.3f) 1 else 2
+    // Match iOS: two columns normally and one at large text sizes.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        tiles.chunked(2).forEach { rowTiles ->
+        tiles.chunked(metricColumnCount).forEach { rowTiles ->
             // Detailed rows equalise heights (IntrinsicSize.Max + fillMaxHeight, the #399 idiom): a
             // graph-less tile (Steps/Weight/Calories) sharing a row with graphed neighbours must not
             // shrink its card. Compact rows keep the plain layout, byte-identical to before.
@@ -8225,7 +8227,7 @@ private fun MetricGrid(
                             .then(if (detailed) Modifier.fillMaxHeight() else Modifier),
                     )
                 }
-                repeat(2 - rowTiles.size) { Spacer(Modifier.weight(1f)) }
+                repeat(metricColumnCount - rowTiles.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -8280,6 +8282,7 @@ private fun LiquidKeyTile(
     val hasValue = data.value != NO_DATA
     val trend = data.spark.takeLast(14)
     val showsTrend = trend.size >= 2
+    val largeText = LocalDensity.current.fontScale >= 1.3f
     // Tap -> the tile's focused trend detail (the Sleep night-detail tile idiom): liquidPress on the
     // tappable tile, indication = null so only the liquid settle shows. A null onClick keeps the tile
     // inert with zero modifier overhead (byte-identical to before).
@@ -8351,7 +8354,7 @@ private fun LiquidKeyTile(
                 data.label.uppercase(),
                 style = NoopType.overline.copy(fontSize = 9.5.sp, letterSpacing = 0.sp),
                 color = Palette.textSecondary,
-                maxLines = 1,
+                maxLines = if (largeText) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
         } else {
@@ -8364,26 +8367,45 @@ private fun LiquidKeyTile(
                     data.label.uppercase(),
                     style = NoopType.overline.copy(fontSize = 9.5.sp, letterSpacing = 0.sp),
                     color = Palette.textSecondary,
-                    maxLines = 1,
+                    maxLines = if (largeText) 2 else 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
             }
         }
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                data.value,
-                style = NoopType.number(24f),
-                color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
-                maxLines = 1,
-            )
-            if (data.unit.isNotEmpty() && hasValue) {
+        if (largeText) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    uiString(R.string.l10n_today_screen_data_unit_c768ef8c, data.unit),
-                    style = NoopType.subhead,
-                    color = Palette.textPrimary,
+                    data.value,
+                    style = NoopType.number(24f),
+                    color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
                     maxLines = 1,
                 )
+                if (data.unit.isNotEmpty() && hasValue) {
+                    Text(
+                        data.unit,
+                        style = NoopType.subhead,
+                        color = Palette.textPrimary,
+                        maxLines = 1,
+                    )
+                }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    data.value,
+                    style = NoopType.number(24f),
+                    color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
+                    maxLines = 1,
+                )
+                if (data.unit.isNotEmpty() && hasValue) {
+                    Text(
+                        uiString(R.string.l10n_today_screen_data_unit_c768ef8c, data.unit),
+                        style = NoopType.subhead,
+                        color = Palette.textPrimary,
+                        maxLines = 1,
+                    )
+                }
             }
         }
         Box(
@@ -9654,19 +9676,6 @@ private fun flagColor(flag: ReadinessEngine.Flag): Color = when (flag) {
     ReadinessEngine.Flag.BAD -> Palette.metricRose
 }
 
-/**
- * #316 / @63, map a step-sample activity class (0=still, 1=walk, 2=run) to the still/walk/run icon + an
- * accessibility label. Mirrors the iOS Steps-tile glyph set (figure.stand / figure.walk / figure.run) and
- * semantics exactly (cross-platform parity). Returns (null, "") for any other code so an unmapped value
- * shows nothing rather than a wrong glyph.
- */
-private fun stepActivityIconFor(activityClass: Int): Pair<ImageVector?, String> = when (activityClass) {
-    0 -> Icons.Filled.Accessibility to "Still"
-    1 -> Icons.AutoMirrored.Filled.DirectionsWalk to "Walking"
-    2 -> Icons.AutoMirrored.Filled.DirectionsRun to "Running"
-    else -> null to ""
-}
-
 // MARK: - SparkStatTile
 //
 // A fixed-height metric tile: overline label, big value + caption, and a 14-day
@@ -9685,16 +9694,13 @@ private fun SparkStatTile(
     sparkColor: Color = Palette.accent,
     onInfo: (() -> Unit)? = null,
     badge: String? = null,
-    // #316 / @63, an optional activity-class code (0=still, 1=walk, 2=run) rendered as a small still/walk/run
-    // glyph in the label row, tinted with the tile accent. null = no icon. Used by the Steps tile.
-    trailingIcon: Int? = null,
 ) {
     NoopCard(modifier = modifier.height(Metrics.tileHeight), padding = Metrics.space14) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // Label row carries the overline, an optional low-confidence [badge] (H9, e.g. "Estimated"
-            // stages), an optional activity glyph ([trailingIcon], #316), and, for the three headline scores
-            // only, a trailing ⓘ that opens the scoring guide at this score. Other tiles render as before.
-            if (onInfo != null || badge != null || trailingIcon != null) {
+            // stages), and, for the three headline scores only, a trailing info control that opens the
+            // scoring guide at this score. Other tiles render as before.
+            if (onInfo != null || badge != null) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -9707,18 +9713,6 @@ private fun SparkStatTile(
                         SourceBadge(badge, tint = Palette.textTertiary)
                     }
                     Spacer(Modifier.weight(1f))
-                    // #316, still/walk/run glyph, before the optional ⓘ. Self-hides for an unknown code.
-                    if (trailingIcon != null) {
-                        val (vector, desc) = stepActivityIconFor(trailingIcon)
-                        if (vector != null) {
-                            Icon(
-                                vector,
-                                contentDescription = desc,
-                                tint = accent,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
-                    }
                     if (onInfo != null) ScoreInfoButton(section = null, onClick = onInfo, compact = true)
                 }
             } else {
@@ -9838,10 +9832,7 @@ private data class Window(
     val rhr: List<Double>,
     val spo2: List<Double>,
     val resp: List<Double>,
-    // #616: the Steps tile carried no `spark` series, so it drew no trend line while every other tile did.
-    // On-device DailyMetric.steps (the strap @57 motion-derived estimate) — the same signal the Steps tile VALUE reads
-    // (on-device-first), matching iOS kSparks "steps". (Calories is imported-first, so its spark is threaded
-    // separately as caloriesSpark, not read off a DailyMetric column here.)
+    // Primary Steps trend, populated only by imported pedometer values.
     val steps: List<Double>,
 )
 
@@ -9856,6 +9847,7 @@ private data class ResolvedSpo2Window(
  * only, so stale imports do not draw a current-day trend.
  */
 @Composable
+@Suppress("UNUSED_PARAMETER")
 private fun rememberTrendWindow(
     days: List<com.noop.data.DailyMetric>,
     anchorDay: LocalDate,
@@ -9865,7 +9857,7 @@ private fun rememberTrendWindow(
     resolvedSpo2ByDay: Map<String, Double> = emptyMap(),
 ): Window =
     androidx.compose.runtime.remember(
-        days, anchorDay, windowDays, importedStepsByDay, calibratedStepsByDay, resolvedSpo2ByDay,
+        days, anchorDay, windowDays, importedStepsByDay, resolvedSpo2ByDay,
     ) {
         // Trailing CALENDAR days ending today, NOT the last N stored rows, which on an old import
         // were months-old data shown as a fresh trend (issue #23). ISO yyyy-MM-dd sorts chronologically.
@@ -9873,9 +9865,7 @@ private fun rememberTrendWindow(
         val end = anchorDay.toString()
         val recent = days.filter { it.day >= cutoff && it.day <= end }
         fun series(pick: (DailyMetric) -> Double?): List<Double> = recent.mapNotNull(pick)
-        val motionStepsByDay = recent.mapNotNull { row -> row.steps?.let { row.day to it } }.toMap()
         val measuredWindow = importedStepsByDay.filterKeys { it >= cutoff && it <= end }
-        val calibratedWindow = calibratedStepsByDay.filterKeys { it >= cutoff && it <= end }
         Window(
             recovery = series { it.recovery },
             strain = series { it.strain },
@@ -9888,7 +9878,7 @@ private fun rememberTrendWindow(
                 .map { it.value }
                 .ifEmpty { series { it.spo2Pct } },
             resp = series { it.respRateBpm },
-            steps = resolvedStepsSeries(measuredWindow, motionStepsByDay, calibratedWindow).map { it.second },
+            steps = resolvedStepsSeries(measuredWindow, emptyMap(), emptyMap()).map { it.second },
         )
     }
 

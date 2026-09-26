@@ -328,6 +328,8 @@ object AnalyticsEngine {
         // Sleep / recovery keep using hr/rr/resp/gravity — staging needs the pre-midnight night span.
         dayHr: List<HrSample>? = null,
         daySteps: List<StepSample>? = null,
+        stepClassificationPolicy: StepsCounter.ClassificationPolicy =
+            StepsCounter.ClassificationPolicy.rejectUnverifiedBandCounter,
         dayGravity: List<GravitySample>? = null,
         // Wear-gated nightly skin-temp mean is harvested here (baseline-independent); IntelligenceEngine
         // seeds a personal baseline from these means across nights and re-derives skinTempDevC in pass 2
@@ -397,13 +399,9 @@ object AnalyticsEngine {
         // instead of V1. Default false keeps V1 the byte-identical default for pure-function callers/tests;
         // IntelligenceEngine threads PuffinExperiment.from(context).experimentalSleepV2. Mirrors Swift. (V7 / #690)
         useSleepStagerV2: Boolean = false,
-        // Opt-in motion-aware wake refinement (#364 "Proposal 2" follow-up; density gate precedent #345).
-        // When true, [WakeMotionRefinement] re-derives each detected session's stages, reclassifying a
-        // hot-but-still WAKE segment to `light` when it shows no locomotion and a stable posture outside
-        // isolated burst minutes; it only ever runs AFTER V1/V2 staging and self-gates on the observed
-        // gravity + step density, so it is a no-op on a sparse (e.g. WHOOP 4.0) night regardless of this
-        // flag. Default false keeps every pure-function caller/test byte-identical; IntelligenceEngine
-        // threads PuffinExperiment.from(context).motionAwareWake. Mirrors Swift.
+        // Retained compatibility seam for the withdrawn motion-aware wake experiment. Production callers
+        // pass false, and [WakeMotionRefinement] still requires an explicit research-only authorization
+        // before it can alter stages, so an old persisted preference cannot reactivate the disputed byte.
         useMotionAwareWake: Boolean = false,
         // Sleep & Rest test-mode trace sink (E11). null = byte-identical default. When non-null the gate
         // trace from detectSleep and the Rest sub-score line are forwarded line-by-line. Mirrors Swift.
@@ -459,11 +457,8 @@ object AnalyticsEngine {
             useSleepStagerV2 = useSleepStagerV2,
             traceSink = traceSink,
         )
-        // Motion-aware wake refinement (#364 follow-up) runs AFTER V1/V2 staging, over every detected
-        // session (naps included — the same eligibility gates apply). `steps` is the SAME calendar-day/
-        // night-window stream the caller passed for the rest of this analysis; the pass self-gates on its
-        // observed density, so an empty/sparse `steps` (e.g. a WHOOP 4.0, which never emits a step sample
-        // at all) is a no-op regardless of `useMotionAwareWake`.
+        // Compatibility call only. The production entry point remains byte-identical even when a stale
+        // caller passes true; synthetic research tests invoke the explicit research overload directly.
         val allSessions = if (useMotionAwareWake) {
             detectedSessions.map { WakeMotionRefinement.refine(it, gravity, steps) }
         } else {
@@ -744,7 +739,7 @@ object AnalyticsEngine {
             profile = profile,
         )
 
-        // ── Steps (APPROXIMATE) ───────────────────────────────────────────────
+        // ── Band counter policy ───────────────────────────────────────────────
         // step_motion_counter@57 is a CUMULATIVE u16 running counter (it climbs while you move, holds
         // flat when still, and wraps at 65536). The daily total is the SUM of WRAP-AWARE increments of
         // that counter across the time-ordered 1 Hz records (already ts-ASC from the DAO): delta =
@@ -754,36 +749,38 @@ object AnalyticsEngine {
         //
         // Reading byte @57 ALONE and summing it (the old bug, #132/#276/#316: exzanimo saw ~24× too
         // many steps) both ignored the high byte and summed a running total — exploding the count to
-        // ~10M/day. Decoding the full u16 and summing wrap-aware DELTAS yields a sane ~14k. ESTIMATE
-        // only — not cloud/clinical parity.
-        val stepsTotal: Int? = run {
+        // ~10M/day. Wrap-aware deltas remain available to explicit legacy/research callers. Production
+        // supplies rejectUnverifiedBandCounter, so no band-counter delta becomes a step total.
+        val stepAnalysis = run {
             // Prefer the full-calendar-day stream for the additive total; fall back to the
             // night-window stream when the caller didn't supply one (pure-function callers/tests). The
             // day's read window may include adjacent-day samples, so filter to the LOCAL-day key first
             // (#277); the wrap-aware tick math itself lives in the shared StepsCounter kernel so the daily
             // and per-workout (#398) totals can never disagree.
             val inDay = (daySteps ?: steps).filter { tsInDay(it.ts) }
-            val ticks = StepsCounter.stepsInWindow(inDay) ?: return@run null
-            // @57 counts motion ticks, not validated steps — the 5/MG counter overcounts. Divide
-            // by the user-calibrated ticks-per-step (default 1.0 = raw pass-through; floor 0.5 so
-            // a bad pref can at most double, never explode, the total). (#139)
-            val scaled = (ticks.toDouble() / max(profile.stepTicksPerStep, 0.5)).roundToLong()
-                .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-            if (scaled > 0) scaled else null
+            StepsCounter.analyze(
+                inDay,
+                classificationPolicy = stepClassificationPolicy,
+            )
+        }
+        val stepsTotal: Int? = run {
+            val ticks = stepAnalysis.steps ?: return@run null
+            StepsCounter.scaledSteps(ticks, profile.stepTicksPerStep)
         }
 
         // ── Final daily Effort (cardiovascular load + ordinary movement) ──────
-        // Edwards TRIMP intentionally gives sub-zone HR zero weight. Calibrated steps provide a
-        // conservative low-intensity floor; calendar-day gravity is the fallback on hardware without
-        // a step counter. max, not addition, prevents workout HR and workout steps being counted twice.
+        // Edwards TRIMP intentionally gives sub-zone HR zero weight. A legacy/research step total can
+        // provide a low-intensity floor; calendar-day gravity is the fallback only when no counter row
+        // exists. max, not addition, prevents workout HR and movement being counted twice.
         // Gravity alone cannot prove wear (a charging/off-wrist band can still be moved). Require the
-        // sparse-HR sample floor before gravity may stand in for steps; a real step counter needs no HR gate.
+        // sparse-HR sample floor before gravity may stand in for movement. Heart rate is wear/effort
+        // context, never evidence that wrist motion was gait.
         val hasWornMotionEvidence = (dayHr ?: hr)
             .asSequence()
             .filter { tsInDay(it.ts) && it.bpm > 0 }
             .take(StrainScorer.minSparseReadings)
             .count() == StrainScorer.minSparseReadings
-        val movementGravity = if (hasWornMotionEvidence) {
+        val movementGravity = if (hasWornMotionEvidence && stepAnalysis.allowsMotionFallback) {
             (dayGravity ?: gravity).filter { tsInDay(it.ts) }
         } else {
             emptyList()

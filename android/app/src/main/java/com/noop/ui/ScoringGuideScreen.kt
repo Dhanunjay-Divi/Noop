@@ -467,7 +467,7 @@ private fun Footer(onClose: () -> Unit) {
             onClick = onClose,
             colors = ButtonDefaults.buttonColors(
                 containerColor = Palette.accent,
-                contentColor = Palette.surfaceBase,
+                contentColor = Palette.accentInk,
             ),
         ) {
             Text(uiString(R.string.l10n_scoring_guide_screen_got_it_5b8027fa), style = NoopType.captionNumber)

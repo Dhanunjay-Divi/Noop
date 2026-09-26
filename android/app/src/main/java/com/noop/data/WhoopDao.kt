@@ -441,6 +441,27 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun upsertDailyMetrics(rows: List<DailyMetric>)
 
     @Query(
+        "DELETE FROM metricSeries WHERE deviceId = :deviceId " +
+            "AND day IN (:days) AND `key` = :key"
+    )
+    suspend fun deleteMetricSeriesPoints(
+        deviceId: String,
+        days: List<String>,
+        key: String,
+    ): Int
+
+    @Query(
+        "DELETE FROM metricSeries WHERE deviceId = :deviceId AND day = :day " +
+            "AND `key` = :key AND value = :expectedValue"
+    )
+    suspend fun deleteMatchingMetricSeriesPoint(
+        deviceId: String,
+        day: String,
+        key: String,
+        expectedValue: Double,
+    ): Int
+
+    @Query(
         "DELETE FROM dailyMetric WHERE deviceId = :deviceId " +
             "AND day >= :fromDay AND day <= :toDay"
     )
@@ -1141,6 +1162,25 @@ interface WhoopDao : DeviceRegistryDao {
             "ORDER BY day ASC"
     )
     suspend fun dailyMetricsRange(deviceId: String, from: String, to: String): List<DailyMetric>
+
+    @Query(
+        "UPDATE dailyMetric SET steps = NULL WHERE deviceId = :computedDeviceId " +
+            "AND day IN (:days) AND steps IS NOT NULL"
+    )
+    suspend fun clearComputedDailySteps(
+        computedDeviceId: String,
+        days: List<String>,
+    ): Int
+
+    @Query(
+        "UPDATE dailyMetric SET steps = NULL WHERE deviceId = :deviceId " +
+            "AND day = :day AND steps = :expectedSteps"
+    )
+    suspend fun clearMatchingDailySteps(
+        deviceId: String,
+        day: String,
+        expectedSteps: Int,
+    ): Int
 
     /**
      * Delete a source's cached daily rows whose day-key is in [from, to] (inclusive, yyyy-MM-dd

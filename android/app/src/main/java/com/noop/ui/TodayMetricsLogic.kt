@@ -76,47 +76,48 @@ internal fun latestWeightKg(apple: List<AppleDaily>, healthConnect: List<AppleDa
 internal fun stepsForDay(apple: List<AppleDaily>, healthConnect: List<AppleDaily>, dayKey: String): Int? =
     (apple + healthConnect)
         .filter { it.day == dayKey }
-        .mapNotNull { it.steps }
+        .mapNotNull { it.steps?.takeIf { value -> value >= 0 } }
         .maxOrNull()
 
-/** Single-day measured-first arbitration shared by cards and tests. */
+/**
+ * Single-day primary Steps arbitration shared by cards and tests.
+ *
+ * Wrist motion and heart rate can describe movement or effort but cannot prove footfalls. Both local
+ * estimates remain outside the primary Steps surface.
+ */
+@Suppress("UNUSED_PARAMETER")
 internal fun resolvedSteps(imported: Int?, motionDerived: Int?, calibratedEstimate: Int?): Int? =
-    imported ?: motionDerived ?: calibratedEstimate
+    imported
 
-/** Per-day measured-first arbitration for Today sparklines. */
+/** Per-day primary Steps arbitration for Today sparklines. */
+@Suppress("UNUSED_PARAMETER")
 internal fun resolvedStepsSeries(
     imported: Map<String, Int>,
     motionDerived: Map<String, Int>,
     calibratedEstimate: Map<String, Int>,
 ): List<Pair<String, Double>> =
-    (imported.keys + motionDerived.keys + calibratedEstimate.keys).toSortedSet().mapNotNull { day ->
-        resolvedSteps(imported[day], motionDerived[day], calibratedEstimate[day])
-            ?.let { day to it.toDouble() }
+    imported.keys.toSortedSet().mapNotNull { day ->
+        imported[day]?.let { day to it.toDouble() }
     }
 
 /**
- * Truthful Today copy for the selected step winner. `DailyMetric.steps` is the WHOOP 5/MG @57
- * motion-derived estimate, not a validated pedometer count. An imported Health Connect / Apple Health
- * count stays a measured phone-source value; the final fallback is the calibrated motion estimate.
+ * Truthful Today copy for the selected step winner. Only an imported Health Connect / Apple Health
+ * pedometer count can populate primary Steps.
  */
+@Suppress("UNUSED_PARAMETER")
 internal fun stepsSourceCaption(
     motionDerived: Int?,
     imported: Int?,
     calibratedEstimate: Int?,
 ): String? = when {
     imported != null -> "Measured · Apple Health / Health Connect"
-    motionDerived != null -> "Motion-derived estimate · Noop Band"
-    calibratedEstimate != null -> "Motion-derived estimate · calibrated"
     else -> null
 }
 
-/** Compact Key-Metrics label: only strap-derived values need the estimate qualifier. */
+/** Compact Key-Metrics label. Unvalidated local motion never changes the primary metric name. */
+@Suppress("UNUSED_PARAMETER")
 internal fun stepsTileLabel(motionDerived: Int?, imported: Int?, calibratedEstimate: Int?): String =
-    if (imported == null && (motionDerived != null || calibratedEstimate != null)) {
-        "Motion-derived steps"
-    } else {
-        "Steps"
-    }
+    "Steps"
 
 /**
  * Resolve the Weight tile text: prefer the latest Apple/Health-Connect weight, else fall back to the

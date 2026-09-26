@@ -122,7 +122,7 @@ object FusionDayAdapter {
                 ) {
                     return@mapNotNull null
                 }
-                WhoopRepository.dailyColumn(spec.key, selected.row)?.let { value ->
+                fusionValue(spec.key, selected.source, selected.row)?.let { value ->
                     FusionInput(selected.source, value)
                 }
             }
@@ -138,6 +138,22 @@ object FusionDayAdapter {
             dayOwner = dayOwner,
             contributingSourceCount = contributingSources,
         )
+    }
+
+    /**
+     * Adapter-level provenance gate for primary Steps. The generic resolver remains capable of
+     * comparing future validated sources, but this app adapter may publish Steps only from an OS
+     * pedometer aggregate. Reverse-engineered band motion, computed rows, and unvalidated wearable
+     * counters remain absent instead of being presented as walking.
+     */
+    internal fun fusionValue(key: String, source: FusionSource, row: DailyMetric): Double? {
+        if (key == "steps" &&
+            source != FusionSource.APPLE_HEALTH &&
+            source != FusionSource.HEALTH_CONNECT
+        ) {
+            return null
+        }
+        return WhoopRepository.dailyColumn(key, row)
     }
 
     /** Pick the day's score-owner via [DayOwnerResolver]: active strap (0) beats imports/phone. */

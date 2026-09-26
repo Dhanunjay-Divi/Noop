@@ -9,6 +9,19 @@ NOOP_STRENGTH_MEDIA_URL_TEMPLATE =
 NOOP_STRENGTH_VIDEO_URL_TEMPLATE =
 #include? "StrengthMediaSecrets.xcconfig"
 
+// Optional restricted Veepoo SDK wiring. A clean checkout leaves every value
+// empty/disabled, so simulator, macOS, Watch, widgets, and CI never resolve or
+// link the iPhoneOS-only vendor framework. Use the bounded local verifier
+// documented in docs/IOS_RESTRICTED_VEEPOO_SDK.md to create the ignored include.
+NOOP_VEEPOO_SDK_ENABLED = NO
+NOOP_VEEPOO_FRAMEWORK_DIR =
+NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR =
+NOOP_VEEPOO_FMDB_FRAMEWORK_DIR =
+NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR =
+NOOP_VEEPOO_LINK_FLAGS =
+NOOP_VEEPOO_SWIFT_CONDITION =
+#include? "VeepooLocalSDK.xcconfig"
+
 // NOOP+ is compiled in but remains unavailable unless the ignored staging
 // configuration supplies every value. These identifiers are not user secrets,
 // but keeping environment-specific values out of source prevents a community

@@ -308,7 +308,19 @@ class UiAuditPresentationContractTest {
 
         val onboarding = source("src/main/java/com/noop/ui/OnboardingScreen.kt")
         assertFalse(onboarding.contains("If the strap is nearby"))
-        assertTrue(onboarding.contains("appwide_ui_audit_onboarding_background_pairing"))
+        assertFalse(onboarding.contains("NOOP keeps Noop Band connected in the background"))
+        assertTrue(
+            onboarding.contains(
+                "appwide_onboarding_notifications_background_status_subtitle",
+            ),
+        )
+        assertTrue(
+            onboarding.contains(
+                "appwide_onboarding_notifications_background_status_body",
+            ),
+        )
+        assertTrue(onboarding.contains("appwide_onboarding_notifications_wrist_alerts"))
+        assertTrue(onboarding.contains("appwide_onboarding_notifications_permission_help"))
 
         val scoring = source("src/main/java/com/noop/ui/ScoringGuideScreen.kt")
         assertFalse(scoring.contains("your strap's raw signals"))
@@ -324,7 +336,13 @@ class UiAuditPresentationContractTest {
             .substringBefore("style = NoopType.subhead")
         assertFalse(rebootProbeCall.contains("+"))
         assertTrue(devices.contains("""displayModel = "Heart-rate strap""""))
-        assertTrue(devices.contains("Other heart-rate straps can stream live heart"))
+        assertTrue(devices.contains("appwide_devices_connect_action"))
+        assertTrue(devices.contains("appwide_devices_supported_footer"))
+        assertTrue(
+            devices.contains(
+                "selectionScope = AddDeviceSelectionScope.ClaimEligibleBands",
+            ),
+        )
 
         val logExport = source("src/main/java/com/noop/ui/LogExport.kt")
         assertFalse(logExport.contains("connect to your strap"))

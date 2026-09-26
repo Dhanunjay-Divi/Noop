@@ -51,7 +51,7 @@ jobs:
           CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
           git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
             > "$CHANGED_FILES"
-          if grep -Eq '^(android/|Tools/(android-managed-device-retry|run-bounded-command)\.py$|\.github/workflows/android\.yml$)' \
+          if grep -Eq '^(android/|Vendor/NoopBandSDK/|release/supplier/runtime/noop-band-compatibility\.json$|Tools/(android-managed-device-retry|run-bounded-command)\.py$|\.github/workflows/android\.yml$)' \
              "$CHANGED_FILES"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
@@ -181,6 +181,14 @@ jobs:
             --bounded-status-file app/build/noop-managed-device-status/production-shell-instrumentation.status \
             --expected-label production-shell-instrumentation \
             --github-output "$GITHUB_OUTPUT"
+
+      - name: Announce approved production-shell infrastructure retry
+        if: >-
+          ${{
+            steps.production_shell_first.outcome == 'failure' &&
+            steps.production_shell_retry.outputs.retry == 'true'
+          }}
+        run: |
           echo "::warning title=Managed-device infrastructure retry::Android production-shell infrastructure failed before tests started; resetting and retrying once."
 
       - name: Reset production-shell managed device before the approved retry
@@ -322,8 +330,8 @@ jobs:
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
             -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
-            "-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" \
-            --max-workers=2 \
+            "-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8" \
+            --max-workers=1 \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace
@@ -336,6 +344,14 @@ jobs:
             app/build/outputs/androidTest-results/managedDevice \
             --bounded-status-file app/build/noop-managed-device-status/review-sample-fresh-process.status \
             --github-output "$GITHUB_OUTPUT"
+
+      - name: Announce approved Review Sample infrastructure retry
+        if: >-
+          ${{
+            steps.review_sample_first.outcome == 'failure' &&
+            steps.review_sample_retry.outputs.retry == 'true'
+          }}
+        run: |
           echo "::warning title=Managed-device infrastructure retry::Android managed-device infrastructure failed before tests started; resetting and retrying once."
 
       - name: Reset managed device before the approved retry
@@ -378,8 +394,8 @@ jobs:
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
             -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
-            "-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" \
-            --max-workers=2 \
+            "-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8" \
+            --max-workers=1 \
             --no-daemon \
             --no-configuration-cache \
             --stacktrace

@@ -349,9 +349,14 @@ enum MetricCatalog {
 
     /// Customer-visible catalog entries for the current profile context. BMI stays in the canonical
     /// catalog so stored/imported rows and internal provenance remain intact, but it is not offered as
-    /// a personal metric until the adult profile gate has passed.
+    /// a personal metric until the adult profile gate has passed. Historical motion-derived step
+    /// namespaces remain in `all` for export and diagnostics, but are not customer metrics because wrist
+    /// movement is not validated gait evidence.
     static func visible(allowsBMI: Bool) -> [MetricDescriptor] {
-        all.filter { allowsBMI || $0.key != "bmi" }
+        all.filter {
+            (allowsBMI || $0.key != "bmi")
+                && !($0.source == "my-whoop" && ($0.key == "steps" || $0.key == "steps_est"))
+        }
     }
 
     static func inCategory(_ c: String, allowsBMI: Bool = true) -> [MetricDescriptor] {
@@ -366,23 +371,24 @@ enum MetricCatalog {
         visible(allowsBMI: allowsBMI).first { $0.key == key && $0.source == source }
     }
 
-    /// The source the Today steps tile taps through to, matching the value it displays. A measured
-    /// pedometer count imported from Apple Health always outranks WHOOP 5/MG's @57 motion-derived
-    /// estimate; the calibrated WHOOP 4 fallback is last. This ordering is shared with Android.
+    /// The source the Today steps tile taps through to, matching the value it displays. Primary Steps
+    /// requires an imported pedometer count. The reverse-engineered band motion counter and the calibrated
+    /// gravity estimate remain available only as separately labelled research/diagnostic series.
     static func todayStepsMetric(hasMotionDerivedSteps: Bool, hasImportedSteps: Bool = false) -> MetricDescriptor? {
+        _ = hasMotionDerivedSteps
         if hasImportedSteps { return metric(key: "steps", source: "apple-health") }
-        if hasMotionDerivedSteps { return metric(key: "steps", source: "my-whoop") }
-        return metric(key: "steps_est", source: "my-whoop")
+        return nil
     }
 
-    /// One-value form of the measured-first steps contract. Keeping the arbitration here prevents a
-    /// card, dashboard row and route from independently drifting back to motion-first precedence.
+    /// One-value form of the primary Steps contract. The legacy parameters remain for source compatibility,
+    /// but wrist motion cannot prove gait and therefore cannot fill a missing imported pedometer value.
     static func todayStepsValue<T>(imported: T?, motionDerived: T?, calibratedEstimate: T?) -> T? {
-        imported ?? motionDerived ?? calibratedEstimate
+        _ = motionDerived
+        _ = calibratedEstimate
+        return imported
     }
 
-    /// Per-day form used by Today sparklines. Sources are merged by day rather than choosing one whole
-    /// series, so a measured import wins every overlapping day while motion estimates still fill gaps.
+    /// Per-day form used by Today sparklines. Only imported pedometer days enter the primary Steps series.
     static func todayStepsSeries(
         imported: [(day: String, value: Double)],
         motionDerived: [(day: String, value: Double)],
@@ -393,14 +399,11 @@ enum MetricCatalog {
                 .map { ($0.day, $0.value) }, uniquingKeysWith: { _, newer in newer })
         }
         let importedByDay = byDay(imported)
-        let motionByDay = byDay(motionDerived)
-        let estimateByDay = byDay(calibratedEstimate)
-        return Set(importedByDay.keys).union(motionByDay.keys).union(estimateByDay.keys)
-            .sorted()
-            .compactMap { day in
-                todayStepsValue(imported: importedByDay[day], motionDerived: motionByDay[day],
-                                calibratedEstimate: estimateByDay[day]).map { (day, $0) }
-            }
+        _ = motionDerived
+        _ = calibratedEstimate
+        return importedByDay.keys.sorted().compactMap { day in
+            importedByDay[day].map { (day, $0) }
+        }
     }
 
     /// #616: the calorie twin of `todayStepsMetric` — route the tapped detail to the source that MATCHES

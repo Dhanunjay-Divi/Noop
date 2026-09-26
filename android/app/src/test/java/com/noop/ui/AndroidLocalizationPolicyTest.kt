@@ -95,6 +95,7 @@ class AndroidLocalizationPolicyTest {
         val expectedKeys = partial.getValue("values-it").keys
         val allowed = Regex(
                 """string:(wind_down_|sleep_planner_|strength_|key_metrics_(selection_|show_)|hydration_(adaptive_timing_|base_interval_label)).*|""" +
+                """string:key_metrics_open_history|""" +
                 """string:(profile_(bmi_|target_weight_)|vital_range_summary_).*|""" +
                 """string:ownership_(delete_|deletion_).*|""" +
                 """string:(widget_hrv|trends_effort|l10n_today_screen_(recovery_ea924f72|sleep_3cac34e6|resting_hr_26677094|blood_oxygen_a8ad9ff5|respiratory_1cd8c175|steps_cdde4f20|weight_69c0b815|calories_3e62ecfe))|""" +
@@ -251,7 +252,7 @@ class AndroidLocalizationPolicyTest {
         val auditKeys = base.keys.filter {
             it.startsWith("string:appwide_ui_audit_")
         }.toSet()
-        assertEquals(50, auditKeys.size)
+        assertEquals(49, auditKeys.size)
 
         val forbidden = listOf(
             "whoop",

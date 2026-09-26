@@ -135,9 +135,9 @@ remains manual until the final go/no-go review.
 
 ### Current mainline health
 
-The protected integrated baseline for the September 17-18 review is `main` at
-`b688b3b725cd497e96a31b28540a219bf50446e1`. Live GitHub settings and the exact
-commit's checks were reverified on 2026-09-18:
+The current protected integrated baseline is `main` at
+`9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`. The remote branch head was
+reverified on 2026-09-24:
 
 - `main` uses strict up-to-date status checks, administrator enforcement, and
   linear history; force pushes and branch deletion are disabled. Release work
@@ -160,11 +160,11 @@ commit's checks were reverified on 2026-09-18:
 - Historical exact-main evidence at `1443acb1` and `b5caec52` remains valid for
   those exact trees, including the retained commit/tree-bound SBOM manifest.
   It is not evidence for the active September 17-19 branch.
-- The `codex/ui-cloud-readiness-20260917` candidate has complete local Apple,
-  Android, package, server, simulator, infrastructure, bounded-runner, and
-  exact-current policy walls, and exact round-owned cleanup is complete. Its
-  protected pull request and exact-head check suite are the authoritative
-  record for the candidate SHA, hosted wall, merge, and protected-main result.
+- App PR `#17` on `codex/noop-band-sdk-app-integration-20260921` carries the
+  current source-only SDK/UI replacement. Focused local Apple, Android,
+  simulator, and artifact evidence is green; its final exact-tree control wall,
+  consolidated push, exact-head checks, merge, and protected-main result remain
+  authoritative pending gates.
 - Reviewed deployment environments, production credentials and rotation,
   signed artifacts, physical-device evidence, supplier inputs, legal and
   certification approvals, store records, production operations, and final
@@ -256,8 +256,82 @@ Exact UUIDs and byte layouts remain pending the input dossier.
 ### 6.1 Repository boundaries
 
 The NOOP-owned protocol, adapters, fixtures, and conformance tools live in the
-separate private `Dhanunjay-Divi/NoopBandSDK` repository. The initial
-English-only, binary-free scaffold is published at commit `ee82cc0`.
+separate public `Dhanunjay-Divi/NoopBandSDK` repository. The binary-free
+neutral Swift/Kotlin implementation was merged at
+`e166773c5d3efd68dc5fa24488c9bbdf3ab6e97b`; its first protected-review
+hardening was merged at `f32633a9fc63a9edd273f38e97b48c216a798234`;
+and the generation, history, diagnostics, input-validation, cache-bound, and
+operation-terminal remediation was merged at
+`34028a2ab56feb90ae774b0ee0055529ce175723`. Session-bound operation
+authority, immutable capability inputs, non-HR live streams, history gates,
+firmware invalidation, and stale terminal fencing were merged at
+`dab6072eb2b69b07ee34221dbb649a0119547246`. Explicit connection and
+authentication phases, generation-fenced connection completion, categorized
+connection/authentication terminals, and bounded pending-history busy
+diagnostics were merged through PR `#6` at
+`78c17cbd495353f33b5ef169bd1200ee9a0c35df`. Caller-owned Kotlin collection
+snapshots and terminal operation-security failures were merged through PR
+`#8` at `277c628d5a1fd9e747871e777d908e41460802fa`. The same-session
+security-failure terminal and bounded invalid-history-token rejection evidence
+were merged through PRs `#8` and `#9`. Durable-receipt serialization,
+capability cancel/fail terminals, and operation-authentication invalidation
+were merged through PR `#12`. Exact provenance-bearing accepted history rows,
+immutable Android acceptance collections, bounded restored-checkpoint
+traversal, and independent staged receipt counts were merged through PR `#13`,
+and candidate-bound callbacks, bounded successful-live diagnostics,
+established authentication/security terminals, Swift actor-operation
+revalidation, and terminal-cursor retention were merged through PR `#14`.
+PR `#15` adds capability schema v2 with separate live/history streams,
+retained and first-lost overflow ranges bound to durable receipts, pending
+persistence protection for established failures, and scan-authority
+revalidation after diagnostics suspension.
+PR `#16` validates retained sample bounds and circular-loss chronology,
+rejects history streams with zero retained history, and distinguishes
+recoverable from terminal firmware failure.
+PR `#19` publishes each platform's ordered conformance list and fails closed on
+contract-order drift. PR `#20` preserves an already ready Kotlin session when a
+malformed delayed capability callback is rejected, while the same malformed
+input still fails capability negotiation when negotiation is active.
+PR `#21` preserves a restored checkpoint across an intervening source and
+adds generation-fenced graceful disconnect with bounded cancellation evidence
+for active live and history operations.
+PR `#22` binds discovery callbacks to an opaque scan-session token, bounds
+hostile Kotlin set traversal by iterator steps, and rejects history operations
+unless retention and at least one history stream were negotiated.
+PR `#23` closes the Kotlin source-integration authority gap by retaining the
+exact scan token issued by `beginScan` and requiring reference identity for
+every scan callback, even when app and SDK sources compile in one Gradle
+module.
+PR `#24` makes Swift consume the active scan token before
+candidate-selection diagnostics suspend. Delayed select, cancel, and failure
+callbacks therefore fail with the same `staleCallback` category as Kotlin
+while the accepted connection remains usable.
+PR `#25` requires the exact issued connection and live-operation tokens for
+established-session failure and live stop, returns fresh connection authority
+after reconnect, and preserves that authority across Swift actor suspension.
+PR `#26` additionally makes reconnect interruption require the exact active
+connection token, returns opaque one-use reconnect authority, keeps firmware
+failure recovery scan-only, and invalidates stale reconnect authority when a
+new recovery scan starts.
+PR `#27` rejects every public Kotlin session-machine entry while a
+caller-owned supplier collection is being traversed. JVM monitor reentrancy
+therefore cannot use `close`, `disconnect`, or another public operation to
+mutate the session before the outer collection snapshot is validated.
+PR `#28` completes the supplier-neutral lifecycle chronology, bounded
+diagnostic compatibility, Swift actor-reentrancy, firmware disconnect
+classification, and JVM source/binary compatibility closeout.
+PR `#29` advances the accepted supplier-neutral capability contract to schema
+v3 and makes report equivalence deterministic across Swift and Kotlin,
+including exact per-stream semantics, UTF-8 byte semantics, and explicit
+live-operation allowlists.
+Current reviewed SDK `main` is
+`b02808372b7c537f22058c7ebc75d92c750373be`. The app integration candidate
+consumes the deterministic export from that reviewed revision through a
+digest-pinned, supplier-artifact-free boundary. By owner decision on
+2026-09-23, the app and SDK repositories remain public. D-056 therefore
+requires a continuously enforced public-source boundary rather than a later
+visibility change: supplier binaries, firmware, credentials, signing material,
+private inputs, and user or health data stay outside both repositories.
 
 ```text
 NoopBandSDK/
@@ -397,7 +471,9 @@ arbitrary errors.
 - Firmware and both clients pass the same conformance scenarios.
 - Parsers pass truncation, corruption, bounds, replay, duplicate, ordering, and
   fuzz/property tests.
-- A deterministic simulator proves every lifecycle and error transition.
+- A deterministic simulator exercises every modeled neutral lifecycle and
+  error transition; it does not prove supplier callbacks, BLE, firmware,
+  background execution, OS termination behavior, or physical hardware errors.
 - Hardware-in-loop proves reconnect, backlog, clock drift, power loss, full
   flash, haptics, and OTA recovery.
 - Public SDK symbols and protocol versions are documented and compatibility
@@ -422,7 +498,7 @@ and vendor-named apnea/body-composition outputs are not validated NOOP
 features. The package remains outside Git until legal, dependency, security,
 privacy, network, exact-version, and update-support gates pass.
 
-The neutral SDK contract is developed in the separate private
+The neutral SDK contract is developed in the separate public
 `Dhanunjay-Divi/NoopBandSDK` repository. Its local gate rejects tracked
 supplier binaries and CJK text in NOOP-owned public source/docs. This does not
 alter or delete NOOP's supported app localizations, and it does not rewrite the
@@ -668,14 +744,14 @@ with traceable calibration and identity.
 
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
-| S3.1 | OPEN | Check in the versioned canonical protocol and capability schema after dossier approval. | Reviewed spec with change policy |
-| S3.2 | OPEN | Build pure Swift and Kotlin models, framing, parser, clock, history, command, and update state machines. | Shared golden and negative corpus green |
+| S3.1 | PARTIAL | Maintain the supplier-neutral versioned capability schema; bind supplier-approved protocol details only after dossier approval. | Schema v3 and change policy are reviewed; supplier protocol truth remains gated |
+| S3.2 | PARTIAL | The pure Swift/Kotlin neutral models and session/history/command/firmware state machines are implemented; exact supplier framing, parsing, clock, and transport truth remain gated. | Shared golden and negative corpus green for the neutral contract; supplier corpus pending |
 | S3.3 | OPEN | Build CoreBluetooth and Android BLE transports around one serialized session state machine. | Lifecycle tests and platform builds |
-| S3.4 | OPEN | Build deterministic virtual band, fault injection, CLI, and packet/manifest inspector. | CI scenarios for every state and failure |
-| S3.5 | OPEN | Bind accepted batches to additive neutral storage and durable acknowledgment. | Crash/retry/idempotency database tests |
-| S3.6 | OPEN | Add bounded cross-platform diagnostics and report coverage. | Redaction, bounding, stall, and failure tests |
-| S3.7 | OPEN | Publish internal SDK integration docs, API compatibility policy, and examples. | A new client can integrate without transport internals |
-| S3.8 | OPEN | Run firmware/Swift/Kotlin conformance in CI and hardware-in-loop. | Version-pair compatibility matrix |
+| S3.4 | PARTIAL | A deterministic Swift/Kotlin virtual band and fault scenarios are implemented; supplier packet/manifest inspection and any required CLI remain open. | Neutral scenarios pass; supplier fixtures and tools pending |
+| S3.5 | PARTIAL | The neutral contract binds accepted batches to durable receipt authority; production app storage and supplier acknowledgements remain default-off. | Neutral crash/retry/idempotency tests pass; supplier/database path pending |
+| S3.6 | PARTIAL | Bounded cross-platform neutral diagnostics and app-boundary category tests exist; real adapter/report coverage remains open. | Neutral redaction, bounding, stall, and failure tests pass; physical adapter evidence pending |
+| S3.7 | PARTIAL | Public SDK integration, compatibility, and physical-handoff documents exist; exact supplier adapter examples remain gated. | A neutral client can integrate without supplier internals; supplier adapter guide pending |
+| S3.8 | PARTIAL | Swift/Kotlin conformance runs locally and through the app gates; firmware conformance and hardware-in-loop remain open. | Neutral version-pair matrix passes; firmware/physical matrix pending |
 | S3.9 | OPEN | Model printed-label matching, identify, possession challenge, confirmation, and claim-proof results without exposing identifiers. | Shared fixtures, redaction tests, and supplier conformance |
 
 **Exit:** mobile integration uses the SDK, not duplicated screen-level GATT

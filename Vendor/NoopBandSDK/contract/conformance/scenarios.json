@@ -1,0 +1,883 @@
+{
+  "schemaVersion": 1,
+  "scenarios": [
+    {
+      "id": "happy_path",
+      "automated": true,
+      "expected": {
+        "events": [
+          "scan_started",
+          "candidate_selected",
+          "connected",
+          "capabilities_accepted",
+          "live_committed",
+          "history_received",
+          "history_committed",
+          "history_acknowledged"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 3,
+        "failure": null
+      }
+    },
+    {
+      "id": "single_command_queue",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "command_started",
+          "second_command_rejected",
+          "command_completed"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "busy"
+      }
+    },
+    {
+      "id": "stale_callback_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "generation_advanced",
+          "stale_callback_rejected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "scan_callback_session_bound",
+      "automated": true,
+      "expected": {
+        "events": [
+          "scan_pair",
+          "foreign_select_rejected",
+          "foreign_cancel_rejected",
+          "foreign_failure_rejected",
+          "current_scan_preserved",
+          "own_select_accepted",
+          "current_session_ready"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "scan_callback_consumed_after_selection",
+      "automated": true,
+      "expected": {
+        "events": [
+          "scan_started",
+          "candidate_selected",
+          "late_select_rejected",
+          "late_cancel_rejected",
+          "late_failure_rejected",
+          "connection_preserved",
+          "current_session_ready"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "cross_session_credentials_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready_pair",
+          "foreign_live_receipt_rejected",
+          "own_live_receipt_accepted",
+          "foreign_history_receipt_rejected",
+          "foreign_operation_token_rejected",
+          "own_history_completed"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 3,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "established_failure_session_bound",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready_pair",
+          "foreign_failure_rejected",
+          "current_session_preserved",
+          "own_failure_accepted"
+        ],
+        "finalState": "rejected",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "reconnect_callback_session_bound",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready_pair",
+          "foreign_interrupt_rejected",
+          "current_live_preserved",
+          "live_interruption_ordered",
+          "foreign_resume_rejected",
+          "current_recovery_preserved",
+          "own_resume_accepted"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "reconnected_established_failure_authorized",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "reconnected",
+          "stale_previous_failure_rejected",
+          "resumed_session_preserved",
+          "resumed_failure_accepted"
+        ],
+        "finalState": "rejected",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "superseded_live_stop_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "first_live_stopped",
+          "stale_stop_rejected",
+          "current_live_preserved",
+          "current_stop_accepted"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "same_session_replay_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "first_live_committed",
+          "stale_live_receipt_rejected",
+          "second_live_committed",
+          "stale_operation_token_rejected",
+          "first_history_committed",
+          "stale_history_receipt_rejected",
+          "second_history_committed"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-3",
+        "acceptedSamples": 5,
+        "failure": "storage"
+      }
+    },
+    {
+      "id": "stale_terminal_callbacks_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "scan_restarted",
+          "stale_scan_cancel_rejected",
+          "stale_scan_failure_rejected",
+          "ready",
+          "stale_reconnect_interrupt_rejected",
+          "reconnect_started",
+          "first_reconnect_completed",
+          "second_reconnect_started",
+          "stale_reconnect_completion_rejected",
+          "reconnected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "history_requires_durable_receipt",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "history_received",
+          "ack_rejected",
+          "history_committed",
+          "history_acknowledged"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 2,
+        "failure": "storage"
+      }
+    },
+    {
+      "id": "live_does_not_advance_history",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "live_committed",
+          "cursor_unchanged",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 1,
+        "failure": null
+      }
+    },
+    {
+      "id": "live_batch_deduplicated",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "live_committed",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 1,
+        "failure": null
+      }
+    },
+    {
+      "id": "history_cursor_chain_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "first_history_committed",
+          "cursor_chain_rejected",
+          "operation_cancelled"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 2,
+        "failure": "historyStalled"
+      }
+    },
+    {
+      "id": "operation_capability_fail_closed",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "unsupported_operation_rejected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "unsupported"
+      }
+    },
+    {
+      "id": "oversized_metadata_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "oversized_metadata_rejected",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "invalidInput"
+      }
+    },
+    {
+      "id": "capability_unknown_fail_closed",
+      "automated": true,
+      "expected": {
+        "events": [
+          "scan_started",
+          "candidate_selected",
+          "connected",
+          "capability_rejected"
+        ],
+        "finalState": "incompatible",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "incompatible"
+      }
+    },
+    {
+      "id": "history_interrupted_resume",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "history_received",
+          "persistence_drain_required",
+          "persistence_failed",
+          "history_interrupted",
+          "reconnected",
+          "history_resumed",
+          "history_committed",
+          "history_acknowledged"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 2,
+        "failure": "disconnected"
+      }
+    },
+    {
+      "id": "history_checkpoint_restored",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "checkpoint_restored",
+          "range_resume_required",
+          "history_committed",
+          "history_acknowledged"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-3",
+        "acceptedSamples": 1,
+        "failure": null
+      }
+    },
+    {
+      "id": "history_checkpoint_survives_source_mismatch",
+      "automated": true,
+      "expected": {
+        "events": [
+          "alternate_source_ready",
+          "alternate_source_disconnected",
+          "checkpoint_restored"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 2,
+        "failure": null
+      }
+    },
+    {
+      "id": "firmware_eligibility_specific",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "firmware_rejected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "updateNotEligible"
+      }
+    },
+    {
+      "id": "unnegotiated_stream_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "live_stream_rejected",
+          "live_stopped",
+          "history_stream_rejected",
+          "operation_cancelled"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "unsupported"
+      }
+    },
+    {
+      "id": "firmware_blocked_during_live",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "live_started",
+          "firmware_rejected",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "busy"
+      }
+    },
+    {
+      "id": "history_state_requires_durable_receipt",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "history_received",
+          "receipt_rejected",
+          "history_committed",
+          "range_incomplete",
+          "terminal_received",
+          "terminal_committed",
+          "post_terminal_chunk_rejected",
+          "operation_completed"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-3",
+        "acceptedSamples": 2,
+        "failure": "historyStalled"
+      }
+    },
+    {
+      "id": "stale_capability_callback_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "generation_advanced",
+          "stale_capability_rejected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "invalid_device_time_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "invalid_device_time_rejected",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "invalidInput"
+      }
+    },
+    {
+      "id": "history_operation_requires_own_receipt",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "first_history_completed",
+          "own_receipt_required",
+          "operation_cancelled"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 2,
+        "failure": "storage"
+      }
+    },
+    {
+      "id": "firmware_diagnostics_specific",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "firmware_diagnostics_specific"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": null
+      }
+    },
+    {
+      "id": "firmware_terminal_failure",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "firmware_started",
+          "firmware_terminal",
+          "reconnect_rejected",
+          "terminal_diagnostic_recorded",
+          "same_session_restart_rejected",
+          "replacement_scan_started"
+        ],
+        "finalState": "firmwareFailure",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "invalidState"
+      }
+    },
+    {
+      "id": "history_nonadvancing_cursor_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "nonadvancing_cursor_rejected",
+          "operation_cancelled"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "historyStalled"
+      }
+    },
+    {
+      "id": "utf8_length_cross_platform",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "utf8_limit_rejected",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "invalidInput"
+      }
+    },
+    {
+      "id": "sampling_requires_sensor_capability",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "sampling_rejected"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "unsupported"
+      }
+    },
+    {
+      "id": "durable_identity_cache_bounded",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "identity_cache_bounded",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 2,
+        "failure": null
+      }
+    },
+    {
+      "id": "operation_terminal_paths",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready",
+          "operation_cancelled",
+          "operation_failed",
+          "disconnect_recovery",
+          "stale_callback_rejected",
+          "reconnected",
+          "security_failure_terminal",
+          "security_failure_stale_token_rejected",
+          "security_failure_restart_rejected",
+          "replacement_session_ready"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": null
+      }
+    },
+    {
+      "id": "connection_callbacks_generation_fenced",
+      "automated": true,
+      "expected": {
+        "events": [
+          "connection_started",
+          "connection_failed",
+          "stale_cancel_rejected",
+          "stale_failure_rejected",
+          "stale_terminals_preserved_state",
+          "stale_connection_rejected",
+          "connected",
+          "capabilities_accepted",
+          "stale_phases_preserved",
+          "connection_diagnostics_bounded"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "connection_terminal_paths",
+      "automated": true,
+      "expected": {
+        "events": [
+          "connection_cancelled",
+          "authentication_rejected",
+          "security_failure",
+          "security_failure_restart_rejected",
+          "replacement_session_ready",
+          "connection_diagnostics_bounded"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "securityFailure"
+      }
+    },
+    {
+      "id": "capability_terminal_paths",
+      "automated": true,
+      "expected": {
+        "events": [
+          "capability_cancelled",
+          "stale_cancel_rejected",
+          "capability_timed_out",
+          "stale_failure_rejected",
+          "capability_authentication_rejected",
+          "capability_disconnected",
+          "capability_security_failure",
+          "security_failure_restart_rejected",
+          "replacement_session_ready",
+          "capability_diagnostics_bounded"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "securityFailure"
+      }
+    },
+    {
+      "id": "history_pending_busy_diagnostics",
+      "automated": true,
+      "expected": {
+        "events": [
+          "history_pending",
+          "second_chunk_rejected",
+          "history_busy_recorded",
+          "operation_cancelled"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": "cursor-2",
+        "acceptedSamples": 0,
+        "failure": "busy"
+      }
+    },
+    {
+      "id": "diagnostics_bounded",
+      "automated": true,
+      "expected": {
+        "events": [
+          "diagnostics_recorded",
+          "diagnostics_bounded"
+        ],
+        "finalState": "idle",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": null
+      }
+    },
+    {
+      "id": "fractional_steps_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "integer_steps_accepted",
+          "fractional_steps_rejected"
+        ],
+        "finalState": "idle",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "invalidInput"
+      }
+    },
+    {
+      "id": "live_callback_session_bound",
+      "automated": true,
+      "expected": {
+        "events": [
+          "ready_pair",
+          "foreign_live_callback_rejected",
+          "own_live_callback_accepted"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 1,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "graceful_disconnect_to_idle",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_and_history_started",
+          "history_cancelled",
+          "live_cancelled",
+          "disconnect_completed",
+          "stale_callback_rejected",
+          "session_reusable"
+        ],
+        "finalState": "idle",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "staleCallback"
+      }
+    },
+    {
+      "id": "close_active_phase_terminal",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_and_history_started",
+          "history_cancelled",
+          "live_cancelled",
+          "session_closed"
+        ],
+        "finalState": "closed",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": null
+      }
+    },
+    {
+      "id": "closed_session_terminal",
+      "automated": true,
+      "expected": {
+        "events": [
+          "session_closed",
+          "no_unmatched_connection_cancellation",
+          "operation_rejected"
+        ],
+        "finalState": "closed",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "closed"
+      }
+    },
+    {
+      "id": "live_operation_allowed",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_started",
+          "battery_allowed",
+          "operation_completed",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": null
+      }
+    },
+    {
+      "id": "live_operation_denied",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_started",
+          "haptic_denied",
+          "operation_class_recorded",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "busy"
+      }
+    },
+    {
+      "id": "stream_semantics_mismatch_rejected",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_started",
+          "semantic_revision_rejected",
+          "no_batch_staged",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 0,
+        "failure": "unsupported"
+      }
+    },
+    {
+      "id": "live_staged_before_durable",
+      "automated": true,
+      "expected": {
+        "events": [
+          "live_started",
+          "accepted_before_persistence",
+          "durable_completion_recorded",
+          "duplicate_zero_recorded",
+          "live_stopped"
+        ],
+        "finalState": "ready",
+        "acknowledgedCursor": null,
+        "acceptedSamples": 1,
+        "failure": null
+      }
+    },
+    {
+      "id": "firmware_possession_proof",
+      "automated": false,
+      "externalGate": "Requires approved challenge-bound firmware proof and physical bands."
+    },
+    {
+      "id": "unexpected_network_egress_blocked",
+      "automated": false,
+      "externalGate": "Requires signed-app traffic inspection with the approved supplier binary."
+    },
+    {
+      "id": "ota_wrong_image_rejected",
+      "automated": false,
+      "externalGate": "Requires approved signed firmware manifests, bootloader contract, and hardware."
+    },
+    {
+      "id": "ota_interruption_recovery",
+      "automated": false,
+      "externalGate": "Requires physical update, rollback, rescue, and power-interruption evidence."
+    },
+    {
+      "id": "collector_handoff",
+      "automated": false,
+      "externalGate": "Requires account-authorized multi-device physical lifecycle evidence."
+    },
+    {
+      "id": "background_reconnect",
+      "automated": false,
+      "externalGate": "Requires signed physical iOS and Android process-lifecycle evidence."
+    },
+    {
+      "id": "sensor_accuracy",
+      "automated": false,
+      "externalGate": "Requires the exact hardware, firmware, references, and approved validation study."
+    }
+  ]
+}

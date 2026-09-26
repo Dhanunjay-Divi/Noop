@@ -1081,6 +1081,7 @@ private struct iOSRootView: View {
             // refresh, backup catch-up and optional remote sync from its task modifier.
             if hasLaunchAccess
                 && !reviewSampleBlocksStandardLaunch
+                && (onboarded || demoBypass)
                 && (acceptedTerms == Terms.currentVersion || demoBypass) {
                 RootTabView()
             } else {
@@ -1196,11 +1197,7 @@ private struct iOSRootView: View {
     }
 
     private var forceReviewSample: Bool {
-        #if DEBUG
         return CommandLine.arguments.contains("--review-sample")
-        #else
-        return false
-        #endif
     }
 
     private var hasLaunchAccess: Bool {
@@ -1208,7 +1205,7 @@ private struct iOSRootView: View {
     }
 
     private var reviewSampleOffered: Bool {
-        !demoBypass && (forceReviewSample || acceptedTerms != Terms.currentVersion)
+        !demoBypass && forceReviewSample
     }
 
     private var reviewSampleBlocksStandardLaunch: Bool {
@@ -1275,7 +1272,7 @@ enum DemoScreens {
         }
         guard let i = args.firstIndex(of: "--demo-screen"), i + 1 < args.count else { return nil }
         switch args[i + 1].lowercased() {
-        case "today":    return AnyView(TodayView())
+        case "today", "liquidtoday": return AnyView(LiquidTodayView())
         case "releasewelcome", "release_welcome":
             return AnyView(
                 WhatsNewView(
@@ -1288,11 +1285,6 @@ enum DemoScreens {
             return AnyView(WhatsNewView(presentation: .history, onClose: {}))
         case "noopplus", "noop_plus":
             return AnyView(NoopPlusView())
-        // The DEFAULT iOS Today (`noop.liquidTodayEnabled` ships true), so it needs its own entry — plain
-        // "today" renders the CLASSIC screen, which is exactly the screen whose behaviour Liquid was found
-        // to have diverged from. Without this, the default Today was the one screen the harness could not
-        // capture.
-        case "liquidtoday": return AnyView(LiquidTodayView())
         case "calendar": return AnyView(CalendarMonthView())
         case "trends":   return AnyView(TrendsView())
         case "sleep":    return AnyView(SleepView())
@@ -1344,6 +1336,7 @@ enum DemoScreens {
         case "fitnessage": return AnyView(FitnessAgeDemoScreen())
         case "vitality": return AnyView(VitalityDemoScreen())
         case "addwizard": return AnyView(AddWizardDemoHost())
+        case "launchbands": return AnyView(LaunchBandsDemoHost())
         // Oura onboarding: the Add-device wizard deep-linked straight to the Oura factory-reset-and-adopt
         // prep step (the Beta banner + get/lose card + the red irreversible-consent gate), screenshot-able
         // WITHOUT a ring.
@@ -1368,7 +1361,25 @@ enum DemoScreens {
 /// wizard's `init(live:)` (the nonisolated DemoScreens switch can't construct a LiveState itself).
 private struct AddWizardDemoHost: View {
     @EnvironmentObject var live: LiveState
-    var body: some View { AddDeviceWizard(live: live, onClose: {}) }
+    var body: some View {
+        AddDeviceWizard(
+            live: live,
+            onClose: {},
+            selectionScope: .launchBands
+        )
+    }
+}
+
+private struct LaunchBandsDemoHost: View {
+    @EnvironmentObject var live: LiveState
+
+    var body: some View {
+        AddDeviceWizard(
+            live: live,
+            onClose: {},
+            selectionScope: .launchBands
+        )
+    }
 }
 
 private struct CycleTrackerDemoHost: View {
@@ -1419,7 +1430,12 @@ private struct CycleTrackerDemoHost: View {
 private struct OuraOnboardingDemoHost: View {
     @EnvironmentObject var live: LiveState
     var body: some View {
-        AddDeviceWizard(live: live, onClose: {}, startAt: (.oura, .prep))
+        AddDeviceWizard(
+            live: live,
+            onClose: {},
+            selectionScope: .allDevices,
+            startAt: (.oura, .prep)
+        )
     }
 }
 #endif

@@ -134,6 +134,71 @@ internal data class MatchedSleepObservation(
     val durationMinutes: Double,
 )
 
+internal enum class ActiveDeviceSourceState {
+    UNRESOLVED,
+    NO_ACTIVE_DEVICE,
+    SUPPLIER,
+    STANDARD,
+}
+
+internal data class ActiveDeviceProjection(
+    val deviceId: String?,
+    val name: String?,
+    val sourceState: ActiveDeviceSourceState,
+)
+
+internal fun activeDeviceProjection(
+    devices: List<com.noop.data.PairedDeviceRow>,
+): ActiveDeviceProjection {
+    val active = devices.firstOrNull {
+        it.status == com.noop.data.DeviceStatus.active.name
+    }
+    val sourceKind = active?.sourceKind?.let { rawSourceKind ->
+        com.noop.data.SourceKind.entries.firstOrNull { it.name == rawSourceKind }
+    }
+    return ActiveDeviceProjection(
+        deviceId = active?.id,
+        name = active?.let(::displayName),
+        sourceState = when {
+            active == null -> ActiveDeviceSourceState.NO_ACTIVE_DEVICE
+            sourceKind == com.noop.data.SourceKind.veepoo ->
+                ActiveDeviceSourceState.SUPPLIER
+            sourceKind != null -> ActiveDeviceSourceState.STANDARD
+            else -> ActiveDeviceSourceState.UNRESOLVED
+        },
+    )
+}
+
+internal suspend fun loadActiveDeviceProjection(
+    retryDelaysMillis: List<Long>,
+    readDevices: suspend () -> List<com.noop.data.PairedDeviceRow>,
+    wait: suspend (Long) -> Unit = { delay(it) },
+): ActiveDeviceProjection? {
+    for (delayMillis in listOf(0L) + retryDelaysMillis) {
+        if (delayMillis > 0L) wait(delayMillis)
+        val devices = try {
+            readDevices()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            null
+        }
+        if (devices != null) return activeDeviceProjection(devices)
+    }
+    return null
+}
+
+internal fun shouldInvalidateActiveDeviceProjection(
+    confirmed: Boolean,
+    confirmedSelectionId: String?,
+    selectedDeviceId: String,
+): Boolean = confirmed && confirmedSelectionId != selectedDeviceId
+
+data class ArchivedDeviceResult(
+    val archived: Boolean,
+    val activeDeviceId: String?,
+)
+
 /** Stable live fields the Today root is allowed to observe. Sensor values and sync counters stay in leaves. */
 internal data class DashboardLiveSnapshot(
     val connected: Boolean,
@@ -255,6 +320,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun setActiveDevice(id: String) {
         val changed = id != deviceId
         noopApp.deviceRegistry.setActive(id)
+        publishActiveDevice(id, changed)
+    }
+
+    private suspend fun publishActiveDevice(id: String, changed: Boolean) {
         noopApp.noteActiveDeviceId(id)
         _selectedDeviceId.value = id
         noopApp.sourceCoordinator.onActiveDeviceChanged(id)
@@ -270,12 +339,52 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _activeDeviceName = MutableStateFlow<String?>(null)
     val activeDeviceName: StateFlow<String?> = _activeDeviceName.asStateFlow()
 
-    /** Re-read the active device row and republish its display name. Called at launch + after a setActive. */
+    /** Durable source state for the registry's active row. Presentation must not infer source ownership
+     *  from transient adapter state because secure-store or transport failures can reset that state. */
+    private val _activeDeviceSourceState =
+        MutableStateFlow(ActiveDeviceSourceState.UNRESOLVED)
+    internal val activeDeviceSourceState: StateFlow<ActiveDeviceSourceState> =
+        _activeDeviceSourceState.asStateFlow()
+    private var activeDeviceProjectionJob: Job? = null
+    private var activeDeviceProjectionConfirmed = false
+    private var activeDeviceProjectionSelectionId: String? = null
+    private val activeDeviceProjectionRetryDelaysMillis =
+        listOf(1_000L, 5_000L, 15_000L)
+
+    /** Re-read the active device row and republish its presentation. A failed read preserves the last
+     *  confirmed durable projection instead of temporarily presenting another source's controls. */
     fun refreshActiveDeviceName() {
-        viewModelScope.launch {
-            val all = runCatching { noopApp.deviceRegistry.all() }.getOrDefault(emptyList())
-            val active = all.firstOrNull { it.status == com.noop.data.DeviceStatus.active.name }
-            _activeDeviceName.value = active?.let { displayName(it) }
+        activeDeviceProjectionJob?.cancel()
+        val expectedDeviceId = _selectedDeviceId.value
+        if (shouldInvalidateActiveDeviceProjection(
+                confirmed = activeDeviceProjectionConfirmed,
+                confirmedSelectionId = activeDeviceProjectionSelectionId,
+                selectedDeviceId = expectedDeviceId,
+            )
+        ) {
+            activeDeviceProjectionConfirmed = false
+            activeDeviceProjectionSelectionId = null
+            _activeDeviceName.value = null
+            _activeDeviceSourceState.value = ActiveDeviceSourceState.UNRESOLVED
+        }
+        val retryDelays = if (activeDeviceProjectionConfirmed) {
+            emptyList()
+        } else {
+            activeDeviceProjectionRetryDelaysMillis
+        }
+        activeDeviceProjectionJob = viewModelScope.launch {
+            val projection = loadActiveDeviceProjection(
+                retryDelaysMillis = retryDelays,
+                readDevices = noopApp.deviceRegistry::all,
+            ) ?: return@launch
+            if (_selectedDeviceId.value != expectedDeviceId) return@launch
+            if (projection.deviceId != null && projection.deviceId != expectedDeviceId) {
+                return@launch
+            }
+            activeDeviceProjectionConfirmed = true
+            activeDeviceProjectionSelectionId = expectedDeviceId
+            _activeDeviceName.value = projection.name
+            _activeDeviceSourceState.value = projection.sourceState
         }
     }
 
@@ -285,17 +394,47 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  pointed at it), so it stayed connected and couldn't show its blue pairing LEDs. iOS already does
      *  this in forgetDevice; this brings Android to parity. A non-WHOOP source (FTMS/HR strap) is owned by
      *  the SourceCoordinator, not the WHOOP client, so it isn't touched here. */
-    suspend fun archivePairedDevice(id: String) {
+    suspend fun archivePairedDevice(id: String): ArchivedDeviceResult {
         val devices = runCatching { noopApp.deviceRegistry.all() }.getOrDefault(emptyList())
-        val wasEligible = devices.any {
-            it.id == id && it.status != com.noop.data.DeviceStatus.archived.name
+        val target = devices.firstOrNull { it.id == id }
+        val wasEligible = target?.status != null &&
+            target.status != com.noop.data.DeviceStatus.archived.name
+        val supplierRemoval = target?.sourceKind == com.noop.data.SourceKind.veepoo.name
+        val archived = if (supplierRemoval) {
+            noopApp.sourceCoordinator.archiveVeepooDevice(id)
+        } else {
+            runCatching {
+                noopApp.deviceRegistry.archive(id)
+                true
+            }.getOrDefault(false)
         }
-        noopApp.deviceRegistry.archive(id)
+        if (!archived) return ArchivedDeviceResult(archived = false, activeDeviceId = null)
+        val activeDeviceId = if (supplierRemoval) {
+            val activeRead = runCatching {
+                noopApp.deviceRegistry.all()
+                    .firstOrNull { it.status == com.noop.data.DeviceStatus.active.name }
+            }
+            val active = activeRead.getOrNull()
+            val selectedId = active?.id ?: if (activeRead.isFailure) {
+                noopApp.activeDeviceIdFlow.value.takeIf { it != id }
+            } else {
+                null
+            }
+            if (selectedId != null) {
+                noopApp.noteActiveDeviceId(selectedId)
+                _selectedDeviceId.value = selectedId
+            }
+            refreshActiveDeviceName()
+            selectedId
+        } else {
+            null
+        }
         if (com.noop.ble.SourceCoordinator.isWhoop(id, devices)) ble.releaseStrap()
         if (wasEligible) {
             analyzeKick.trySend(Unit)
             scheduleAgeMetricRecompute()
         }
+        return ArchivedDeviceResult(archived = true, activeDeviceId = activeDeviceId)
     }
 
     /** Rename a device (blank clears the nickname → falls back to brand+model). */
@@ -408,6 +547,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val ouraWearState: StateFlow<com.noop.oura.OuraWearState?> =
         noopApp.sourceCoordinator.ouraWearState
 
+    val supplierBandAvailable: Boolean get() = noopApp.sourceCoordinator.veepooAvailable
+    val supplierBandCandidates = noopApp.sourceCoordinator.veepooCandidates
+    val supplierBandPairingState = noopApp.sourceCoordinator.veepooPairingState
+    val supplierBandDisplay = noopApp.sourceCoordinator.veepooDisplay
+
+    fun supplierBandRegistrationUsable(deviceId: String): Boolean =
+        noopApp.sourceCoordinator.hasUsableVeepooRegistration(deviceId)
+
+    suspend fun beginSupplierBandPairing(): Boolean =
+        noopApp.sourceCoordinator.beginVeepooPairing()
+
+    suspend fun selectSupplierBandCandidate(
+        handle: com.noop.ble.veepoo.VeepooCandidateHandle,
+    ): Boolean = noopApp.sourceCoordinator.selectVeepooCandidate(handle)
+
+    fun submitSupplierBandPairing(transportPassword: String): Boolean =
+        noopApp.sourceCoordinator.submitVeepooPairing(
+            transportPassword.toCharArray(),
+        )
+
+    suspend fun commitSupplierBandPairing(nickname: String?): Boolean {
+        val committedDeviceId =
+            noopApp.sourceCoordinator.commitVeepooPairing(nickname) ?: return false
+        noopApp.noteActiveDeviceId(committedDeviceId)
+        _selectedDeviceId.value = committedDeviceId
+        refreshActiveDeviceName()
+        return true
+    }
+
+    fun cancelSupplierBandPairing() = noopApp.sourceCoordinator.cancelVeepooPairing()
+
     /** #656: a journal day-offset (daysBack; -1 = Tomorrow) the Today journal widget asks the journal
      *  (Insights) to open at, so tapping a SPECIFIC day's bar lands on THAT day instead of always today.
      *  InsightsScreen consumes it on open and clears it via [requestJournalDay]`(null)`. */
@@ -437,14 +607,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun stopWhoopScan() = ble.stopWhoopScan()
 
     /**
-     * Register a paired device and (optionally) make it the active one — the Add-a-device wizard's single
-     * write path. [addPairedDevice] upserts the row; when [makeActive] is true [setActiveDevice] promotes
-     * it (which also tells the [SourceCoordinator] the active device changed, so it pins the WHOOP /
-     * starts the strap source). Mirrors the macOS AppModel.registerDevice.
+     * Register a paired device and optionally make it active. Active registration uses the registry's
+     * verified one-transaction add-and-promote operation, then publishes the committed source to the live
+     * coordinator. A false result means no durable active row was confirmed.
      */
-    suspend fun registerDevice(device: com.noop.data.PairedDeviceRow, makeActive: Boolean) {
-        addPairedDevice(device)
-        if (makeActive) setActiveDevice(device.id)
+    suspend fun registerDevice(
+        device: com.noop.data.PairedDeviceRow,
+        makeActive: Boolean,
+    ): Boolean {
+        if (!makeActive) {
+            return addPairedDevice(device)
+        }
+
+        val changed = device.id != deviceId
+        if (!noopApp.deviceRegistry.addAndSetActive(device)) return false
+        publishActiveDevice(device.id, changed)
+        return true
     }
 
     /**
@@ -882,6 +1060,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val salvageProbeLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityResumed(activity: android.app.Activity) {
             ble.salvageProbeIfBondLoopPaused()
+            noopApp.sourceCoordinator.onAppForeground()
+            refreshActiveDeviceName()
             // The process-wide Application hook reconciles notification/channel revocation first.
             // Mirror its persisted fail-closed result into this Activity-scoped UI on every resume.
             _windDownEnabled.value = windDownStore.enabled
@@ -1392,8 +1572,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         // Opt-in experimental sleep staging (V2) — read off SharedPreferences here (the
                         // analytics layer is Context-free) and thread it into the sleep self-heal. (V7 3b)
                         useExperimentalSleepV2 = PuffinExperiment.from(appContext).experimentalSleepV2,
-                        // Opt-in motion-aware wake refinement (#364 follow-up) — same Context-free threading.
-                        useMotionAwareWake = PuffinExperiment.from(appContext).motionAwareWake,
+                        // The historical motion byte has conflicting wear/contact and activity meanings.
+                        // A stale preference must not rewrite production sleep stages.
+                        useMotionAwareWake = false,
                         // Sleep & Rest test mode (Test Centre E5): when the SLEEP domain is on, route the
                         // per-day sleep gate trace into the SAME shareable strap log, tagged .sleep so it
                         // lands under the profile in the export. Zero-cost when off: the gate is one
@@ -2466,8 +2647,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // Opt-in experimental sleep staging (V2) — same flag the 15-min loop reads, so a manual
                 // re-score after an edit stages with the same engine the user chose. (V7 Pillar 3b)
                 useExperimentalSleepV2 = PuffinExperiment.from(appContext).experimentalSleepV2,
-                // Opt-in motion-aware wake refinement (#364 follow-up) — same flag the 15-min loop reads.
-                useMotionAwareWake = PuffinExperiment.from(appContext).motionAwareWake,
+                // Retained as an analytics API seam for research tests; production remains disabled.
+                useMotionAwareWake = false,
             )
         }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
     }
@@ -2638,19 +2819,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    /** Steps over a manual-workout window `[from, to]` from the strap's own `step_motion_counter@57`
-     *  (#398): the shared wrap-aware `StepsCounter` delta-sum, then the per-user `stepTicksPerStep`
-     *  calibration the daily total applies (#139, floor 0.5). null when no strap counter covers the window
-     *  — a WHOOP 4.0 (no @57 counter) or an MG/5.0 that hasn't offloaded the window yet. Mirrors Swift
-     *  `Repository.strapStepTicks` + the WorkoutDetailView scaling; the phone-pedometer fallback iOS adds is
-     *  not available on Android (no cheap windowed step source), so a 4.0 window simply shows no steps. */
-    suspend fun workoutSteps(from: Long, to: Long): Int? {
-        if (to <= from) return null
-        val samples = runCatching { repository.stepSamples(deviceId, from, to) }.getOrDefault(emptyList())
-        val ticks = com.noop.analytics.StepsCounter.stepsInWindow(samples) ?: return null
-        val scaled = (ticks.toDouble() / maxOf(profileStore.stepTicksPerStep, 0.5)).roundToInt()
-        return if (scaled > 0) scaled else null
-    }
+    /** Steps over a manual-workout window `[from, to]`.
+     *
+     * Android currently has no validated, inexpensive windowed pedometer source. The band field at byte
+     * 57 is an unverified wrist-motion counter and must not become customer-facing Steps, even when heart
+     * rate rises. Return missing until Health Connect or a supplier-native gait stream can own this value.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    suspend fun workoutSteps(from: Long, to: Long): Int? = null
 
     /** Save a retroactive / edited manual workout, then reload. [replacing] is the original on edit. */
     fun saveManualWorkout(

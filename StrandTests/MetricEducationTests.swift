@@ -93,7 +93,9 @@ final class MetricEducationTests: XCTestCase {
     }
 
     func testWhoopStepCounterEducationCallsItMotionDerivedNotMeasured() throws {
-        let metric = try XCTUnwrap(MetricCatalog.metric(key: "steps", source: "my-whoop"))
+        let metric = try XCTUnwrap(
+            MetricCatalog.all.first { $0.key == "steps" && $0.source == "my-whoop" }
+        )
         let education = MetricKnowledge.education(for: metric)
         let copy = [metric.title, metric.description ?? "", education.whatItIs,
                     education.method, education.limitations].joined(separator: " ")

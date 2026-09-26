@@ -12,23 +12,19 @@ import UIKit
 // a dark surfaceBase substrate with a slow ambient glow, a bottom progress "thread"
 // that fills as you advance, Back always available, and a forward CTA per step.
 //
-// Steps:
-//  1 Welcome           - NOOP + local-first health-data boundary
-//  2 What it does      - 3 calm value slides
-//  3 Expectations      - what scores need and what NOOP does not claim
-//  4 Bluetooth priming - explain BEFORE the OS prompt
-//  5 Wear & wake       - put your strap on, make sure it is charged
-//  6 Scan              - radar sweep; auto-scans, Scan retries via model.scan()
-//  7 Bonding           - celebration when live.bonded
-//  8 Ownership         - always visible; configured builds require claim before profile
-//  9 Profile           - age / sex / weight / height bound to ProfileStore
-// 10 Import (optional) - wearable / Apple Health history
-// 11 Notifications     - explicit, default-off daily guidance choice
-// 12 Safety contacts   - optional contact setup
-// 13 Appearance        - app finish
-// 14 Daily rhythm      - where everyday reviews, logs, and automations live
-// 15 Plan              - choose NOOP or save a NOOP+ preference without payment
-// 16 Done              - "Your thread starts here." -> onFinished()
+// First-run path:
+//  1 Welcome           - NOOP + data boundary
+//  2 Account           - create or restore the ownership identity
+//  3 Bluetooth         - explain the permission before the OS prompt
+//  4 Band setup        - launch-only chooser: NOOP Band or retained WHOOP test transport
+//  5 Ownership         - first-party claim/replacement confirmation when required
+//  6 Profile           - age / sex / weight / height bound to ProfileStore
+//  7 Plan              - choose NOOP or save a NOOP+ preference without payment
+//  8 Done              - enter the app
+//
+// Education, history import, notifications, Safety contacts, appearance, and
+// daily-rhythm discovery remain reachable after entry instead of making a new
+// user clear sixteen pages before seeing the product.
 //
 // Presentation is wired centrally; this view only calls onFinished() when complete.
 
@@ -41,6 +37,7 @@ public struct OnboardingWizard: View {
         self.onFinished = onFinished
         let isOwnershipConfigured = Self.ownershipConfiguredForCurrentBuild
         ownershipConfigured = isOwnershipConfigured
+        var demoStepOverride: Step?
         _ownershipBootstrapComplete = State(
             initialValue: !isOwnershipConfigured
         )
@@ -57,18 +54,23 @@ public struct OnboardingWizard: View {
            let requestedStep = Step.allCases.first(where: {
                $0.storageValue == args[index + 1]
            }) {
+            demoStepOverride = requestedStep
             initialStep = requestedStep
         } else if let index = args.firstIndex(of: "--demo-onboarding-step"),
            args.indices.contains(index + 1),
            let rawValue = Int(args[index + 1]),
            let requestedStep = Step(rawValue: rawValue) {
+            demoStepOverride = requestedStep
             initialStep = requestedStep
         }
         #endif
-        initialStep = Self.normalizedOnboardingStep(
-            initialStep,
-            ownershipConfigured: isOwnershipConfigured
-        )
+        self.demoStepOverride = demoStepOverride
+        if demoStepOverride == nil {
+            initialStep = Self.normalizedOnboardingStep(
+                initialStep,
+                ownershipConfigured: isOwnershipConfigured
+            )
+        }
         _step = State(initialValue: initialStep)
     }
 
@@ -78,9 +80,9 @@ public struct OnboardingWizard: View {
     // handles the bond→celebration transition without re-rendering the root.
 
     enum Step: Int, CaseIterable {
-        case welcome, what, expectations, bluetooth, wear, scan, bonded,
-             ownership, profile, importData, notifications, safetyContacts,
-             appearance, dailyRhythm, plan, done
+        case welcome, account, bluetooth, scan, ownership, profile, plan, done,
+             what, expectations, wear, bonded, importData, notifications,
+             safetyContacts, appearance, dailyRhythm
 
         var isFirst: Bool { self == .welcome }
         var isLast: Bool { self == .done }
@@ -88,6 +90,7 @@ public struct OnboardingWizard: View {
         var storageValue: String {
             switch self {
             case .welcome: return "welcome"
+            case .account: return "account"
             case .what: return "what"
             case .expectations: return "expectations"
             case .bluetooth: return "bluetooth"
@@ -108,7 +111,16 @@ public struct OnboardingWizard: View {
     }
 
     static func onboardingSteps(ownershipConfigured _: Bool) -> [Step] {
-        Step.allCases
+        [
+            .welcome,
+            .account,
+            .bluetooth,
+            .scan,
+            .ownership,
+            .profile,
+            .plan,
+            .done,
+        ]
     }
 
     static func restoredOnboardingStep(
@@ -131,29 +143,57 @@ public struct OnboardingWizard: View {
         let steps = onboardingSteps(
             ownershipConfigured: ownershipConfigured
         )
-        if steps.contains(candidate) {
-            return candidate
+        if steps.contains(candidate) { return candidate }
+        switch candidate {
+        case .what, .expectations, .wear, .bonded, .importData,
+             .notifications, .safetyContacts, .appearance, .dailyRhythm:
+            return .welcome
+        default:
+            return .welcome
         }
-        return steps.contains(.profile) ? .profile : .welcome
     }
 
     static func ownershipDestination(
         for candidate: Step,
         ownershipConfigured: Bool,
         reconciliationComplete: Bool,
-        phase: OwnershipServicePhase
+        phase: OwnershipServicePhase,
+        supplierClaimRequired: Bool = true,
+        deviceSetupComplete: Bool = true
     ) -> Step? {
-        guard ownershipConfigured,
-              candidate.rawValue > Step.ownership.rawValue else {
+        if candidate == .welcome || candidate == .account {
             return candidate
         }
-        guard reconciliationComplete else {
-            return nil
+        if ownershipConfigured {
+            guard reconciliationComplete else { return nil }
+            guard accountStepCanContinue(
+                ownershipConfigured: true,
+                reconciliationComplete: true,
+                phase: phase
+            ) else {
+                return .account
+            }
         }
-        return ownershipCanAccessPostClaimOnboarding(
-            isAvailable: true,
-            phase: phase
-        ) ? candidate : .ownership
+        let requiresDeviceSetup = [
+            Step.ownership,
+            .profile,
+            .plan,
+            .done,
+        ].contains(candidate)
+        guard !requiresDeviceSetup || deviceSetupComplete else {
+            return .scan
+        }
+        guard ownershipConfigured else { return candidate }
+        let requiresCompletedClaim = supplierClaimRequired
+            && [.profile, .plan, .done].contains(candidate)
+        guard !requiresCompletedClaim
+            || ownershipCanAccessPostClaimOnboarding(
+                isAvailable: true,
+                phase: phase
+            ) else {
+            return .ownership
+        }
+        return candidate
     }
 
     private static var ownershipConfiguredForCurrentBuild: Bool {
@@ -164,14 +204,16 @@ public struct OnboardingWizard: View {
         #endif
     }
 
-    private static let progressStorageKey = "noop.onboarding.progress.v1"
+    private static let progressStorageKey = "noop.onboarding.progress.v2"
     private let ownershipConfigured: Bool
+    /// DEBUG-only visual previews may render a page without fabricating durable account or device state.
+    private let demoStepOverride: Step?
     @State private var step: Step = .welcome
     @State private var ownershipBootstrapRequested = false
     @State private var ownershipBootstrapComplete: Bool
     @State private var glow = false
     @State private var profileEditing = false
-    @State private var bandBonded = false
+    @State private var registrySetupSource: SourceKind?
     /// Notification permission is never bundled into a generic Continue tap. This explicit, default-off
     /// choice is explained on the Notifications step and only then passed to the scheduler.
     @State private var dailyReviewOptIn = DailyReviewNotifications.isEnabled
@@ -197,13 +239,7 @@ public struct OnboardingWizard: View {
                 ZStack {
                     switch step {
                     case .welcome:    WelcomeStep()
-                    case .what:       WhatItDoesStep()
-                    case .expectations: ExpectationsStep()
-                    case .bluetooth:  BluetoothStep()
-                    case .wear:       WearStep()
-                    case .scan:       ScanStep(advance: advance)
-                    case .bonded:     BondedStep()
-                    case .ownership:
+                    case .account:
                         #if os(iOS)
                         if ownershipConfigured {
                             OwnershipAccountView()
@@ -212,6 +248,30 @@ public struct OnboardingWizard: View {
                         }
                         #else
                         OwnershipAvailabilityStep()
+                        #endif
+                    case .what:       WhatItDoesStep()
+                    case .expectations: ExpectationsStep()
+                    case .bluetooth:  BluetoothStep()
+                    case .wear:       WearStep()
+                    case .scan:
+                        ScanStep(
+                            setupComplete: deviceSetupComplete,
+                            onSetupSource: handleDeviceSetupSource
+                        )
+                    case .bonded:     BondedStep()
+                    case .ownership:
+                        #if os(iOS)
+                        if supplierClaimRequired {
+                            OwnershipAccountView()
+                        } else {
+                            ConnectedTransportAccountStep(
+                                source: registrySetupSource
+                            )
+                        }
+                        #else
+                        ConnectedTransportAccountStep(
+                            source: registrySetupSource
+                        )
                         #endif
                     case .profile:    ProfileStep(isEditing: $profileEditing)
                     case .importData: ImportStep()
@@ -257,29 +317,39 @@ public struct OnboardingWizard: View {
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
         // Reduce Motion: leave the ambient bloom at its resting frame (no breathing).
         .onAppear {
-            normalizeCurrentStep()
+            if demoStepOverride == nil {
+                normalizeCurrentStep()
+            }
             if !reduceMotion { glow = true }
         }
-        // Isolated live observation — a hidden watcher slides Scan → celebration on bond
-        // without subscribing the whole wizard to per-tick updates.
-        .background(BondWatcher(onBondState: handleBondState))
+        // Isolated durable-registry observation keeps relaunch/resume fail-closed without subscribing
+        // the animated wizard root to high-rate heart-rate updates.
+        .background(
+            DeviceSetupWatcher(onSetupSource: handleDeviceSetupSource)
+        )
         #if os(iOS)
         .task {
+            guard demoStepOverride == nil else { return }
             bootstrapOwnershipIfNeeded()
         }
         .onChange(of: ownershipService.phase) { _, _ in
+            guard demoStepOverride == nil else { return }
             reconcileOwnershipRequirement()
         }
         .onChange(of: ownershipService.isBusy) { _, _ in
+            guard demoStepOverride == nil else { return }
             completeOwnershipBootstrapIfSettled()
         }
         #endif
     }
 
-    private func handleBondState(_ bonded: Bool) {
-        bandBonded = bonded
-        if bonded && step == .scan {
-            move(to: .bonded, direction: "automatic")
+    private func handleDeviceSetupSource(_ source: SourceKind?) {
+        guard demoStepOverride == nil else { return }
+        registrySetupSource = source
+        if source != nil && step == .scan {
+            move(to: .ownership, direction: "automatic")
+        } else if source == nil {
+            reconcileOwnershipRequirement()
         }
     }
 
@@ -373,18 +443,15 @@ public struct OnboardingWizard: View {
         }
         switch step {
         case .welcome:    return String(localized: "Get Started")
+        case .account:    return String(localized: "Continue")
         case .what:       return String(localized: "Continue")
         case .expectations: return String(localized: "I understand")
         case .bluetooth:  return String(localized: "Continue")
         case .wear:       return String(localized: "I'm wearing it")
-        case .scan:
-            return Self.scanCTATitle(
-                ownershipConfigured: ownershipConfigured,
-                bandBonded: bandBonded
-            )
+        case .scan:       return String(localized: "Continue")
         case .bonded:     return String(localized: "Continue")
         case .ownership:
-            guard ownershipConfigured else {
+            guard supplierClaimRequired else {
                 return String(localized: "Continue")
             }
             return ownershipClaimed
@@ -407,25 +474,80 @@ public struct OnboardingWizard: View {
         }
     }
 
-    static func scanCTATitle(
-        ownershipConfigured: Bool,
-        bandBonded: Bool
-    ) -> String {
-        if !ownershipConfigured && !bandBonded {
-            return String(localized: "appwide.onboarding.continue_without_band")
+    static func completedDeviceSetupSource(
+        in devices: [PairedDevice],
+        requiresClaimEligibleBand: Bool,
+        supplierUsable: (PairedDevice) -> Bool
+    ) -> SourceKind? {
+        func completedSource(for device: PairedDevice) -> SourceKind? {
+            guard device.status == .active || device.status == .paired else {
+                return nil
+            }
+            guard !device.isImportSource,
+                  device.sourceKind != .activityFile else {
+                return nil
+            }
+            if device.id == "my-whoop" {
+                let peripheralID = device.peripheralId?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard peripheralID?.isEmpty == false else { return nil }
+            }
+            let isUsableSupplier =
+                device.sourceKind == .veepoo && supplierUsable(device)
+            if device.sourceKind == .veepoo && !isUsableSupplier {
+                return nil
+            }
+            if requiresClaimEligibleBand {
+                let peripheralID = device.peripheralId?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard peripheralID?.isEmpty == false else { return nil }
+                let isWhoopTransport =
+                    device.sourceKind == .liveBLE ||
+                    device.sourceKind == .historyBLE
+                let isEligibleWhoop =
+                    SourceCoordinator.isWhoop(device) && isWhoopTransport
+                guard isEligibleWhoop || isUsableSupplier else {
+                    return nil
+                }
+            }
+            return device.sourceKind
         }
-        return String(localized: "Continue")
+
+        if let active = devices.first(where: { $0.status == .active }) {
+            if let source = completedSource(for: active) {
+                return source
+            }
+            // The active supplier row is the durable ownership authority. If its runtime registration
+            // is unavailable, fail closed instead of accepting an older paired compatibility transport.
+            if active.sourceKind == .veepoo {
+                return nil
+            }
+        }
+
+        for device in devices where device.status == .paired {
+            if let source = completedSource(for: device) {
+                return source
+            }
+        }
+        return nil
+    }
+
+    private var deviceSetupComplete: Bool {
+        registrySetupSource != nil
     }
 
     private var primaryActionEnabled: Bool {
+        if step == .account {
+            return accountStepReady
+        }
         if step == .ownership {
-            return Self.ownershipStepCanContinue(
-                ownershipConfigured: ownershipConfigured,
+            return Self.claimStepCanContinue(
+                supplierClaimRequired: supplierClaimRequired,
                 claimed: ownershipClaimed,
                 reconciliationComplete: ownershipReconciliationComplete
             )
         }
-        if step == .scan && ownershipRequired { return bandBonded }
+        if step == .scan { return deviceSetupComplete }
         if step == .plan {
             return !planSubmissionBusy && postClaimOwnershipReady
         }
@@ -455,10 +577,6 @@ public struct OnboardingWizard: View {
     /// its own: only "Enable & Continue" calls the scheduler, which requests the OS permission if needed.
     /// Denial does not block onboarding and the same control remains available under Automations.
     private func advance() {
-        if step == .scan && !bandBonded && !ownershipConfigured {
-            move(to: .ownership, direction: "forward")
-            return
-        }
         if step == .plan {
             planSubmissionAttempted = true
             #if os(iOS)
@@ -535,9 +653,9 @@ public struct OnboardingWizard: View {
     }
 
     private func back() {
-        let index = currentStepIndex
-        guard activeSteps.indices.contains(index - 1) else { return }
-        move(to: activeSteps[index - 1], direction: "back")
+        let target = currentStepIndex - 1
+        guard activeSteps.indices.contains(target) else { return }
+        move(to: activeSteps[target], direction: "back")
     }
 
     private var activeSteps: [Step] {
@@ -548,16 +666,46 @@ public struct OnboardingWizard: View {
         activeSteps.firstIndex(of: step) ?? 0
     }
 
-    private var ownershipRequired: Bool {
-        ownershipConfigured
+    static func accountStepCanContinue(
+        ownershipConfigured: Bool,
+        reconciliationComplete: Bool,
+        phase: OwnershipServicePhase
+    ) -> Bool {
+        guard ownershipConfigured else { return true }
+        guard reconciliationComplete else { return false }
+        switch phase {
+        case .accountReady, .possessionUnavailable, .claiming, .claimed,
+             .complete, .replacementRequired, .authorizingReplacement:
+            return true
+        case .unavailable, .localRecoveryRequired, .signedOut,
+             .emailVerification, .termsReview, .registering,
+             .deletionPending:
+            return false
+        }
     }
 
-    static func ownershipStepCanContinue(
-        ownershipConfigured: Bool,
+    static func claimStepCanContinue(
+        supplierClaimRequired: Bool,
         claimed: Bool,
         reconciliationComplete: Bool
     ) -> Bool {
-        !ownershipConfigured || (claimed && reconciliationComplete)
+        !supplierClaimRequired || (claimed && reconciliationComplete)
+    }
+
+    private var accountStepReady: Bool {
+        #if os(iOS)
+        return Self.accountStepCanContinue(
+            ownershipConfigured: ownershipConfigured,
+            reconciliationComplete: ownershipReconciliationComplete,
+            phase: ownershipService.phase
+        )
+        #else
+        return true
+        #endif
+    }
+
+    private var supplierClaimRequired: Bool {
+        registrySetupSource == .veepoo
     }
 
     private var ownershipClaimed: Bool {
@@ -579,8 +727,10 @@ public struct OnboardingWizard: View {
 
     private var postClaimOwnershipReady: Bool {
         #if os(iOS)
+        guard accountStepReady else { return false }
+        guard supplierClaimRequired else { return true }
         return ownershipCanAccessPostClaimOnboarding(
-            isAvailable: ownershipConfigured,
+            isAvailable: true,
             phase: ownershipService.phase
         )
         #else
@@ -626,7 +776,9 @@ public struct OnboardingWizard: View {
             for: candidate,
             ownershipConfigured: ownershipConfigured,
             reconciliationComplete: ownershipReconciliationComplete,
-            phase: phase
+            phase: phase,
+            supplierClaimRequired: supplierClaimRequired,
+            deviceSetupComplete: deviceSetupComplete
         )
     }
 
@@ -638,14 +790,11 @@ public struct OnboardingWizard: View {
     }
 
     private func reconcileOwnershipRequirement() {
-        #if os(iOS)
         guard let destination = ownershipDestination(for: step),
-              destination == .ownership,
               destination != step else {
             return
         }
         move(to: destination, direction: "reconciled")
-        #endif
     }
 
     private func move(to next: Step, direction: String) {
@@ -711,24 +860,45 @@ public struct OnboardingWizard: View {
 private struct OwnershipAvailabilityStep: View {
     var body: some View {
         StepShell(
-            title: String(localized: "Band Account"),
-            subtitle: String(localized: "Band ownership is not enabled")
+            title: String(
+                localized:
+                    "appwide.onboarding.account.unconfigured_title"
+            ),
+            subtitle: String(
+                localized:
+                    "appwide.onboarding.account.unconfigured_subtitle"
+            )
         ) {
             VStack(spacing: 12) {
                 InfoCard(
-                    icon: "person.badge.plus",
+                    icon: "iphone",
                     tint: StrandPalette.accent,
-                    title: String(localized: "Create ownership account"),
-                    message: String(localized: "This build keeps the future account flow dormant. Core local NOOP remains available without an account.")
+                    title: String(
+                        localized:
+                            "appwide.onboarding.account.local_title"
+                    ),
+                    message: String(
+                        localized:
+                            "appwide.onboarding.account.local_body"
+                    )
                 )
                 InfoCard(
                     icon: "person.crop.circle.badge.checkmark",
                     tint: StrandPalette.statusPositive,
-                    title: String(localized: "Sign in"),
-                    message: String(localized: "Activation will be enabled only after the approved band SDK can provide fresh, cryptographic possession proof.")
+                    title: String(
+                        localized:
+                            "appwide.onboarding.account.release_title"
+                    ),
+                    message: String(
+                        localized:
+                            "appwide.onboarding.account.release_body"
+                    )
                 )
                 Text(
-                    "Account actions stay off in this build. Continuing does not create an account or upload data."
+                    String(
+                        localized:
+                            "appwide.onboarding.account.unconfigured_footer"
+                    )
                 )
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.textTertiary)
@@ -737,6 +907,52 @@ private struct OwnershipAvailabilityStep: View {
                 .frame(maxWidth: 460)
                 .accessibilityIdentifier("noop.onboarding.account-unconfigured")
             }
+        }
+    }
+}
+
+private struct ConnectedTransportAccountStep: View {
+    let source: SourceKind?
+
+    var body: some View {
+        StepShell(
+            title: String(
+                localized: "appwide.onboarding.device_ready_title"
+            ),
+            subtitle: String(
+                localized: "appwide.onboarding.device_ready_body"
+            )
+        ) {
+            VStack(spacing: 16) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 58, weight: .semibold))
+                    .foregroundStyle(StrandPalette.statusPositive)
+                    .accessibilityHidden(true)
+
+                InfoCard(
+                    icon: "waveform.path.ecg",
+                    tint: StrandPalette.statusPositive,
+                    title: sourceTitle,
+                    message: String(
+                        localized: "appwide.onboarding.device_ready_body"
+                    )
+                )
+            }
+            .frame(maxWidth: 480)
+        }
+    }
+
+    private var sourceTitle: String {
+        switch source {
+        case .liveBLE, .historyBLE:
+            return "WHOOP"
+        case .veepoo:
+            return "NOOP Band"
+        default:
+            return String(
+                localized:
+                    "appwide.onboarding.device_wizard.compatible_band"
+            )
         }
     }
 }
@@ -883,16 +1099,53 @@ private struct ProductPlanStep: View {
     }
 }
 
-/// Hidden, isolated observer — re-renders on live updates (it's just Color.clear, so no
-/// visible cost) and fires `onBonded` when the strap bonds, keeping the main wizard body
-/// out of the per-tick re-render path that caused flicker.
-private struct BondWatcher: View {
-    @EnvironmentObject private var live: LiveState
-    let onBondState: (Bool) -> Void
+/// Hidden, isolated observer for the registry's low-frequency device list. A restored post-scan page is
+/// not trusted until this watcher finds a durable, usable launch-band row. It also reacts if that row is
+/// archived while onboarding is open.
+private struct DeviceSetupWatcher: View {
+    @EnvironmentObject private var model: AppModel
+    let onSetupSource: (SourceKind?) -> Void
+
+    var body: some View {
+        Group {
+            if let registry = model.deviceRegistry {
+                DeviceRegistrySetupWatcher(
+                    registry: registry,
+                    onSetupSource: onSetupSource
+                )
+            } else {
+                Color.clear
+            }
+        }
+    }
+}
+
+private struct DeviceRegistrySetupWatcher: View {
+    @ObservedObject var registry: DeviceRegistry
+    let onSetupSource: (SourceKind?) -> Void
+
     var body: some View {
         Color.clear
-            .onAppear { onBondState(live.bonded) }
-            .onChangeCompat(of: live.bonded) { onBondState($0) }
+            .onReceive(registry.$devices) { devices in
+                let credentials = VeepooCredentialStore.shared
+                onSetupSource(
+                    OnboardingWizard.completedDeviceSetupSource(
+                        in: devices,
+                        requiresClaimEligibleBand: true,
+                        supplierUsable: {
+                            guard AddDeviceWizard
+                                .supplierPairingAvailableForCurrentBuild else {
+                                return false
+                            }
+                            return VeepooBandSourceFactory
+                                .hasUsableRegistration(
+                                    for: $0,
+                                    credentials: credentials
+                                )
+                        }
+                    )
+                )
+            }
     }
 }
 
@@ -1102,11 +1355,19 @@ private struct BluetoothStep: View {
                 InfoCard(
                     icon: "lock.fill",
                     tint: StrandPalette.statusPositive,
-                    title: String(localized: "Direct, local Bluetooth"),
-                    message: String(localized: "NOOP talks straight to Noop Band over Bluetooth Low Energy, with no project server in the middle. Readings stay on this device unless you later enable an optional destination such as your own self-hosted server.")
+                    title: String(localized: "Direct band connection"),
+                    message: String(
+                        localized:
+                            "appwide.onboarding.bluetooth.local_body"
+                    )
                 )
 
-                Text("When the system prompt appears, choose Allow so NOOP can find Noop Band.")
+                Text(
+                    String(
+                        localized:
+                            "When the system prompt appears, choose Allow so NOOP can find Noop Band."
+                    )
+                )
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .multilineTextAlignment(.center)
@@ -1146,141 +1407,141 @@ private struct WearStep: View {
     }
 }
 
-// MARK: - Step 5 · Scan (radar sweep + reassurance)
+// MARK: - Step 5 · Source-aware device setup
 
 private struct ScanStep: View {
-    let advance: () -> Void
+    let setupComplete: Bool
+    let onSetupSource: (SourceKind?) -> Void
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var live: LiveState
 
-    @State private var scanning = false
-    @State private var showHelp = false
+    @State private var showAddDeviceWizard = false
+    @State private var addedSource: SourceKind?
 
     var body: some View {
-        StepShell(title: String(localized: "Find Noop Band"),
-                  subtitle: live.bonded
-                      ? String(localized: "Bonded. You're set.")
-                      : String(localized: "Keep your Noop Band nearby, then tap Scan. Hardware detection is automatic.")) {
+        StepShell(
+            title: String(
+                localized: "appwide.onboarding.device_setup_title"
+            ),
+            subtitle: setupBody
+        ) {
             VStack(spacing: 24) {
-                RadarSweep(active: scanning && !live.bonded, bonded: live.bonded)
-                    .frame(width: 220, height: 220)
-
-                statusLine
-
-                if !live.bonded {
-                    VStack(spacing: 6) {
-                        Label("Noop Band", systemImage: "applewatch.side.right")
-                            .font(StrandFont.headline)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                        Text("NOOP detects compatible band hardware automatically.")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textTertiary)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Noop Band. Hardware detection is automatic.")
-                    .accessibilityIdentifier("noop.onboarding.band")
-
-                    Button(action: { startScan() }) {
-                        Label(scanning ? "Scanning…" : "Scan", systemImage: "dot.radiowaves.left.and.right")
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .disabled(scanning)
-                    .accessibilityIdentifier("noop.onboarding.scan")
-
-                    DisclosureToggle(open: $showHelp, label: String(localized: "Don't see it?"))
-
-                    if showHelp { reassurance }
-
-                    Text("No Noop Band? You can still continue. Add another heart-rate strap, watch, ring, or gym machine under Devices, or connect an import under Data Sources at any time.")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 360)
-                        .accessibilityIdentifier("noop.onboarding.scan-footnote")
+                ZStack {
+                    Circle()
+                        .fill(StrandPalette.accent.opacity(0.14))
+                        .frame(width: 148, height: 148)
+                    Image(
+                        systemName: setupComplete
+                            ? "checkmark.circle.fill"
+                            : "dot.radiowaves.left.and.right"
+                    )
+                    .font(.system(size: 58, weight: .semibold))
+                    .foregroundStyle(
+                        setupComplete
+                            ? StrandPalette.statusPositive
+                            : StrandPalette.accent
+                    )
                 }
-            }
-        }
-        .onDisappear { scanning = false }
-    }
+                .accessibilityHidden(true)
 
-    private var statusLine: some View {
-        Group {
-            if live.bonded {
-                StatePill("Connected", tone: .positive)
-            } else if live.connected {
-                StatePill("Connecting…", tone: .warning, pulsing: true)
-            } else if scanning {
-                StatePill("Searching", tone: .accent, pulsing: true)
-            } else {
-                StatePill("Ready to scan", tone: .neutral, showsDot: false)
-            }
-        }
-    }
-
-    private func startScan() {
-        scanning = true
-        showHelp = false
-        // The transport starts with the last observed family and automatically rotates after a short
-        // miss, so setup does not ask users for protocol-generation knowledge.
-        model.scan()
-        // Surface the reassurance card if we haven't bonded after a calm beat.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12) {
-            if !live.bonded {
-                scanning = false
-                withAnimation(StrandMotion.gentle) { showHelp = true }
-            }
-        }
-    }
-
-    // The calm, never-alarmist "can't find it" card.
-    private var reassurance: some View {
-        StrandCard {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Image(systemName: "info.circle.fill")
-                        .foregroundStyle(StrandPalette.statusWarning)
-                    Text("Don't see it? That's normal.")
-                        .font(StrandFont.headline)
-                        .foregroundStyle(StrandPalette.textPrimary)
+                if setupComplete {
+                    StatePill(
+                        "appwide.onboarding.device_ready_title",
+                        tone: .positive
+                    )
                 }
 
-                Text("A Noop Band may not appear in your \(Platform.deviceNoun)'s Bluetooth settings. NOOP finds its private band signal directly, so start pairing here.")
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Divider().overlay(StrandPalette.hairline)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Checkline(text: String(localized: "It's charged and worn. The sensor needs skin contact to wake."))
-                    Checkline(text: String(localized: "It isn't held by another band app. Close that app first because the band supports one active host."))
-                    Checkline(text: String(localized: "It's within about a metre of \(Platform.deviceNounPhrase)."))
-                }
-
-                Button(action: retry) {
-                    Label("Try again", systemImage: "arrow.clockwise")
+                Button(action: openDeviceWizard) {
+                    Label(
+                        String(
+                            localized:
+                                "appwide.onboarding.device_setup_action"
+                        ),
+                        systemImage: "plus.circle"
+                    )
                 }
                 .buttonStyle(SecondaryButtonStyle())
-                .padding(.top, 2)
+                .accessibilityLabel(
+                    String(
+                        localized:
+                            "appwide.onboarding.device_setup_action"
+                    )
+                )
+                .accessibilityHint(
+                    setupBody
+                )
+                .accessibilityIdentifier("noop.onboarding.choose-device")
+
             }
         }
-        .frame(maxWidth: 480)
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
+        .sheet(
+            isPresented: $showAddDeviceWizard,
+            onDismiss: { refreshSetupSource(recordOutcome: true) }
+        ) {
+            AddDeviceWizard(
+                live: live,
+                onClose: { showAddDeviceWizard = false },
+                onAddedSource: { source in
+                    addedSource = source
+                    onSetupSource(source)
+                },
+                selectionScope: .launchBands
+            )
+        }
+        .onAppear {
+            refreshSetupSource(recordOutcome: false)
+        }
     }
 
-    private func retry() {
-        withAnimation(StrandMotion.gentle) { showHelp = false }
-        startScan()
+    private func openDeviceWizard() {
+        addedSource = nil
+        AppDiagnosticsRecorder.shared.record(
+            "onboarding.device_setup",
+            fields: ["outcome": "opened"]
+        )
+        showAddDeviceWizard = true
+    }
+
+    private func refreshSetupSource(recordOutcome: Bool) {
+        if recordOutcome {
+            AppDiagnosticsRecorder.shared.record(
+                "onboarding.device_setup",
+                fields: [
+                    "outcome": addedSource == nil
+                        ? "dismissed"
+                        : "completed",
+                ]
+            )
+            return
+        }
+        let credentials = VeepooCredentialStore.shared
+        let source = OnboardingWizard.completedDeviceSetupSource(
+            in: model.deviceRegistry?.devices ?? [],
+            requiresClaimEligibleBand: true,
+            supplierUsable: {
+                guard AddDeviceWizard
+                    .supplierPairingAvailableForCurrentBuild else {
+                    return false
+                }
+                return VeepooBandSourceFactory.hasUsableRegistration(
+                    for: $0,
+                    credentials: credentials
+                )
+            }
+        )
+        onSetupSource(source)
+    }
+
+    private var setupBody: String {
+        String(
+            localized: "appwide.onboarding.claim_band_setup_body"
+        )
     }
 }
 
-// MARK: - Step 6 · Bonding celebration
+// MARK: - Step 6 · Device-setup celebration
 
 private struct BondedStep: View {
-    @EnvironmentObject private var live: LiveState
     @State private var bloom = false
     var body: some View {
         StepShell {
@@ -1293,8 +1554,12 @@ private struct BondedStep: View {
                         .blur(radius: 70)
                         .opacity(bloom ? 0.5 : 0.0)
                         .blendMode(.plusLighter)
-                    // A ring materialises — a taste of the signature component.
-                    RecoveryRing(score: 100, supporting: nil, diameter: 200, lineWidth: 14, showsLabel: false)
+                    Circle()
+                        .stroke(
+                            StrandPalette.statusPositive.opacity(0.34),
+                            lineWidth: 14
+                        )
+                        .frame(width: 200, height: 200)
                         .scaleEffect(bloom ? 1 : 0.7)
                         .opacity(bloom ? 1 : 0)
                     Image(systemName: "checkmark")
@@ -1304,27 +1569,34 @@ private struct BondedStep: View {
                         .opacity(bloom ? 1 : 0)
                 }
                 .frame(height: 210)
+                .accessibilityHidden(true)
 
                 VStack(spacing: 8) {
-                    Text("You're connected.")
+                    Text(
+                        String(
+                            localized:
+                                "appwide.onboarding.device_ready_title"
+                        )
+                    )
                         .font(StrandFont.title1)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text(batteryLine)
+                    Text(
+                        String(
+                            localized:
+                                "appwide.onboarding.device_ready_body"
+                        )
+                    )
                         .font(StrandFont.body)
                         .foregroundStyle(StrandPalette.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .opacity(bloom ? 1 : 0)
+                .accessibilityElement(children: .combine)
                 Spacer()
             }
         }
         .onAppear { withAnimation(StrandMotion.hero) { bloom = true } }
-    }
-
-    private var batteryLine: String {
-        if let pct = live.batteryPct {
-            return String(localized: "Noop Band is paired · \(Int(pct))% battery.")
-        }
-        return String(localized: "Noop Band is paired and ready to stream.")
     }
 }
 
@@ -1695,7 +1967,7 @@ private struct ProfileStep: View {
         case .heightInches:
             heightInchesDraft = ""
         }
-        focusedField = nil
+        focusedField = field
         DispatchQueue.main.async {
             guard clearTransitionField == field else { return }
             focusedField = field
@@ -1731,15 +2003,16 @@ private struct ProfileStep: View {
                         .simultaneousGesture(TapGesture().onEnded { focus(.weight) })
                         .accessibilityLabel("Weight value")
                         .accessibilityIdentifier("noop.profile.weight")
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .contentShape(Rectangle())
-                        .onTapGesture { clearDraft(.weight) }
-                        .accessibilityElement()
-                        .accessibilityAddTraits(.isButton)
+                    Button {
+                        clearDraft(.weight)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    .buttonStyle(.plain)
                     .opacity(weightDraft.isEmpty ? 0 : 1)
-                    .allowsHitTesting(!weightDraft.isEmpty)
+                    .disabled(weightDraft.isEmpty)
                     .accessibilityHidden(weightDraft.isEmpty)
                     .accessibilityLabel("Clear weight")
                     .accessibilityIdentifier("noop.profile.weight.clear")
@@ -1782,15 +2055,16 @@ private struct ProfileStep: View {
                             .simultaneousGesture(TapGesture().onEnded { focus(.heightCm) })
                             .accessibilityLabel("Height value")
                             .accessibilityIdentifier("noop.profile.height.cm")
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 15))
-                            .foregroundStyle(StrandPalette.textTertiary)
-                            .contentShape(Rectangle())
-                            .onTapGesture { clearDraft(.heightCm) }
-                            .accessibilityElement()
-                            .accessibilityAddTraits(.isButton)
+                        Button {
+                            clearDraft(.heightCm)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                        .buttonStyle(.plain)
                         .opacity(heightCmDraft.isEmpty ? 0 : 1)
-                        .allowsHitTesting(!heightCmDraft.isEmpty)
+                        .disabled(heightCmDraft.isEmpty)
                         .accessibilityHidden(heightCmDraft.isEmpty)
                         .accessibilityLabel("Clear height")
                         .accessibilityIdentifier("noop.profile.height.clear")
@@ -2315,100 +2589,6 @@ private struct StepShell<Content: View>: View {
     }
 }
 
-// MARK: - Radar sweep
-
-private struct RadarSweep: View {
-    var active: Bool
-    var bonded: Bool
-    @State private var angle: Double = 0
-    @State private var ping = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        GeometryReader { geo in
-            let size = min(geo.size.width, geo.size.height)
-            ZStack {
-                // Concentric rings.
-                ForEach(1...3, id: \.self) { i in
-                    Circle()
-                        .stroke(StrandPalette.hairline.opacity(0.7), lineWidth: 1)
-                        .frame(width: size * Double(i) / 3, height: size * Double(i) / 3)
-                }
-                // Cross hairs.
-                Path { p in
-                    p.move(to: CGPoint(x: size / 2, y: 0)); p.addLine(to: CGPoint(x: size / 2, y: size))
-                    p.move(to: CGPoint(x: 0, y: size / 2)); p.addLine(to: CGPoint(x: size, y: size / 2))
-                }
-                .stroke(StrandPalette.hairline.opacity(0.5), lineWidth: 1)
-
-                // The sweeping wedge.
-                if active {
-                    sweepWedge(size: size)
-                        .rotationEffect(.degrees(angle))
-                }
-
-                // Center node — accent while searching, mint when bonded.
-                Circle()
-                    .fill(bonded ? StrandPalette.recovery100 : StrandPalette.accent)
-                    .frame(width: 14, height: 14)
-                    .shadow(color: (bonded ? StrandPalette.recovery100 : StrandPalette.accent).opacity(0.8),
-                            radius: ping ? 10 : 4)
-
-                // A discovered "blip" once bonded.
-                if bonded {
-                    Circle()
-                        .fill(StrandPalette.statusPositive)
-                        .frame(width: 12, height: 12)
-                        .shadow(color: StrandPalette.statusPositive.opacity(0.9), radius: 8)
-                        .position(x: size * 0.70, y: size * 0.36)
-                        .transition(.scale.combined(with: .opacity))
-                }
-            }
-            .frame(width: size, height: size)
-        }
-        .onAppear {
-            if active { startSweep() }
-            ping = true
-        }
-        .onChangeCompat(of: active) { isActive in
-            if isActive { startSweep() }
-        }
-        .animation(StrandMotion.breathe(reduced: reduceMotion), value: ping)
-    }
-
-    private func sweepWedge(size: CGFloat) -> some View {
-        let radius = size / 2
-        return AngularGradient(
-            gradient: Gradient(colors: [StrandPalette.accent.opacity(0.0),
-                                        StrandPalette.accent.opacity(0.45)]),
-            center: .center,
-            startAngle: .degrees(-50),
-            endAngle: .degrees(0)
-        )
-        .mask(
-            Path { p in
-                let c = CGPoint(x: radius, y: radius)
-                p.move(to: c)
-                p.addArc(center: c, radius: radius,
-                         startAngle: .degrees(-50), endAngle: .degrees(0), clockwise: false)
-                p.closeSubpath()
-            }
-        )
-        .frame(width: size, height: size)
-        .blendMode(.plusLighter)
-    }
-
-    private func startSweep() {
-        // Reduce Motion: keep the wedge still (the static rings/crosshairs/blip
-        // still convey "searching" / "found") instead of spinning forever.
-        guard !reduceMotion else { return }
-        angle = 0
-        withAnimation(.linear(duration: 2.4).repeatForever(autoreverses: false)) {
-            angle = 360
-        }
-    }
-}
-
 // MARK: - The bottom "thread" progress
 
 private struct ThreadProgress: View {
@@ -2506,24 +2686,6 @@ private struct FieldRow: View {
                 .font(StrandFont.bodyNumber)
                 .foregroundStyle(StrandPalette.textPrimary)
         }
-    }
-}
-
-private struct DisclosureToggle: View {
-    @Binding var open: Bool
-    let label: String
-    var body: some View {
-        Button {
-            withAnimation(StrandMotion.gentle) { open.toggle() }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: open ? "chevron.up" : "chevron.down")
-                Text(label)
-            }
-            .font(StrandFont.subhead)
-            .foregroundStyle(StrandPalette.accent)
-        }
-        .buttonStyle(.plain)
     }
 }
 

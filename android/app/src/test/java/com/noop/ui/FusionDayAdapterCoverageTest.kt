@@ -197,4 +197,47 @@ class FusionDayAdapterCoverageTest {
         assertEquals(FusionSource.WHOOP_IMPORT,
             rec.rows.first { it.point.metric == "sleep_deep_min" }.point.winningSource)
     }
+
+    @Test
+    fun healthConnectStepCountOutranksBandMotionEstimate() = runBlocking {
+        val computed = "my-whoop-noop"
+        val healthConnect = WhoopRepository.HEALTH_CONNECT_SOURCE
+        val rec = FusionDayAdapter.buildFor(
+            repo(
+                mapOf(
+                    computed to listOf(DailyMetric(computed, dayA, steps = 4_000)),
+                    healthConnect to listOf(DailyMetric(healthConnect, dayA, steps = 9_500)),
+                ),
+            ),
+            dayA,
+        )
+
+        val steps = rec.rows.first { it.point.metric == "steps" }.point
+        assertEquals(9_500.0, steps.value, 0.0)
+        assertEquals(FusionSource.HEALTH_CONNECT, steps.winningSource)
+    }
+
+    @Test
+    fun computedOnlyStepCountIsNotPublishedAsPrimarySteps() = runBlocking {
+        val computed = "my-whoop-noop"
+        val rec = FusionDayAdapter.buildFor(
+            repo(mapOf(computed to listOf(DailyMetric(computed, dayA, steps = 4_000)))),
+            dayA,
+        )
+
+        assertNull(rec.rows.firstOrNull { it.point.metric == "steps" })
+    }
+
+    @Test
+    fun measuredZeroStepDayRemainsPublishable() = runBlocking {
+        val healthConnect = WhoopRepository.HEALTH_CONNECT_SOURCE
+        val rec = FusionDayAdapter.buildFor(
+            repo(mapOf(healthConnect to listOf(DailyMetric(healthConnect, dayA, steps = 0)))),
+            dayA,
+        )
+
+        val steps = rec.rows.first { it.point.metric == "steps" }.point
+        assertEquals(0.0, steps.value, 0.0)
+        assertEquals(FusionSource.HEALTH_CONNECT, steps.winningSource)
+    }
 }

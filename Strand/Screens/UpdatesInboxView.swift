@@ -152,6 +152,7 @@ struct UpdatesInboxView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(StrandPalette.accent)
+            .foregroundStyle(StrandPalette.accentInk)
             .disabled(updateStore.unreadCount == 0)
         }
         .padding(16)

@@ -5,9 +5,8 @@ import com.noop.data.StepSample
 
 /**
  * WakeMotionRefinement.kt - motion-aware wake refinement (#364 "Proposal 2" follow-up; density-gate
- * precedent #345). Direct Kotlin port of the Swift `WakeMotionRefinement`
- * (Packages/StrandAnalytics/Sources/StrandAnalytics/WakeMotionRefinement.swift) — same constants, same
- * algorithm, same [StageSegment] shape.
+ * precedent #345). Based on the Swift `WakeMotionRefinement`, with legacy @63 activity classes disabled
+ * as locomotion evidence.
  *
  * THE PROBLEM. Both stagers ([SleepStager] V1, [SleepStagerV2]) call "wake" primarily from HR / HR
  * variability — neither consults locomotion or posture. On a strap night with pharmacologically- or
@@ -22,14 +21,9 @@ import com.noop.data.StepSample
  * multi-minute walking cadence, not an isolated single-minute blip.
  *
  * THE FIX. A POST-PASS over the already-staged [StageSegment] output of either stager (V1 or V2 — this
- * file never touches their HR-led emission models). For each scored wake segment of at least
- * [MIN_WAKE_SEGMENT_SECONDS], look at the SAME two signals a human reviewer used above: per-minute
- * step-motion-counter cadence ([StepSample.counter], wrap-aware, `activityClass` 1=walk/2=run only — see
- * [walkClassTicksPerMinute]) and per-minute gravity posture variance ([postureVariance]). A segment with NO
- * locomotion evidence ([hasLocomotion]) and posture stable outside a minority of isolated burst minutes
- * ([stableBurstMinutes]) is a hot-but-still wake call: every non-burst minute is reclassified to `light`,
- * while burst minutes (plus a ±[BURST_PAD_MINUTES] buffer) are KEPT as wake — the pass only ever shrinks
- * wake time, it never invents wake the incumbent stager didn't already call.
+ * file never touches their HR-led emission models). The cadence interpretation was later withdrawn
+ * because historical byte @63 is also wear/contact quality. Production therefore returns the incumbent
+ * staging byte-for-byte; the old branch remains reachable only from explicit synthetic/research tests.
  *
  * THE DENSITY SELF-GATE (#345). A per-minute posture VARIANCE needs multiple samples inside each minute to
  * mean anything (a single sample has zero variance by construction, which would silently read as "stable"
@@ -44,11 +38,9 @@ import com.noop.data.StepSample
  * 5.0/MG night — which streams both channels densely — is this refinement's expected beneficiary and
  * clears the gate on its own merits.
  *
- * SAFETY POSTURE. Default-off Experimental toggle
- * ([com.noop.ble.PuffinExperiment.motionAwareWake]), consistent with the repo rule for a derived
- * physiological signal: land it as an opt-in refinement, never the default, until it has more than this
- * one reference night behind it. All thresholds below are NAMED CONSTANTS fixed a-priori from that
- * reference night, not fit to labels. Pure, deterministic, no I/O.
+ * SAFETY POSTURE. The user-facing toggle is retired. A stale preference cannot reactivate the algorithm;
+ * callers must pass [allowLegacyActivityClassForResearch] explicitly from synthetic/research code.
+ * All thresholds below are retained for reproducible comparison, not production inference.
  */
 object WakeMotionRefinement {
 
@@ -109,13 +101,6 @@ object WakeMotionRefinement {
      */
     const val MIN_DENSE_MINUTE_COVERAGE_FRACTION: Double = 0.80
 
-    /**
-     * WHOOP [StepSample.activityClass] codes (community finding #316) that count as locomotion. 0 = still
-     * (a turn-over, NOT ambulation) is deliberately excluded; null (unknown/invalid byte) is also
-     * excluded — unattributed ticks feed the posture-variance half of the gate instead.
-     */
-    private val LOCOMOTION_ACTIVITY_CLASSES = setOf(1, 2) // walk, run
-
     // ── Public entry points ──────────────────────────────────────────────────────────────────────────
 
     /**
@@ -124,14 +109,20 @@ object WakeMotionRefinement {
      * `steps` should cover at least that window. Byte-identical passthrough when `segments` is empty, the
      * window is degenerate, or the density self-gate declines.
      */
-    fun refine(segments: List<StageSegment>, grav: List<GravitySample>, steps: List<StepSample>): List<StageSegment> {
+    fun refine(
+        segments: List<StageSegment>,
+        grav: List<GravitySample>,
+        steps: List<StepSample>,
+        allowLegacyActivityClassForResearch: Boolean = false,
+    ): List<StageSegment> {
+        if (!allowLegacyActivityClassForResearch) return segments
         val windowStart = segments.firstOrNull()?.start ?: return segments
         val windowEnd = segments.lastOrNull()?.end ?: return segments
         if (windowEnd <= windowStart) return segments
         if (!isMotionDense(windowStart, windowEnd, grav, steps)) return segments
 
         val gravByMinute = bucketByMinute(grav) { it.ts }
-        val ticksByMinute = walkClassTicksPerMinute(steps)
+        val ticksByMinute = legacyWalkClassTicksPerMinute(steps)
 
         val out = mutableListOf<StageSegment>()
         for (seg in segments) {
@@ -143,8 +134,8 @@ object WakeMotionRefinement {
     }
 
     /**
-     * Toggle-shaped convenience: `enabled = false` is a guaranteed byte-identical passthrough (the
-     * [com.noop.ble.PuffinExperiment.motionAwareWake] off-path), `enabled = true` runs [refine].
+     * Compatibility-shaped convenience. Even `enabled = true` remains a passthrough because [refine]
+     * requires explicit research authorization that production callers never supply.
      */
     fun apply(
         segments: List<StageSegment>,
@@ -159,8 +150,18 @@ object WakeMotionRefinement {
      * `avgHRV` are independent of stage labels and are carried over unchanged (via [DetectedSleep.copy]).
      * Identity passthrough when [refine] makes no change to the stages.
      */
-    fun refine(session: DetectedSleep, grav: List<GravitySample>, steps: List<StepSample>): DetectedSleep {
-        val newStages = refine(session.stages, grav, steps)
+    fun refine(
+        session: DetectedSleep,
+        grav: List<GravitySample>,
+        steps: List<StepSample>,
+        allowLegacyActivityClassForResearch: Boolean = false,
+    ): DetectedSleep {
+        val newStages = refine(
+            session.stages,
+            grav,
+            steps,
+            allowLegacyActivityClassForResearch,
+        )
         if (newStages == session.stages) return session
         val newEfficiency = SleepStager.efficiency(session.start, session.end, newStages)
         return session.copy(efficiency = newEfficiency, stages = newStages)
@@ -324,24 +325,24 @@ object WakeMotionRefinement {
     }
 
     /**
-     * Per-minute walk-class tick cadence: the wrap-aware u16 counter delta between consecutive
-     * [StepSample]s, attributed to the LATER sample's minute, kept only when that later sample's
-     * `activityClass` is walk (1) or run (2) — see [LOCOMOTION_ACTIVITY_CLASSES]. A still-class (0) or
-     * unknown-class (null) delta is real counter movement (a turn-over jostles the accelerometer too) but
-     * is deliberately NOT counted as locomotion; it still shows up in [postureVariance] instead. Minutes
-     * with no qualifying tick are simply absent from the result (callers read `?: 0`).
+     * No walk-class ticks can be derived from this source. Persisted 0/1/2 values are retained only
+     * for compatibility because historical byte @63 is simultaneously `motion_wear_quality`.
      */
-    fun walkClassTicksPerMinute(steps: List<StepSample>): Map<Long, Int> {
+    fun walkClassTicksPerMinute(
+        @Suppress("UNUSED_PARAMETER") steps: List<StepSample>,
+    ): Map<Long, Int> = emptyMap()
+
+    /** Retains the withdrawn @63 interpretation for explicit synthetic/research comparisons only. */
+    internal fun legacyWalkClassTicksPerMinute(steps: List<StepSample>): Map<Long, Int> {
         val sorted = steps.sortedBy { it.ts }
         if (sorted.size < 2) return emptyMap()
-        val out = HashMap<Long, Int>()
-        for (i in 1 until sorted.size) {
-            val cur = sorted[i]
-            val cls = cur.activityClass ?: continue
-            if (cls !in LOCOMOTION_ACTIVITY_CLASSES) continue
-            val delta = (cur.counter - sorted[i - 1].counter) and 0xFFFF // wrap-aware u16 increment
-            val m = cur.ts / 60
-            out[m] = (out[m] ?: 0) + delta
+        val out = mutableMapOf<Long, Int>()
+        for (index in 1 until sorted.size) {
+            val current = sorted[index]
+            if (current.activityClass != 1 && current.activityClass != 2) continue
+            val delta = (current.counter - sorted[index - 1].counter) and 0xFFFF
+            val minute = current.ts / 60
+            out[minute] = (out[minute] ?: 0) + delta
         }
         return out
     }

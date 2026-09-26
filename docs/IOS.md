@@ -3,8 +3,8 @@
 Building and signing the app yourself is the supported development path. A
 legacy unsigned-artifact pipeline also exists for explicitly authorized
 development testing, but it is not the App Store distribution lane. This
-repository is currently private, so its Releases page requires authenticated
-collaborator access and its stable source asset is not a public install feed.
+repository is public, but its Releases page is not an approved public install
+feed and no unsigned artifact should be presented as a production release.
 
 Build and run the `NOOPiOS` scheme on a real iPhone with your own signing team.
 The CI job in [`app-build.yml`](../.github/workflows/app-build.yml) compile-checks
@@ -25,10 +25,10 @@ the widget; iOS still will not run it until the sideloader signs it on your devi
 
 1. Install [AltStore](https://altstore.io), [SideStore](https://sidestore.io),
    or another sideloader and complete its one-time setup.
-2. If your GitHub account is an authorized repository collaborator, download
-   `NOOP-ios-unsigned-v<version>.ipa` from the canonical project's
-   [Releases](https://github.com/Dhanunjay-Divi/Noop/releases) page. Otherwise,
-   there is no anonymous download from the private repository.
+2. If an exact reviewed development artifact was explicitly published,
+   download `NOOP-ios-unsigned-v<version>.ipa` from the canonical project's
+   [Releases](https://github.com/Dhanunjay-Divi/Noop/releases) page. Public
+   repository visibility alone does not authorize an artifact for testing.
 3. Open the `.ipa` with the sideloader. First launch may require trusting your
    Apple ID under **Settings → General → VPN & Device Management**.
 
@@ -40,10 +40,9 @@ historical channel URL is deliberately **not advertised as an install path**:
 **Dormant channel (not usable):**
 `https://github.com/Dhanunjay-Divi/Noop/releases/download/altstore-source/altstore-source.json`
 
-AltStore/SideStore does not send GitHub collaborator credentials when fetching a
-source or an IPA. Consequently private release URLs return an authentication
-failure to the sideloader. Immutable GitHub Releases also cannot host the
-mutable source pointer AltStore requires, so workflow invocation is disabled.
+Immutable GitHub Releases cannot host the mutable source pointer AltStore
+requires, and public repository visibility does not make an unsigned artifact
+an approved install, so workflow invocation remains disabled.
 The pointer must move to a separate mutable host and pass anonymous
 manifest/icon/IPA fetch and install tests before any channel is advertised.
 Until then, authorized testers must download the IPA in an authenticated
@@ -75,6 +74,11 @@ there is currently no guaranteed background-processing task for server upload.
 Run `xcodegen generate`, then build the **`NOOPiOS`** scheme in Xcode. The
 historical design notes later in this document explain how the native iOS target
 was reconciled with the shared Apple implementation.
+
+The restricted owner-supplied Veepoo framework is optional, default-off, and
+available only to approved local physical-iPhone builds. Follow
+[`IOS_RESTRICTED_VEEPOO_SDK.md`](IOS_RESTRICTED_VEEPOO_SDK.md); never copy the
+vendor framework into this repository.
 
 > 🛠️ **Signing it under your own Apple ID** (thanks @gingerbeardman for the original recipe). Apple
 > requires a bundle id and app group unique to *your* developer account — otherwise the build collides

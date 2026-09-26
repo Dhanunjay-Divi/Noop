@@ -61,18 +61,59 @@ class FusionResolverTest {
     }
 
     @Test
-    fun tieBrokenStablyBySourcePriority() {
-        // Two tier-0 step counters (band + phone). Stable tiebreak = sourcePriority: APPLE_HEALTH (2)
-        // < XIAOMI_BAND (4), so the phone wins the tie even though the band is listed first.
+    fun equalTrustStepCountersUseLargestCumulativeTotalWithoutSumming() {
+        // Apple Health and Health Connect can cover different portions of the day. MAX keeps the
+        // more-complete phone/watch total while avoiding the double count that SUM would introduce.
         val point = FusionResolver.resolve(
             "steps",
             listOf(
-                FusionInput(FusionSource.XIAOMI_BAND, 8000.0),
-                FusionInput(FusionSource.APPLE_HEALTH, 8100.0),
+                FusionInput(FusionSource.APPLE_HEALTH, 8000.0),
+                FusionInput(FusionSource.HEALTH_CONNECT, 8100.0),
+            ),
+        )
+        assertEquals(FusionSource.HEALTH_CONNECT, point?.winningSource)
+        assertEquals(8100.0, point?.value)
+    }
+
+    @Test
+    fun higherBandCounterDoesNotDisplacePhoneWatchSteps() {
+        // A noisy wrist counter may overcount repetitive hand motion. Its larger total is not evidence
+        // of walking and must not override the higher-priority phone/watch pedometer.
+        val point = FusionResolver.resolve(
+            "steps",
+            listOf(
+                FusionInput(FusionSource.XIAOMI_BAND, 12_000.0),
+                FusionInput(FusionSource.APPLE_HEALTH, 8_000.0),
             ),
         )
         assertEquals(FusionSource.APPLE_HEALTH, point?.winningSource)
-        assertEquals(8100.0, point?.value)
+        assertEquals(8_000.0, point?.value)
+    }
+
+    @Test
+    fun equalTrustNonStepMetricsStillUseStableSourcePriority() {
+        val point = FusionResolver.resolve(
+            "rhr",
+            listOf(
+                FusionInput(FusionSource.HEALTH_CONNECT, 52.0),
+                FusionInput(FusionSource.APPLE_HEALTH, 54.0),
+            ),
+        )
+        assertEquals(FusionSource.APPLE_HEALTH, point?.winningSource)
+        assertEquals(54.0, point?.value)
+    }
+
+    @Test
+    fun equalTierStepEstimatesStillUseStableSourcePriority() {
+        val point = FusionResolver.resolve(
+            "steps",
+            listOf(
+                FusionInput(FusionSource.NOOP_COMPUTED, 8_500.0),
+                FusionInput(FusionSource.WHOOP_IMPORT, 8_000.0),
+            ),
+        )
+        assertEquals(FusionSource.WHOOP_IMPORT, point?.winningSource)
+        assertEquals(8_000.0, point?.value)
     }
 
     // 2. Cross-validation classification at boundaries ---------------------------------------------

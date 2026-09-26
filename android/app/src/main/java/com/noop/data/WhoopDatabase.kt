@@ -389,10 +389,8 @@ abstract class WhoopDatabase : RoomDatabase() {
 
         /**
          * v12 -> v13: ADDITIVE, adds `stepSample.activityClass` (nullable INTEGER), the Android port of the
-         * Swift WhoopStore v19 migration. The @63 activity-class enum (0=still, 1=walk, 2=run; null when the
-         * byte was 0xFF/invalid/absent) the decoder ALREADY carries on [StepRow] but which was DROPPED at the
-         * insert boundary, the v2_3 `stepSample` held only ts/counter, so a classed sample could never be
-         * persisted, read, or shown. (#316)
+         * Swift WhoopStore v19 migration. The field is now compatibility-only: current protocol decode does
+         * not populate it because @63 overlaps `motion_wear_quality` and is not validated gait evidence.
          *
          * ALTER ... ADD COLUMN only (no data touched), so existing rows are untouched and read back with
          * `activityClass = NULL`, an absent class stays absent, never a fabricated 0/"still". The SQL MUST

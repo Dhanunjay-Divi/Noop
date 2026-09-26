@@ -572,6 +572,7 @@ fun AppRoot(
                         // Every metric/vital card opens its OWN focused detail trend (vital_detail/<key>),
                         // not the shared Health hub (2026-07-03). Mirrors the iOS liquidCard metricDetail.
                         onOpenMetric = { key -> nav.navigate("vital_detail/$key") },
+                        onOpenMetricHistory = { openTopLevel(Destination.Explore.route) },
                         onOpenSleep = { openTopLevel(Destination.Sleep.route) },
                         // Optional Coupled view card (task #43): a normal push so back returns to Today.
                         onOpenCoupled = { nav.navigate(Destination.CoupledView.route) },
@@ -2086,10 +2087,12 @@ private fun NavHostController.returnToTabRoot(route: String) {
  */
 @Composable
 private fun FusedRecordRoute(viewModel: AppViewModel) {
+    val metricDataVersion by viewModel.metricDataVersion.collectAsStateWithLifecycle()
+    val activeDeviceId by viewModel.selectedDeviceId.collectAsStateWithLifecycle()
     var record by remember {
         mutableStateOf(FusedRecord(rows = emptyList(), dayOwner = null as FusionSource?, contributingSourceCount = 0))
     }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(metricDataVersion, activeDeviceId) {
         record = runCatching { viewModel.fusedRecordForToday() }.getOrDefault(record)
     }
     FusedRecordScreen(record = record)

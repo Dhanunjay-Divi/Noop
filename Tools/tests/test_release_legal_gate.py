@@ -96,7 +96,7 @@ class ReleaseLegalGateTests(unittest.TestCase):
                 GATE.verified_owner_declaration()
 
     def test_terms_acknowledgment_versions_match(self) -> None:
-        self.assertEqual(GATE.verified_terms_version(), "2.5")
+        self.assertEqual(GATE.verified_terms_version(), "2.6")
 
 
 if __name__ == "__main__":

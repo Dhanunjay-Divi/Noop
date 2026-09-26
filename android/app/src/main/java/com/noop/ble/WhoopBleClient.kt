@@ -2802,7 +2802,8 @@ class WhoopBleClient(
                     deepHrvWindow = UnitPrefs.hrvWindow(context) == HrvWindow.DEEP_SLEEP,
                     diag = { message -> log(message) },
                     useExperimentalSleepV2 = PuffinExperiment.from(context).experimentalSleepV2,
-                    useMotionAwareWake = PuffinExperiment.from(context).motionAwareWake,
+                    // A stale experimental preference cannot re-authorize the disputed motion byte.
+                    useMotionAwareWake = false,
                     sleepTraceSink =
                         if (testCentre.active(com.noop.testcentre.TestDomain.SLEEP)) {
                             { message -> log(message, com.noop.testcentre.TestDomain.SLEEP) }
