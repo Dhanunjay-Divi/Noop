@@ -164,6 +164,78 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(pruneCutoffs, [:])
     }
 
+    func testRestoreOnlyCanExcludeDocumentsForHistoryViewer() async throws {
+        let ciphertext = Data(repeating: 0x2a, count: 32)
+        let document = ManagedDocument(
+            documentKind: .journal,
+            documentID: UUID(),
+            revision: 1,
+            originInstallationID: "remote-installation",
+            contentMode: "client_encrypted",
+            clientKeyID: UUID(),
+            contentSHA256: ManagedDigest.sha256(ciphertext),
+            payloadJSON: nil,
+            payloadCiphertextBase64: ciphertext.base64EncodedString(),
+            updatedAt: "2026-09-26T12:00:00.000Z",
+            deletedAt: nil,
+            duplicate: false
+        )
+        let metadata = document.changeMetadata
+        let change = ManagedChangeFeed.Change(
+            sequence: 43,
+            resourceKind: metadata.resourceKind,
+            resourceID: metadata.resourceID,
+            operation: metadata.operation,
+            contentSHA256: metadata.contentSHA256,
+            dataClass: metadata.dataClass,
+            eventStart: metadata.eventStart,
+            eventEnd: metadata.eventEnd,
+            chunk: metadata.chunk,
+            document: metadata.document
+        )
+        let transport = CoordinatorTransport(
+            changes: [change],
+            snapshotDocuments: [document],
+            remoteDocuments: [document.documentID: document]
+        )
+        let state = CoordinatorState(changeFeedCapabilityVersion: 0)
+        let restore = CoordinatorRestore()
+        let coordinator = ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: restore
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "macos-viewer",
+            installationToken: installationToken
+        )
+
+        let result = try await coordinator.restoreOnly(
+            authorization: authorization,
+            dataClasses: ["essential_timeseries"],
+            restoreDocuments: false
+        )
+
+        XCTAssertEqual(result.appliedChanges, 1)
+        XCTAssertFalse(result.hasMoreChanges)
+        let restoreIncludeDeleted =
+            await transport.restoreIncludeDeletedValues()
+        let snapshotIncludeDeleted =
+            await transport.snapshotIncludeDeletedValues()
+        let documentReads = await transport.documentReadCount()
+        let documentOperations =
+            await restore.appliedDocumentOperations()
+        let currentSequence = await state.currentSequence()
+        XCTAssertEqual(restoreIncludeDeleted, [false])
+        XCTAssertEqual(snapshotIncludeDeleted, [])
+        XCTAssertEqual(documentReads, 0)
+        XCTAssertEqual(documentOperations, [])
+        XCTAssertEqual(currentSequence, 43)
+    }
+
     func testLocalRetentionAppliesPerDataClassCutoffs() async throws {
         let dayMs: Int64 = 86_400_000
         let state = CoordinatorState()
@@ -2126,6 +2198,7 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     private var sourceRegistrations = 0
     private var chunkReservations = 0
     private var downloads = 0
+    private var documentReads = 0
     private var snapshotCursors: [ManagedChunkPage.Cursor?] = []
     private var snapshotIncludeDeleted: [Bool] = []
     private var restoreIncludeDeleted: [Bool] = []
@@ -2163,6 +2236,7 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     func sourceRegistrationCount() -> Int { sourceRegistrations }
     func chunkReservationCount() -> Int { chunkReservations }
     func downloadCount() -> Int { downloads }
+    func documentReadCount() -> Int { documentReads }
     func snapshotCursorChunkIDs() -> [UUID?] {
         snapshotCursors.map { $0?.afterChunkID }
     }
@@ -2265,12 +2339,15 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     ) async throws -> ManagedRestoreJob {
         restoreIncludeDeleted.append(includeDeletedDocuments)
         restoreCreations += 1
+        let selectedDocuments = includeDeletedDocuments
+            ? snapshotDocuments.count
+            : 0
         return ManagedRestoreJob(
             restoreJobID: restoreJobID,
             status: "running",
             snapshotAt: "2026-09-01T02:00:00Z",
             changeSequence: 42,
-            selectedObjects: snapshotChunks.count + snapshotDocuments.count,
+            selectedObjects: snapshotChunks.count + selectedDocuments,
             selectedBytes: Int64(
                 snapshotChunks.reduce(0) { $0 + $1.expectedCompressedBytes }
             ),
@@ -2320,12 +2397,15 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
         restoreCompletions += 1
+        let selectedDocuments = restoreIncludeDeleted.last == true
+            ? snapshotDocuments.count
+            : 0
         return ManagedRestoreJob(
             restoreJobID: restoreJobID,
             status: "completed",
             snapshotAt: "2026-09-01T02:00:00Z",
             changeSequence: 42,
-            selectedObjects: snapshotChunks.count + snapshotDocuments.count,
+            selectedObjects: snapshotChunks.count + selectedDocuments,
             selectedBytes: Int64(
                 snapshotChunks.reduce(0) { $0 + $1.expectedCompressedBytes }
             ),
@@ -2375,6 +2455,7 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         revision: Int64?,
         authorization: ManagedAuthorization
     ) async throws -> ManagedDocument {
+        documentReads += 1
         guard let document = remoteDocuments[id],
               document.documentKind == kind,
               revision.map({ document.revision == $0 }) ?? true else {
