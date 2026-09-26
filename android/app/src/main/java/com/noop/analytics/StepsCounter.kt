@@ -1,6 +1,7 @@
 package com.noop.analytics
 
 import com.noop.data.StepSample
+import kotlin.math.roundToLong
 
 /**
  * Wrap-aware step derivation from the strap's cumulative `step_motion_counter@57`, shared by the daily
@@ -23,6 +24,12 @@ object StepsCounter {
      * Real 1 Hz motion never ticks this fast between adjacent records. (#132/#276/#316)
      */
     const val MAX_STEP_DELTA = 512
+
+    /**
+     * Maximum tolerated missing coverage at a day edge or between rows before an all-still window becomes
+     * too sparse to repair a previously persisted whole-day value. This is not a gait threshold.
+     */
+    const val STATIONARY_REPAIR_MAX_COVERAGE_GAP_SECONDS = 15 * 60L
 
     enum class ClassificationPolicy {
         /** Preserve the historical raw-motion estimate for explicit legacy analysis. */
@@ -48,6 +55,8 @@ object StepsCounter {
         val rejectedUnknownDeltaCount: Int,
         val rejectedGapDeltaCount: Int,
         val zeroDeltaCount: Int,
+        /** Positive, in-range ticks before classification. Never published as current steps. */
+        val unfilteredRawTicks: Int,
         val rawTicks: Int,
     ) {
         enum class FilterMode {
@@ -73,6 +82,68 @@ object StepsCounter {
         /** Only retained walk/run evidence may replace older computed evidence. */
         val hasAuthoritativeCounterOutcome: Boolean
             get() = steps != null
+
+        /**
+         * The exact raw-motion total the former algorithm would have published when every usable positive
+         * delta is explicitly still. Persistence may use it only as a conditional compare-and-clear value.
+         */
+        val stationaryOnlyLegacyTicks: Int?
+            get() = unfilteredRawTicks.takeIf {
+                filterMode == FilterMode.activityClassFiltered &&
+                    keptDeltaCount == 0 &&
+                    rejectedStillDeltaCount > 0 &&
+                    rejectedUnknownDeltaCount == 0 &&
+                    rejectedGapDeltaCount == 0 &&
+                    it > 0
+            }
+    }
+
+    /** Shared calibration for daily, workout, trace, and stale-value repair paths. */
+    fun scaledSteps(rawTicks: Int, ticksPerStep: Double): Int? {
+        if (rawTicks <= 0) return null
+        val scaled = (rawTicks.toDouble() / maxOf(ticksPerStep, 0.5))
+            .roundToLong()
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        return scaled.takeIf { it > 0 }
+    }
+
+    /**
+     * Return the exact stale raw-motion value disproved by a continuously observed all-still day.
+     *
+     * Rejecting a short stationary burst is valid for new step publication, but that burst cannot disprove
+     * the rest of a persisted day. Repair therefore requires edge-to-edge coverage through
+     * [observedThroughTs] with no large internal gap. Persistence still uses compare-and-clear.
+     */
+    fun stationaryLegacyRepairSteps(
+        analysis: Analysis,
+        samples: List<StepSample>,
+        ticksPerStep: Double,
+        dayStartTs: Long,
+        observedThroughTs: Long,
+        maxCoverageGapSeconds: Long = STATIONARY_REPAIR_MAX_COVERAGE_GAP_SECONDS,
+    ): Int? {
+        val legacyTicks = analysis.stationaryOnlyLegacyTicks ?: return null
+        if (maxCoverageGapSeconds <= 0L || observedThroughTs < dayStartTs) return null
+
+        val covered = samples
+            .asSequence()
+            .filter { it.ts in dayStartTs..observedThroughTs }
+            .sortedBy { it.ts }
+            .toList()
+        if (
+            covered.size < 2 ||
+            covered.size != analysis.sampleCount ||
+            covered.first().ts - dayStartTs > maxCoverageGapSeconds ||
+            observedThroughTs - covered.last().ts > maxCoverageGapSeconds
+        ) {
+            return null
+        }
+        for (index in 1 until covered.size) {
+            val gap = covered[index].ts - covered[index - 1].ts
+            if (gap <= 0L || gap > maxCoverageGapSeconds) return null
+        }
+        return scaledSteps(legacyTicks, ticksPerStep)
     }
 
     /**
@@ -102,6 +173,7 @@ object StepsCounter {
         var rejectedUnknownDeltaCount = 0
         var rejectedGapDeltaCount = 0
         var zeroDeltaCount = 0
+        var unfilteredRawTicks = 0
 
         for (i in 1 until sorted.size) {
             val later = sorted[i]
@@ -110,16 +182,20 @@ object StepsCounter {
                 delta == 0 -> zeroDeltaCount += 1
                 delta >= MAX_STEP_DELTA -> rejectedGapDeltaCount += 1
                 filterMode == Analysis.FilterMode.legacyRawMotion -> {
+                    unfilteredRawTicks += delta
                     rawTicks += delta
                     keptDeltaCount += 1
                 }
-                else -> when (later.activityClass) {
-                    1, 2 -> {
-                        rawTicks += delta
-                        keptDeltaCount += 1
+                else -> {
+                    unfilteredRawTicks += delta
+                    when (later.activityClass) {
+                        1, 2 -> {
+                            rawTicks += delta
+                            keptDeltaCount += 1
+                        }
+                        0 -> rejectedStillDeltaCount += 1
+                        else -> rejectedUnknownDeltaCount += 1
                     }
-                    0 -> rejectedStillDeltaCount += 1
-                    else -> rejectedUnknownDeltaCount += 1
                 }
             }
         }
@@ -133,6 +209,7 @@ object StepsCounter {
             rejectedUnknownDeltaCount = rejectedUnknownDeltaCount,
             rejectedGapDeltaCount = rejectedGapDeltaCount,
             zeroDeltaCount = zeroDeltaCount,
+            unfilteredRawTicks = unfilteredRawTicks,
             rawTicks = rawTicks,
         )
     }

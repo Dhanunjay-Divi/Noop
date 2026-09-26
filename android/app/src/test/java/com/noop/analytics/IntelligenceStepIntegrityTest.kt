@@ -45,6 +45,33 @@ class IntelligenceStepIntegrityTest {
                     doomed.forEach(series::remove)
                     doomed.size
                 }
+                "clearMatchingDailySteps" -> {
+                    val source = args!![0] as String
+                    val day = args[1] as String
+                    val expected = args[2] as Int
+                    val mapKey = source to day
+                    val row = daily[mapKey]
+                    if (row?.steps == expected) {
+                        daily[mapKey] = row.copy(steps = null)
+                        1
+                    } else {
+                        0
+                    }
+                }
+                "deleteMatchingMetricSeriesPoint" -> {
+                    if (fixture.failEstimateDelete) error("injected estimate delete failure")
+                    val source = args!![0] as String
+                    val day = args[1] as String
+                    val key = args[2] as String
+                    val expected = args[3] as Double
+                    val mapKey = Triple(source, day, key)
+                    if (series[mapKey]?.value == expected) {
+                        series.remove(mapKey)
+                        1
+                    } else {
+                        0
+                    }
+                }
                 "dailyMetricsRange" -> {
                     val source = args!![0] as String
                     val from = args[1] as String
@@ -174,6 +201,86 @@ class IntelligenceStepIntegrityTest {
     }
 
     @Test
+    fun stationaryLegacyRepairClearsOnlyExactComputedValue() = runBlocking {
+        val f = fixture()
+        val matching = "active-band-noop"
+        val mismatching = "old-band-noop"
+        val imported = "health-connect"
+        val day = "2026-09-24"
+        f.daily[matching to day] = DailyMetric(
+            deviceId = matching,
+            day = day,
+            recovery = 60.0,
+            steps = 4_000,
+        )
+        f.daily[mismatching to day] = DailyMetric(
+            deviceId = mismatching,
+            day = day,
+            recovery = 61.0,
+            steps = 4_500,
+        )
+        f.daily[imported to day] = DailyMetric(
+            deviceId = imported,
+            day = day,
+            recovery = 90.0,
+            steps = 4_000,
+        )
+        f.series[Triple(matching, day, "steps_est")] =
+            MetricSeriesRow(matching, day, "steps_est", 4_000.0)
+        f.series[Triple(mismatching, day, "steps_est")] =
+            MetricSeriesRow(mismatching, day, "steps_est", 4_500.0)
+        f.series[Triple(imported, day, "steps_est")] =
+            MetricSeriesRow(imported, day, "steps_est", 4_000.0)
+
+        assertEquals(
+            2,
+            f.repo.reconcileComputedStepEvidence(
+                deviceIds = listOf(matching, mismatching),
+                deleteEstimateDays = emptyList(),
+                clearMatchingComputedSteps = mapOf(day to 4_000),
+            ),
+        )
+
+        assertNull(f.daily[matching to day]?.steps)
+        assertEquals(60.0, f.daily[matching to day]?.recovery)
+        assertNull(f.series[Triple(matching, day, "steps_est")])
+        assertEquals(4_500, f.daily[mismatching to day]?.steps)
+        assertEquals(4_500.0, f.series[Triple(mismatching, day, "steps_est")]?.value)
+        assertEquals(4_000, f.daily[imported to day]?.steps)
+        assertEquals(4_000.0, f.series[Triple(imported, day, "steps_est")]?.value)
+        assertEquals(1L, f.repo.metricDataVersion.value)
+    }
+
+    @Test
+    fun stationaryLegacyRepairRollsBackDailyClearWhenEstimateDeleteFails() = runBlocking {
+        val f = fixture()
+        val source = "active-band-noop"
+        val day = "2026-09-24"
+        f.daily[source to day] = DailyMetric(
+            deviceId = source,
+            day = day,
+            recovery = 60.0,
+            steps = 4_000,
+        )
+        f.series[Triple(source, day, "steps_est")] =
+            MetricSeriesRow(source, day, "steps_est", 4_000.0)
+        f.failEstimateDelete = true
+
+        val failure = runCatching {
+            f.repo.reconcileComputedStepEvidence(
+                deviceIds = listOf(source),
+                deleteEstimateDays = emptyList(),
+                clearMatchingComputedSteps = mapOf(day to 4_000),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals(4_000, f.daily[source to day]?.steps)
+        assertEquals(4_000.0, f.series[Triple(source, day, "steps_est")]?.value)
+        assertEquals(0L, f.repo.metricDataVersion.value)
+    }
+
+    @Test
     fun ambiguousScoreReplacementPreservesOnlyRequestedPriorSteps() = runBlocking {
         val f = fixture()
         val source = "whoop-ABC123-noop"
@@ -285,6 +392,40 @@ class IntelligenceStepIntegrityTest {
         assertEquals("RMSSD", saved?.hrvMethod)
         assertEquals(1L, f.repo.metricDataVersion.value)
         assertEquals(1L, f.repo.restDataVersion.value)
+    }
+
+    @Test
+    fun scoreReplacementClearsMatchingStepAfterFieldPreservation() = runBlocking {
+        val f = fixture()
+        val source = "whoop-ABC123-noop"
+        val day = "2026-09-24"
+        f.daily[source to day] = DailyMetric(
+            deviceId = source,
+            day = day,
+            recovery = 60.0,
+            steps = 4_000,
+        )
+        f.series[Triple(source, day, "steps_est")] =
+            MetricSeriesRow(source, day, "steps_est", 4_000.0)
+
+        val receipt = f.repo.reconcileComputedScoreRange(
+            deviceId = source,
+            fromDay = day,
+            toDay = day,
+            dailyRows = listOf(
+                DailyMetric(deviceId = source, day = day, recovery = 80.0),
+            ),
+            managedRestKeys = setOf("sleep_performance"),
+            restRows = emptyList(),
+            preserveDailyFieldsDays = setOf(day),
+            stepEvidenceDeviceIds = listOf(source),
+            clearMatchingComputedSteps = mapOf(day to 4_000),
+        )
+
+        assertEquals(setOf(day), receipt)
+        assertEquals(80.0, f.daily[source to day]?.recovery)
+        assertNull(f.daily[source to day]?.steps)
+        assertNull(f.series[Triple(source, day, "steps_est")])
     }
 
     @Test

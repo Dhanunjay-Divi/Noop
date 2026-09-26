@@ -702,6 +702,7 @@ class WhoopRepository internal constructor(
     suspend fun reconcileComputedStepEvidence(
         deviceIds: Collection<String>,
         deleteEstimateDays: Collection<String>,
+        clearMatchingComputedSteps: Map<String, Int> = emptyMap(),
     ): Int {
         val sources = deviceIds.distinct().sorted()
         require(sources.all(String::isNotBlank)) { "computed step source id is required" }
@@ -709,10 +710,16 @@ class WhoopRepository internal constructor(
         require(estimateDays.all(CycleTrackingStore::isValidLocalDayKey)) {
             "invalid computed step estimate day"
         }
-        if (sources.isEmpty() || estimateDays.isEmpty()) return 0
+        val matchingStepClears = clearMatchingComputedSteps.toSortedMap()
+        require(
+            matchingStepClears.all { (day, expectedSteps) ->
+                CycleTrackingStore.isValidLocalDayKey(day) && expectedSteps > 0
+            }
+        ) { "invalid computed step clear" }
+        if (sources.isEmpty() || estimateDays.isEmpty() && matchingStepClears.isEmpty()) return 0
 
         val changed = transactor.run {
-            applyComputedStepEvidence(sources, estimateDays)
+            applyComputedStepEvidence(sources, estimateDays, matchingStepClears)
         }
         if (changed > 0) {
             noteMetricsChanged(listOf("steps_est"))
@@ -723,11 +730,21 @@ class WhoopRepository internal constructor(
     private suspend fun applyComputedStepEvidence(
         sources: List<String>,
         estimateDays: List<String>,
+        matchingStepClears: Map<String, Int> = emptyMap(),
     ): Int {
         var total = 0
         for (source in sources) {
             for (days in estimateDays.chunked(STEP_EVIDENCE_DAY_CHUNK)) {
                 total += dao.deleteMetricSeriesPoints(source, days, "steps_est")
+            }
+            for ((day, expectedSteps) in matchingStepClears) {
+                total += dao.clearMatchingDailySteps(source, day, expectedSteps)
+                total += dao.deleteMatchingMetricSeriesPoint(
+                    deviceId = source,
+                    day = day,
+                    key = "steps_est",
+                    expectedValue = expectedSteps.toDouble(),
+                )
             }
         }
         return total
@@ -871,6 +888,7 @@ class WhoopRepository internal constructor(
         preserveDailyFieldsDays: Set<String> = emptySet(),
         stepEvidenceDeviceIds: Collection<String> = emptyList(),
         deleteEstimateDays: Collection<String> = emptyList(),
+        clearMatchingComputedSteps: Map<String, Int> = emptyMap(),
     ): Set<String> {
         require(deviceId.isNotBlank()) { "computed score device id is required" }
         require(
@@ -912,6 +930,17 @@ class WhoopRepository internal constructor(
             estimateDays.all { CycleTrackingStore.isValidLocalDayKey(it) && it in fromDay..toDay }
         ) { "invalid computed step estimate day" }
         require(estimateDays.isEmpty() || stepSources.isNotEmpty()) {
+            "computed step source id is required"
+        }
+        val matchingStepClears = clearMatchingComputedSteps.toSortedMap()
+        require(
+            matchingStepClears.all { (day, expectedSteps) ->
+                CycleTrackingStore.isValidLocalDayKey(day) &&
+                    day in fromDay..toDay &&
+                    expectedSteps > 0
+            }
+        ) { "invalid computed step clear" }
+        require(estimateDays.isEmpty() && matchingStepClears.isEmpty() || stepSources.isNotEmpty()) {
             "computed step source id is required"
         }
 
@@ -986,7 +1015,7 @@ class WhoopRepository internal constructor(
                 managedKeys = keys,
                 rows = normalizedRestRows,
             )
-            applyComputedStepEvidence(stepSources, estimateDays)
+            applyComputedStepEvidence(stepSources, estimateDays, matchingStepClears)
             replacementByDay.keys.toSet()
         }
         noteMetricsChanged(keys, dailyMetricsChanged = true)

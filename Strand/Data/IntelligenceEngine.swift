@@ -2233,6 +2233,7 @@ final class IntelligenceEngine: ObservableObject {
                 Set<OptionalAnalysisEvidence>,
                 Set<String>,
                 Set<String>,
+                [String: Int],
                 Set<String>,
                 Set<String>,
                 Set<String>,
@@ -2247,6 +2248,7 @@ final class IntelligenceEngine: ObservableObject {
             var optionalEvidenceFailures = Set<OptionalAnalysisEvidence>()
             var stepCounterObservedDays = Set<String>()
             var stepCounterAuthoritativeDays = Set<String>()
+            var stationaryLegacyStepsByDay: [String: Int] = [:]
             var stepCounterSkippedDays = Set<String>()
             var stepOnlyDailyDays = Set<String>()
             var stepCounterOwnerIDs = Set<String>()
@@ -2369,6 +2371,15 @@ final class IntelligenceEngine: ObservableObject {
                 }
                 if dayStepAnalysis.hasAuthoritativeCounterOutcome {
                     stepCounterAuthoritativeDays.insert(day)
+                }
+                if let legacySteps = StepsCounter.stationaryLegacyRepairSteps(
+                    analysis: dayStepAnalysis,
+                    samples: daySteps,
+                    ticksPerStep: up.stepTicksPerStep,
+                    dayStartTs: dayMid,
+                    observedThroughTs: min(dayEnd, actualNow)
+                ) {
+                    stationaryLegacyStepsByDay[day] = legacySteps
                 }
                 if hr.count < 200 {
                     if dayStepAnalysis.steps != nil {
@@ -2716,6 +2727,7 @@ final class IntelligenceEngine: ObservableObject {
                 optionalEvidenceFailures,
                 stepCounterObservedDays,
                 stepCounterAuthoritativeDays,
+                stationaryLegacyStepsByDay,
                 stepCounterSkippedDays,
                 stepOnlyDailyDays,
                 stepCounterOwnerIDs,
@@ -2728,6 +2740,7 @@ final class IntelligenceEngine: ObservableObject {
         let optionalEvidenceFailures: Set<OptionalAnalysisEvidence>
         let stepCounterObservedDays: Set<String>
         let stepCounterAuthoritativeDays: Set<String>
+        let stationaryLegacyStepsByDay: [String: Int]
         let stepCounterSkippedDays: Set<String>
         let stepOnlyDailyDays: Set<String>
         let stepCounterOwnerIDs: Set<String>
@@ -2740,6 +2753,7 @@ final class IntelligenceEngine: ObservableObject {
                 optionalEvidenceFailures,
                 stepCounterObservedDays,
                 stepCounterAuthoritativeDays,
+                stationaryLegacyStepsByDay,
                 stepCounterSkippedDays,
                 stepOnlyDailyDays,
                 stepCounterOwnerIDs,
@@ -3336,7 +3350,8 @@ final class IntelligenceEngine: ObservableObject {
         if !computedStepSourceIds.contains(computedId) {
             computedStepSourceIds.append(computedId)
         }
-        let hasStepEvidenceMutation = !stepCounterAuthoritativeDays.isEmpty
+        let hasStepEvidenceMutation =
+            !stepCounterAuthoritativeDays.isEmpty || !stationaryLegacyStepsByDay.isEmpty
         var scorePersistenceSucceeded = !shouldReconcileScoreRange
         if shouldReconcileScoreRange {
             do {
@@ -3350,7 +3365,8 @@ final class IntelligenceEngine: ObservableObject {
                     preserveDailyStepDays: stepCounterNoRetainedDays,
                     preserveDailyFieldsDays: preserveDailyFieldsDays,
                     stepEvidenceDeviceIds: hasStepEvidenceMutation ? computedStepSourceIds : [],
-                    deleteEstimateDays: stepCounterAuthoritativeDays
+                    deleteEstimateDays: stepCounterAuthoritativeDays,
+                    clearMatchingComputedSteps: stationaryLegacyStepsByDay
                 )
                 persistedWhoopStrapDays = freshlyScoredWhoopStrapDays
                     .intersection(persistedDays)
@@ -3401,15 +3417,17 @@ final class IntelligenceEngine: ObservableObject {
         }
 
         // Counter evidence is day-scoped integrity data, including on a historical catch-up pass.
-        // A retained walk/run count supersedes an older gravity estimate. Still-only, classless, flat,
-        // gap-only, and unknown-only windows suppress new fallback estimates without destructively
-        // rewriting earlier same-day history. Estimate deletion spans every known computed namespace.
-        if !shouldReconcileScoreRange && !stepCounterAuthoritativeDays.isEmpty {
+        // A retained walk/run count supersedes an older gravity estimate. An all-still window may also
+        // remove the exact legacy raw-motion value it proves stale; compare-and-clear keeps mismatched,
+        // imported, classless, sparse, flat, gap-only, and unknown-only history intact. The mutation spans
+        // every known computed namespace.
+        if !shouldReconcileScoreRange && hasStepEvidenceMutation {
             do {
                 try Task.checkCancellation()
                 _ = try await store.reconcileComputedStepEvidence(
                     deviceIds: computedStepSourceIds,
-                    deleteEstimateDays: Array(stepCounterAuthoritativeDays)
+                    deleteEstimateDays: Array(stepCounterAuthoritativeDays),
+                    clearMatchingComputedSteps: stationaryLegacyStepsByDay
                 )
             } catch {
                 if error is CancellationError || Task.isCancelled {

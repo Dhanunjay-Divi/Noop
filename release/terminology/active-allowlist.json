@@ -3827,12 +3827,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 40,
+      "occurrenceCount": 39,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/DevicesScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "46ec9a360661e1fb7af00762e85df52fa72de821bcc0af252b7d623e1ed7fe5d"
+      "sha256": "02e462f09ddd320e42cb8a731366acea2baa4c6fb35e0adb536b21915e6360ee"
     },
     {
       "category": "customer",

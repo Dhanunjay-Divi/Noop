@@ -36,6 +36,18 @@ Last updated: **2026-09-26**
   embedded. One consolidated commit/push, replacement exact-SHA checks,
   evidence-backed resolution of the final thread, normal protected merge,
   protected-main verification, and exact temporary-output cleanup remain.
+- The September 26 step-integrity refinement is also local and green. Current
+  motion-derived steps require per-record walk/run classification; still,
+  unknown, classless, reset/gap, and singleton evidence cannot publish steps or
+  re-enter through gravity fallback. Exact stale raw-motion cleanup now also
+  requires continuous civil-day coverage with no edge or internal gap above
+  15 minutes, so a short head-bath or hand-motion burst cannot erase unrelated
+  history. Swift counter tests pass 20/20, mirrored Android analytics plus
+  transactional integrity compile and pass, and Apple engine orchestration
+  passes 2/2. The exact complete shared walls pass 1,507 analytics tests with
+  seven intentional skips and 551 storage tests with zero failures. Physical
+  firmware classification and synchronized manual-count accuracy remain
+  external gates.
 - Current integration state: PR `#17` includes the supplier qualification
   candidate whose first hosted run used exact head
   `25b239a9cca9b5f5da15bc882d51fc344fe122b0`. The same Full/iPhone app
@@ -206,13 +218,33 @@ Last updated: **2026-09-26**
   62 subtests; direct release, required-CI, trusted-control, calibration,
   terminology, localization, operations, legal, distribution, private-data,
   claims, SDK-artifact, and diff gates pass. The reviewed terminology ratchet
-  records 18,512 classified occurrences across 1,628 groups with no active-use
+  records 18,533 classified occurrences across 1,628 groups with no active-use
   regression. Remote PR `#17` head `e92efc51e` passed every applicable hosted
   job and all ten protected contexts, but it predates these final fixes. One
   consolidated replacement commit/push, replacement exact-SHA hosted checks,
   evidence-backed review-thread resolution, normal protected merge,
   protected-main verification, and final bounded-log/test-environment cleanup
   remain.
+- The September 26 final Android review closeout remains local and keeps the
+  step formula unchanged. Pending supplier-credential cleanup now has separate
+  durable archive and authentication-rejection ledgers, supports multiple
+  pending device cleanups across process recreation, retries on the bounded
+  1s/5s/15s schedule and foreground entry, and fails closed by archiving a
+  rejected supplier row if both ledger persistence and secure deletion fail.
+  The initial durable active-source projection retries transient registry-read
+  failure and invalidates a stale confirmed projection when source selection
+  changes. Devices selects supplier connection/battery presentation only from
+  the exact supplier device's display stream rather than stale WHOOP state.
+  Focused compilation and 76/76 tests pass. The complete Full wall passes
+  5,177 tests with seven intentional skips, builds the 54,399,693-byte debug
+  APK, passes lint with zero errors, and compiles 207 instrumentation test
+  classes. Independent final review reports no remaining correctness finding
+  in the changed Android boundary. The post-closeout complete Tools wall and
+  direct policy controls are rerun after the final operations and terminology
+  snapshot. Remote PR `#17` head `58f4c3d5` remains the prior hosted-green
+  candidate; one replacement commit/push, replacement exact-SHA checks,
+  resolution of the three matching threads, normal protected merge,
+  protected-main verification, and exact cleanup remain.
 - An isolated local follow-up from `60df38a2` confirms the vendored Swift and
   Kotlin `failOperation` implementations already reject non-operation failure
   categories before state mutation. Matching app-side regressions pass 2/2 on
@@ -634,9 +666,9 @@ Resume from:
 
 ## Immediate next actions
 
-1. Regenerate and review the terminology inventory after this final evidence
-   update, repin only its exact reviewed digest, and run the lightweight
-   operations/release/trust/diff wall.
+1. Regenerate and review the terminology inventory after the final Android and
+   step-integrity evidence update, repin only its exact reviewed digest, and run
+   the lightweight operations/release/trust/diff wall.
 2. Commit and push the documentation-only closeout to PR `#17`.
 3. Require all ten protected contexts on the final head without bypassing
    branch protection, then merge normally.

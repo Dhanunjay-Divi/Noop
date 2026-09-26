@@ -938,11 +938,10 @@ public enum AnalyticsEngine {
         }()
         let stepsTotal: Int? = {
             guard let ticks = stepAnalysis.steps else { return nil }
-            // @57 counts motion ticks, not validated steps — the 5/MG counter overcounts. Divide
-            // by the user-calibrated ticks-per-step (default 1.0 = raw pass-through; floor 0.5 so
-            // a bad pref can at most double, never explode, the total). (#139)
-            let scaled = Int((Double(ticks) / max(profile.stepTicksPerStep, 0.5)).rounded())
-            return scaled > 0 ? scaled : nil
+            return StepsCounter.scaledSteps(
+                rawTicks: ticks,
+                ticksPerStep: profile.stepTicksPerStep
+            )
         }()
 
         // ── Final daily Effort (cardiovascular load + ordinary movement) ──────

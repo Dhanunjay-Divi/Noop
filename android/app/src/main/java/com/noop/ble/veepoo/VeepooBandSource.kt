@@ -79,6 +79,7 @@ data class VeepooCandidateRow(
 )
 
 data class VeepooDisplayState(
+    val deviceId: String? = null,
     val adapterState: VeepooAdapterState = VeepooAdapterState.IDLE,
     val heartRate: Int? = null,
     val batteryPercent: Int? = null,

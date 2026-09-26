@@ -69,12 +69,116 @@ final class StepsCounterTests: XCTestCase {
         XCTAssertEqual(analysis.deltaCount, 10)
         XCTAssertEqual(analysis.keptDeltaCount, 0)
         XCTAssertEqual(analysis.rejectedStillDeltaCount, 10)
+        XCTAssertEqual(analysis.unfilteredRawTicks, 4_000)
         XCTAssertEqual(analysis.rawTicks, 0)
         XCTAssertNil(analysis.steps)
         XCTAssertTrue(analysis.counterObserved)
         XCTAssertFalse(analysis.allowsMotionFallback)
         XCTAssertFalse(analysis.hasAuthoritativeCounterOutcome)
+        XCTAssertEqual(analysis.stationaryOnlyLegacyTicks, 4_000)
+        XCTAssertEqual(
+            StepsCounter.scaledSteps(
+                rawTicks: try XCTUnwrap(analysis.stationaryOnlyLegacyTicks),
+                ticksPerStep: 2
+            ),
+            2_000
+        )
         XCTAssertNil(StepsCounter.stepsInWindow(samples))
+    }
+
+    func testContinuousAllStillCoverageCanRepairExactLegacyValue() {
+        let samples = (0...6).map { step($0 * 600, $0 * 100, 0) }
+        let analysis = StepsCounter.analyze(
+            samples,
+            classificationPolicy: .requireActivityClass
+        )
+
+        XCTAssertEqual(
+            StepsCounter.stationaryLegacyRepairSteps(
+                analysis: analysis,
+                samples: samples,
+                ticksPerStep: 2,
+                dayStartTs: 0,
+                observedThroughTs: 3_600
+            ),
+            300
+        )
+    }
+
+    func testShortStationaryBurstCannotRepairWholeDayValue() {
+        let samples = (0...10).map { step(43_200 + $0 * 60, $0 * 400, 0) }
+        let analysis = StepsCounter.analyze(
+            samples,
+            classificationPolicy: .requireActivityClass
+        )
+
+        XCTAssertEqual(analysis.stationaryOnlyLegacyTicks, 4_000)
+        XCTAssertNil(
+            StepsCounter.stationaryLegacyRepairSteps(
+                analysis: analysis,
+                samples: samples,
+                ticksPerStep: 1,
+                dayStartTs: 0,
+                observedThroughTs: 86_399
+            )
+        )
+    }
+
+    func testAllStillCoverageWithInternalOrTrailingGapCannotRepair() {
+        let internalGap = [
+            step(0, 0, 0),
+            step(600, 100, 0),
+            step(1_200, 200, 0),
+            step(3_000, 300, 0),
+            step(3_600, 400, 0),
+        ]
+        let internalAnalysis = StepsCounter.analyze(
+            internalGap,
+            classificationPolicy: .requireActivityClass
+        )
+        XCTAssertNil(
+            StepsCounter.stationaryLegacyRepairSteps(
+                analysis: internalAnalysis,
+                samples: internalGap,
+                ticksPerStep: 1,
+                dayStartTs: 0,
+                observedThroughTs: 3_600
+            )
+        )
+
+        let trailingGap = (0...3).map { step($0 * 600, $0 * 100, 0) }
+        let trailingAnalysis = StepsCounter.analyze(
+            trailingGap,
+            classificationPolicy: .requireActivityClass
+        )
+        XCTAssertNil(
+            StepsCounter.stationaryLegacyRepairSteps(
+                analysis: trailingAnalysis,
+                samples: trailingGap,
+                ticksPerStep: 1,
+                dayStartTs: 0,
+                observedThroughTs: 3_600
+            )
+        )
+    }
+
+    func testRepairFailsClosedWhenAnalysisAndCoveredRowsDiffer() {
+        let samples = (0...6).map { step($0 * 600, $0 * 100, 0) }
+            + [step(4_200, 700, 0)]
+        let analysis = StepsCounter.analyze(
+            samples,
+            classificationPolicy: .requireActivityClass
+        )
+
+        XCTAssertNil(
+            StepsCounter.stationaryLegacyRepairSteps(
+                analysis: analysis,
+                samples: samples,
+                ticksPerStep: 1,
+                dayStartTs: 0,
+                observedThroughTs: 3_600
+            )
+        )
     }
 
     func testMixedStillAndWalkRetainsOnlyWalkDeltas() {
@@ -88,8 +192,10 @@ final class StepsCounterTests: XCTestCase {
         let analysis = StepsCounter.analyze(samples)
 
         XCTAssertEqual(analysis.rawTicks, 300)
+        XCTAssertEqual(analysis.unfilteredRawTicks, 600)
         XCTAssertEqual(analysis.keptDeltaCount, 2)
         XCTAssertEqual(analysis.rejectedStillDeltaCount, 2)
+        XCTAssertNil(analysis.stationaryOnlyLegacyTicks)
         XCTAssertEqual(StepsCounter.stepsInWindow(samples), 300)
     }
 
@@ -103,8 +209,10 @@ final class StepsCounterTests: XCTestCase {
 
         XCTAssertEqual(analysis.filterMode, .activityClassFiltered)
         XCTAssertEqual(analysis.rawTicks, 70)
+        XCTAssertEqual(analysis.unfilteredRawTicks, 120)
         XCTAssertEqual(analysis.keptDeltaCount, 1)
         XCTAssertEqual(analysis.rejectedUnknownDeltaCount, 1)
+        XCTAssertNil(analysis.stationaryOnlyLegacyTicks)
         XCTAssertEqual(StepsCounter.stepsInWindow(samples), 70)
     }
 
@@ -116,6 +224,7 @@ final class StepsCounterTests: XCTestCase {
 
         XCTAssertEqual(analysis.rawTicks, 0)
         XCTAssertEqual(analysis.rejectedUnknownDeltaCount, 1)
+        XCTAssertNil(analysis.stationaryOnlyLegacyTicks)
         XCTAssertNil(analysis.steps)
     }
 
@@ -125,7 +234,9 @@ final class StepsCounterTests: XCTestCase {
 
         XCTAssertEqual(analysis.filterMode, .legacyRawMotion)
         XCTAssertEqual(analysis.keptDeltaCount, 10)
+        XCTAssertEqual(analysis.unfilteredRawTicks, 4_000)
         XCTAssertEqual(analysis.rawTicks, 4_000)
+        XCTAssertNil(analysis.stationaryOnlyLegacyTicks)
         XCTAssertTrue(analysis.counterObserved)
         XCTAssertFalse(analysis.allowsMotionFallback)
         XCTAssertTrue(analysis.hasAuthoritativeCounterOutcome)
@@ -142,7 +253,9 @@ final class StepsCounterTests: XCTestCase {
         XCTAssertEqual(analysis.filterMode, .activityClassRequiredMissing)
         XCTAssertEqual(analysis.keptDeltaCount, 0)
         XCTAssertEqual(analysis.rejectedUnknownDeltaCount, 10)
+        XCTAssertEqual(analysis.unfilteredRawTicks, 4_000)
         XCTAssertEqual(analysis.rawTicks, 0)
+        XCTAssertNil(analysis.stationaryOnlyLegacyTicks)
         XCTAssertNil(analysis.steps)
         XCTAssertTrue(analysis.counterObserved)
         XCTAssertFalse(analysis.allowsMotionFallback)
@@ -157,6 +270,7 @@ final class StepsCounterTests: XCTestCase {
         XCTAssertNil(gapOnly.steps)
         XCTAssertTrue(gapOnly.counterObserved)
         XCTAssertFalse(gapOnly.hasAuthoritativeCounterOutcome)
+        XCTAssertNil(gapOnly.stationaryOnlyLegacyTicks)
 
         let unknownOnly = StepsCounter.analyze([
             step(0, 100, 9),
@@ -165,6 +279,7 @@ final class StepsCounterTests: XCTestCase {
         XCTAssertNil(unknownOnly.steps)
         XCTAssertTrue(unknownOnly.counterObserved)
         XCTAssertFalse(unknownOnly.hasAuthoritativeCounterOutcome)
+        XCTAssertNil(unknownOnly.stationaryOnlyLegacyTicks)
     }
 
     func testStillMixedWithUnknownOrGapRemainsAmbiguous() {
@@ -177,6 +292,7 @@ final class StepsCounterTests: XCTestCase {
         XCTAssertEqual(stillAndUnknown.rejectedStillDeltaCount, 1)
         XCTAssertEqual(stillAndUnknown.rejectedUnknownDeltaCount, 1)
         XCTAssertFalse(stillAndUnknown.hasAuthoritativeCounterOutcome)
+        XCTAssertNil(stillAndUnknown.stationaryOnlyLegacyTicks)
 
         let stillAndGap = StepsCounter.analyze([
             step(0, 100, 0),
@@ -187,6 +303,7 @@ final class StepsCounterTests: XCTestCase {
         XCTAssertEqual(stillAndGap.rejectedStillDeltaCount, 1)
         XCTAssertEqual(stillAndGap.rejectedGapDeltaCount, 1)
         XCTAssertFalse(stillAndGap.hasAuthoritativeCounterOutcome)
+        XCTAssertNil(stillAndGap.stationaryOnlyLegacyTicks)
     }
 
     func testClassedWindowRetainsWrapAndGapBehavior() {

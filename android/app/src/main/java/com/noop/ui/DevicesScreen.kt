@@ -114,6 +114,7 @@ fun DevicesScreen(
 ) {
     val scope = rememberCoroutineScope()
     val live by viewModel.live.collectAsStateWithLifecycle()
+    val supplierDisplay by viewModel.supplierBandDisplay.collectAsStateWithLifecycle()
     // #592 extended-battery probe result - non-null (incl. the " waiting" sentinel) shows the result dialog.
     val batteryProbeResult by viewModel.extendedBatteryProbe.collectAsStateWithLifecycle()
     // #690 body-location probe result — same non-null-shows-the-dialog contract.
@@ -197,32 +198,42 @@ fun DevicesScreen(
             }
         } else {
             items(activeDevices) { device ->
+                val isActive = device.status == DeviceStatus.active.name
+                val isSupplier = device.sourceKind == SourceKind.veepoo.name
+                val cardLive = deviceCardLiveProjection(
+                    deviceId = device.id,
+                    sourceKind = device.sourceKind,
+                    isActive = isActive,
+                    standardConnected = live.connected,
+                    standardBatteryPct = live.batteryPct,
+                    supplierDisplay = supplierDisplay,
+                )
                 DeviceCard(
                     device = device,
-                    isActive = device.status == DeviceStatus.active.name,
-                    isLiveConnected = device.status == DeviceStatus.active.name && live.connected,
+                    isActive = isActive,
+                    isLiveConnected = cardLive.connected,
                 // #221: a WHOOP 5/MG can be BLE-connected yet have its ENCRYPTED bond refused (the WHOOP
                 // app, or a stale pairing, holds the single-app bond) — no HR/biometric data flows even
                 // though the link is up, so "Active · Live" overstates it. pairingHint is set only once
                 // that refusal is genuinely detected (#78), never during a normal connect, so this can't
                 // false-alarm a working 4.0 (its pairingHint stays null) or a fresh 5/MG connect.
-                bondRefused = device.status == DeviceStatus.active.name && live.connected && live.pairingHint != null,
+                bondRefused = !isSupplier && cardLive.connected && live.pairingHint != null,
                 // The full #78 how-to-fix guidance, surfaced on the card itself when bondRefused so the
                 // fix is self-service instead of buried in the strap log.
-                pairingHint = if (device.status == DeviceStatus.active.name) live.pairingHint else null,
+                pairingHint = if (isActive && !isSupplier) live.pairingHint else null,
                 // Reboot in flight + link currently down → "Reconnecting…" (#166).
-                isReconnecting = device.status == DeviceStatus.active.name && live.rebootInProgress && !live.connected,
-                // The live battery belongs to whichever device is ACTIVE + connected (WHOOP, a generic
-                // strap, or an FTMS machine all funnel into live.batteryPct). null otherwise.
-                liveBatteryPct = if (device.status == DeviceStatus.active.name && live.connected)
-                    live.batteryPct?.let { Math.round(it).toInt() } else null,
-                liveBatteryMv = if (device.status == DeviceStatus.active.name && live.connected)
+                isReconnecting =
+                    isActive && !isSupplier && live.rebootInProgress && !cardLive.connected,
+                // Resolve battery through the active source's own display stream so one transport
+                // cannot surface another transport's stale state. null while inactive or disconnected.
+                liveBatteryPct = cardLive.batteryPercent,
+                liveBatteryMv = if (isActive && !isSupplier && cardLive.connected)
                     live.batteryMv else null,
                 // Firmware version from the connect handshake: only for the active, connected strap.
-                liveFirmware = if (device.status == DeviceStatus.active.name && live.connected)
+                liveFirmware = if (isActive && !isSupplier && cardLive.connected)
                     live.strapFirmware else null,
                 // Historical record layout from the current backfill, distinct from strap firmware.
-                liveHistoryLayout = if (device.status == DeviceStatus.active.name && live.connected)
+                liveHistoryLayout = if (isActive && !isSupplier && cardLive.connected)
                     live.historyLayoutVersion else null,
                 onMakeActive = { switchTarget = device },
                 onRename = { renameTarget = device },
@@ -468,6 +479,45 @@ fun DevicesScreen(
             onLeaveNone = { pickNewActive = false },
         )
     }
+}
+
+internal data class DeviceCardLiveProjection(
+    val connected: Boolean,
+    val batteryPercent: Int?,
+)
+
+internal fun deviceCardLiveProjection(
+    deviceId: String,
+    sourceKind: String,
+    isActive: Boolean,
+    standardConnected: Boolean,
+    standardBatteryPct: Double?,
+    supplierDisplay: com.noop.ble.veepoo.VeepooDisplayState,
+): DeviceCardLiveProjection {
+    if (!isActive) return DeviceCardLiveProjection(connected = false, batteryPercent = null)
+    if (sourceKind == SourceKind.veepoo.name) {
+        val connected =
+            supplierDisplay.deviceId == deviceId &&
+            supplierDisplay.active &&
+                supplierDisplay.adapterState ==
+                com.noop.ble.veepoo.VeepooAdapterState.LIVE_DISPLAY_ONLY
+        return DeviceCardLiveProjection(
+            connected = connected,
+            batteryPercent = if (connected) {
+                visibleSupplierBatteryPercent(supplierDisplay)
+            } else {
+                null
+            },
+        )
+    }
+    return DeviceCardLiveProjection(
+        connected = standardConnected,
+        batteryPercent = if (standardConnected) {
+            standardBatteryPct?.let { Math.round(it).toInt() }
+        } else {
+            null
+        },
+    )
 }
 
 internal fun shouldPromptForReplacementAfterArchive(

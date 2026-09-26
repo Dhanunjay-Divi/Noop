@@ -167,7 +167,7 @@ internal object VeepooPendingCredentialCleanup {
         credentials: VeepooCredentialAccess,
         cleanup: VeepooCredentialCleanupAccess,
         diagnostics: VeepooSupplierLifecycleDiagnosticSink,
-    ) {
+    ): Boolean {
         val pending = when (val read = runCatching { cleanup.pendingDeviceIds() }.getOrNull()) {
             is VeepooCredentialCleanupRead.Available -> read.deviceIds
             VeepooCredentialCleanupRead.Unavailable,
@@ -178,10 +178,10 @@ internal object VeepooPendingCredentialCleanup {
                     outcome = VeepooSupplierLifecycleOutcome.FAILED,
                     failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
                 )
-                return
+                return false
             }
         }
-        if (pending.isEmpty()) return
+        if (pending.isEmpty()) return true
 
         val registered = try {
             registry.all()
@@ -199,8 +199,9 @@ internal object VeepooPendingCredentialCleanup {
                 outcome = VeepooSupplierLifecycleOutcome.FAILED,
                 failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
             )
-            return
+            return false
         }
+        var allCompleted = true
         for (deviceId in pending.sorted()) {
             val completed = if (deviceId in registered) {
                 runCatching { cleanup.clearPending(deviceId) }.getOrDefault(false)
@@ -223,7 +224,9 @@ internal object VeepooPendingCredentialCleanup {
                     VeepooSupplierLifecycleFailure.CLEANUP_FAILED
                 },
             )
+            allCompleted = allCompleted && completed
         }
+        return allCompleted
     }
 }
 
@@ -319,6 +322,8 @@ class SourceCoordinator(
     private val supplierCredentialRetryDelaysMillis: List<Long> =
         listOf(1_000L, 5_000L, 15_000L),
     private val supplierCredentialRecoveryDelayMillis: Long? = null,
+    private val supplierCredentialCleanupRetryDelaysMillis: List<Long> =
+        listOf(1_000L, 5_000L, 15_000L),
     /** Publish a verified registry correction through the process-wide active-source projection. */
     private val onDurableActiveDeviceChanged: (String) -> Unit = {},
     /** Push a strap's battery percent into the live state (e.g. `ble::publishExternalBattery`), so a
@@ -424,6 +429,10 @@ class SourceCoordinator(
     private var supplierCredentialRetryJob: Job? = null
     private var supplierCredentialRetryDeviceId: String? = null
     private val supplierCredentialRetryGeneration = AtomicLong()
+    private var supplierCredentialCleanupRetryJob: Job? = null
+    private val supplierCredentialCleanupRetryGeneration = AtomicLong()
+    private var rejectedSupplierCredentialCleanupRetryJob: Job? = null
+    private val rejectedSupplierCredentialCleanupRetryGeneration = AtomicLong()
 
     /** The single non-WHOOP source currently live — a generic HR strap, FTMS machine, Huami band, or Oura
      *  ring — held behind the [LiveHrSource] interface. null while WHOOP is active or nothing else is
@@ -465,11 +474,28 @@ class SourceCoordinator(
     fun start() {
         scope.launch {
             reconcileLock.withLock {
-                reconcilePendingSupplierCredentialCleanup()
+                if (!reconcilePendingSupplierCredentialCleanup()) {
+                    scheduleSupplierCredentialCleanupRetry()
+                }
+                if (!reconcileRejectedSupplierCredentialCleanup()) {
+                    scheduleRejectedSupplierCredentialCleanupRetry()
+                }
                 val id = registry.activeDeviceId() ?: WhoopBleClient.DEFAULT_DEVICE_ID
                 reconcile(id)
             }
         }
+    }
+
+    /** Retry deferred secure cleanup after the app returns to the foreground. */
+    fun onAppForeground() {
+        scheduleSupplierCredentialCleanupRetry(
+            includeImmediateAttempt = true,
+            restart = true,
+        )
+        scheduleRejectedSupplierCredentialCleanupRetry(
+            includeImmediateAttempt = true,
+            restart = true,
+        )
     }
 
     /**
@@ -488,7 +514,9 @@ class SourceCoordinator(
             if (veepooPairingRequestGeneration.get() != requestGeneration) {
                 return@withLock false
             }
-            reconcilePendingSupplierCredentialCleanup()
+            if (!reconcilePendingSupplierCredentialCleanup()) {
+                scheduleSupplierCredentialCleanupRetry()
+            }
             cancelSupplierCredentialRetry()
             val generation = veepooPairingGeneration.incrementAndGet()
             clearVeepooPairingLocked(restoreTransport = false)
@@ -575,6 +603,7 @@ class SourceCoordinator(
                 now = now,
             )
             if (!adopted) {
+                scheduleSupplierCredentialCleanupRetry()
                 clearVeepooPairingLocked(
                     restoreTransport = true,
                     expectedGeneration = generation,
@@ -703,6 +732,9 @@ class SourceCoordinator(
             runCatching { credentialStore.clear(id) }.getOrDefault(false)
         val markerCleared = credentialCleared &&
             runCatching { credentialCleanup.clearPending(id) }.getOrDefault(false)
+        if (!credentialCleared || !markerCleared) {
+            scheduleSupplierCredentialCleanupRetry()
+        }
         veepooLifecycleDiagnostics.recordSafely(
             stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
             outcome = if (credentialCleared && markerCleared) {
@@ -763,25 +795,68 @@ class SourceCoordinator(
                         onStrap = true
                     }
                 }
-                val credentialStore = veepooCredentials
-                val cleared = credentialStore?.let {
+                val cleanup = veepooCredentialCleanup
+                val markedPending = cleanup?.let {
+                    runCatching { it.markRejectedPending(id) }.getOrDefault(false)
+                } ?: false
+                val credentialCleared = veepooCredentials?.let {
                     runCatching { it.clear(id) }.getOrDefault(false)
                 } ?: false
+                val markerCleared = if (markedPending && credentialCleared) {
+                    runCatching { cleanup?.clearRejectedPending(id) == true }
+                        .getOrDefault(false)
+                } else {
+                    credentialCleared
+                }
+                val cleanupCompleted = credentialCleared && markerCleared
+                val failClosedArchive = if (!markedPending && !credentialCleared) {
+                    runCatching { registry.archiveSupplierAndSelectFallback(id) }.getOrNull()
+                } else {
+                    null
+                }
+                if (!cleanupCompleted) {
+                    scheduleRejectedSupplierCredentialCleanupRetry()
+                }
                 veepooLifecycleDiagnostics.recordSafely(
                     stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
-                    outcome = if (cleared) {
+                    outcome = if (cleanupCompleted) {
                         VeepooSupplierLifecycleOutcome.COMPLETED
                     } else {
                         VeepooSupplierLifecycleOutcome.FAILED
                     },
                     trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
-                    failure = if (cleared) null else VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
+                    failure = if (cleanupCompleted) {
+                        null
+                    } else {
+                        VeepooSupplierLifecycleFailure.CLEANUP_FAILED
+                    },
                 )
-                reconcileUnavailableSupplier(
-                    id = id,
-                    trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
-                    preferredTransportDeviceId = null,
-                )
+                if (failClosedArchive != null) {
+                    veepooLifecycleDiagnostics.recordSafely(
+                        stage = VeepooSupplierLifecycleStage.RECONCILIATION,
+                        outcome = VeepooSupplierLifecycleOutcome.BEGAN,
+                        trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
+                    )
+                    val fallback = failClosedArchive.activeDeviceId
+                    lastSeenId = null
+                    if (fallback != null) {
+                        runCatching { onDurableActiveDeviceChanged(fallback) }
+                        reconcile(fallback)
+                    } else {
+                        onStrap = false
+                    }
+                    veepooLifecycleDiagnostics.recordSafely(
+                        stage = VeepooSupplierLifecycleStage.RECONCILIATION,
+                        outcome = VeepooSupplierLifecycleOutcome.COMPLETED,
+                        trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
+                    )
+                } else {
+                    reconcileUnavailableSupplier(
+                        id = id,
+                        trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
+                        preferredTransportDeviceId = null,
+                    )
+                }
             }
         }
     }
@@ -1084,7 +1159,7 @@ class SourceCoordinator(
         activeSource = source
         activeStrapId = id
         onStrap = true
-        if (source is VeepooManagedSource) mirrorVeepooActiveDisplay(source)
+        if (source is VeepooManagedSource) mirrorVeepooActiveDisplay(id, source)
 
         // CONNECT to the active strap's known BLE address, don't just scan. A bare scan discovers + lists
         // the strap but never connects - so a Polar H10 etc. showed up as "found" yet never streamed
@@ -1397,10 +1472,10 @@ class SourceCoordinator(
         onStrap = true
     }
 
-    private fun mirrorVeepooActiveDisplay(source: VeepooManagedSource) {
+    private fun mirrorVeepooActiveDisplay(id: String, source: VeepooManagedSource) {
         veepooActiveDisplayJob?.cancel()
         veepooActiveDisplayJob = scope.launch {
-            source.display.collect { _veepooDisplay.value = it }
+            source.display.collect { _veepooDisplay.value = it.copy(deviceId = id) }
         }
     }
 
@@ -1544,15 +1619,181 @@ class SourceCoordinator(
             false
         }
 
-    private suspend fun reconcilePendingSupplierCredentialCleanup() {
-        val credentials = veepooCredentials ?: return
-        val cleanup = veepooCredentialCleanup ?: return
-        VeepooPendingCredentialCleanup.reconcile(
+    private suspend fun reconcilePendingSupplierCredentialCleanup(): Boolean {
+        val credentials = veepooCredentials ?: return true
+        val cleanup = veepooCredentialCleanup ?: return true
+        return VeepooPendingCredentialCleanup.reconcile(
             registry = registry,
             credentials = credentials,
             cleanup = cleanup,
             diagnostics = veepooLifecycleDiagnostics,
         )
+    }
+
+    private fun scheduleSupplierCredentialCleanupRetry(
+        includeImmediateAttempt: Boolean = false,
+        restart: Boolean = false,
+    ) {
+        if (veepooCredentials == null || veepooCredentialCleanup == null) return
+        if (!restart && supplierCredentialCleanupRetryJob?.isActive == true) return
+        cancelSupplierCredentialCleanupRetry()
+        val generation = supplierCredentialCleanupRetryGeneration.incrementAndGet()
+        val delays = if (includeImmediateAttempt) {
+            listOf(0L) + supplierCredentialCleanupRetryDelaysMillis
+        } else {
+            supplierCredentialCleanupRetryDelaysMillis
+        }
+        supplierCredentialCleanupRetryJob = scope.launch {
+            try {
+                for (delayMillis in delays) {
+                    if (delayMillis > 0L) delay(delayMillis)
+                    val completed = reconcileLock.withLock {
+                        reconcilePendingSupplierCredentialCleanup()
+                    }
+                    if (completed) return@launch
+                }
+            } finally {
+                if (supplierCredentialCleanupRetryGeneration.get() == generation) {
+                    supplierCredentialCleanupRetryJob = null
+                }
+            }
+        }
+    }
+
+    private fun cancelSupplierCredentialCleanupRetry() {
+        supplierCredentialCleanupRetryGeneration.incrementAndGet()
+        supplierCredentialCleanupRetryJob?.cancel()
+        supplierCredentialCleanupRetryJob = null
+    }
+
+    private suspend fun reconcileRejectedSupplierCredentialCleanup(): Boolean {
+        val credentials = veepooCredentials ?: return true
+        val cleanup = veepooCredentialCleanup ?: return true
+        val rejectedPending = when (
+            val read = runCatching { cleanup.rejectedPendingDeviceIds() }.getOrNull()
+        ) {
+            is VeepooCredentialCleanupRead.Available -> read.deviceIds
+            VeepooCredentialCleanupRead.Unavailable,
+            null,
+            -> {
+                veepooLifecycleDiagnostics.recordSafely(
+                    stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
+                    outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                    trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
+                    failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
+                )
+                return false
+            }
+        }
+        val archivePending = when (
+            val read = runCatching { cleanup.pendingDeviceIds() }.getOrNull()
+        ) {
+            is VeepooCredentialCleanupRead.Available -> read.deviceIds
+            VeepooCredentialCleanupRead.Unavailable,
+            null,
+            -> return false
+        }
+        val archivedSupplierIds = try {
+            registry.all()
+                .asSequence()
+                .filter {
+                    it.sourceKind == SourceKind.veepoo.name &&
+                        it.status == DeviceStatus.archived.name
+                }
+                .map { it.id }
+                .toSet()
+        } catch (_: Throwable) {
+            veepooLifecycleDiagnostics.recordSafely(
+                stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
+                outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
+                failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
+            )
+            return false
+        }
+        val pending = rejectedPending + (archivedSupplierIds - archivePending)
+        var allCompleted = true
+        for (id in pending.sorted()) {
+            val hasRejectedMarker = id in rejectedPending
+            if (!hasRejectedMarker) {
+                when (val retained = credentials.readForRetention(id)) {
+                    is VeepooCredentialRead.Available -> retained.credential.close()
+                    VeepooCredentialRead.Missing -> continue
+                    VeepooCredentialRead.Unavailable -> {
+                        allCompleted = false
+                        veepooLifecycleDiagnostics.recordSafely(
+                            stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
+                            outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                            trigger =
+                                VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
+                            failure = VeepooSupplierLifecycleFailure.CLEANUP_FAILED,
+                        )
+                        continue
+                    }
+                }
+            }
+            val credentialCleared =
+                runCatching { credentials.clear(id) }.getOrDefault(false)
+            val markerCleared = if (hasRejectedMarker) {
+                credentialCleared &&
+                    runCatching { cleanup.clearRejectedPending(id) }.getOrDefault(false)
+            } else {
+                true
+            }
+            val completed = credentialCleared && markerCleared
+            allCompleted = allCompleted && completed
+            veepooLifecycleDiagnostics.recordSafely(
+                stage = VeepooSupplierLifecycleStage.SECURE_CLEANUP,
+                outcome = if (completed) {
+                    VeepooSupplierLifecycleOutcome.COMPLETED
+                } else {
+                    VeepooSupplierLifecycleOutcome.FAILED
+                },
+                trigger = VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED,
+                failure = if (completed) {
+                    null
+                } else {
+                    VeepooSupplierLifecycleFailure.CLEANUP_FAILED
+                },
+            )
+        }
+        return allCompleted
+    }
+
+    private fun scheduleRejectedSupplierCredentialCleanupRetry(
+        includeImmediateAttempt: Boolean = false,
+        restart: Boolean = false,
+    ) {
+        if (veepooCredentials == null || veepooCredentialCleanup == null) return
+        if (!restart && rejectedSupplierCredentialCleanupRetryJob?.isActive == true) return
+        cancelRejectedSupplierCredentialCleanupRetry()
+        val generation = rejectedSupplierCredentialCleanupRetryGeneration.incrementAndGet()
+        val delays = if (includeImmediateAttempt) {
+            listOf(0L) + supplierCredentialCleanupRetryDelaysMillis
+        } else {
+            supplierCredentialCleanupRetryDelaysMillis
+        }
+        rejectedSupplierCredentialCleanupRetryJob = scope.launch {
+            try {
+                for (delayMillis in delays) {
+                    if (delayMillis > 0L) delay(delayMillis)
+                    val completed = reconcileLock.withLock {
+                        reconcileRejectedSupplierCredentialCleanup()
+                    }
+                    if (completed) return@launch
+                }
+            } finally {
+                if (rejectedSupplierCredentialCleanupRetryGeneration.get() == generation) {
+                    rejectedSupplierCredentialCleanupRetryJob = null
+                }
+            }
+        }
+    }
+
+    private fun cancelRejectedSupplierCredentialCleanupRetry() {
+        rejectedSupplierCredentialCleanupRetryGeneration.incrementAndGet()
+        rejectedSupplierCredentialCleanupRetryJob?.cancel()
+        rejectedSupplierCredentialCleanupRetryJob = null
     }
 
     private fun cancelSupplierCredentialRetry() {

@@ -2674,6 +2674,85 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         XCTAssertEqual(daily.first?.recovery, 60, "unrelated daily evidence must remain intact")
     }
 
+    /// Complete, gap-free all-still coverage can disprove the exact value produced by the former raw-motion
+    /// algorithm. The repair must clear only matching computed step evidence and retain unrelated fields.
+    @MainActor
+    func testContinuousStationaryCounterClearsExactLegacyStepEvidence() async throws {
+        let store = try await WhoopStore.inMemory()
+        let calendar = Calendar.current
+        let yesterday = try XCTUnwrap(
+            calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: Date()))
+        )
+        let nextDay = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: yesterday))
+        let startTs = Int(yesterday.timeIntervalSince1970)
+        let endTs = Int(nextDay.timeIntervalSince1970) - 1
+        var timestamps = Array(stride(from: startTs, through: endTs, by: 600))
+        if timestamps.last != endTs {
+            timestamps.append(endTs)
+        }
+        let intervalCount = timestamps.count - 1
+        let baseIncrement = 4_000 / intervalCount
+        let remainder = 4_000 % intervalCount
+        var counter = 0
+        var samples = [StepSample(ts: timestamps[0], counter: counter, activityClass: 0)]
+        for index in 1..<timestamps.count {
+            counter += baseIncrement + (index <= remainder ? 1 : 0)
+            samples.append(
+                StepSample(ts: timestamps[index], counter: counter, activityClass: 0)
+            )
+        }
+        XCTAssertEqual(counter, 4_000)
+        try await store.insert(Streams(steps: samples), deviceId: canonicalId)
+
+        let day = Repository.localDayKey(yesterday)
+        let computedId = canonicalId + "-noop"
+        _ = try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "steps_est", value: 4_000)],
+            deviceId: computedId
+        )
+        _ = try await store.upsertDailyMetrics(
+            [
+                DailyMetric(
+                    day: day,
+                    totalSleepMin: 420,
+                    efficiency: 0.9,
+                    deepMin: 90,
+                    remMin: 100,
+                    lightMin: 230,
+                    disturbances: 2,
+                    restingHr: 52,
+                    avgHrv: 70,
+                    recovery: 60,
+                    strain: 8,
+                    exerciseCount: 0,
+                    steps: 4_000
+                )
+            ],
+            deviceId: computedId
+        )
+
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+        let engine = analysisEngine(repo: repo)
+        _ = await engine.analyzeRecent(maxDays: 2, force: true)
+
+        let estimates = try await store.metricSeries(
+            deviceId: computedId,
+            key: "steps_est",
+            from: day,
+            to: day
+        )
+        XCTAssertTrue(estimates.isEmpty)
+        let daily = try await store.dailyMetrics(
+            deviceId: computedId,
+            from: day,
+            to: day
+        )
+        XCTAssertEqual(daily.count, 1)
+        XCTAssertNil(daily.first?.steps)
+        XCTAssertEqual(daily.first?.recovery, 60, "unrelated daily evidence must remain intact")
+    }
+
     /// Mixed still plus unknown evidence is ambiguous: a normal score-window replacement may refresh the
     /// day's sleep/Recovery fields, but it must preserve the previously stored computed step value and
     /// motion estimate until authoritative walk/run or wholly-still evidence arrives.

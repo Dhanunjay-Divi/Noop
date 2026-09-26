@@ -379,6 +379,7 @@ class SourceCoordinatorAdoptionTest {
 
     private class FakeCredentialCleanup : VeepooCredentialCleanupAccess {
         val pending = linkedSetOf<String>()
+        val rejectedPending = linkedSetOf<String>()
         var readsAvailable = true
         var markSucceeds = true
         var clearSucceeds = true
@@ -399,6 +400,25 @@ class SourceCoordinatorAdoptionTest {
         override fun clearPending(deviceId: String): Boolean {
             if (!clearSucceeds) return false
             pending -= deviceId
+            return true
+        }
+
+        override fun markRejectedPending(deviceId: String): Boolean {
+            if (!markSucceeds) return false
+            rejectedPending += deviceId
+            return true
+        }
+
+        override fun rejectedPendingDeviceIds(): VeepooCredentialCleanupRead =
+            if (readsAvailable) {
+                VeepooCredentialCleanupRead.Available(rejectedPending.toSet())
+            } else {
+                VeepooCredentialCleanupRead.Unavailable
+            }
+
+        override fun clearRejectedPending(deviceId: String): Boolean {
+            if (!clearSucceeds) return false
+            rejectedPending -= deviceId
             return true
         }
     }
@@ -957,6 +977,57 @@ class SourceCoordinatorAdoptionTest {
 
         assertFalse(credentials.values.containsKey("supplier-archived"))
         assertTrue(cleanup.pending.isEmpty())
+    }
+
+    @Test
+    fun failedStartupCleanupRetriesAgainWhenTheAppReturnsToForeground() = runTest {
+        val operations = mutableListOf<String>()
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+            devices["supplier-archived"] =
+                supplierRow("supplier-archived", DeviceStatus.archived)
+        }
+        val credentials = FakeCredentials(operations).apply {
+            seed("supplier-archived")
+            clearSucceeds = false
+        }
+        val cleanup = FakeCredentialCleanup().apply {
+            pending += "supplier-archived"
+        }
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = this,
+            veepooCredentials = credentials,
+            veepooCredentialCleanup = cleanup,
+            supplierCredentialCleanupRetryDelaysMillis = listOf(1L),
+        )
+
+        coordinator.start()
+        testScheduler.runCurrent()
+        assertEquals(1, operations.count { it == "credential.clear" })
+
+        advanceTimeBy(1L)
+        testScheduler.runCurrent()
+        assertEquals(2, operations.count { it == "credential.clear" })
+        assertTrue(credentials.values.containsKey("supplier-archived"))
+        assertEquals(setOf("supplier-archived"), cleanup.pending)
+
+        credentials.clearSucceeds = true
+        coordinator.onAppForeground()
+        testScheduler.runCurrent()
+
+        assertEquals(3, operations.count { it == "credential.clear" })
+        assertFalse(credentials.values.containsKey("supplier-archived"))
+        assertTrue(cleanup.pending.isEmpty())
+
+        advanceTimeBy(100L)
+        testScheduler.runCurrent()
+        assertEquals(3, operations.count { it == "credential.clear" })
     }
 
     @Test
@@ -1702,6 +1773,185 @@ class SourceCoordinatorAdoptionTest {
     }
 
     @Test
+    fun authenticationRejectionCleanupRetriesWhenTheAppReturnsToForeground() = runTest {
+        val operations = mutableListOf<String>()
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+        }
+        val source = FakeNoopBandSource()
+        val credentials = FakeCredentials(operations).apply {
+            seed("supplier-band")
+            clearSucceeds = false
+        }
+        val cleanup = FakeCredentialCleanup()
+        val diagnostics = mutableListOf<VeepooSupplierLifecycleEvent>()
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = this,
+            noopBandSourceFactory = { id, _ -> if (id == "supplier-band") source else null },
+            veepooCredentials = credentials,
+            veepooCredentialCleanup = cleanup,
+            supplierCredentialCleanupRetryDelaysMillis = listOf(1L),
+            veepooLifecycleDiagnostics =
+                VeepooSupplierLifecycleDiagnosticSink(diagnostics::add),
+        )
+
+        coordinator.start()
+        testScheduler.runCurrent()
+        coordinator.onVeepooAuthenticationRejected("supplier-band", source)
+        testScheduler.runCurrent()
+
+        assertTrue(credentials.values.containsKey("supplier-band"))
+        assertEquals(setOf("supplier-band"), cleanup.rejectedPending)
+        assertEquals(1, operations.count { it == "credential.clear" })
+
+        advanceTimeBy(1L)
+        testScheduler.runCurrent()
+        assertEquals(2, operations.count { it == "credential.clear" })
+        assertTrue(credentials.values.containsKey("supplier-band"))
+
+        credentials.clearSucceeds = true
+        coordinator.onAppForeground()
+        testScheduler.runCurrent()
+
+        assertEquals(3, operations.count { it == "credential.clear" })
+        assertFalse(credentials.values.containsKey("supplier-band"))
+        assertTrue(cleanup.rejectedPending.isEmpty())
+        assertTrue(
+            diagnostics.any {
+                it.stage == VeepooSupplierLifecycleStage.SECURE_CLEANUP &&
+                    it.outcome == VeepooSupplierLifecycleOutcome.COMPLETED &&
+                    it.trigger == VeepooSupplierLifecycleTrigger.AUTHENTICATION_REJECTED
+            },
+        )
+
+        advanceTimeBy(100L)
+        testScheduler.runCurrent()
+        assertEquals(3, operations.count { it == "credential.clear" })
+    }
+
+    @Test
+    fun startupClearsEveryDurableRejectedCredentialAfterProcessRecreation() = runTest {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+            devices["supplier-a"] = supplierRow("supplier-a", DeviceStatus.paired)
+            devices["supplier-b"] = supplierRow("supplier-b", DeviceStatus.paired)
+        }
+        val credentials = FakeCredentials().apply {
+            seed("supplier-a")
+            seed("supplier-b")
+            clearSucceeds = false
+        }
+        val cleanup = FakeCredentialCleanup().apply {
+            rejectedPending += "supplier-a"
+            rejectedPending += "supplier-b"
+        }
+        val registry = registryWith(dao)
+        val first = SourceCoordinator(
+            context = null,
+            registry = registry,
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = this,
+            veepooCredentials = credentials,
+            veepooCredentialCleanup = cleanup,
+            supplierCredentialCleanupRetryDelaysMillis = emptyList(),
+        )
+
+        first.start()
+        testScheduler.runCurrent()
+
+        assertEquals(setOf("supplier-a", "supplier-b"), credentials.values.keys)
+        assertEquals(setOf("supplier-a", "supplier-b"), cleanup.rejectedPending)
+
+        credentials.clearSucceeds = true
+        val recreated = SourceCoordinator(
+            context = null,
+            registry = registry,
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = this,
+            veepooCredentials = credentials,
+            veepooCredentialCleanup = cleanup,
+            supplierCredentialCleanupRetryDelaysMillis = emptyList(),
+        )
+        recreated.start()
+        testScheduler.runCurrent()
+
+        assertTrue(credentials.values.isEmpty())
+        assertTrue(cleanup.rejectedPending.isEmpty())
+    }
+
+    @Test
+    fun authenticationRejectionArchivesFailClosedWhenMarkerAndClearBothFail() = runTest {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+                .copy(status = DeviceStatus.paired.name)
+            devices["supplier-band"] = supplierRow()
+        }
+        val source = FakeNoopBandSource()
+        val credentials = FakeCredentials().apply {
+            seed("supplier-band")
+            clearSucceeds = false
+        }
+        val cleanup = FakeCredentialCleanup().apply {
+            markSucceeds = false
+        }
+        val registry = registryWith(dao)
+        val first = SourceCoordinator(
+            context = null,
+            registry = registry,
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = this,
+            noopBandSourceFactory = { id, _ -> if (id == "supplier-band") source else null },
+            veepooCredentials = credentials,
+            veepooCredentialCleanup = cleanup,
+            supplierCredentialCleanupRetryDelaysMillis = emptyList(),
+        )
+
+        first.start()
+        testScheduler.runCurrent()
+        first.onVeepooAuthenticationRejected("supplier-band", source)
+        testScheduler.runCurrent()
+
+        assertEquals(DeviceStatus.archived.name, dao.devices["supplier-band"]?.status)
+        assertEquals("my-whoop", dao.activeDeviceId())
+        assertTrue(credentials.values.containsKey("supplier-band"))
+
+        credentials.clearSucceeds = true
+        val recreated = SourceCoordinator(
+            context = null,
+            registry = registry,
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = this,
+            veepooCredentials = credentials,
+            veepooCredentialCleanup = cleanup,
+            supplierCredentialCleanupRetryDelaysMillis = emptyList(),
+        )
+        recreated.start()
+        testScheduler.runCurrent()
+
+        assertFalse(credentials.values.containsKey("supplier-band"))
+    }
+
+    @Test
     fun authenticationRejectionWaitsForRemovalRollbackBeforeClearingCredential() = runTest {
         val operations = mutableListOf<String>()
         val archiveStarted = CompletableDeferred<Unit>()
@@ -2216,6 +2466,7 @@ class SourceCoordinatorAdoptionTest {
             ),
         )
         assertEquals(71, coordinator.veepooDisplay.value.heartRate)
+        assertEquals("supplier-band", coordinator.veepooDisplay.value.deviceId)
         operations.clear()
 
         assertTrue(coordinator.beginVeepooPairing())

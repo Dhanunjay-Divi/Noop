@@ -772,12 +772,7 @@ object AnalyticsEngine {
         }
         val stepsTotal: Int? = run {
             val ticks = stepAnalysis.steps ?: return@run null
-            // @57 counts motion ticks, not validated steps — the 5/MG counter overcounts. Divide
-            // by the user-calibrated ticks-per-step (default 1.0 = raw pass-through; floor 0.5 so
-            // a bad pref can at most double, never explode, the total). (#139)
-            val scaled = (ticks.toDouble() / max(profile.stepTicksPerStep, 0.5)).roundToLong()
-                .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-            if (scaled > 0) scaled else null
+            StepsCounter.scaledSteps(ticks, profile.stepTicksPerStep)
         }
 
         // ── Final daily Effort (cardiovascular load + ordinary movement) ──────

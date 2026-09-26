@@ -141,6 +141,59 @@ internal enum class ActiveDeviceSourceState {
     STANDARD,
 }
 
+internal data class ActiveDeviceProjection(
+    val deviceId: String?,
+    val name: String?,
+    val sourceState: ActiveDeviceSourceState,
+)
+
+internal fun activeDeviceProjection(
+    devices: List<com.noop.data.PairedDeviceRow>,
+): ActiveDeviceProjection {
+    val active = devices.firstOrNull {
+        it.status == com.noop.data.DeviceStatus.active.name
+    }
+    val sourceKind = active?.sourceKind?.let { rawSourceKind ->
+        com.noop.data.SourceKind.entries.firstOrNull { it.name == rawSourceKind }
+    }
+    return ActiveDeviceProjection(
+        deviceId = active?.id,
+        name = active?.let(::displayName),
+        sourceState = when {
+            active == null -> ActiveDeviceSourceState.NO_ACTIVE_DEVICE
+            sourceKind == com.noop.data.SourceKind.veepoo ->
+                ActiveDeviceSourceState.SUPPLIER
+            sourceKind != null -> ActiveDeviceSourceState.STANDARD
+            else -> ActiveDeviceSourceState.UNRESOLVED
+        },
+    )
+}
+
+internal suspend fun loadActiveDeviceProjection(
+    retryDelaysMillis: List<Long>,
+    readDevices: suspend () -> List<com.noop.data.PairedDeviceRow>,
+    wait: suspend (Long) -> Unit = { delay(it) },
+): ActiveDeviceProjection? {
+    for (delayMillis in listOf(0L) + retryDelaysMillis) {
+        if (delayMillis > 0L) wait(delayMillis)
+        val devices = try {
+            readDevices()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            null
+        }
+        if (devices != null) return activeDeviceProjection(devices)
+    }
+    return null
+}
+
+internal fun shouldInvalidateActiveDeviceProjection(
+    confirmed: Boolean,
+    confirmedSelectionId: String?,
+    selectedDeviceId: String,
+): Boolean = confirmed && confirmedSelectionId != selectedDeviceId
+
 data class ArchivedDeviceResult(
     val archived: Boolean,
     val activeDeviceId: String?,
@@ -292,25 +345,46 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         MutableStateFlow(ActiveDeviceSourceState.UNRESOLVED)
     internal val activeDeviceSourceState: StateFlow<ActiveDeviceSourceState> =
         _activeDeviceSourceState.asStateFlow()
+    private var activeDeviceProjectionJob: Job? = null
+    private var activeDeviceProjectionConfirmed = false
+    private var activeDeviceProjectionSelectionId: String? = null
+    private val activeDeviceProjectionRetryDelaysMillis =
+        listOf(1_000L, 5_000L, 15_000L)
 
     /** Re-read the active device row and republish its presentation. A failed read preserves the last
      *  confirmed durable projection instead of temporarily presenting another source's controls. */
     fun refreshActiveDeviceName() {
-        viewModelScope.launch {
-            val all = runCatching { noopApp.deviceRegistry.all() }.getOrNull()
-                ?: return@launch
-            val active = all.firstOrNull { it.status == com.noop.data.DeviceStatus.active.name }
-            val sourceKind = active?.sourceKind?.let { rawSourceKind ->
-                com.noop.data.SourceKind.entries.firstOrNull { it.name == rawSourceKind }
+        activeDeviceProjectionJob?.cancel()
+        val expectedDeviceId = _selectedDeviceId.value
+        if (shouldInvalidateActiveDeviceProjection(
+                confirmed = activeDeviceProjectionConfirmed,
+                confirmedSelectionId = activeDeviceProjectionSelectionId,
+                selectedDeviceId = expectedDeviceId,
+            )
+        ) {
+            activeDeviceProjectionConfirmed = false
+            activeDeviceProjectionSelectionId = null
+            _activeDeviceName.value = null
+            _activeDeviceSourceState.value = ActiveDeviceSourceState.UNRESOLVED
+        }
+        val retryDelays = if (activeDeviceProjectionConfirmed) {
+            emptyList()
+        } else {
+            activeDeviceProjectionRetryDelaysMillis
+        }
+        activeDeviceProjectionJob = viewModelScope.launch {
+            val projection = loadActiveDeviceProjection(
+                retryDelaysMillis = retryDelays,
+                readDevices = noopApp.deviceRegistry::all,
+            ) ?: return@launch
+            if (_selectedDeviceId.value != expectedDeviceId) return@launch
+            if (projection.deviceId != null && projection.deviceId != expectedDeviceId) {
+                return@launch
             }
-            _activeDeviceName.value = active?.let { displayName(it) }
-            _activeDeviceSourceState.value = when {
-                active == null -> ActiveDeviceSourceState.NO_ACTIVE_DEVICE
-                sourceKind == com.noop.data.SourceKind.veepoo ->
-                    ActiveDeviceSourceState.SUPPLIER
-                sourceKind != null -> ActiveDeviceSourceState.STANDARD
-                else -> ActiveDeviceSourceState.UNRESOLVED
-            }
+            activeDeviceProjectionConfirmed = true
+            activeDeviceProjectionSelectionId = expectedDeviceId
+            _activeDeviceName.value = projection.name
+            _activeDeviceSourceState.value = projection.sourceState
         }
     }
 
@@ -986,6 +1060,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val salvageProbeLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityResumed(activity: android.app.Activity) {
             ble.salvageProbeIfBondLoopPaused()
+            noopApp.sourceCoordinator.onAppForeground()
+            refreshActiveDeviceName()
             // The process-wide Application hook reconciles notification/channel revocation first.
             // Mirror its persisted fail-closed result into this Activity-scoped UI on every resume.
             _windDownEnabled.value = windDownStore.enabled

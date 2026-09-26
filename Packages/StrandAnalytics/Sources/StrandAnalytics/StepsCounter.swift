@@ -19,6 +19,11 @@ public enum StepsCounter {
     /// Real 1 Hz motion never ticks this fast between adjacent records. (#132/#276/#316)
     public static let maxStepDelta = 512
 
+    /// Maximum tolerated absence at either edge of a day, or between adjacent rows, before an all-still
+    /// window becomes too sparse to repair a previously persisted whole-day value. This is an integrity
+    /// threshold, not a gait detector: current step publication still requires walk/run classification.
+    public static let stationaryRepairMaxCoverageGapSeconds = 15 * 60
+
     public enum ClassificationPolicy: Equatable, Sendable {
         /// Preserve the historical raw-motion estimate when every persisted class is absent.
         case allowLegacyRawMotion
@@ -51,6 +56,9 @@ public enum StepsCounter {
         public let rejectedUnknownDeltaCount: Int
         public let rejectedGapDeltaCount: Int
         public let zeroDeltaCount: Int
+        /// Positive, in-range ticks before activity-class filtering. This exists only to recognize a
+        /// stale value produced by the former raw-motion algorithm; it is never published as current steps.
+        public let unfilteredRawTicks: Int
         public let rawTicks: Int
 
         /// Compatibility value used by existing callers: no retained movement remains missing, not zero.
@@ -75,6 +83,66 @@ public enum StepsCounter {
         /// Still-only or unclassified partial windows suppress new fallbacks but do not prove that the
         /// entire day's previously stored steps were false.
         public var hasAuthoritativeCounterOutcome: Bool { steps != nil }
+
+        /// The exact raw-motion total the former algorithm would have published when every usable positive
+        /// delta is explicitly classified as still. Mixed, unknown, discontinuous, classless, singleton,
+        /// and flat windows stay ambiguous. Persistence may use this only as a conditional compare-and-clear
+        /// value, so unrelated or imported step totals remain untouched.
+        public var stationaryOnlyLegacyTicks: Int? {
+            guard filterMode == .activityClassFiltered,
+                  keptDeltaCount == 0,
+                  rejectedStillDeltaCount > 0,
+                  rejectedUnknownDeltaCount == 0,
+                  rejectedGapDeltaCount == 0,
+                  unfilteredRawTicks > 0
+            else { return nil }
+            return unfilteredRawTicks
+        }
+    }
+
+    /// Apply the one shared motion-tick calibration used by daily, workout, trace, and stale-value repair
+    /// paths. Keeping rounding and the defensive coefficient floor here prevents cross-path drift.
+    public static func scaledSteps(rawTicks: Int, ticksPerStep: Double) -> Int? {
+        guard rawTicks > 0 else { return nil }
+        let scaled = Int((Double(rawTicks) / max(ticksPerStep, 0.5)).rounded())
+        return scaled > 0 ? scaled : nil
+    }
+
+    /// Return the exact stale raw-motion value that a continuously observed all-still day disproves.
+    ///
+    /// A short shower/hand-motion burst can reject new steps, but it cannot establish what happened during
+    /// the rest of the day. Compare-and-clear therefore becomes eligible only when the same rows analyzed
+    /// above cover the civil-day start through `observedThroughTs`, with no large internal gap. The caller
+    /// still clears only an exact matching computed value; imported or mismatched totals remain untouched.
+    public static func stationaryLegacyRepairSteps(
+        analysis: Analysis,
+        samples: [StepSample],
+        ticksPerStep: Double,
+        dayStartTs: Int,
+        observedThroughTs: Int,
+        maxCoverageGapSeconds: Int = stationaryRepairMaxCoverageGapSeconds
+    ) -> Int? {
+        guard let legacyTicks = analysis.stationaryOnlyLegacyTicks,
+              maxCoverageGapSeconds > 0,
+              observedThroughTs >= dayStartTs
+        else { return nil }
+
+        let covered = samples
+            .filter { $0.ts >= dayStartTs && $0.ts <= observedThroughTs }
+            .sorted { $0.ts < $1.ts }
+        guard covered.count >= 2,
+              covered.count == analysis.sampleCount,
+              let first = covered.first,
+              let last = covered.last,
+              first.ts - dayStartTs <= maxCoverageGapSeconds,
+              observedThroughTs - last.ts <= maxCoverageGapSeconds
+        else { return nil }
+
+        for index in 1..<covered.count {
+            let gap = covered[index].ts - covered[index - 1].ts
+            guard gap > 0, gap <= maxCoverageGapSeconds else { return nil }
+        }
+        return scaledSteps(rawTicks: legacyTicks, ticksPerStep: ticksPerStep)
     }
 
     /// Pure analysis of a counter window. Deltas remain wrap-aware and the `maxStepDelta` boundary is
@@ -102,6 +170,7 @@ public enum StepsCounter {
         var rejectedUnknownDeltaCount = 0
         var rejectedGapDeltaCount = 0
         var zeroDeltaCount = 0
+        var unfilteredRawTicks = 0
 
         if sorted.count >= 2 {
             for i in 1..<sorted.count {
@@ -112,9 +181,11 @@ public enum StepsCounter {
                 } else if delta >= maxStepDelta {
                     rejectedGapDeltaCount += 1
                 } else if filterMode == .legacyRawMotion {
+                    unfilteredRawTicks += delta
                     rawTicks += delta
                     keptDeltaCount += 1
                 } else {
+                    unfilteredRawTicks += delta
                     switch later.activityClass {
                     case 1, 2:
                         rawTicks += delta
@@ -137,6 +208,7 @@ public enum StepsCounter {
             rejectedUnknownDeltaCount: rejectedUnknownDeltaCount,
             rejectedGapDeltaCount: rejectedGapDeltaCount,
             zeroDeltaCount: zeroDeltaCount,
+            unfilteredRawTicks: unfilteredRawTicks,
             rawTicks: rawTicks
         )
     }

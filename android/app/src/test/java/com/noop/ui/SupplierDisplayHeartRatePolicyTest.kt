@@ -3,6 +3,7 @@ package com.noop.ui
 import com.noop.ble.LiveHeartRateNotificationPolicy
 import com.noop.ble.veepoo.VeepooAdapterState
 import com.noop.ble.veepoo.VeepooDisplayState
+import com.noop.data.SourceKind
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,6 +13,7 @@ import org.junit.Test
 
 class SupplierDisplayHeartRatePolicyTest {
     private val liveDisplay = VeepooDisplayState(
+        deviceId = "supplier-band",
         adapterState = VeepooAdapterState.LIVE_DISPLAY_ONLY,
         heartRate = 72,
         phoneReceiptMilliseconds = 100_000L,
@@ -124,6 +126,66 @@ class SupplierDisplayHeartRatePolicyTest {
     }
 
     @Test
+    fun supplierDeviceCardUsesOnlyTheSupplierConnectionAndBatteryState() {
+        val projection = deviceCardLiveProjection(
+            deviceId = "supplier-band",
+            sourceKind = SourceKind.veepoo.name,
+            isActive = true,
+            standardConnected = false,
+            standardBatteryPct = 12.0,
+            supplierDisplay = liveDisplay.copy(batteryPercent = 81),
+        )
+
+        assertTrue(projection.connected)
+        assertEquals(81, projection.batteryPercent)
+    }
+
+    @Test
+    fun staleStandardStateCannotMakeAnIdleSupplierCardLookLive() {
+        val projection = deviceCardLiveProjection(
+            deviceId = "supplier-band",
+            sourceKind = SourceKind.veepoo.name,
+            isActive = true,
+            standardConnected = true,
+            standardBatteryPct = 91.0,
+            supplierDisplay = VeepooDisplayState(),
+        )
+
+        assertFalse(projection.connected)
+        assertNull(projection.batteryPercent)
+    }
+
+    @Test
+    fun standardDeviceCardKeepsTheExistingLiveProjection() {
+        val projection = deviceCardLiveProjection(
+            deviceId = "my-whoop",
+            sourceKind = SourceKind.liveBLE.name,
+            isActive = true,
+            standardConnected = true,
+            standardBatteryPct = 64.6,
+            supplierDisplay = liveDisplay.copy(batteryPercent = 81),
+        )
+
+        assertTrue(projection.connected)
+        assertEquals(65, projection.batteryPercent)
+    }
+
+    @Test
+    fun anotherSupplierCannotInheritThePreviousSuppliersLiveState() {
+        val projection = deviceCardLiveProjection(
+            deviceId = "supplier-band-b",
+            sourceKind = SourceKind.veepoo.name,
+            isActive = true,
+            standardConnected = false,
+            standardBatteryPct = null,
+            supplierDisplay = liveDisplay,
+        )
+
+        assertFalse(projection.connected)
+        assertNull(projection.batteryPercent)
+    }
+
+    @Test
     fun durableSupplierSourceKeepsSupplierControlsWhenDisplayResetsIdle() {
         val resetDisplay = VeepooDisplayState()
 
@@ -182,6 +244,21 @@ class SupplierDisplayHeartRatePolicyTest {
         assertTrue(whoopConnect > supplierRoute)
     }
 
+    @Test
+    fun devicesScreenObservesTheSupplierDisplayStream() {
+        val source = devicesScreenSource().readText()
+        val screen = source
+            .substringAfter("fun DevicesScreen(")
+            .substringBefore("internal data class DeviceCardLiveProjection")
+
+        assertTrue(
+            screen.contains(
+                "viewModel.supplierBandDisplay.collectAsStateWithLifecycle()",
+            ),
+        )
+        assertTrue(screen.contains("deviceCardLiveProjection("))
+    }
+
     private fun liveScreenSource(): File {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         return listOf(
@@ -189,5 +266,14 @@ class SupplierDisplayHeartRatePolicyTest {
             File(userDir, "app/src/main/java/com/noop/ui/LiveScreen.kt"),
             File(userDir, "android/app/src/main/java/com/noop/ui/LiveScreen.kt"),
         ).firstOrNull(File::isFile) ?: error("Could not locate LiveScreen.kt from $userDir")
+    }
+
+    private fun devicesScreenSource(): File {
+        val userDir = checkNotNull(System.getProperty("user.dir"))
+        return listOf(
+            File(userDir, "src/main/java/com/noop/ui/DevicesScreen.kt"),
+            File(userDir, "app/src/main/java/com/noop/ui/DevicesScreen.kt"),
+            File(userDir, "android/app/src/main/java/com/noop/ui/DevicesScreen.kt"),
+        ).firstOrNull(File::isFile) ?: error("Could not locate DevicesScreen.kt from $userDir")
     }
 }

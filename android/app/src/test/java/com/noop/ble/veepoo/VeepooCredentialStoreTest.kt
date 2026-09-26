@@ -33,20 +33,23 @@ class VeepooCredentialStoreTest {
     }
 
     private class MemoryCleanupBackend : VeepooCredentialCleanupBackend {
-        var values: Set<String> = emptySet()
+        val values = mutableMapOf<VeepooCredentialCleanupKind, Set<String>>()
         var readsAvailable = true
         var writesSucceed = true
 
-        override fun read(): VeepooCredentialCleanupRead =
+        override fun read(kind: VeepooCredentialCleanupKind): VeepooCredentialCleanupRead =
             if (readsAvailable) {
-                VeepooCredentialCleanupRead.Available(values.toSet())
+                VeepooCredentialCleanupRead.Available(values[kind].orEmpty().toSet())
             } else {
                 VeepooCredentialCleanupRead.Unavailable
             }
 
-        override fun write(deviceIds: Set<String>): Boolean {
+        override fun write(
+            kind: VeepooCredentialCleanupKind,
+            deviceIds: Set<String>,
+        ): Boolean {
             if (!writesSucceed) return false
-            values = deviceIds.toSet()
+            values[kind] = deviceIds.toSet()
             return true
         }
     }
@@ -79,7 +82,41 @@ class VeepooCredentialStoreTest {
 
         assertFalse(store.clearPending("supplier-generated"))
         assertFalse(store.markPending("supplier-other"))
-        assertEquals(setOf("supplier-generated"), backend.values)
+        assertEquals(
+            setOf("supplier-generated"),
+            backend.values[VeepooCredentialCleanupKind.ARCHIVE],
+        )
+    }
+
+    @Test
+    fun rejectedCleanupUsesADurableLedgerSeparateFromArchiveCleanup() {
+        val backend = MemoryCleanupBackend()
+        val first = VeepooCredentialCleanupStore(backend)
+        assertTrue(first.markPending("supplier-archive"))
+        assertTrue(first.markRejectedPending("supplier-rejected-a"))
+        assertTrue(first.markRejectedPending("supplier-rejected-b"))
+
+        val restored = VeepooCredentialCleanupStore(backend)
+        assertEquals(
+            setOf("supplier-archive"),
+            (restored.pendingDeviceIds() as VeepooCredentialCleanupRead.Available).deviceIds,
+        )
+        assertEquals(
+            setOf("supplier-rejected-a", "supplier-rejected-b"),
+            (restored.rejectedPendingDeviceIds() as VeepooCredentialCleanupRead.Available)
+                .deviceIds,
+        )
+
+        assertTrue(restored.clearRejectedPending("supplier-rejected-a"))
+        assertEquals(
+            setOf("supplier-rejected-b"),
+            (first.rejectedPendingDeviceIds() as VeepooCredentialCleanupRead.Available)
+                .deviceIds,
+        )
+        assertEquals(
+            setOf("supplier-archive"),
+            (first.pendingDeviceIds() as VeepooCredentialCleanupRead.Available).deviceIds,
+        )
     }
 
     @Test

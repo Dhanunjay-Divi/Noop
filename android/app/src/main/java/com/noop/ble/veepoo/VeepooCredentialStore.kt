@@ -27,6 +27,9 @@ interface VeepooCredentialCleanupAccess {
     fun markPending(deviceId: String): Boolean
     fun pendingDeviceIds(): VeepooCredentialCleanupRead
     fun clearPending(deviceId: String): Boolean
+    fun markRejectedPending(deviceId: String): Boolean
+    fun rejectedPendingDeviceIds(): VeepooCredentialCleanupRead
+    fun clearRejectedPending(deviceId: String): Boolean
 }
 
 sealed interface VeepooCredentialCleanupRead {
@@ -35,8 +38,13 @@ sealed interface VeepooCredentialCleanupRead {
 }
 
 internal interface VeepooCredentialCleanupBackend {
-    fun read(): VeepooCredentialCleanupRead
-    fun write(deviceIds: Set<String>): Boolean
+    fun read(kind: VeepooCredentialCleanupKind): VeepooCredentialCleanupRead
+    fun write(kind: VeepooCredentialCleanupKind, deviceIds: Set<String>): Boolean
+}
+
+internal enum class VeepooCredentialCleanupKind {
+    ARCHIVE,
+    AUTHENTICATION_REJECTED,
 }
 
 /**
@@ -54,19 +62,42 @@ class VeepooCredentialCleanupStore internal constructor(
         ),
     )
 
-    override fun markPending(deviceId: String): Boolean {
+    override fun markPending(deviceId: String): Boolean =
+        markPending(VeepooCredentialCleanupKind.ARCHIVE, deviceId)
+
+    override fun pendingDeviceIds(): VeepooCredentialCleanupRead =
+        pendingDeviceIds(VeepooCredentialCleanupKind.ARCHIVE)
+
+    override fun clearPending(deviceId: String): Boolean =
+        clearPending(VeepooCredentialCleanupKind.ARCHIVE, deviceId)
+
+    override fun markRejectedPending(deviceId: String): Boolean =
+        markPending(VeepooCredentialCleanupKind.AUTHENTICATION_REJECTED, deviceId)
+
+    override fun rejectedPendingDeviceIds(): VeepooCredentialCleanupRead =
+        pendingDeviceIds(VeepooCredentialCleanupKind.AUTHENTICATION_REJECTED)
+
+    override fun clearRejectedPending(deviceId: String): Boolean =
+        clearPending(VeepooCredentialCleanupKind.AUTHENTICATION_REJECTED, deviceId)
+
+    private fun markPending(
+        kind: VeepooCredentialCleanupKind,
+        deviceId: String,
+    ): Boolean {
         if (!validDeviceId(deviceId)) return false
-        val current = when (val read = backend.read()) {
+        val current = when (val read = backend.read(kind)) {
             is VeepooCredentialCleanupRead.Available -> read.deviceIds
             VeepooCredentialCleanupRead.Unavailable -> return false
         }
         if (deviceId in current) return true
         if (current.size >= MAX_PENDING_IDS) return false
-        return backend.write(current + deviceId)
+        return backend.write(kind, current + deviceId)
     }
 
-    override fun pendingDeviceIds(): VeepooCredentialCleanupRead =
-        when (val read = backend.read()) {
+    private fun pendingDeviceIds(
+        kind: VeepooCredentialCleanupKind,
+    ): VeepooCredentialCleanupRead =
+        when (val read = backend.read(kind)) {
             is VeepooCredentialCleanupRead.Available -> {
                 VeepooCredentialCleanupRead.Available(
                     read.deviceIds
@@ -79,14 +110,17 @@ class VeepooCredentialCleanupStore internal constructor(
             VeepooCredentialCleanupRead.Unavailable -> read
         }
 
-    override fun clearPending(deviceId: String): Boolean {
+    private fun clearPending(
+        kind: VeepooCredentialCleanupKind,
+        deviceId: String,
+    ): Boolean {
         if (!validDeviceId(deviceId)) return false
-        val current = when (val read = backend.read()) {
+        val current = when (val read = backend.read(kind)) {
             is VeepooCredentialCleanupRead.Available -> read.deviceIds
             VeepooCredentialCleanupRead.Unavailable -> return false
         }
         if (deviceId !in current) return true
-        return backend.write(current - deviceId)
+        return backend.write(kind, current - deviceId)
     }
 
     private fun validDeviceId(value: String): Boolean =
@@ -97,10 +131,10 @@ class VeepooCredentialCleanupStore internal constructor(
     private class SharedPreferencesCleanupBackend(
         private val preferences: SharedPreferences,
     ) : VeepooCredentialCleanupBackend {
-        override fun read(): VeepooCredentialCleanupRead =
+        override fun read(kind: VeepooCredentialCleanupKind): VeepooCredentialCleanupRead =
             try {
                 VeepooCredentialCleanupRead.Available(
-                    preferences.getStringSet(KEY_PENDING_IDS, emptySet())
+                    preferences.getStringSet(key(kind), emptySet())
                         ?.toSet()
                         .orEmpty(),
                 )
@@ -108,23 +142,35 @@ class VeepooCredentialCleanupStore internal constructor(
                 VeepooCredentialCleanupRead.Unavailable
             }
 
-        override fun write(deviceIds: Set<String>): Boolean =
+        override fun write(
+            kind: VeepooCredentialCleanupKind,
+            deviceIds: Set<String>,
+        ): Boolean =
             try {
                 val editor = preferences.edit()
                 if (deviceIds.isEmpty()) {
-                    editor.remove(KEY_PENDING_IDS)
+                    editor.remove(key(kind))
                 } else {
-                    editor.putStringSet(KEY_PENDING_IDS, deviceIds.toSet())
+                    editor.putStringSet(key(kind), deviceIds.toSet())
                 }
                 editor.commit()
             } catch (_: Throwable) {
                 false
+            }
+
+        private fun key(kind: VeepooCredentialCleanupKind): String =
+            when (kind) {
+                VeepooCredentialCleanupKind.ARCHIVE -> KEY_PENDING_IDS
+                VeepooCredentialCleanupKind.AUTHENTICATION_REJECTED ->
+                    KEY_REJECTED_PENDING_IDS
             }
     }
 
     companion object {
         private const val FILE_NAME = "noop_supplier_band_cleanup"
         private const val KEY_PENDING_IDS = "pending_credential_cleanup_ids"
+        private const val KEY_REJECTED_PENDING_IDS =
+            "pending_rejected_credential_cleanup_ids"
         private const val MAX_PENDING_IDS = 64
         private const val MAX_DEVICE_ID_LENGTH = 256
     }

@@ -80,12 +80,123 @@ class StepsCounterTest {
         assertEquals(10, analysis.deltaCount)
         assertEquals(0, analysis.keptDeltaCount)
         assertEquals(10, analysis.rejectedStillDeltaCount)
+        assertEquals(4_000, analysis.unfilteredRawTicks)
         assertEquals(0, analysis.rawTicks)
         assertNull(analysis.steps)
         assertEquals(true, analysis.counterObserved)
         assertEquals(false, analysis.allowsMotionFallback)
         assertEquals(false, analysis.hasAuthoritativeCounterOutcome)
+        assertEquals(4_000, analysis.stationaryOnlyLegacyTicks)
+        assertEquals(
+            2_000,
+            StepsCounter.scaledSteps(
+                rawTicks = requireNotNull(analysis.stationaryOnlyLegacyTicks),
+                ticksPerStep = 2.0,
+            ),
+        )
         assertNull(StepsCounter.stepsInWindow(samples))
+    }
+
+    @Test fun continuousAllStillCoverageCanRepairExactLegacyValue() {
+        val samples = (0..6).map { index ->
+            step(index * 600L, index * 100, activityClass = 0)
+        }
+        val analysis = StepsCounter.analyze(
+            samples,
+            StepsCounter.ClassificationPolicy.requireActivityClass,
+        )
+
+        assertEquals(
+            300,
+            StepsCounter.stationaryLegacyRepairSteps(
+                analysis = analysis,
+                samples = samples,
+                ticksPerStep = 2.0,
+                dayStartTs = 0,
+                observedThroughTs = 3_600,
+            ),
+        )
+    }
+
+    @Test fun shortStationaryBurstCannotRepairWholeDayValue() {
+        val samples = (0..10).map { index ->
+            step(43_200L + index * 60L, index * 400, activityClass = 0)
+        }
+        val analysis = StepsCounter.analyze(
+            samples,
+            StepsCounter.ClassificationPolicy.requireActivityClass,
+        )
+
+        assertEquals(4_000, analysis.stationaryOnlyLegacyTicks)
+        assertNull(
+            StepsCounter.stationaryLegacyRepairSteps(
+                analysis = analysis,
+                samples = samples,
+                ticksPerStep = 1.0,
+                dayStartTs = 0,
+                observedThroughTs = 86_399,
+            ),
+        )
+    }
+
+    @Test fun allStillCoverageWithInternalOrTrailingGapCannotRepair() {
+        val internalGap = listOf(
+            step(0, 0, activityClass = 0),
+            step(600, 100, activityClass = 0),
+            step(1_200, 200, activityClass = 0),
+            step(3_000, 300, activityClass = 0),
+            step(3_600, 400, activityClass = 0),
+        )
+        val internalAnalysis = StepsCounter.analyze(
+            internalGap,
+            StepsCounter.ClassificationPolicy.requireActivityClass,
+        )
+        assertNull(
+            StepsCounter.stationaryLegacyRepairSteps(
+                analysis = internalAnalysis,
+                samples = internalGap,
+                ticksPerStep = 1.0,
+                dayStartTs = 0,
+                observedThroughTs = 3_600,
+            ),
+        )
+
+        val trailingGap = (0..3).map { index ->
+            step(index * 600L, index * 100, activityClass = 0)
+        }
+        val trailingAnalysis = StepsCounter.analyze(
+            trailingGap,
+            StepsCounter.ClassificationPolicy.requireActivityClass,
+        )
+        assertNull(
+            StepsCounter.stationaryLegacyRepairSteps(
+                analysis = trailingAnalysis,
+                samples = trailingGap,
+                ticksPerStep = 1.0,
+                dayStartTs = 0,
+                observedThroughTs = 3_600,
+            ),
+        )
+    }
+
+    @Test fun repairFailsClosedWhenAnalysisAndCoveredRowsDiffer() {
+        val samples = (0..6).map { index ->
+            step(index * 600L, index * 100, activityClass = 0)
+        } + step(4_200, 700, activityClass = 0)
+        val analysis = StepsCounter.analyze(
+            samples,
+            StepsCounter.ClassificationPolicy.requireActivityClass,
+        )
+
+        assertNull(
+            StepsCounter.stationaryLegacyRepairSteps(
+                analysis = analysis,
+                samples = samples,
+                ticksPerStep = 1.0,
+                dayStartTs = 0,
+                observedThroughTs = 3_600,
+            ),
+        )
     }
 
     @Test fun mixedStillAndWalkRetainsOnlyWalkDeltas() {
@@ -100,8 +211,10 @@ class StepsCounterTest {
         val analysis = StepsCounter.analyze(samples)
 
         assertEquals(300, analysis.rawTicks)
+        assertEquals(600, analysis.unfilteredRawTicks)
         assertEquals(2, analysis.keptDeltaCount)
         assertEquals(2, analysis.rejectedStillDeltaCount)
+        assertNull(analysis.stationaryOnlyLegacyTicks)
         assertEquals(300, StepsCounter.stepsInWindow(samples))
     }
 
@@ -119,8 +232,10 @@ class StepsCounterTest {
             analysis.filterMode,
         )
         assertEquals(70, analysis.rawTicks)
+        assertEquals(120, analysis.unfilteredRawTicks)
         assertEquals(1, analysis.keptDeltaCount)
         assertEquals(1, analysis.rejectedUnknownDeltaCount)
+        assertNull(analysis.stationaryOnlyLegacyTicks)
         assertEquals(70, StepsCounter.stepsInWindow(samples))
     }
 
@@ -134,6 +249,7 @@ class StepsCounterTest {
 
         assertEquals(0, analysis.rawTicks)
         assertEquals(1, analysis.rejectedUnknownDeltaCount)
+        assertNull(analysis.stationaryOnlyLegacyTicks)
         assertNull(analysis.steps)
     }
 
@@ -149,7 +265,9 @@ class StepsCounterTest {
             analysis.filterMode,
         )
         assertEquals(10, analysis.keptDeltaCount)
+        assertEquals(4_000, analysis.unfilteredRawTicks)
         assertEquals(4_000, analysis.rawTicks)
+        assertNull(analysis.stationaryOnlyLegacyTicks)
         assertEquals(true, analysis.counterObserved)
         assertEquals(false, analysis.allowsMotionFallback)
         assertEquals(true, analysis.hasAuthoritativeCounterOutcome)
@@ -169,7 +287,9 @@ class StepsCounterTest {
         )
         assertEquals(0, analysis.keptDeltaCount)
         assertEquals(10, analysis.rejectedUnknownDeltaCount)
+        assertEquals(4_000, analysis.unfilteredRawTicks)
         assertEquals(0, analysis.rawTicks)
+        assertNull(analysis.stationaryOnlyLegacyTicks)
         assertNull(analysis.steps)
         assertEquals(true, analysis.counterObserved)
         assertEquals(false, analysis.allowsMotionFallback)
@@ -186,6 +306,7 @@ class StepsCounterTest {
         assertNull(gapOnly.steps)
         assertEquals(true, gapOnly.counterObserved)
         assertEquals(false, gapOnly.hasAuthoritativeCounterOutcome)
+        assertNull(gapOnly.stationaryOnlyLegacyTicks)
 
         val unknownOnly = StepsCounter.analyze(
             listOf(
@@ -196,6 +317,7 @@ class StepsCounterTest {
         assertNull(unknownOnly.steps)
         assertEquals(true, unknownOnly.counterObserved)
         assertEquals(false, unknownOnly.hasAuthoritativeCounterOutcome)
+        assertNull(unknownOnly.stationaryOnlyLegacyTicks)
     }
 
     @Test fun stillMixedWithUnknownOrGapRemainsAmbiguous() {
@@ -210,6 +332,7 @@ class StepsCounterTest {
         assertEquals(1, stillAndUnknown.rejectedStillDeltaCount)
         assertEquals(1, stillAndUnknown.rejectedUnknownDeltaCount)
         assertEquals(false, stillAndUnknown.hasAuthoritativeCounterOutcome)
+        assertNull(stillAndUnknown.stationaryOnlyLegacyTicks)
 
         val stillAndGap = StepsCounter.analyze(
             listOf(
@@ -222,6 +345,7 @@ class StepsCounterTest {
         assertEquals(1, stillAndGap.rejectedStillDeltaCount)
         assertEquals(1, stillAndGap.rejectedGapDeltaCount)
         assertEquals(false, stillAndGap.hasAuthoritativeCounterOutcome)
+        assertNull(stillAndGap.stationaryOnlyLegacyTicks)
     }
 
     @Test fun classedWindowRetainsWrapAndGapBehavior() {

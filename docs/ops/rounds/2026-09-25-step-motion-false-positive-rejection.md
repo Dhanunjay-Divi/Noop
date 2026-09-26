@@ -2,19 +2,22 @@
 
 ## Status
 
-- State: `the final implementation candidate is independently reviewed; the
+- State: `the final implementation candidate and final Android review
+  remediation are independently reviewed; the
   class-aware step correction, no-fallback boundary, non-destructive
   stale-estimate replacement, archive-before-credential-cleanup lifecycle,
   bounded first-unlock credential cleanup, battery-confirmed supplier pairing,
   approved warm revision rebind, atomic source publication, supplier battery
-  mapping, day-owner resolution, and supplier-onboarding credential gates pass
+  mapping, day-owner resolution, supplier-onboarding credential gates, Android
+  cleanup retry, startup active-source retry, and source-correct device cards pass
   the complete local Android Full, macOS, unsigned iPhone/Watch/widget,
-  repository/server/SDK, and direct policy walls; exact implementation head
-  9474ffbb passes every hosted required context after the sole first-attempt
+  repository/server/SDK, and direct policy walls; prior exact implementation
+  head 9474ffbb passes every hosted required context after the sole first-attempt
   iOS profile-entry event-loss failure passed six local repetitions and the
-  complete hosted retry; documentation closeout, protected integration,
-  protected-main verification, cleanup, and physical accuracy validation
-  remain`
+  complete hosted retry; remote documentation head 58f4c3d5 is also hosted
+  green but predates the final Android fixes; one replacement commit/push,
+  replacement exact-SHA checks, protected integration, protected-main
+  verification, cleanup, and physical accuracy validation remain`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `4604fd53d15b459d0c2251da8e8697134bdb30e1`
@@ -26,7 +29,9 @@
   `65e4b0ab5f5ae7695ad2199b90fd50cacc1e5ba1`
 - Final hosted-green implementation candidate:
   `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16`
-- Protected-data review follow-up commit: commit containing this record
+- Previous hosted-green documentation candidate:
+  `58f4c3d5b70eb657ae3c953286d569ec76a05cff`
+- Final Android review follow-up commit: commit containing this record
 - Record commit or PR: application pull request `#17`
 
 ## Objective
@@ -105,6 +110,11 @@ heart-rate elevation as proof of walking.
   Still-only, classless, singleton, flat, gap-only, and unknown-only windows
   suppress new fallback estimates without deleting an earlier daily total or
   estimate that the partial window cannot disprove.
+- Added one narrowly bounded exception for a stale value produced by the former
+  raw-motion algorithm. An all-still window may compare-and-clear that exact
+  computed value only when its rows cover the civil-day start through the
+  observed end with no edge or internal gap above 15 minutes. Short bathing or
+  hand-motion bursts reject new steps but cannot erase whole-day history.
 - Integrated retained-counter estimate deletion into the same GRDB/Room
   transaction as score-range replacement. When no score range is being
   replaced, the estimate-only repair still runs in one transaction across all
@@ -192,15 +202,32 @@ heart-rate elevation as proof of walking.
   lock/unlock loop. Registered supplier rows still retain their credential,
   archived rows still delete it, and an unreadable registry or ledger remains
   fail-closed.
+- Closed the final Android review findings without changing the step policy.
+  Pending supplier-credential cleanup now separates ordinary archive cleanup
+  from authentication-rejection cleanup, persists multiple pending identifiers
+  across process recreation, receives a finite 1s/5s/15s retry budget, and
+  retries immediately when the app next reaches the foreground. If both
+  rejection-ledger persistence and secure deletion fail, the supplier row is
+  archived transactionally so the rejected credential cannot remain an active
+  source. Startup reconciles only archived rows that still own cleanup and
+  avoids duplicate cleanup ownership. The initial durable active-device
+  projection retries the same bounded schedule when Room is temporarily
+  unreadable, invalidates stale confirmed state after a source-selection
+  change, and accepts only a projection for the exact active identifier.
+  Device cards select connection and battery state by exact durable device and
+  source kind, so a supplier card cannot inherit stale WHOOP state and a
+  working supplier card can show only its own live state and battery.
 
 ## Data, privacy, and medical truth
 
 - Schema or migration impact: none.
 - Existing-data retention impact: exact-day computed estimate replacement only.
   Stale `steps_est` points are deleted only after a retained classified
-  walk/run count. Still-only, classless, sparse, flat, gap-only, and
-  unknown-only evidence preserves prior daily and estimate history. Other daily
-  evidence, unrelated series, adjacent days, and imported rows are retained.
+  walk/run count. A continuously covered all-still day may additionally clear
+  only an exact matching computed value from the former raw-motion formula.
+  Classless, sparse, short, flat, gap-only, unknown-only, mismatched, and
+  imported evidence remains intact. Other daily evidence, unrelated series,
+  and adjacent days are retained.
 - Source/provenance or formula impact: production motion-derived steps now
   require walk/run classification. Rows with no class evidence remain available
   only to explicit legacy compatibility analysis and are rejected by current
@@ -229,6 +256,11 @@ heart-rate elevation as proof of walking.
   `workouts.step_summary` event; no success or per-sample event. The cleanup
   retry adds no event family and only supplies a fixed trigger to the existing
   lifecycle event.
+- Android cleanup attempts reuse the existing bounded
+  `band.supplier_lifecycle` secure-cleanup outcome. The retry owner records no
+  device identifier, credential, health value, or exception text. Active-source
+  retry and device-card projection are local presentation reads with no new
+  network or high-frequency event boundary.
 - Redaction, retention, and high-frequency controls: aggregate counts and fixed
   categories only, emitted solely through the existing opt-in test mode.
 - Cross-platform/backend correlation: identical Swift/Kotlin result and trace
@@ -246,20 +278,22 @@ heart-rate elevation as proof of walking.
 | Focused Swift storage | 46 tests, 0 failures | Ambiguous counter windows preserve prior daily fields and estimates, while retained locomotion removes only superseded computed estimates | App orchestration or physical accuracy |
 | Focused Android analytics and integrity | 58 tests, 0 failures; Full app compile passes | Kotlin matches the Swift vectors, owner/window behavior, manual-workout fail-closed policy, chunking, and repository transaction fixtures | OEM or physical-band behavior |
 | Focused Apple app orchestration | 57 tests, 0 failures | Classified walking publishes without overnight HR, active-source rejection cannot fall through, rejected counter evidence remains distinct from a truly absent counter for phone fallback, stationary evidence preserves prior history, and retained locomotion replaces only stale computed estimates | Physical-device collection or firmware classification quality |
-| Complete `StrandAnalytics` wall | 1,503 tests, 7 intentional private-data skips, 0 failures | The changed step kernel, absent-versus-observed fallback boundary, sparse-evidence preservation, and complete shared formula surface remain green | App integration or physical accuracy |
-| Complete `WhoopStore` wall | 547 tests, 0 failures | Exact-day computed estimate replacement preserves unrelated evidence and transaction boundaries | App orchestration or physical accuracy |
+| September 26 continuous-coverage refinement | Swift `StepsCounterTests` pass 20/20; Android `StepsCounterTest` plus `IntelligenceStepIntegrityTest` compile and pass; Apple engine regressions pass 2/2 | A 4,000-tick all-still burst is rejected, short/sparse/internal-gap windows preserve history, continuously covered all-still evidence clears only the exact stale computed value, and unrelated daily fields survive | Whether physical firmware labels bathing and real walking correctly |
+| Complete `StrandAnalytics` wall | 1,507 tests, 7 intentional private-data skips, 0 failures | The changed step kernel, absent-versus-observed fallback boundary, sparse-evidence preservation, and complete shared formula surface remain green | App integration or physical accuracy |
+| Complete `WhoopStore` wall | 551 tests, 0 failures | Exact-day computed estimate replacement preserves unrelated evidence and transaction boundaries | App orchestration or physical accuracy |
 | Complete Android Full wall | 5,164 tests, 7 intentional skips, 0 failures; APK, lint, and instrumentation-source compilation pass | The exact Full app, analytics integration, archive-first secure cleanup, warm revision rebind, resources, and test sources compile together | Installation, background collection, or hardware callbacks |
 | Apple rollback regression | First full wall exposed one stale failure-injection fixture; corrected focused case passes | The atomic registration failure restores the prior source and leaves no partial supplier row | A real secure-store, radio, or vendor callback failure |
 | Complete macOS app wall | 2,336 tests, 1 intentional fixture skip, 0 failures | Shared Apple app, exact stale-estimate repair, battery-confirmed pairing, archive-first secure cleanup, terminal compatibility handling, storage, source coordination, metrics, Watch/widget contracts, and accessibility metadata pass together | iPhone hardware, BLE, or signed distribution |
 | Unsigned iOS Release graph | Exact-current generic iPhoneOS Release build passes; the phone app embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | Phone, Watch, complication, widget, localization, and dependency graphs compile together | Signing, installation, haptics, notifications, or physical performance |
 | Focused release-contract recovery | SDK artifact tests 9/9 and supplier app-slice tests 8/8 pass after exact generated-cache cleanup and atomic-contract update | The vendored SDK tree is exact and the source-shape gate follows the current transactional registration contract | Hosted execution or physical SDK behavior |
-| Complete repository and direct gates | Broad pinned repository/server/SDK wall passes 1,173 tests with 215 declared optional/environment skips and 78 subtests; focused artifact, supplier-wrapper, terminology, trust, required-CI, and release controls pass 137 tests plus 62 subtests. Direct checks pass 9/9 release controls, all ten required contexts, trusted-main verification, 12 metrics / 3 revisions / 13 thresholds / 16 calibration guards, the reviewed 18,512-occurrence terminology ratchet, full localization, all 96 operations records, distribution/private-data, the 1,310-file health-claims scan, syntax, workflow lint, and diff hygiene. | The exact local candidate satisfies the broad local repository, server, SDK-artifact, privacy, claims, localization, workflow, and trust contracts | Hosted exact-SHA checks, protected integration, physical validation, or external approvals |
+| Complete repository and direct gates | Broad pinned repository/server/SDK wall passes 1,173 tests with 215 declared optional/environment skips and 78 subtests; focused artifact, supplier-wrapper, terminology, trust, required-CI, and release controls pass 137 tests plus 62 subtests. Direct checks pass 9/9 release controls, all ten required contexts, trusted-main verification, 12 metrics / 3 revisions / 13 thresholds / 16 calibration guards, the reviewed 18,533-occurrence terminology ratchet, full localization, all 96 operations records, distribution/private-data, the 1,310-file health-claims scan, syntax, workflow lint, and diff hygiene. | The exact local candidate satisfies the broad local repository, server, SDK-artifact, privacy, claims, localization, workflow, and trust contracts | Hosted exact-SHA checks, protected integration, physical validation, or external approvals |
 | Final exact-SHA hosted replacement | Implementation head `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16` passes every required hosted context. The first Apple attempt completed 38 production-shell cases, skipped the intentional private pilot, and lost two batched XCTest keystrokes only in the profile-height assertion. The exact case then passed once locally and five more times with app relaunch between repetitions; the same unmodified SHA passed the complete hosted iOS production shell on retry, and `apple-ci-required` is green. | The final implementation graph, including iPhone, Watch, widgets, macOS, Android, packages, policy, claims, localization, operations, runtime licenses, and trust controls, is hosted-green on the exact reviewed source | Signed installation, physical BLE/background behavior, or step accuracy |
 | Exact implementation hosted checks | Exact head `db7de8e2571b1effd8278537d63bd7019b2b0d28` passed 33 jobs with four intentional skips, including all ten protected contexts, Android, macOS, and iOS production-shell checks | The consolidated implementation builds and passes hosted policy/tests on the reviewed SHA | The later review-closeout commit until replacement hosted checks finish |
 | PR review closeout | Apple focused set passes 32/32; Android Full compile and `SupplierDeviceCardPolicyTest` pass 7/7 | Oura ownership, supplier transient live restart, archived activation policy, non-supplier reactivation, and Android supplier presentation are covered on the local replacement head | Physical BLE, Compose instrumentation, or signed installation |
 | Final source-integration review remediation | Android Full debug compile and supplier Live policy tests pass 10/10; Apple supplier recovery tests pass 2/2 | Durable source ownership now selects Android Live controls, the confirmed no-active path remains reachable, and Apple discovery continues through a cancellable low-frequency tail | Physical radios, background execution, signed installation, or supplier timing |
 | Final supplier compatibility, pairing, revision, owner, picker, and archive review | Apple supplier lifecycle tests pass 49/49; Android supplier adapter/coordinator tests pass 75/75; complete Android Full passes 5,164 with seven intentional skips; complete macOS passes 2,336 with one intentional fixture skip; the unsigned Release iPhone graph embeds Watch, complications, and widgets | A singleton/raw step row cannot own the day, battery verification is sufficient for supplier registration, archive failure cannot destroy a credential, post-archive cleanup is restart-safe, approved warm revision drift rebinds durably, and model/peripheral substitution remains rejected | Signed installation, physical BLE, real revision callbacks, secure-store faults on devices, firmware activity classification, background execution, or physical step accuracy |
 | Final protected-data cleanup lifecycle | Apple supplier lifecycle tests pass 51/51; exact-current unsigned generic iPhoneOS Release builds and embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | A ledger unavailable before first unlock is retried on the protected-data edge, cleanup stops after success, and a failed unlock retry cannot create an unbounded observer loop | A physical device Keychain fault, signed install, background relaunch, or supplier hardware behavior |
+| Final Android review remediation | Focused Full compile plus 76/76 source-coordinator, credential-store, active-device projection, and supplier-display cases pass. The complete Full wall passes 5,177 tests with seven intentional skips, builds the 54,399,693-byte debug APK, passes lint with zero errors, and compiles 207 instrumentation test classes. Independent final review reports no remaining correctness finding in the changed Android boundary. | Failed pending cleanup retries in-process and on foreground, authentication rejection survives process recreation for multiple devices, combined ledger/deletion failure archives the rejected source, stale active-source projections cannot cross a source-selection change, and supplier cards use only exact supplier connection/battery state | Physical encrypted-store recovery, Activity/OEM lifecycle timing, supplier BLE callbacks, installation, signed-device UI, hosted replacement checks, or protected integration |
 
 ## Physical device and deployment
 
@@ -276,8 +310,8 @@ heart-rate elevation as proof of walking.
 
 ## Git and release state
 
-- Changed paths in this final local slice: the Apple pending-credential cleanup
-  reconciler, its AppModel lifetime owner, two protected-data/bounded-retry
+- Changed paths in this final local slice: Android source coordination,
+  active-device presentation, device-card source routing, their focused
   regressions, and closeout operations records. Earlier PR changes remain as
   recorded above.
 - Commits: implementation `db7de8e2571b1effd8278537d63bd7019b2b0d28`;
@@ -289,13 +323,14 @@ heart-rate elevation as proof of walking.
   keystrokes. The exact case passed six consecutive local executions, including
   five process-relaunched repetitions, and the unchanged hosted SHA then passed
   the complete iOS production shell plus `apple-ci-required`.
-- Current replacement state: implementation, local verification, hosted
-  exact-SHA verification, and review-thread audit are complete. This
-  documentation-only closeout, its terminology/policy verification, normal
-  protected merge, protected-main verification, and exact temporary-output
-  cleanup remain. Physical BLE, supplier firmware classification, signed
-  installation, background behavior, and synchronized step-accuracy validation
-  remain external or device gates.
+- Current replacement state: the prior implementation and documentation heads
+  are hosted green. The final Android findings are corrected locally and
+  the complete Full wall is green. Operations/terminology/policy closeout, one
+  replacement commit/push, replacement exact-SHA hosted verification,
+  evidence-backed thread resolution, normal protected merge, protected-main
+  verification, and exact temporary-output cleanup remain. Physical BLE,
+  supplier firmware classification, signed installation, background behavior,
+  and synchronized step-accuracy validation remain external or device gates.
 - Repository visibility verified: not rechecked in this slice.
 - Version/build impact: no version bump.
 - Release or distribution impact: no release claim; physical metric validation
@@ -446,6 +481,10 @@ heart-rate elevation as proof of walking.
 - The first final calibration command omitted the required `check` subcommand,
   so no audit ran. The corrected command passed 12 metrics, 3 revisions,
   13 thresholds, and 16 guards.
+- The first September 26 Apple engine regression compile used the detached
+  scan's nonexistent `now` name. Replacing it with the already captured
+  `actualNow` value preserved executor isolation; both partial-window
+  preservation and continuous-day exact-clear orchestration tests then passed.
 - The first final direct-wall command omitted the mandatory `--root` argument
   from trusted-main verification. Release controls and all ten required
   contexts passed before that invocation error. The corrected command ran the
@@ -525,11 +564,38 @@ heart-rate elevation as proof of walking.
 - The current 3.5 GiB round-owned iPhone DerivedData is retained only until the
   replacement hosted evidence is durable; free Data-volume space was about
   13 GiB after the successful build.
+- The first late-Android focused run stopped before Kotlin compilation because
+  local dependency verification resolved two official Jackson 2.13.5 parent
+  POMs that were not needed by the prior hosted cache path. Fresh Maven Central
+  downloads were byte-identical to the local cache. A Gradle-generated
+  verification pass resolved the graph without changing committed metadata,
+  and the normal strict-verification rerun proceeded.
+- The next focused run constrained the Kotlin compiler to 2 GiB and exhausted
+  that heap during unrelated full-module IR lowering. The production-equivalent
+  4 GiB in-process, one-worker rerun compiled the app and passed the earlier
+  59/59 focused set. After the final cleanup-ownership and exact-device review
+  fixes, the focused wall passed 76/76 and the same bounded profile completed
+  the 5,177-test Full wall, 54,399,693-byte APK, lint with zero errors, and
+  instrumentation-source compilation without a persistent daemon.
+- Before the final Android wall, resource review found no active build process
+  or open handle and only 6.8 GiB free. Exact deletion of superseded
+  round-owned Apple DerivedData, prior Android build output, and Gradle project
+  cache reclaimed about 27 GiB. Source, logs still needed for evidence,
+  simulators, credentials, SDK inputs, and user data were preserved. The
+  Android wall then regenerated only its current build output; free space
+  remained about 32 GiB afterward.
+- The final documentation and terminology closeout records 18,533 classified
+  occurrences across 1,628 groups with no active-use expansion. The reviewed
+  inventory and allowlist digests are repinned after this record so the
+  complete Tools and direct policy walls cover the exact replacement bytes.
 
 ## Next round
 
 1. Capture the exact reporting band/firmware and a privacy-safe Steps test trace,
    then execute the physical validation matrix with synchronized manual counts.
+   Include a timed head-washing/showering interval, ordinary dominant-hand
+   washing motions, and a matched no-arm-motion hot-water interval so activity
+   classification and step deltas can be separated from heart-rate elevation.
 
 ## Privacy check
 
