@@ -2742,6 +2742,7 @@
     <string name="ownership_checking">正在检查…</string>
     <string name="ownership_email_verified_action">我已验证电子邮箱</string>
     <string name="ownership_resend_verification">重新发送验证邮件</string>
+    <string name="ownership_resend_verification_countdown">%1$d 秒后重新发送</string>
     <string name="ownership_terms_title">查看所有权条款</string>
     <string name="ownership_terms_detail">系统会从 NOOP 控制的存储中获取准确且不可变的文档，并在接受前验证该文档。</string>
     <string name="ownership_terms_before_account">创建账户前，请查看并接受所有权政策。</string>
@@ -2771,6 +2772,7 @@
     <string name="ownership_phone_verified_label">手机号码已验证</string>
     <string name="ownership_phone">包含国家/地区代码的手机号码</string>
     <string name="ownership_send_code">发送验证码</string>
+    <string name="ownership_send_code_countdown">%1$d 秒后再次发送</string>
     <string name="ownership_code">验证码</string>
     <string name="ownership_verify_phone">验证可选号码</string>
     <string name="ownership_installations_title">已授权手机</string>
@@ -2856,11 +2858,15 @@
     <string name="ownership_terms_reload">请重新加载并查看当前所有权条款。</string>
     <string name="ownership_invalid_phone">请输入包含国家/地区代码的手机号码。</string>
     <string name="ownership_invalid_code">请输入当前的六位验证码。</string>
+    <string name="ownership_verification_code_invalid">该验证码不正确。请检查后重试。</string>
+    <string name="ownership_verification_session_expired">该验证会话已过期。请申请新验证码。</string>
+    <string name="ownership_verification_rate_limited">验证请求过多。请稍后再试。</string>
+    <string name="ownership_verification_cooldown_active">请等待倒计时结束后再申请新的验证消息。</string>
     <string name="ownership_sign_in_again">请重新登录以继续。</string>
     <string name="ownership_confirmation_inactive">该手环确认已失效。请重新开始确认。</string>
     <string name="ownership_confirmation_rejected">手环确认未被接受。请继续佩戴手环并重试。</string>
     <string name="ownership_band_unavailable">此手环不可用于激活。</string>
-    <string name="ownership_network_unavailable">无法连接所有权服务。</string>
+    <string name="ownership_network_unavailable">请重新连接互联网后再试。</string>
     <string name="ownership_service_unavailable">所有权服务暂时不可用。</string>
     <string name="ownership_cannot_continue">NOOP 无法安全地继续所有权设置。</string>
     <string name="ownership_action_failed">NOOP 无法完成该账户操作。请重试或重置密码。</string>

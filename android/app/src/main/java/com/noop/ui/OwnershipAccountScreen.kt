@@ -52,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -83,6 +84,7 @@ import com.noop.ownership.OwnershipAccountDeletion
 import com.noop.ownership.OwnershipInstallation
 import com.noop.ownership.OwnershipPhase
 import com.noop.ownership.OwnershipService
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 
@@ -103,6 +105,12 @@ internal fun OwnershipAccountScreen() {
     var confirmation by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var phoneCode by remember { mutableStateOf("") }
+    var emailVerificationResendSeconds by remember(service) {
+        mutableIntStateOf(service.emailVerificationResendSecondsRemaining())
+    }
+    var phoneVerificationResendSeconds by remember(service) {
+        mutableIntStateOf(service.phoneVerificationResendSecondsRemaining())
+    }
     var acceptedTerms by remember { mutableStateOf(false) }
     var selectedPlan by remember {
         mutableStateOf(state.overview?.plan ?: NoopProductPlan.stored(context))
@@ -121,6 +129,28 @@ internal fun OwnershipAccountScreen() {
     }
     LaunchedEffect(state.overview?.plan) {
         state.overview?.plan?.let { selectedPlan = it }
+    }
+    LaunchedEffect(service, state.phase) {
+        emailVerificationResendSeconds =
+            service.emailVerificationResendSecondsRemaining()
+        phoneVerificationResendSeconds =
+            service.phoneVerificationResendSecondsRemaining()
+    }
+    LaunchedEffect(
+        service,
+        emailVerificationResendSeconds > 0,
+        phoneVerificationResendSeconds > 0,
+    ) {
+        while (
+            emailVerificationResendSeconds > 0 ||
+            phoneVerificationResendSeconds > 0
+        ) {
+            delay(1_000L)
+            emailVerificationResendSeconds =
+                service.emailVerificationResendSecondsRemaining()
+            phoneVerificationResendSeconds =
+                service.phoneVerificationResendSecondsRemaining()
+        }
     }
 
     LazyScreenScaffold(
@@ -164,6 +194,8 @@ internal fun OwnershipAccountScreen() {
                             } else {
                                 service.signIn(email, suppliedPassword)
                             }
+                            emailVerificationResendSeconds =
+                                service.emailVerificationResendSecondsRemaining()
                         }
                     },
                     onPasswordReset = {
@@ -179,8 +211,21 @@ internal fun OwnershipAccountScreen() {
                 OwnershipPhase.EMAIL_VERIFICATION -> OwnershipEmailVerificationCard(
                     maskedEmail = state.maskedEmail,
                     busy = state.busy,
-                    onCheck = { scope.launch { service.checkEmailVerification() } },
-                    onResend = { scope.launch { service.resendEmailVerification() } },
+                    resendSecondsRemaining = emailVerificationResendSeconds,
+                    onCheck = {
+                        scope.launch {
+                            service.checkEmailVerification()
+                            emailVerificationResendSeconds =
+                                service.emailVerificationResendSecondsRemaining()
+                        }
+                    },
+                    onResend = {
+                        scope.launch {
+                            service.resendEmailVerification()
+                            emailVerificationResendSeconds =
+                                service.emailVerificationResendSecondsRemaining()
+                        }
+                    },
                     onSignOut = service::signOut,
                 )
                 OwnershipPhase.TERMS_REVIEW -> OwnershipTermsCard(
@@ -271,16 +316,25 @@ internal fun OwnershipAccountScreen() {
                     code = phoneCode,
                     onCodeChange = { phoneCode = it.filter(Char::isDigit).take(6) },
                     busy = state.busy,
+                    resendSecondsRemaining = phoneVerificationResendSeconds,
                     activityAvailable = activity != null,
                     onSend = {
                         activity?.let { owner ->
-                            scope.launch { service.sendPhoneCode(owner, phone) }
+                            scope.launch {
+                                service.sendPhoneCode(owner, phone)
+                                phoneVerificationResendSeconds =
+                                    service.phoneVerificationResendSecondsRemaining()
+                            }
                         }
                     },
                     onVerify = {
                         val suppliedCode = phoneCode
                         phoneCode = ""
-                        scope.launch { service.linkPhone(suppliedCode) }
+                        scope.launch {
+                            service.linkPhone(suppliedCode)
+                            phoneVerificationResendSeconds =
+                                service.phoneVerificationResendSecondsRemaining()
+                        }
                     },
                 )
             }
@@ -796,6 +850,7 @@ private fun OwnershipAuthenticationCard(
 private fun OwnershipEmailVerificationCard(
     maskedEmail: String,
     busy: Boolean,
+    resendSecondsRemaining: Int,
     onCheck: () -> Unit,
     onResend: () -> Unit,
     onSignOut: () -> Unit,
@@ -823,11 +878,18 @@ private fun OwnershipEmailVerificationCard(
                 onClick = onCheck,
             )
             NoopButton(
-                text = stringResource(R.string.ownership_resend_verification),
+                text = if (resendSecondsRemaining > 0) {
+                    stringResource(
+                        R.string.ownership_resend_verification_countdown,
+                        resendSecondsRemaining,
+                    )
+                } else {
+                    stringResource(R.string.ownership_resend_verification)
+                },
                 leadingIcon = Icons.Filled.Refresh,
                 kind = NoopButtonKind.Secondary,
                 fullWidth = true,
-                enabled = !busy,
+                enabled = !busy && resendSecondsRemaining == 0,
                 onClick = onResend,
             )
             NoopButton(
@@ -1320,6 +1382,7 @@ private fun OwnershipPhoneCard(
     code: String,
     onCodeChange: (String) -> Unit,
     busy: Boolean,
+    resendSecondsRemaining: Int,
     activityAvailable: Boolean,
     onSend: () -> Unit,
     onVerify: () -> Unit,
@@ -1357,11 +1420,21 @@ private fun OwnershipPhoneCard(
                     enabled = !busy,
                 )
                 NoopButton(
-                    text = stringResource(R.string.ownership_send_code),
+                    text = if (resendSecondsRemaining > 0) {
+                        stringResource(
+                            R.string.ownership_send_code_countdown,
+                            resendSecondsRemaining,
+                        )
+                    } else {
+                        stringResource(R.string.ownership_send_code)
+                    },
                     leadingIcon = Icons.AutoMirrored.Filled.Message,
                     kind = NoopButtonKind.Secondary,
                     fullWidth = true,
-                    enabled = !busy && activityAvailable && phone.isNotBlank(),
+                    enabled = !busy &&
+                        resendSecondsRemaining == 0 &&
+                        activityAvailable &&
+                        phone.isNotBlank(),
                     onClick = onSend,
                 )
                 OwnershipTextField(

@@ -4,7 +4,9 @@ import android.app.Activity
 import android.content.Context
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseException
+import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.FirebaseOptions
+import com.google.firebase.FirebaseTooManyRequestsException
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
@@ -37,6 +39,89 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+
+internal const val OWNERSHIP_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
+private const val OWNERSHIP_NANOS_PER_SECOND = 1_000_000_000L
+private const val OWNERSHIP_VERIFICATION_RESEND_COOLDOWN_NANOS =
+    OWNERSHIP_VERIFICATION_RESEND_COOLDOWN_SECONDS * OWNERSHIP_NANOS_PER_SECOND
+
+internal fun ownershipVerificationResendSecondsRemaining(
+    deadlineNanos: Long,
+    nowNanos: Long,
+): Int {
+    if (deadlineNanos == 0L) return 0
+    val remainingNanos = deadlineNanos - nowNanos
+    if (remainingNanos <= 0L) return 0
+    return (1L + (remainingNanos - 1L) / OWNERSHIP_NANOS_PER_SECOND)
+        .coerceAtMost(OWNERSHIP_VERIFICATION_RESEND_COOLDOWN_SECONDS.toLong())
+        .toInt()
+}
+
+internal enum class OwnershipVerificationFailureCategory(
+    val diagnosticKind: String,
+) {
+    OFFLINE("network"),
+    INVALID_CODE("verification_code_invalid"),
+    EXPIRED_SESSION("verification_expired"),
+    RATE_LIMITED("rate_limit"),
+    LOCAL_COOLDOWN("resend_cooldown"),
+}
+
+internal fun ownershipVerificationFailureForProviderCode(
+    errorCode: String?,
+): OwnershipVerificationFailureCategory? = when (errorCode) {
+    "ERROR_NETWORK_REQUEST_FAILED" ->
+        OwnershipVerificationFailureCategory.OFFLINE
+    "ERROR_INVALID_VERIFICATION_CODE",
+    "ERROR_MISSING_VERIFICATION_CODE",
+    -> OwnershipVerificationFailureCategory.INVALID_CODE
+    "ERROR_SESSION_EXPIRED",
+    "ERROR_INVALID_VERIFICATION_ID",
+    "ERROR_MISSING_VERIFICATION_ID",
+    -> OwnershipVerificationFailureCategory.EXPIRED_SESSION
+    "ERROR_TOO_MANY_REQUESTS",
+    "ERROR_QUOTA_EXCEEDED",
+    -> OwnershipVerificationFailureCategory.RATE_LIMITED
+    else -> null
+}
+
+internal fun ownershipVerificationFailureForProvider(
+    error: Throwable,
+): OwnershipVerificationFailureCategory? =
+    ownershipVerificationFailureForProviderSignals(
+        networkFailure = error is FirebaseNetworkException,
+        rateLimitedFailure = error is FirebaseTooManyRequestsException,
+        authErrorCode = (error as? FirebaseAuthException)?.errorCode,
+    )
+
+internal fun ownershipVerificationFailureForProviderSignals(
+    networkFailure: Boolean,
+    rateLimitedFailure: Boolean,
+    authErrorCode: String?,
+): OwnershipVerificationFailureCategory? = when {
+    networkFailure -> OwnershipVerificationFailureCategory.OFFLINE
+    rateLimitedFailure -> OwnershipVerificationFailureCategory.RATE_LIMITED
+    else -> ownershipVerificationFailureForProviderCode(authErrorCode)
+}
+
+internal fun ownershipVerificationMessageResource(
+    category: OwnershipVerificationFailureCategory,
+): Int = when (category) {
+    OwnershipVerificationFailureCategory.OFFLINE ->
+        R.string.ownership_network_unavailable
+    OwnershipVerificationFailureCategory.INVALID_CODE ->
+        R.string.ownership_verification_code_invalid
+    OwnershipVerificationFailureCategory.EXPIRED_SESSION ->
+        R.string.ownership_verification_session_expired
+    OwnershipVerificationFailureCategory.RATE_LIMITED ->
+        R.string.ownership_verification_rate_limited
+    OwnershipVerificationFailureCategory.LOCAL_COOLDOWN ->
+        R.string.ownership_verification_cooldown_active
+}
+
+private class OwnershipVerificationFailure(
+    val category: OwnershipVerificationFailureCategory,
+) : Exception()
 
 class OwnershipService private constructor(
     context: Context,
@@ -84,9 +169,25 @@ class OwnershipService private constructor(
     private var bootstrapGeneration = 0L
     private var bootstrapBusyGeneration: Long? =
         if (configuration == null) null else bootstrapGeneration
+    @Volatile
+    private var emailVerificationResendAvailableAtNanos = 0L
+    @Volatile
+    private var phoneVerificationResendAvailableAtNanos = 0L
 
     val isAvailable: Boolean get() = configuration != null
     val possessionAvailable: Boolean get() = possessionProvider.isAvailable
+
+    internal fun emailVerificationResendSecondsRemaining(): Int =
+        ownershipVerificationResendSecondsRemaining(
+            deadlineNanos = emailVerificationResendAvailableAtNanos,
+            nowNanos = System.nanoTime(),
+        )
+
+    internal fun phoneVerificationResendSecondsRemaining(): Int =
+        ownershipVerificationResendSecondsRemaining(
+            deadlineNanos = phoneVerificationResendAvailableAtNanos,
+            nowNanos = System.nanoTime(),
+        )
 
     fun bootstrap() {
         serviceScope.launch {
@@ -117,6 +218,7 @@ class OwnershipService private constructor(
                 checkReconciliation(generation)
                 val user = runtime().auth.currentUser
                 if (user == null) {
+                    clearVerificationResendCooldowns()
                     replaceState {
                         it.copy(
                             phase = OwnershipPhase.SIGNED_OUT,
@@ -235,7 +337,7 @@ class OwnershipService private constructor(
                     locale = terms.locale,
                 ),
             )
-            user.sendEmailVerification().awaitManaged()
+            requestEmailVerification(user, enforceCooldown = false)
             replaceState {
                 it.copy(
                     status = text(R.string.ownership_email_verification_sent),
@@ -274,7 +376,10 @@ class OwnershipService private constructor(
 
     suspend fun resendEmailVerification() =
         perform("ownership.identity.resend_verification") {
-            currentUser().sendEmailVerification().awaitManaged()
+            requestEmailVerification(
+                currentUser(),
+                enforceCooldown = true,
+            )
             replaceState {
                 it.copy(
                     phase = OwnershipPhase.EMAIL_VERIFICATION,
@@ -286,7 +391,11 @@ class OwnershipService private constructor(
     suspend fun checkEmailVerification() =
         perform("ownership.identity.refresh_verification") {
             val user = currentUser()
-            user.reload().awaitManaged()
+            withVerificationFailureMapping(
+                onRateLimited = ::startEmailVerificationResendCooldown,
+            ) {
+                user.reload().awaitManaged()
+            }
             if (!user.isEmailVerified) {
                 replaceState {
                     it.copy(
@@ -296,6 +405,7 @@ class OwnershipService private constructor(
                 }
                 return@perform
             }
+            emailVerificationResendAvailableAtNanos = 0L
             var checkpoint = checkpoint(user)
             checkpoint = checkpoint.copy(
                 stage = if (checkpoint.hasAcceptedTerms) {
@@ -856,11 +966,19 @@ class OwnershipService private constructor(
             if (!user.isEmailVerified) {
                 throw OwnershipException.EmailVerificationRequired
             }
+            ensurePhoneVerificationResendAvailable()
             when (
-                val result = requestPhoneVerification(activity, phone)
+                val result = withVerificationFailureMapping(
+                    onRateLimited = ::startPhoneVerificationResendCooldown,
+                ) {
+                    requestPhoneVerification(activity, phone)
+                }
             ) {
                 is PhoneVerificationResult.AutomaticallyVerified -> {
-                    user.linkWithCredential(result.credential).awaitManaged()
+                    withVerificationFailureMapping {
+                        user.linkWithCredential(result.credential).awaitManaged()
+                    }
+                    phoneVerificationResendAvailableAtNanos = 0L
                     val cleanupCompleted = secureStore().clearPhoneVerificationId(
                         accountScope(user),
                     )
@@ -881,6 +999,7 @@ class OwnershipService private constructor(
                     }
                 }
                 is PhoneVerificationResult.CodeSent -> {
+                    startPhoneVerificationResendCooldown()
                     secureStore().writePhoneVerificationId(
                         accountScope(user),
                         result.verificationId,
@@ -905,7 +1024,12 @@ class OwnershipService private constructor(
                 verificationId,
                 code,
             )
-            user.linkWithCredential(credential).awaitManaged()
+            withVerificationFailureMapping(
+                onRateLimited = ::startPhoneVerificationResendCooldown,
+            ) {
+                user.linkWithCredential(credential).awaitManaged()
+            }
+            phoneVerificationResendAvailableAtNanos = 0L
             val cleanupCompleted = secureStore().clearPhoneVerificationId(scope)
             if (!cleanupCompleted) {
                 AppDiagnosticsRecorder.record(
@@ -1149,6 +1273,7 @@ class OwnershipService private constructor(
             val scope = runtime.auth.currentUser?.let(::accountScope)
             invalidateBootstrapReconciliation()
             runtime.auth.signOut()
+            clearVerificationResendCooldowns()
             replaceState {
                 OwnershipState(
                     phase = OwnershipPhase.SIGNED_OUT,
@@ -1204,6 +1329,7 @@ class OwnershipService private constructor(
             }
             secureStoreInstance = null
             runtime().auth.signOut()
+            clearVerificationResendCooldowns()
             replaceState {
                 OwnershipState(
                     phase = OwnershipPhase.SIGNED_OUT,
@@ -1821,6 +1947,66 @@ class OwnershipService private constructor(
     private fun client(): OwnershipClient =
         ownershipClient ?: throw OwnershipException.Unavailable
 
+    private suspend fun requestEmailVerification(
+        user: FirebaseUser,
+        enforceCooldown: Boolean,
+    ) {
+        if (enforceCooldown) ensureEmailVerificationResendAvailable()
+        withVerificationFailureMapping(
+            onRateLimited = ::startEmailVerificationResendCooldown,
+        ) {
+            user.sendEmailVerification().awaitManaged()
+        }
+        startEmailVerificationResendCooldown()
+    }
+
+    private fun ensureEmailVerificationResendAvailable() {
+        if (emailVerificationResendSecondsRemaining() > 0) {
+            throw OwnershipVerificationFailure(
+                OwnershipVerificationFailureCategory.LOCAL_COOLDOWN,
+            )
+        }
+    }
+
+    private fun ensurePhoneVerificationResendAvailable() {
+        if (phoneVerificationResendSecondsRemaining() > 0) {
+            throw OwnershipVerificationFailure(
+                OwnershipVerificationFailureCategory.LOCAL_COOLDOWN,
+            )
+        }
+    }
+
+    private fun startEmailVerificationResendCooldown() {
+        emailVerificationResendAvailableAtNanos =
+            System.nanoTime() + OWNERSHIP_VERIFICATION_RESEND_COOLDOWN_NANOS
+    }
+
+    private fun startPhoneVerificationResendCooldown() {
+        phoneVerificationResendAvailableAtNanos =
+            System.nanoTime() + OWNERSHIP_VERIFICATION_RESEND_COOLDOWN_NANOS
+    }
+
+    private fun clearVerificationResendCooldowns() {
+        emailVerificationResendAvailableAtNanos = 0L
+        phoneVerificationResendAvailableAtNanos = 0L
+    }
+
+    private suspend fun <T> withVerificationFailureMapping(
+        onRateLimited: (() -> Unit)? = null,
+        block: suspend () -> T,
+    ): T = try {
+        block()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        val category = verificationFailureCategory(error)
+        if (category == OwnershipVerificationFailureCategory.RATE_LIMITED) {
+            onRateLimited?.invoke()
+        }
+        if (category != null) throw OwnershipVerificationFailure(category)
+        throw error
+    }
+
     private suspend fun requestPhoneVerification(
         activity: Activity,
         phone: String,
@@ -2072,128 +2258,163 @@ class OwnershipService private constructor(
         )
     }
 
-    private fun userMessage(error: Throwable): String = when (error) {
-        OwnershipException.Unavailable,
-        OwnershipException.InvalidConfiguration,
-        -> text(R.string.ownership_unavailable_status)
-        OwnershipException.InvalidCredentials ->
-            text(R.string.ownership_invalid_credentials)
-        OwnershipException.InvalidPassword ->
-            text(R.string.ownership_invalid_password)
-        OwnershipException.EmailVerificationRequired ->
-            text(R.string.ownership_email_verification_required)
-        OwnershipException.TermsRequired,
-        OwnershipException.TermsChanged,
-        -> text(R.string.ownership_terms_reload)
-        OwnershipException.InvalidPhone ->
-            text(R.string.ownership_invalid_phone)
-        OwnershipException.InvalidCode,
-        OwnershipException.PhoneCodeRequired,
-        -> text(R.string.ownership_invalid_code)
-        OwnershipException.DeletionConfirmationRequired ->
-            text(R.string.ownership_deletion_confirmation_required)
-        OwnershipException.DeletionAcknowledgementsRequired ->
-            text(R.string.ownership_deletion_acknowledgements_required)
-        OwnershipException.NotSignedIn,
-        OwnershipException.Authentication,
-        -> text(R.string.ownership_sign_in_again)
-        OwnershipException.ChallengeInactive ->
-            text(R.string.ownership_confirmation_inactive)
-        OwnershipException.PossessionRejected ->
-            text(R.string.ownership_confirmation_rejected)
-        OwnershipException.AlreadyClaimed ->
-            text(R.string.ownership_band_unavailable)
-        OwnershipException.PossessionUnavailable ->
-            text(R.string.ownership_possession_sdk_pending)
-        OwnershipException.Network ->
-            text(R.string.ownership_network_unavailable)
-        OwnershipException.ServiceUnavailable ->
-            text(R.string.ownership_service_unavailable)
-        OwnershipException.InvalidResponse,
-        OwnershipException.InvalidState,
-        OwnershipException.SecureStorage,
-        -> text(R.string.ownership_cannot_continue)
-        is FirebaseAuthException -> when (error.errorCode) {
-            "ERROR_INVALID_EMAIL",
-            "ERROR_WRONG_PASSWORD",
-            "ERROR_USER_NOT_FOUND",
-            "ERROR_INVALID_CREDENTIAL",
-            -> text(R.string.ownership_invalid_credentials)
-            "ERROR_REQUIRES_RECENT_LOGIN" ->
-                text(R.string.ownership_deletion_password_required)
+    private fun verificationFailureCategory(
+        error: Throwable,
+    ): OwnershipVerificationFailureCategory? = when (error) {
+        is OwnershipVerificationFailure -> error.category
+        else -> ownershipVerificationFailureForProvider(error)
+    }
+
+    private fun verificationUserMessage(
+        category: OwnershipVerificationFailureCategory,
+    ): String = text(ownershipVerificationMessageResource(category))
+
+    private fun userMessage(error: Throwable): String {
+        verificationFailureCategory(error)?.let {
+            return verificationUserMessage(it)
+        }
+        return when (error) {
+            OwnershipException.Unavailable,
+            OwnershipException.InvalidConfiguration,
+            -> text(R.string.ownership_unavailable_status)
+            OwnershipException.InvalidCredentials ->
+                text(R.string.ownership_invalid_credentials)
+            OwnershipException.InvalidPassword ->
+                text(R.string.ownership_invalid_password)
+            OwnershipException.EmailVerificationRequired ->
+                text(R.string.ownership_email_verification_required)
+            OwnershipException.TermsRequired,
+            OwnershipException.TermsChanged,
+            -> text(R.string.ownership_terms_reload)
+            OwnershipException.InvalidPhone ->
+                text(R.string.ownership_invalid_phone)
+            OwnershipException.InvalidCode ->
+                text(R.string.ownership_verification_code_invalid)
+            OwnershipException.PhoneCodeRequired ->
+                text(R.string.ownership_verification_session_expired)
+            OwnershipException.DeletionConfirmationRequired ->
+                text(R.string.ownership_deletion_confirmation_required)
+            OwnershipException.DeletionAcknowledgementsRequired ->
+                text(R.string.ownership_deletion_acknowledgements_required)
+            OwnershipException.NotSignedIn,
+            OwnershipException.Authentication,
+            -> text(R.string.ownership_sign_in_again)
+            OwnershipException.ChallengeInactive ->
+                text(R.string.ownership_confirmation_inactive)
+            OwnershipException.PossessionRejected ->
+                text(R.string.ownership_confirmation_rejected)
+            OwnershipException.AlreadyClaimed ->
+                text(R.string.ownership_band_unavailable)
+            OwnershipException.PossessionUnavailable ->
+                text(R.string.ownership_possession_sdk_pending)
+            OwnershipException.Network ->
+                text(R.string.ownership_network_unavailable)
+            OwnershipException.ServiceUnavailable ->
+                text(R.string.ownership_service_unavailable)
+            OwnershipException.InvalidResponse,
+            OwnershipException.InvalidState,
+            OwnershipException.SecureStorage,
+            -> text(R.string.ownership_cannot_continue)
+            is FirebaseAuthException -> when (error.errorCode) {
+                "ERROR_INVALID_EMAIL",
+                "ERROR_WRONG_PASSWORD",
+                "ERROR_USER_NOT_FOUND",
+                "ERROR_INVALID_CREDENTIAL",
+                -> text(R.string.ownership_invalid_credentials)
+                "ERROR_REQUIRES_RECENT_LOGIN" ->
+                    text(R.string.ownership_deletion_password_required)
+                else -> text(R.string.ownership_action_failed)
+            }
             else -> text(R.string.ownership_action_failed)
         }
-        else -> text(R.string.ownership_action_failed)
     }
 
-    private fun diagnosticOutcome(error: Throwable): String = when (error) {
-        OwnershipException.InvalidCredentials,
-        OwnershipException.InvalidPassword,
-        OwnershipException.EmailVerificationRequired,
-        OwnershipException.TermsRequired,
-        OwnershipException.TermsChanged,
-        OwnershipException.InvalidPhone,
-        OwnershipException.InvalidCode,
-        OwnershipException.PhoneCodeRequired,
-        OwnershipException.DeletionConfirmationRequired,
-        OwnershipException.DeletionAcknowledgementsRequired,
-        OwnershipException.NotSignedIn,
-        OwnershipException.Authentication,
-        OwnershipException.ChallengeInactive,
-        OwnershipException.PossessionRejected,
-        OwnershipException.AlreadyClaimed,
-        OwnershipException.InvalidState,
-        -> "rejected"
-        OwnershipException.Unavailable,
-        OwnershipException.ServiceUnavailable,
-        OwnershipException.PossessionUnavailable,
-        -> "unavailable"
-        else -> "failed"
-    }
-
-    private fun diagnosticFailureKind(error: Throwable): String = when (error) {
-        OwnershipException.Unavailable,
-        OwnershipException.InvalidConfiguration,
-        -> "configuration"
-        OwnershipException.InvalidCredentials -> "credentials"
-        OwnershipException.InvalidPassword -> "password_policy"
-        OwnershipException.EmailVerificationRequired -> "email_unverified"
-        OwnershipException.TermsRequired -> "terms_missing"
-        OwnershipException.TermsChanged -> "terms_changed"
-        OwnershipException.InvalidPhone -> "phone_format"
-        OwnershipException.InvalidCode -> "code_format"
-        OwnershipException.PhoneCodeRequired -> "verification_state"
-        OwnershipException.DeletionConfirmationRequired ->
-            "deletion_confirmation"
-        OwnershipException.DeletionAcknowledgementsRequired ->
-            "deletion_acknowledgements"
-        OwnershipException.NotSignedIn -> "identity_missing"
-        OwnershipException.Authentication -> "authentication"
-        OwnershipException.ChallengeInactive -> "challenge_inactive"
-        OwnershipException.PossessionRejected -> "possession_rejected"
-        OwnershipException.AlreadyClaimed -> "ownership_conflict"
-        OwnershipException.PossessionUnavailable -> "possession_provider"
-        OwnershipException.Network -> "network"
-        OwnershipException.ServiceUnavailable -> "service"
-        OwnershipException.InvalidResponse -> "response_contract"
-        OwnershipException.InvalidState -> "state"
-        OwnershipException.SecureStorage -> "secure_storage"
-        is FirebaseAuthException -> when (error.errorCode) {
-            "ERROR_NETWORK_REQUEST_FAILED" -> "network"
-            "ERROR_TOO_MANY_REQUESTS" -> "rate_limit"
-            "ERROR_USER_DISABLED" -> "identity_disabled"
-            "ERROR_REQUIRES_RECENT_LOGIN" -> "reauthentication"
-            "ERROR_EMAIL_ALREADY_IN_USE",
-            "ERROR_CREDENTIAL_ALREADY_IN_USE",
-            -> "identity_conflict"
-            "ERROR_INVALID_EMAIL",
-            "ERROR_WRONG_PASSWORD",
-            "ERROR_USER_NOT_FOUND",
-            "ERROR_INVALID_CREDENTIAL",
-            -> "credentials"
-            else -> "identity_provider"
+    private fun diagnosticOutcome(error: Throwable): String {
+        verificationFailureCategory(error)?.let { category ->
+            return when (category) {
+                OwnershipVerificationFailureCategory.OFFLINE,
+                OwnershipVerificationFailureCategory.RATE_LIMITED,
+                -> "unavailable"
+                OwnershipVerificationFailureCategory.INVALID_CODE,
+                OwnershipVerificationFailureCategory.EXPIRED_SESSION,
+                OwnershipVerificationFailureCategory.LOCAL_COOLDOWN,
+                -> "rejected"
+            }
         }
-        else -> "unknown"
+        return when (error) {
+            OwnershipException.InvalidCredentials,
+            OwnershipException.InvalidPassword,
+            OwnershipException.EmailVerificationRequired,
+            OwnershipException.TermsRequired,
+            OwnershipException.TermsChanged,
+            OwnershipException.InvalidPhone,
+            OwnershipException.InvalidCode,
+            OwnershipException.PhoneCodeRequired,
+            OwnershipException.DeletionConfirmationRequired,
+            OwnershipException.DeletionAcknowledgementsRequired,
+            OwnershipException.NotSignedIn,
+            OwnershipException.Authentication,
+            OwnershipException.ChallengeInactive,
+            OwnershipException.PossessionRejected,
+            OwnershipException.AlreadyClaimed,
+            OwnershipException.InvalidState,
+            -> "rejected"
+            OwnershipException.Unavailable,
+            OwnershipException.ServiceUnavailable,
+            OwnershipException.PossessionUnavailable,
+            -> "unavailable"
+            else -> "failed"
+        }
+    }
+
+    private fun diagnosticFailureKind(error: Throwable): String {
+        verificationFailureCategory(error)?.let {
+            return it.diagnosticKind
+        }
+        return when (error) {
+            OwnershipException.Unavailable,
+            OwnershipException.InvalidConfiguration,
+            -> "configuration"
+            OwnershipException.InvalidCredentials -> "credentials"
+            OwnershipException.InvalidPassword -> "password_policy"
+            OwnershipException.EmailVerificationRequired -> "email_unverified"
+            OwnershipException.TermsRequired -> "terms_missing"
+            OwnershipException.TermsChanged -> "terms_changed"
+            OwnershipException.InvalidPhone -> "phone_format"
+            OwnershipException.InvalidCode -> "code_format"
+            OwnershipException.PhoneCodeRequired -> "verification_state"
+            OwnershipException.DeletionConfirmationRequired ->
+                "deletion_confirmation"
+            OwnershipException.DeletionAcknowledgementsRequired ->
+                "deletion_acknowledgements"
+            OwnershipException.NotSignedIn -> "identity_missing"
+            OwnershipException.Authentication -> "authentication"
+            OwnershipException.ChallengeInactive -> "challenge_inactive"
+            OwnershipException.PossessionRejected -> "possession_rejected"
+            OwnershipException.AlreadyClaimed -> "ownership_conflict"
+            OwnershipException.PossessionUnavailable -> "possession_provider"
+            OwnershipException.Network -> "network"
+            OwnershipException.ServiceUnavailable -> "service"
+            OwnershipException.InvalidResponse -> "response_contract"
+            OwnershipException.InvalidState -> "state"
+            OwnershipException.SecureStorage -> "secure_storage"
+            is FirebaseAuthException -> when (error.errorCode) {
+                "ERROR_NETWORK_REQUEST_FAILED" -> "network"
+                "ERROR_TOO_MANY_REQUESTS" -> "rate_limit"
+                "ERROR_USER_DISABLED" -> "identity_disabled"
+                "ERROR_REQUIRES_RECENT_LOGIN" -> "reauthentication"
+                "ERROR_EMAIL_ALREADY_IN_USE",
+                "ERROR_CREDENTIAL_ALREADY_IN_USE",
+                -> "identity_conflict"
+                "ERROR_INVALID_EMAIL",
+                "ERROR_WRONG_PASSWORD",
+                "ERROR_USER_NOT_FOUND",
+                "ERROR_INVALID_CREDENTIAL",
+                -> "credentials"
+                else -> "identity_provider"
+            }
+            else -> "unknown"
+        }
     }
 
     private fun text(resource: Int): String = appContext.getString(resource)

@@ -2483,6 +2483,7 @@
     <string name="ownership_checking">Checking\u2026</string>
     <string name="ownership_email_verified_action">I verified my email</string>
     <string name="ownership_resend_verification">Resend verification</string>
+    <string name="ownership_resend_verification_countdown">Resend in %1$ds</string>
     <string name="ownership_terms_title">Review ownership terms</string>
     <string name="ownership_terms_detail">The exact immutable document is fetched from NOOP-controlled storage and verified before acceptance.</string>
     <string name="ownership_terms_before_account">Review and accept the ownership policy before creating an account.</string>
@@ -2512,6 +2513,7 @@
     <string name="ownership_phone_verified_label">Mobile number verified</string>
     <string name="ownership_phone">Mobile number with country code</string>
     <string name="ownership_send_code">Send verification code</string>
+    <string name="ownership_send_code_countdown">Send again in %1$ds</string>
     <string name="ownership_code">Verification code</string>
     <string name="ownership_verify_phone">Verify optional number</string>
     <string name="ownership_installations_title">Authorized phones</string>
@@ -2597,11 +2599,15 @@
     <string name="ownership_terms_reload">Reload and review the current ownership terms.</string>
     <string name="ownership_invalid_phone">Enter a mobile number with country code.</string>
     <string name="ownership_invalid_code">Enter the current six-digit code.</string>
+    <string name="ownership_verification_code_invalid">That verification code is incorrect. Check it and try again.</string>
+    <string name="ownership_verification_session_expired">That verification session expired. Request a new code.</string>
+    <string name="ownership_verification_rate_limited">Too many verification requests. Wait before trying again.</string>
+    <string name="ownership_verification_cooldown_active">Wait for the countdown before requesting another verification message.</string>
     <string name="ownership_sign_in_again">Sign in again to continue.</string>
     <string name="ownership_confirmation_inactive">That band confirmation is no longer active. Start confirmation again.</string>
     <string name="ownership_confirmation_rejected">Band confirmation was not accepted. Keep the band worn and try again.</string>
     <string name="ownership_band_unavailable">This band is not available for activation.</string>
-    <string name="ownership_network_unavailable">The ownership service could not be reached.</string>
+    <string name="ownership_network_unavailable">Reconnect to the internet and try again.</string>
     <string name="ownership_service_unavailable">The ownership service is temporarily unavailable.</string>
     <string name="ownership_cannot_continue">NOOP could not safely continue ownership setup.</string>
     <string name="ownership_action_failed">NOOP could not complete that account action. Try again or reset the password.</string>

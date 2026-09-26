@@ -79,6 +79,8 @@ final class OwnershipService: ObservableObject {
     @Published private(set) var overview: OwnershipAccountOverview?
     @Published private(set) var installations: [OwnershipInstallation] = []
     @Published private(set) var accountDeletion: OwnershipAccountDeletion?
+    @Published private(set) var emailVerificationResendSecondsRemaining = 0
+    @Published private(set) var phoneVerificationResendSecondsRemaining = 0
 
     var isAvailable: Bool { configuration != nil }
     var possessionAvailable: Bool { possessionProvider.isAvailable }
@@ -95,9 +97,19 @@ final class OwnershipService: ObservableObject {
     private var firebaseRuntime: OwnershipFirebaseRuntime?
     private var ownershipClient: OwnershipAPIClient?
     private var verificationID: String?
+    private var emailVerificationResendDeadline: ContinuousClock.Instant?
+    private var phoneVerificationResendDeadline: ContinuousClock.Instant?
+    private var emailVerificationResendTask: Task<Void, Never>?
+    private var phoneVerificationResendTask: Task<Void, Never>?
     private var bootstrapTask: Task<Void, Never>?
     private var bootstrapGeneration: UInt64 = 0
     private var bootstrapBusyGeneration: UInt64?
+    private static let verificationResendCooldownSeconds = 60
+
+    private enum VerificationRequestKind: Sendable {
+        case email
+        case phone
+    }
 
     init(
         bundle: Bundle = .main,
@@ -113,6 +125,7 @@ final class OwnershipService: ObservableObject {
 
     func bootstrap() {
         guard configuration != nil else {
+            clearAllVerificationCooldowns()
             phase = .unavailable
             status = String(
                 localized: "Band ownership setup is not enabled in this build."
@@ -124,6 +137,7 @@ final class OwnershipService: ObservableObject {
         do {
             let runtime = try runtime()
             guard let user = runtime.auth.currentUser else {
+                clearAllVerificationCooldowns()
                 phase = .signedOut
                 accountDeletion = nil
                 return
@@ -184,6 +198,7 @@ final class OwnershipService: ObservableObject {
             )
             try save(checkpoint, for: result.user)
             try await result.user.sendEmailVerification()
+            startVerificationCooldown(.email)
             status = String(
                 localized: "Check your email, verify the address, then return to continue."
             )
@@ -269,7 +284,13 @@ final class OwnershipService: ObservableObject {
         await performIdentityOperation(
             name: "ownership.identity.resend_verification"
         ) { user in
-            try await user.sendEmailVerification()
+            try self.requireVerificationResendAvailable(.email)
+            do {
+                try await user.sendEmailVerification()
+                self.startVerificationCooldown(.email)
+            } catch {
+                throw self.mappedVerificationError(error, kind: .email)
+            }
             self.phase = .emailVerification
             self.status = String(
                 localized: "A new verification email was requested."
@@ -289,6 +310,7 @@ final class OwnershipService: ObservableObject {
                 )
                 return
             }
+            self.clearVerificationCooldown(.email)
             var checkpoint = try self.checkpoint(for: user)
             checkpoint.stage = checkpoint.hasAcceptedTerms
                 ? .accountRegistration
@@ -351,17 +373,23 @@ final class OwnershipService: ObservableObject {
         )
         defer { isBusy = false }
         do {
+            try requireVerificationResendAvailable(.phone)
             let phone = try Self.normalizedPhone(rawPhone)
             let runtime = try runtime()
             guard runtime.auth.currentUser?.isEmailVerified == true else {
                 throw OwnershipClientError.emailVerificationRequired
             }
-            verificationID = try await PhoneAuthProvider.provider(
-                auth: runtime.auth
-            ).verifyPhoneNumber(phone, uiDelegate: nil)
+            do {
+                verificationID = try await PhoneAuthProvider.provider(
+                    auth: runtime.auth
+                ).verifyPhoneNumber(phone, uiDelegate: nil)
+            } catch {
+                throw mappedVerificationError(error, kind: .phone)
+            }
             guard let verificationID else {
                 throw OwnershipClientError.invalidResponse
             }
+            startVerificationCooldown(.phone)
             try secureStore.writePhoneVerificationID(
                 verificationID,
                 scope: try accountScope()
@@ -404,8 +432,13 @@ final class OwnershipService: ObservableObject {
                 withVerificationID: identifier,
                 verificationCode: code
             )
-            _ = try await user.link(with: credential)
+            do {
+                _ = try await user.link(with: credential)
+            } catch {
+                throw self.mappedVerificationError(error, kind: .phone)
+            }
             self.verificationID = nil
+            self.clearVerificationCooldown(.phone)
             if !self.secureStore.deletePhoneVerificationID(scope: scope) {
                 AppDiagnosticsRecorder.shared.record(
                     "ownership.lifecycle",
@@ -1130,6 +1163,7 @@ final class OwnershipService: ObservableObject {
             installations = []
             accountDeletion = nil
             verificationID = nil
+            clearAllVerificationCooldowns()
             status = String(localized: "Signed out of band ownership.")
             let cleanupOutcome: String
             if let scope {
@@ -1177,6 +1211,7 @@ final class OwnershipService: ObservableObject {
             installations = []
             accountDeletion = nil
             verificationID = nil
+            clearAllVerificationCooldowns()
             phase = .signedOut
             status = String(
                 localized: "Ownership setup was reset on this phone. Sign in to recover access."
@@ -1231,6 +1266,122 @@ final class OwnershipService: ObservableObject {
                     "failure_kind": Self.diagnosticFailureKind(reportedError)
                 ]
             )
+        }
+    }
+
+    private func requireVerificationResendAvailable(
+        _ kind: VerificationRequestKind
+    ) throws {
+        updateVerificationCountdown(kind)
+        let remaining = kind == .email
+            ? emailVerificationResendSecondsRemaining
+            : phoneVerificationResendSecondsRemaining
+        guard remaining == 0 else {
+            throw OwnershipClientError.verificationCooldown
+        }
+    }
+
+    private func startVerificationCooldown(_ kind: VerificationRequestKind) {
+        let deadline = ContinuousClock.now.advanced(
+            by: .seconds(Self.verificationResendCooldownSeconds)
+        )
+        switch kind {
+        case .email:
+            emailVerificationResendDeadline = deadline
+            emailVerificationResendTask?.cancel()
+            emailVerificationResendTask = verificationCountdownTask(kind)
+        case .phone:
+            phoneVerificationResendDeadline = deadline
+            phoneVerificationResendTask?.cancel()
+            phoneVerificationResendTask = verificationCountdownTask(kind)
+        }
+        updateVerificationCountdown(kind)
+    }
+
+    private func verificationCountdownTask(
+        _ kind: VerificationRequestKind
+    ) -> Task<Void, Never> {
+        Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self else { return }
+                self.updateVerificationCountdown(kind)
+                let remaining = kind == .email
+                    ? self.emailVerificationResendSecondsRemaining
+                    : self.phoneVerificationResendSecondsRemaining
+                if remaining == 0 { return }
+            }
+        }
+    }
+
+    private func updateVerificationCountdown(_ kind: VerificationRequestKind) {
+        let deadline = kind == .email
+            ? emailVerificationResendDeadline
+            : phoneVerificationResendDeadline
+        let remaining: Int
+        if let deadline {
+            let duration = ContinuousClock.now.duration(to: deadline)
+            if duration <= .zero {
+                remaining = 0
+            } else {
+                let components = duration.components
+                let roundedSeconds = components.seconds
+                    + (components.attoseconds > 0 ? 1 : 0)
+                remaining = max(
+                    0,
+                    Int(min(Int64(Int.max), roundedSeconds))
+                )
+            }
+        } else {
+            remaining = 0
+        }
+        switch kind {
+        case .email:
+            emailVerificationResendSecondsRemaining = remaining
+            if remaining == 0 { emailVerificationResendDeadline = nil }
+        case .phone:
+            phoneVerificationResendSecondsRemaining = remaining
+            if remaining == 0 { phoneVerificationResendDeadline = nil }
+        }
+    }
+
+    private func clearVerificationCooldown(_ kind: VerificationRequestKind) {
+        switch kind {
+        case .email:
+            emailVerificationResendTask?.cancel()
+            emailVerificationResendTask = nil
+            emailVerificationResendDeadline = nil
+            emailVerificationResendSecondsRemaining = 0
+        case .phone:
+            phoneVerificationResendTask?.cancel()
+            phoneVerificationResendTask = nil
+            phoneVerificationResendDeadline = nil
+            phoneVerificationResendSecondsRemaining = 0
+        }
+    }
+
+    private func clearAllVerificationCooldowns() {
+        clearVerificationCooldown(.email)
+        clearVerificationCooldown(.phone)
+    }
+
+    private func mappedVerificationError(
+        _ error: Error,
+        kind: VerificationRequestKind
+    ) -> Error {
+        switch Self.authErrorCode(error) {
+        case .networkError:
+            return OwnershipClientError.network
+        case .invalidVerificationCode:
+            return OwnershipClientError.verificationCodeInvalid
+        case .invalidVerificationID, .sessionExpired:
+            clearVerificationCooldown(kind)
+            return OwnershipClientError.verificationSessionExpired
+        case .tooManyRequests:
+            startVerificationCooldown(kind)
+            return OwnershipClientError.verificationRateLimited
+        default:
+            return error
         }
     }
 
@@ -2222,6 +2373,14 @@ final class OwnershipService: ObservableObject {
                 )
             case .invalidCode, .phoneCodeRequired:
                 return String(localized: "Enter the current six-digit code.")
+            case .verificationCodeInvalid:
+                return String(localized: "That code is incorrect. Check it and try again.")
+            case .verificationSessionExpired:
+                return String(localized: "That code expired. Request a new one.")
+            case .verificationRateLimited:
+                return String(localized: "Too many attempts. Wait before requesting another code.")
+            case .verificationCooldown:
+                return String(localized: "Wait for the resend timer before requesting another code.")
             case .deletionConfirmationRequired:
                 return String(
                     localized: "Type the full ownership account deletion confirmation exactly as shown."
@@ -2285,7 +2444,9 @@ final class OwnershipService: ObservableObject {
                     .termsChanged, .notSignedIn, .authentication,
                     .challengeInactive, .possessionRejected, .alreadyClaimed,
                     .phoneCodeRequired, .deletionConfirmationRequired,
-                    .deletionAcknowledgementsRequired:
+                    .deletionAcknowledgementsRequired,
+                    .verificationCodeInvalid, .verificationSessionExpired,
+                    .verificationRateLimited, .verificationCooldown:
                 return "rejected"
             case .unavailable, .serviceUnavailable, .possessionUnavailable:
                 return "unavailable"
@@ -2331,6 +2492,10 @@ final class OwnershipService: ObservableObject {
             case .invalidPhone: return "phone_format"
             case .invalidCode: return "code_format"
             case .phoneCodeRequired: return "verification_state"
+            case .verificationCodeInvalid: return "verification_code_invalid"
+            case .verificationSessionExpired: return "verification_expired"
+            case .verificationRateLimited: return "rate_limit"
+            case .verificationCooldown: return "resend_cooldown"
             case .deletionConfirmationRequired:
                 return "deletion_confirmation"
             case .deletionAcknowledgementsRequired:
@@ -3700,6 +3865,10 @@ enum OwnershipClientError: Error, Equatable {
     case invalidPhone
     case invalidCode
     case phoneCodeRequired
+    case verificationCodeInvalid
+    case verificationSessionExpired
+    case verificationRateLimited
+    case verificationCooldown
     case deletionConfirmationRequired
     case deletionAcknowledgementsRequired
     case notSignedIn

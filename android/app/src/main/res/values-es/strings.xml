@@ -2752,6 +2752,7 @@
     <string name="ownership_checking">Comprobando…</string>
     <string name="ownership_email_verified_action">Ya verifiqué mi correo</string>
     <string name="ownership_resend_verification">Reenviar verificación</string>
+    <string name="ownership_resend_verification_countdown">Reenviar en %1$d s</string>
     <string name="ownership_terms_title">Revisar términos de propiedad</string>
     <string name="ownership_terms_detail">El documento inmutable exacto se obtiene del almacenamiento controlado por NOOP y se verifica antes de aceptarlo.</string>
     <string name="ownership_terms_before_account">Revisa y acepta la política de propiedad antes de crear una cuenta.</string>
@@ -2781,6 +2782,7 @@
     <string name="ownership_phone_verified_label">Número de móvil verificado</string>
     <string name="ownership_phone">Número de móvil con código de país</string>
     <string name="ownership_send_code">Enviar código de verificación</string>
+    <string name="ownership_send_code_countdown">Volver a enviar en %1$d s</string>
     <string name="ownership_code">Código de verificación</string>
     <string name="ownership_verify_phone">Verificar número opcional</string>
     <string name="ownership_installations_title">Teléfonos autorizados</string>
@@ -2866,11 +2868,15 @@
     <string name="ownership_terms_reload">Vuelve a cargar y revisar los términos actuales de propiedad.</string>
     <string name="ownership_invalid_phone">Introduce un número de móvil con código de país.</string>
     <string name="ownership_invalid_code">Introduce el código actual de seis dígitos.</string>
+    <string name="ownership_verification_code_invalid">Ese código de verificación es incorrecto. Compruébalo e inténtalo de nuevo.</string>
+    <string name="ownership_verification_session_expired">Esa sesión de verificación ha caducado. Solicita un código nuevo.</string>
+    <string name="ownership_verification_rate_limited">Demasiadas solicitudes de verificación. Espera antes de intentarlo de nuevo.</string>
+    <string name="ownership_verification_cooldown_active">Espera a que termine la cuenta atrás antes de solicitar otro mensaje de verificación.</string>
     <string name="ownership_sign_in_again">Vuelve a iniciar sesión para continuar.</string>
     <string name="ownership_confirmation_inactive">Esa confirmación de la pulsera ya no está activa. Inicia la confirmación de nuevo.</string>
     <string name="ownership_confirmation_rejected">No se aceptó la confirmación de la pulsera. Mantén la pulsera puesta e inténtalo de nuevo.</string>
     <string name="ownership_band_unavailable">Esta banda no está disponible para la activación.</string>
-    <string name="ownership_network_unavailable">No se pudo contactar con el servicio de propiedad.</string>
+    <string name="ownership_network_unavailable">Vuelve a conectarte a Internet e inténtalo de nuevo.</string>
     <string name="ownership_service_unavailable">El servicio de propiedad no está disponible temporalmente.</string>
     <string name="ownership_cannot_continue">NOOP no pudo continuar de forma segura con la configuración de propiedad.</string>
     <string name="ownership_action_failed">NOOP no pudo completar esa acción de cuenta. Inténtalo de nuevo o restablece la contraseña.</string>

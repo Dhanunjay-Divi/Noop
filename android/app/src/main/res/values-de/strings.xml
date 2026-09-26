@@ -2768,6 +2768,7 @@
     <string name="ownership_checking">Wird geprüft…</string>
     <string name="ownership_email_verified_action">Ich habe meine E-Mail-Adresse bestätigt</string>
     <string name="ownership_resend_verification">Bestätigung erneut senden</string>
+    <string name="ownership_resend_verification_countdown">Erneut senden in %1$d s</string>
     <string name="ownership_terms_title">Bedingungen zum Bandbesitz prüfen</string>
     <string name="ownership_terms_detail">Das exakte unveränderliche Dokument wird aus einem von NOOP kontrollierten Speicher geladen und vor der Annahme geprüft.</string>
     <string name="ownership_terms_before_account">Prüfe und akzeptiere die Eigentumsrichtlinie, bevor du ein Konto erstellst.</string>
@@ -2797,6 +2798,7 @@
     <string name="ownership_phone_verified_label">Mobilnummer bestätigt</string>
     <string name="ownership_phone">Mobilnummer mit Ländervorwahl</string>
     <string name="ownership_send_code">Bestätigungscode senden</string>
+    <string name="ownership_send_code_countdown">Erneut senden in %1$d s</string>
     <string name="ownership_code">Bestätigungscode</string>
     <string name="ownership_verify_phone">Optionale Nummer bestätigen</string>
     <string name="ownership_installations_title">Autorisierte Smartphones</string>
@@ -2882,11 +2884,15 @@
     <string name="ownership_terms_reload">Lade die aktuellen Bedingungen erneut und prüfe sie.</string>
     <string name="ownership_invalid_phone">Gib eine Mobilnummer mit Ländervorwahl ein.</string>
     <string name="ownership_invalid_code">Gib den aktuellen sechsstelligen Code ein.</string>
+    <string name="ownership_verification_code_invalid">Dieser Bestätigungscode ist falsch. Prüfe ihn und versuche es erneut.</string>
+    <string name="ownership_verification_session_expired">Diese Bestätigungssitzung ist abgelaufen. Fordere einen neuen Code an.</string>
+    <string name="ownership_verification_rate_limited">Zu viele Bestätigungsanfragen. Warte, bevor du es erneut versuchst.</string>
+    <string name="ownership_verification_cooldown_active">Warte bis zum Ende des Countdowns, bevor du eine weitere Bestätigungsnachricht anforderst.</string>
     <string name="ownership_sign_in_again">Melde dich erneut an, um fortzufahren.</string>
     <string name="ownership_confirmation_inactive">Diese Bandbestätigung ist nicht mehr aktiv. Starte die Bestätigung erneut.</string>
     <string name="ownership_confirmation_rejected">Die Bandbestätigung wurde nicht akzeptiert. Trage das Band weiter und versuche es erneut.</string>
     <string name="ownership_band_unavailable">Dieses Band ist nicht zur Aktivierung verfügbar.</string>
-    <string name="ownership_network_unavailable">Der Besitzdienst konnte nicht erreicht werden.</string>
+    <string name="ownership_network_unavailable">Stelle die Internetverbindung wieder her und versuche es erneut.</string>
     <string name="ownership_service_unavailable">Der Besitzdienst ist vorübergehend nicht verfügbar.</string>
     <string name="ownership_cannot_continue">NOOP konnte die Einrichtung des Bandbesitzes nicht sicher fortsetzen.</string>
     <string name="ownership_action_failed">NOOP konnte diese Kontoaktion nicht abschließen. Versuche es erneut oder setze das Passwort zurück.</string>

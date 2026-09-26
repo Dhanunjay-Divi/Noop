@@ -7,11 +7,27 @@ Last updated: **2026-09-26**
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Protected branch: `main`
 - Active worktree: dedicated NOOP Band SDK app-integration checkout
-- Active branch: `codex/noop-band-sdk-app-integration-20260921`
+- Active branch: `codex/sept17-readiness-closeout-20260926`
 - Branch base against protected `main`:
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
+- The September 17 readiness closeout is active on a stacked public checkpoint
+  branch. macOS fresh installs now enter the viewer/account shell rather than a
+  collector-only BLE dead end. Watch snapshots carry an exact optional HR
+  observation timestamp, enforce a two-minute live window, preserve legacy
+  decoding, scrub locked values, and share one transport-independent
+  publication policy between macOS tests and iPhone. Apple and Android account
+  recovery now use 60-second monotonic resend cooldowns with specific offline,
+  invalid-code, expired-session, rate-limit, and local-cooldown states plus
+  payload-free diagnostics and complete supported-locale copy. Focused Apple
+  verification passes 12/12; Android Full/Demo compile and focused recovery
+  passes 7/7; the complete unsigned iPhone Simulator graph embeds Watch,
+  complications, and widgets; and all-platform localization passes. The first
+  checkpoint `6b36f035e` is public and triggered zero workflows. The second
+  checkpoint, remaining Claude/release-record reconciliation, complete walls,
+  exact-head hosted review, protected integration/main verification, and
+  physical/provider gates remain pending.
 - The newest September 26 step-source correction supersedes older statements
   below that describe a classification-gated band counter as valid primary
   Steps. Historical byte 63 has conflicting wear/contact and activity

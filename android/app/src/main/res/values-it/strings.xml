@@ -543,4 +543,11 @@
     <string name="managed_friends_delete_account_title">Eliminare l’account NOOP?</string>
     <string name="managed_friends_delete_account_detail">Friends, i dati cloud gestiti e l’account NOOP verranno programmati per l’eliminazione dopo un periodo di attesa di 24 ore. I dati sanitari locali su questo telefono non vengono eliminati.</string>
     <string name="managed_friends_deletion_scheduled_detail">Friends e i servizi dell’account sono sospesi durante il periodo di attesa di 24 ore. I dati sanitari locali restano su questo telefono.</string>
+    <string name="ownership_resend_verification_countdown">Invia di nuovo tra %1$d s</string>
+    <string name="ownership_send_code_countdown">Invia di nuovo tra %1$d s</string>
+    <string name="ownership_verification_code_invalid">Il codice di verifica non è corretto. Controllalo e riprova.</string>
+    <string name="ownership_verification_session_expired">La sessione di verifica è scaduta. Richiedi un nuovo codice.</string>
+    <string name="ownership_verification_rate_limited">Troppe richieste di verifica. Attendi prima di riprovare.</string>
+    <string name="ownership_verification_cooldown_active">Attendi la fine del conto alla rovescia prima di richiedere un altro messaggio di verifica.</string>
+    <string name="ownership_network_unavailable">Riconnettiti a Internet e riprova.</string>
 </resources>

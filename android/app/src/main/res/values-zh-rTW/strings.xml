@@ -543,4 +543,11 @@
     <string name="managed_friends_delete_account_title">要刪除 NOOP 帳戶嗎？</string>
     <string name="managed_friends_delete_account_detail">Friends、受管理的雲端資料與 NOOP 帳戶將在 24 小時冷靜期後安排刪除。這支手機上的本機健康資料不會刪除。</string>
     <string name="managed_friends_deletion_scheduled_detail">Friends 與帳戶服務會在 24 小時冷靜期內暫停。本機健康資料仍保留在這支手機上。</string>
+    <string name="ownership_resend_verification_countdown">%1$d 秒後重新傳送</string>
+    <string name="ownership_send_code_countdown">%1$d 秒後再次傳送</string>
+    <string name="ownership_verification_code_invalid">驗證碼不正確。請檢查後再試一次。</string>
+    <string name="ownership_verification_session_expired">驗證工作階段已過期。請要求新的驗證碼。</string>
+    <string name="ownership_verification_rate_limited">驗證要求過多。請稍候再試。</string>
+    <string name="ownership_verification_cooldown_active">請等待倒數結束後再要求新的驗證訊息。</string>
+    <string name="ownership_network_unavailable">請重新連接網際網路後再試。</string>
 </resources>

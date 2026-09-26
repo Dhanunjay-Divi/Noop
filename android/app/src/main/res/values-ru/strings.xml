@@ -543,4 +543,11 @@
     <string name="managed_friends_delete_account_title">Удалить учётную запись NOOP?</string>
     <string name="managed_friends_delete_account_detail">Friends, управляемые облачные данные и учётная запись NOOP будут запланированы к удалению после 24-часового периода ожидания. Локальные данные о здоровье на этом телефоне не удаляются.</string>
     <string name="managed_friends_deletion_scheduled_detail">Friends и службы учётной записи приостановлены на 24-часовой период ожидания. Локальные данные о здоровье остаются на этом телефоне.</string>
+    <string name="ownership_resend_verification_countdown">Повторная отправка через %1$d с</string>
+    <string name="ownership_send_code_countdown">Повторная отправка через %1$d с</string>
+    <string name="ownership_verification_code_invalid">Код подтверждения неверен. Проверьте его и повторите попытку.</string>
+    <string name="ownership_verification_session_expired">Сеанс подтверждения истёк. Запросите новый код.</string>
+    <string name="ownership_verification_rate_limited">Слишком много запросов подтверждения. Подождите перед повторной попыткой.</string>
+    <string name="ownership_verification_cooldown_active">Дождитесь окончания обратного отсчёта, прежде чем запрашивать новое сообщение для подтверждения.</string>
+    <string name="ownership_network_unavailable">Восстановите подключение к Интернету и повторите попытку.</string>
 </resources>

@@ -313,14 +313,19 @@ struct OwnershipAccountView: View {
                 .disabled(service.isBusy)
 
                 NoopButton(
-                    "Resend verification",
+                    service.emailVerificationResendSecondsRemaining > 0
+                        ? "Resend in \(service.emailVerificationResendSecondsRemaining)s"
+                        : "Resend verification",
                     systemImage: "arrow.clockwise",
                     kind: .secondary,
                     fullWidth: true
                 ) {
                     Task { await service.resendEmailVerification() }
                 }
-                .disabled(service.isBusy)
+                .disabled(
+                    service.isBusy
+                        || service.emailVerificationResendSecondsRemaining > 0
+                )
 
                 signOutButton
             }
@@ -802,14 +807,20 @@ struct OwnershipAccountView: View {
                         .textFieldStyle(.roundedBorder)
                         .disabled(service.isBusy)
                     NoopButton(
-                        "Send verification code",
+                        service.phoneVerificationResendSecondsRemaining > 0
+                            ? "Resend in \(service.phoneVerificationResendSecondsRemaining)s"
+                            : "Send verification code",
                         systemImage: "message",
                         kind: .secondary,
                         fullWidth: true
                     ) {
                         Task { await service.sendPhoneCode(to: phone) }
                     }
-                    .disabled(service.isBusy || phone.isEmpty)
+                    .disabled(
+                        service.isBusy
+                            || phone.isEmpty
+                            || service.phoneVerificationResendSecondsRemaining > 0
+                    )
 
                     TextField("Verification code", text: $phoneCode)
                         .textContentType(.oneTimeCode)

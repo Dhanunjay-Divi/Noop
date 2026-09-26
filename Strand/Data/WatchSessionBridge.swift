@@ -1,8 +1,46 @@
-#if os(iOS)
 import Foundation
+import StrandDesign
+
+/// Whether publishable content in `next` differs from the last-pushed snapshot.
+/// This stays transport-independent so macOS tests and the iPhone bridge exercise
+/// the same Watch freshness and deduplication policy.
+func watchSnapshotHeadlineChanged(
+    from last: WatchScoreSnapshot?,
+    to next: WatchScoreSnapshot,
+    now: Date = Date()
+) -> Bool {
+    guard let last else { return true }
+    return last.charge != next.charge
+        || last.chargeCalibrating != next.chargeCalibrating
+        || last.effort != next.effort
+        || last.effortCalibrating != next.effortCalibrating
+        || last.rest != next.rest
+        || last.restCalibrating != next.restCalibrating
+        || last.sleepSummary != next.sleepSummary
+        || last.scoreDay != next.scoreDay
+        || last.launchGateRequired != next.launchGateRequired
+        || last.launchGateVersion != next.launchGateVersion
+        || last.launchGateAuthorized != next.launchGateAuthorized
+        || watchSnapshotFreshHeartRateChanged(
+            from: last,
+            to: next,
+            now: now
+        )
+}
+
+private func watchSnapshotFreshHeartRateChanged(
+    from last: WatchScoreSnapshot,
+    to next: WatchScoreSnapshot,
+    now: Date
+) -> Bool {
+    guard let nextHR = next.liveHeartRate(at: now) else { return false }
+    return last.liveHeartRate(at: now) != nextHR
+        || last.heartRateObservedAt != next.heartRateObservedAt
+}
+
+#if os(iOS)
 import WatchConnectivity
 import StrandAnalytics
-import StrandDesign
 import WhoopStore   // DailyMetric (the anchor row's recovery / strain / sleep fields)
 
 /// The PHONE side of the watch link (M3). The iPhone is the brain: M1 computes Charge / Effort / Rest
@@ -197,42 +235,11 @@ final class WatchSessionBridge: NSObject, ObservableObject {
     /// pushed one, so an unchanged dashboard never burns a transfer re-stating the same scores.
     private func shouldPush(_ snap: WatchScoreSnapshot, now: Date) -> Bool {
         if let at = lastPushedAt, now.timeIntervalSince(at) < Self.minPushInterval { return false }
-        return Self.headlineChanged(from: lastSent, to: snap, now: now)
-    }
-
-    /// Whether publishable content in `next` differs from the last-pushed snapshot. Score fields retain
-    /// their existing dedup semantics. A genuinely fresh HR observation also counts, including the same
-    /// BPM arriving in a newer packet, while an undated or already-stale held value does not. The separate
-    /// 30-minute spacing gate still bounds WatchConnectivity budget use. `asOf` remains excluded because it
-    /// differs on every build. nil `last` (nothing pushed yet) always counts as changed.
-    static func headlineChanged(
-        from last: WatchScoreSnapshot?,
-        to next: WatchScoreSnapshot,
-        now: Date = Date()
-    ) -> Bool {
-        guard let last else { return true }
-        return last.charge != next.charge
-            || last.chargeCalibrating != next.chargeCalibrating
-            || last.effort != next.effort
-            || last.effortCalibrating != next.effortCalibrating
-            || last.rest != next.rest
-            || last.restCalibrating != next.restCalibrating
-            || last.sleepSummary != next.sleepSummary
-            || last.scoreDay != next.scoreDay
-            || last.launchGateRequired != next.launchGateRequired
-            || last.launchGateVersion != next.launchGateVersion
-            || last.launchGateAuthorized != next.launchGateAuthorized
-            || Self.freshHeartRateChanged(from: last, to: next, now: now)
-    }
-
-    private static func freshHeartRateChanged(
-        from last: WatchScoreSnapshot,
-        to next: WatchScoreSnapshot,
-        now: Date
-    ) -> Bool {
-        guard let nextHR = next.liveHeartRate(at: now) else { return false }
-        return last.liveHeartRate(at: now) != nextHR
-            || last.heartRateObservedAt != next.heartRateObservedAt
+        return watchSnapshotHeadlineChanged(
+            from: lastSent,
+            to: snap,
+            now: now
+        )
     }
 
     /// Build the snapshot off the app state. Pure read; no side effects. Split out so the wiring is easy

@@ -180,7 +180,7 @@ final class WatchScoreSnapshotTests: XCTestCase {
         fresh.heartRateObservedAt = now.addingTimeInterval(-30)
 
         XCTAssertTrue(
-            WatchSessionBridge.headlineChanged(from: last, to: fresh, now: now),
+            watchSnapshotHeadlineChanged(from: last, to: fresh, now: now),
             "A newer accepted packet matters even when its rounded BPM is unchanged"
         )
 
@@ -190,7 +190,7 @@ final class WatchScoreSnapshotTests: XCTestCase {
             -(WatchScoreSnapshot.liveHeartRateMaxAge + 1)
         )
         XCTAssertFalse(
-            WatchSessionBridge.headlineChanged(from: last, to: stale, now: now),
+            watchSnapshotHeadlineChanged(from: last, to: stale, now: now),
             "A held or already-stale HR value must not spend the Watch transfer budget"
         )
     }
