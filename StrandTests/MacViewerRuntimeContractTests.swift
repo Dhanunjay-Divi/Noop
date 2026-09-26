@@ -5,13 +5,68 @@ final class MacViewerRuntimeContractTests: XCTestCase {
     func testCurrentMacRolePreservesLocalHistoryWithoutCollection() {
         XCTAssertEqual(AppRuntimeRole.currentPlatform, .managedViewer)
         XCTAssertFalse(AppRuntimeRole.currentPlatform.allowsLocalCollection)
+        XCTAssertFalse(AppRuntimeRole.currentPlatform.requiresCollectorOnboarding)
         XCTAssertTrue(AppRuntimeRole.currentPlatform.allowsLocalAnalysisAndGuidance)
         XCTAssertTrue(AppRuntimeRole.currentPlatform.hasManagedViewerTransport)
         XCTAssertTrue(AppRuntimeRole.currentPlatform.canPresentOperationalShell)
         XCTAssertTrue(AppRuntimeRole.phoneCollector.allowsLocalCollection)
+        XCTAssertTrue(AppRuntimeRole.phoneCollector.requiresCollectorOnboarding)
         XCTAssertTrue(AppRuntimeRole.phoneCollector.allowsLocalAnalysisAndGuidance)
         XCTAssertFalse(AppRuntimeRole.phoneCollector.hasManagedViewerTransport)
         XCTAssertTrue(AppRuntimeRole.phoneCollector.canPresentOperationalShell)
+    }
+
+    func testFreshMacViewerNeverEntersCollectorOnboarding() {
+        for onboarded in [false, true] {
+            XCTAssertEqual(
+                ContentView.entryDestination(
+                    acceptedCurrentTerms: false,
+                    onboarded: onboarded,
+                    runtimeRole: .managedViewer,
+                    bypassesEntryGates: false
+                ),
+                .terms
+            )
+            XCTAssertEqual(
+                ContentView.entryDestination(
+                    acceptedCurrentTerms: true,
+                    onboarded: onboarded,
+                    runtimeRole: .managedViewer,
+                    bypassesEntryGates: false
+                ),
+                .operationalShell
+            )
+        }
+    }
+
+    func testPhoneCollectorEntryStillRequiresOnboardingAfterTerms() {
+        XCTAssertEqual(
+            ContentView.entryDestination(
+                acceptedCurrentTerms: false,
+                onboarded: false,
+                runtimeRole: .phoneCollector,
+                bypassesEntryGates: false
+            ),
+            .terms
+        )
+        XCTAssertEqual(
+            ContentView.entryDestination(
+                acceptedCurrentTerms: true,
+                onboarded: false,
+                runtimeRole: .phoneCollector,
+                bypassesEntryGates: false
+            ),
+            .collectorOnboarding
+        )
+        XCTAssertEqual(
+            ContentView.entryDestination(
+                acceptedCurrentTerms: true,
+                onboarded: true,
+                runtimeRole: .phoneCollector,
+                bypassesEntryGates: false
+            ),
+            .operationalShell
+        )
     }
 
     func testMacCompositionRootDoesNotActivateCollection() throws {

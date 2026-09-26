@@ -21,6 +21,13 @@ enum AppRuntimeRole: Equatable {
         self == .phoneCollector
     }
 
+    /// Only the collector phone owns device discovery, pairing, and durable
+    /// local-band setup. A managed viewer must reach its account-backed shell
+    /// without entering those steps.
+    var requiresCollectorOnboarding: Bool {
+        allowsLocalCollection
+    }
+
     var allowsLocalAnalysisAndGuidance: Bool {
         true
     }
