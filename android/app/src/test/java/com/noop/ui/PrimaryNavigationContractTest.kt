@@ -218,7 +218,7 @@ class PrimaryNavigationContractTest {
             "Friends(\"friends\", R.string.nav_friends, Icons.Filled.People)"
         ))
         assertTrue(text.contains(
-            "Destination.Profile, Destination.BandAccount, Destination.Friends, Destination.Devices"
+            "Destination.Profile, Destination.Friends, Destination.Devices"
         ))
         assertTrue(text.contains(
             "BandAccount(\"band_account\", R.string.ownership_screen_title, Icons.Filled.Badge)"
@@ -238,7 +238,7 @@ class PrimaryNavigationContractTest {
     }
 
     @Test
-    fun noopPlusIsAlwaysDiscoverableAndHasItsOwnRoute() {
+    fun accountDataAndNoopPlusHaveOneClearHierarchy() {
         val source = appRootSource()
         assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
         val text = source!!
@@ -246,8 +246,16 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains(
             "NoopPlus(\"noop_plus\", R.string.managed_cloud_brand, Icons.Filled.Cloud)"
         ))
-        assertTrue(text.contains("Destination.NoopPlus, Destination.BackupSync"))
-        assertTrue(text.contains("NoopPlusEntry(onNavigate = onNavigate)"))
+        assertTrue(text.contains("MoreAccountDataAccess(onNavigate = onNavigate)"))
+        assertTrue(text.contains("dest = Destination.BandAccount"))
+        assertTrue(text.contains("dest = Destination.BackupSync"))
+        assertTrue(text.contains(
+            "Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,\n" +
+                "        Destination.NoopPlus,"
+        ))
+        assertFalse(text.contains("NoopPlusEntry(onNavigate = onNavigate)"))
+        assertTrue(text.contains("R.string.nav_insights"))
+        assertTrue(text.contains("Destination.Insights.route"))
         assertTrue(text.contains(
             "composable(Destination.NoopPlus.route) { NoopPlusScreen() }"
         ))

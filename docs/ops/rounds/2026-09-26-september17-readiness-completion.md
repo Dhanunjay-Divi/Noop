@@ -9,7 +9,7 @@
   `169230a9ae38ac8b4ca4b690489cd29f5af47ee4`
 - End implementation commit: pending
 - Record checkpoint:
-  `9d57b6b354fa1e1c843a9e9ee0f5e8c2e3020b2b`
+  `8ba797109f01dfe44cdd2760a6e2fa3b4f598bfc`
 
 ## Objective
 
@@ -122,6 +122,17 @@ explicitly gated migration work open.
 - Mac account-history and enrollment copy is translated across every supported
   Apple application locale. The complete unsigned iPhone graph remains
   compatible and embeds Watch, complications, and widgets.
+- iPhone and Android More now place Band Account and Backup & Sync first as
+  ordinary setup rows, before everyday shortcuts and the collapsible
+  catalogue. Their duplicate Body/Data rows were removed, the oversized NOOP+
+  hero was removed, and NOOP+ remains reachable as one conventional Data row.
+- Profile remains once in the complete Body index. Its duplicate quick-access
+  tile was replaced by Journal & Insights while Safety, Devices, and Friends
+  remain one tap away on both mobile platforms.
+- The real iPhone production shell was installed and launched headlessly on an
+  iPhone 17 Pro simulator with seeded fictional data. The 1206 x 2622 capture
+  showed the revised hierarchy without clipping, overlap, or hidden setup
+  actions at the tested text size and appearance.
 - The two formula-review findings were reconciled against current source:
   Recovery education already names only the five production inputs and rejects
   recent-load wording in tests; Rest already publishes as `noop-rest-v2` with
@@ -154,7 +165,8 @@ explicitly gated migration work open.
   without recording addresses, codes, or provider payloads.
 - Existing evidence reused: `AppDiagnosticsRecorder` ownership operation spans,
   authorized Watch snapshot tests, onboarding step-selection tests, managed
-  sync operation spans, and hosted exact-SHA checks.
+  sync operation spans, the fixed-enum `ui.more_visible` destination event, and
+  hosted exact-SHA checks.
 - New bounded events or operation spans:
   `managed_macos.history_restore` records only outcome, a capped applied-change
   count, continuation state, and fixed failure kind. Existing managed-sync
@@ -166,7 +178,8 @@ explicitly gated migration work open.
 - Cross-platform/backend correlation: Apple and Android user-visible account
   states must agree; provider error mapping remains local and payload-free.
 - Remaining blind spots: real provider throttling, mail delivery,
-  WatchConnectivity, physical complications, and production identity services.
+  WatchConnectivity, physical complications, production identity services,
+  VoiceOver/TalkBack traversal, and physical-device visual fit.
 
 ## Evidence
 
@@ -185,15 +198,19 @@ explicitly gated migration work open.
 | `swift test --package-path Packages/NoopRemoteSync` through the bounded runner | 193/193 pass | History-only restore excludes documents and preserves all existing full-sync/document behavior | Production service availability, large-account latency, or signed clients |
 | macOS `MacViewerRuntimeContractTests` through the bounded runner | 9/9 pass | Startup account-history restore is wired, localized, account-fenced, read-only, and remains outside BLE/mutation entitlements | Signed physical Mac behavior, live Firebase/App Check, or real account data |
 | `xcodebuild -scheme NOOPiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` through the bounded runner | Pass | iOS-only ownership code type-checks and the app embeds/validates Watch, Watch complications, and widgets | Signing, physical devices, WatchConnectivity, BLE, background execution, or delivery |
+| Apple `MoreListParityTests` and `MoreSectionPrefsTests` through the bounded runner | 24/24 pass | Account/data rows lead More, NOOP+ has one normal catalogue row, quick access is bounded, and every typed destination remains reachable | VoiceOver traversal or physical-device rendering |
+| Android `PrimaryNavigationContractTest` plus Full/Demo Kotlin compilation through the bounded runner | 6/6 pass; both variants compile | Android mirrors the same Account/Data/NOOP+ order and retains its routes without duplicate grouped rows | TalkBack traversal, OEM rendering, or physical navigation |
+| Headless iPhone 17 Pro simulator install, seeded More launch, and 1206 x 2622 screenshot inspection | Pass | The exact built app renders the revised hierarchy without clipping or overlap in the inspected state | Other devices, Dynamic Type sizes, light mode, or physical behavior |
 | `python3 Tools/i18n_audit.py --platform all --full` | Pass; tracked Apple baseline remains 129 | No localization regression; all existing focus-locale catalog keys and Android locale resources are complete | Native-speaker review or visual fit |
 | Private-data guard, 1,312-file health-claims scan, nine source release controls, operations validation, JSON/XML parsing, and diff hygiene | Pass | The change adds no tracked private filename, unsafe health claim, release-control regression, malformed catalog/resource, or operations-record error | External credentials, legal approval, hosted production state, or physical behavior |
 | Live `gh pr view 16`, `gh pr view 17`, and remote-ref queries | PR 16 merged at `9c5141754`; PR 17 exact head `169230a9a` is open, mergeable, and 10/10 required contexts pass | The release-blocker handoff is refreshed from current protected repository state | Approval, integration of this follow-on branch, or physical behavior |
 
 ## Physical device and deployment
 
-- Install/update action: not run.
-- Generalized device and OS class: hosted macOS/iOS simulator and source
-  evidence only at round start.
+- Install/update action: exact unsigned build installed to a headless iPhone 17
+  Pro simulator for More-screen inspection; no physical install.
+- Generalized device and OS class: hosted macOS/iOS simulator, local iOS 26.5
+  simulator, and source evidence only.
 - Data-preservation result: no data mutation at round start.
 - BLE/background/haptic/battery scenarios exercised: not run.
 - Unrun hardware gates: all physical Apple/Android/Watch and band scenarios.
@@ -203,6 +220,9 @@ explicitly gated migration work open.
   terminated, reclaiming about 8.7 GiB. No shared DerivedData, simulator,
   source, session, user data, or unrelated temporary path was removed; both
   paths were verified absent and system free space was about 23 GiB afterward.
+- The mobile hierarchy slice also exact-deleted its 7.0 GiB isolated
+  `/tmp/noop-account-data-apple-derived` tree, bounded logs/status files,
+  screenshot, and headless simulator runtime after recording the evidence.
 
 ## Git and release state
 
@@ -215,10 +235,10 @@ explicitly gated migration work open.
   baseline-state copy checkpoint `cf967394c`; authority-guidance checkpoint
   `f3c98eaa1`; managed-document conflict recovery checkpoint `8e3947854`.
   History-only managed restore checkpoint `415bf5909`; macOS account-history
-  viewer checkpoint `9d57b6b35`.
+  viewer checkpoint `9d57b6b35`; evidence/cleanup checkpoint `8ba797109`.
 - Branch and remote state:
   `codex/sept17-readiness-closeout-20260926` tracks its public remote.
-  Checkpoints through `9d57b6b35` are pushed and triggered zero workflows
+  Checkpoints through `8ba797109` are pushed and triggered zero workflows
   because the branch has no pull request and push workflows are scoped to
   `main`.
 - Repository visibility verified: public.
@@ -244,13 +264,19 @@ explicitly gated migration work open.
 - The Mac viewer restore is source/simulator verified but not exercised against
   a signed production account. Large-history catch-up latency and continuation
   require staging and physical validation.
+- The More hierarchy now matches the useful part of the September 17 finding,
+  but the destination still uses the legacy `Backup & Sync` title and presents
+  self-hosted sync prominently. A separate cross-platform slice must rename it
+  to Data & Sync and demote self-hosting to an advanced option without removing
+  D-036 compatibility or changing data authority.
 - App-level database encryption and existing-user authority migration require
   separate approved designs and evidence before activation.
 
 ## Next round
 
-1. Reconcile the remaining Account/Data & Sync information-architecture
-   finding against current iPhone and Android source.
+1. Rename/reframe the mobile Backup & Sync destination as Data & Sync and move
+   legacy self-hosted configuration behind an advanced presentation while
+   preserving D-036 compatibility and current local/offline behavior.
 2. Run the applicable complete Apple/Android/repository-control walls.
 3. Open or update the normal protected review only after the consolidated
    candidate is locally green, then require exact-head hosted checks,

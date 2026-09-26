@@ -64,15 +64,19 @@ final class MoreListParityTests: XCTestCase {
                       "The real Nutrition destination needs a deterministic simulator capture route.")
     }
 
-    /// NOOP+ must not disappear merely because Data is collapsed or this build lacks managed-cloud
-    /// configuration. More exposes one always-visible entry and one conventional Data row, both routing
-    /// to a dedicated screen whose card renders the unavailable state instead of hiding itself.
+    /// NOOP+ remains a conventional Data row whose destination renders the unavailable state honestly.
+    /// Account and Backup & Sync are the always-visible setup rows; the former NOOP+ hero must not
+    /// compete with those core setup actions or duplicate the Data catalogue.
     func testNoopPlusIsDiscoverableAndHonestWhenUnavailable() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
         let managed = try sourceText("StrandiOS/System/ManagedCloudViews.swift")
 
-        XCTAssertTrue(shell.contains("noopPlusEntry"))
+        XCTAssertTrue(shell.contains("moreAccountDataAccess"))
+        XCTAssertTrue(shell.contains("MoreRow(\"Band Account\", \"person.badge.key.fill\", .bandAccount)"))
+        XCTAssertTrue(shell.contains("MoreRow(\"Backup & Sync\", \"externaldrive.fill.badge.icloud\", .backupSync)"))
         XCTAssertTrue(shell.contains("MoreRow(\"NOOP+\", \"icloud.fill\", .noopPlus)"))
+        XCTAssertFalse(shell.contains("noopPlusEntry"))
+        XCTAssertFalse(shell.contains("NoopPlusDiscoveryLabel"))
         XCTAssertTrue(shell.contains("case .noopPlus:        NoopPlusView()"))
         XCTAssertTrue(shell.contains("case \"noopplus\", \"noop_plus\": return .noopPlus"))
         XCTAssertTrue(managed.contains("struct NoopPlusView: View"))
@@ -412,12 +416,18 @@ final class MoreListParityTests: XCTestCase {
 
     func testiPhoneMoreHasBoundedQuickAccess() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
+        XCTAssertTrue(shell.contains("moreAccountDataAccess\n                moreQuickAccess"),
+                      "Account and data continuity must lead the More index before everyday shortcuts.")
         XCTAssertTrue(shell.contains("moreQuickAccess\n                moreSection(\"Insights\")"),
-                      "Quick Access should lead the More index before the complete grouped catalogue.")
+                      "Quick Access should remain before the complete grouped catalogue.")
         XCTAssertTrue(shell.contains("ForEach(MoreSectionPrefs.quickAccess"),
                       "The rendered shortcuts must use the tested shared four-item contract.")
         XCTAssertTrue(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "safety" }),
                       "Safety must stay in Quick Access so it is not hidden behind the collapsed App group.")
+        XCTAssertTrue(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "insights" }),
+                      "Journal must replace the duplicate Profile shortcut.")
+        XCTAssertFalse(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "profile" }),
+                       "Profile belongs once in the complete Body index.")
         XCTAssertTrue(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "friends" }),
                       "Friends must remain one tap away after Workouts moves into primary navigation.")
         XCTAssertTrue(shell.contains("MoreQuickAccessLabel(item: item)"),
