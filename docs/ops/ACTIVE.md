@@ -29,6 +29,10 @@ Last updated: **2026-09-26**
   Remaining Claude/release-record reconciliation, complete walls, exact-head
   hosted review, protected integration/main verification, and
   physical/provider gates remain pending.
+- The stale release-blocker handoff no longer describes PR `#16` as pending.
+  It records protected `main` at the PR `#16` merge, hosted-green PR `#17` at
+  exact head `169230a9a`, the outstanding non-author review, and the separate
+  unintegrated September 17 checkpoint branch.
 - The newest September 26 step-source correction supersedes older statements
   below that describe a classification-gated band counter as valid primary
   Steps. Historical byte 63 has conflicting wear/contact and activity

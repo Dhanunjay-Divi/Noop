@@ -91,6 +91,10 @@ explicitly gated migration work open.
   payload-free diagnostic categories.
 - Recovery/countdown UI is localized across the supported Android resource
   sets and the eight Apple application locales.
+- The release-blocker handoff now reflects protected `main` after PR `#16`,
+  exact hosted-green PR `#17`, its outstanding non-author review, and this
+  follow-on branch without confusing an intermittent checkpoint with protected
+  integration.
 
 ## Data, privacy, and medical truth
 
@@ -136,6 +140,7 @@ explicitly gated migration work open.
 | Android Full/Demo compilation plus `OwnershipVerificationRecoveryTest` through the bounded runner | 7/7 pass | Both Android flavors compile; monotonic countdowns, provider mapping, UI disable/countdown state, nine resource sets, and payload-free diagnostics agree | Real provider throttling, OTP delivery, or physical UI |
 | `xcodebuild -scheme NOOPiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` through the bounded runner | Pass | iOS-only ownership code type-checks and the app embeds/validates Watch, Watch complications, and widgets | Signing, physical devices, WatchConnectivity, BLE, background execution, or delivery |
 | `python3 Tools/i18n_audit.py --platform all --full` | Pass; tracked Apple baseline remains 129 | No localization regression; all existing focus-locale catalog keys and Android locale resources are complete | Native-speaker review or visual fit |
+| Live `gh pr view 16`, `gh pr view 17`, and remote-ref queries | PR 16 merged at `9c5141754`; PR 17 exact head `169230a9a` is open, mergeable, and 10/10 required contexts pass | The release-blocker handoff is refreshed from current protected repository state | Approval, integration of this follow-on branch, or physical behavior |
 
 ## Physical device and deployment
 
