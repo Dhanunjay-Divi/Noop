@@ -36,8 +36,14 @@ Last updated: **2026-09-26**
   calibration, nine release checks, ten required contexts, trusted self,
   exact ten-file SDK artifact, legal inventory/distribution, 18,508 classified
   terminology occurrences across 1,629 groups with zero forbidden mappings,
-  and all 101 operations records. Commit/push, exact-head hosted checks,
-  protected integration, and synchronized physical validation remain pending.
+  and all 101 operations records. Exact implementation checkpoint
+  `6c7d3fa2b1e7f744774a89a942465ff1aa137216` is pushed. Its complete unsigned
+  macOS wall passes 2,358 tests with one intentional skip, and all ten required
+  hosted contexts pass, including Apple run `36264295238`, Android run
+  `36264295298`, and package run `36264295274`. Pull request `#17` is open and
+  mergeable but blocked pending the requested non-author review. Protected
+  integration/main verification and synchronized physical validation remain
+  pending.
 - September 26 exact-day step parity is locally green on the current dirty
   replacement. Apple Calendar and Workout detail now prefer the exact-day
   Apple Health pedometer aggregate over the classified band counter. Android

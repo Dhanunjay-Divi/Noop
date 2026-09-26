@@ -2,13 +2,14 @@
 
 ## Status
 
-- State: `local implementation, package/platform verification, and repository
-  controls green; checkpoint commit/push, exact-head hosted checks, protected
-  integration, and physical validation pending`
+- State: `exact implementation checkpoint pushed and all ten required hosted
+  contexts green; requested non-author review, protected integration/main
+  verification, and physical validation pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `8da3ebf4c2d0fecc4cd924e81b27f60bb90ab106`
-- End implementation commit: pending
+- End implementation commit:
+  `6c7d3fa2b1e7f744774a89a942465ff1aa137216`
 - Record commit or PR: application pull request `#17`
 
 ## Objective
@@ -152,11 +153,13 @@ not as proof that motion is gait.
 | Apple app/data tests | 75/75 pass across `ReadSpineActiveDeviceTests` and `IntelligenceDaySourceTests` | Alternate day ownership, imported-row preservation, stale computed cleanup, and app orchestration agree | Signed-device HealthKit or BLE behavior |
 | Apple primary-Steps presentation tests | 25/25 pass across day overview, metric catalog, and provenance safety | Today/detail/day-overview routing and values cannot fall back to motion-only evidence | Physical pedometer accuracy or permission behavior |
 | iOS Simulator graph | `NOOPiOS` build succeeds with Watch app, complications, and widgets embedded and validated | The final shared source compiles in the complete iPhone/Watch/widget graph | Installation, signing, background collection, Watch delivery, or performance |
+| Exact-head macOS app wall | 2,358 tests pass with 1 intentional fixture skip and zero failures | The exact pushed shared/app source passes the complete unsigned macOS test graph | Signed installation, physical BLE, or production performance |
 | Android primary-Steps focused wall | 75 tests pass across Today, day overview, Health detail merge, provenance safety, and counter policy | Every customer-facing primary Steps surface rejects motion-only data | OEM pedometer or physical BLE behavior |
 | Android complete unit wall | 5,213 tests pass, 7 intentional skips; Full and Demo Kotlin, Full instrumentation source, lint, and Full APK assembly pass | Kotlin protocol, analytics, repository, UI, and both flavors remain coherent | OEM or physical BLE behavior |
 | Android Room instrumentation source | `compileFullDebugAndroidTestKotlin` succeeds | The in-memory Room imported-target regression compiles against the real database implementation | Emulator/runtime execution or physical accuracy |
 | Complete Tools wall | 372 tests pass, 1 intentional skip | Release, trust, artifact, policy, and bounded-runner regressions remain coherent | Hosted checks or physical behavior |
 | Standalone repository controls | Health claims 1,312 files; localization; private-data; 12-metric calibration; 9 release checks; 10 required contexts; trusted self; exact 10-file SDK artifact; legal inventory/distribution; 18,508 classified terminology occurrences across 1,629 groups with zero forbidden mappings; 101 operations records all pass | The current source satisfies the repository's independent source-control gates | Exact-head hosted execution, review approval, signed distribution, or launch |
+| Exact-head hosted checks | Commit `6c7d3fa2` passes all 10 required contexts; Apple run `36264295238`, Android run `36264295298`, package run `36264295274`, and the policy/server runs are green | The exact remote source satisfies protected hosted source and build gates | Non-author approval, protected integration, physical behavior, signing, or launch |
 | Diff hygiene | `git diff --check` passes | The local patch has no whitespace errors | Hosted policy or protected integration |
 
 ## Physical device and deployment
@@ -177,10 +180,12 @@ not as proof that motion is gait.
 - Changed paths: shared protocol, analytics, storage, intelligence,
   presentation, mirrored tests/fixtures, BLE documentation, and operations
   records. Concurrent supplier/pairing paths remain separately owned.
-- Commits: pending.
-- Branch and remote state: local verified checkpoint for PR `#17`; commit and
-  push remain pending at the time of this record update.
-- Repository visibility verified: canonical repository unchanged.
+- Commits: implementation checkpoint
+  `6c7d3fa2b1e7f744774a89a942465ff1aa137216`.
+- Branch and remote state: local and remote branch point to the same exact
+  checkpoint. Pull request `#17` is open and mergeable, all ten required hosted
+  contexts pass, and the requested non-author review remains pending.
+- Repository visibility verified: canonical repository is public.
 - Version/build impact: none planned.
 - Release or distribution impact: no artifact or production traffic.
 
@@ -201,11 +206,12 @@ not as proof that motion is gait.
 
 ## Next round
 
-1. Complete the independent review of the concurrent supplier/pairing slice
-   and preserve unrelated ownership.
-2. Commit the consolidated reviewed replacement and push once.
-3. Inspect exact-head hosted checks, obtain required non-author review, and
-   integrate through protected `main`.
+1. Obtain the requested non-author approving review without bypassing protected
+   integration.
+2. Integrate through protected `main` and verify all required contexts on the
+   resulting exact mainline commit.
+3. Remove only the exact round-owned generated outputs after the evidence is
+   durable.
 4. Execute the physical-device validation matrix before any accuracy claim.
 
 ## Privacy check

@@ -2,8 +2,8 @@
 
 ## Status
 
-- State: `local package, platform, and repository-control checkpoint green;
-  commit/push, exact-head hosted checks, review, and integration pending`
+- State: `exact checkpoint 6c7d3fa2 pushed and all ten required hosted contexts
+  green; requested non-author review and protected integration pending`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `8da3ebf4c2d0fecc4cd924e81b27f60bb90ab106`
@@ -67,8 +67,10 @@ protected review, or claiming physical-device behavior.
 | StrandAnalytics wall | 1,513 tests pass with 7 documented skips | Production step rejection and downstream analytics are deterministic | Physical step accuracy |
 | WhoopStore wall | 555 tests pass | Registry, capability, and source-scoped cleanup persistence contracts pass | BLE continuity or phone storage pressure |
 | iPhone Simulator graph | `NOOPiOS` Debug build passes with Watch, complications, and widgets embedded | Current shared Apple source compiles through the complete simulator graph | Signing, installation, background execution, or physical BLE |
+| Exact-head macOS app wall | 2,358 tests pass with 1 intentional fixture skip | The exact pushed app source passes the complete unsigned macOS graph | Signed installation, physical BLE, or production performance |
 | Android complete wall | 5,213 tests pass with 7 intentional skips; Full/Demo compile, Full instrumentation-source compile, lint with zero errors, and Full APK assembly pass | Current Android source, tests, flavors, and packaging remain coherent | Emulator runtime, OEM background behavior, or physical BLE |
 | Complete repository-control wall | 372 Tools tests pass with 1 intentional skip; 9 release checks, 10 required contexts, trusted self, 12-metric calibration, exact 10-file SDK artifact, legal/provenance, localization, private-data, 1,312-file health-claims scan, terminology, and 101 operations records pass | The local checkpoint satisfies the repository's independent source and policy gates | Exact-head hosted checks, non-author approval, or protected integration |
+| Exact-head hosted checks | Commit `6c7d3fa2` passes all 10 required contexts, including Apple run `36264295238`, Android run `36264295298`, and package run `36264295274` | The exact remote source satisfies protected hosted source and build gates | Non-author approval, protected integration, or physical behavior |
 | Public-repository privacy guard | Pass | No prohibited private-data filename entered the checkpoint | Full secret scanning or redistribution approval |
 | Diff hygiene | Pass | The checkpoint has no whitespace errors | Hosted policy or protected integration |
 
@@ -89,9 +91,10 @@ protected review, or claiming physical-device behavior.
 
 - The branch contains the consolidated supplier/pairing and step-source
   replacement.
-- The local checkpoint is package-, platform-, and repository-control-green.
-  Commit, push, exact-head hosted checks, approval, and protected integration
-  remain pending.
+- Local and remote point to exact checkpoint
+  `6c7d3fa2b1e7f744774a89a942465ff1aa137216`. All ten required hosted contexts
+  pass. Pull request `#17` remains open and mergeable but blocked pending the
+  requested non-author review before protected integration.
 
 ## Decisions
 
@@ -108,7 +111,11 @@ protected review, or claiming physical-device behavior.
 
 ## Next round
 
-1. Run the documented physical band matrix after normal protected integration.
+1. Obtain the requested non-author review and integrate through protected
+   `main`.
+2. Verify the exact resulting mainline commit and clean only round-owned
+   generated outputs.
+3. Run the documented physical band matrix after normal protected integration.
 
 ## Privacy check
 
