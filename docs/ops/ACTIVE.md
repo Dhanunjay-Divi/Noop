@@ -21,7 +21,9 @@ Last updated: **2026-09-26**
   1206 x 2622 iPhone 17 Pro simulator capture shows no clipping or overlap in
   the tested dark appearance. These public branch pushes trigger no workflows
   because there is no pull request and automatic push workflows target
-  protected `main`.
+  protected `main`. The slice's isolated 7.0 GiB DerivedData, bounded logs,
+  status files, screenshot, and simulator runtime were removed after evidence
+  became durable; Data-volume free space was about 24 GiB afterward.
 - The September 17 readiness closeout is active on a stacked public checkpoint
   branch. macOS fresh installs now enter the viewer/account shell rather than a
   collector-only BLE dead end. Watch snapshots carry an exact optional HR

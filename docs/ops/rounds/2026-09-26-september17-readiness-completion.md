@@ -236,6 +236,12 @@ explicitly gated migration work open.
 - The mobile hierarchy slice also exact-deleted its 7.0 GiB isolated
   `/tmp/noop-account-data-apple-derived` tree, bounded logs/status files,
   screenshot, and headless simulator runtime after recording the evidence.
+- The Data & Sync slice exact-deleted its 7.0 GiB isolated
+  `/private/tmp/noop-data-sync-apple-derived` tree, all
+  `/private/tmp/noop-data-sync-*` bounded logs/status files, and its inspected
+  screenshot after evidence was durable. The reused iPhone 17 Pro simulator
+  was shut down, every exact path was verified absent, and Data-volume free
+  space was about 24 GiB afterward.
 
 ## Git and release state
 
@@ -253,9 +259,9 @@ explicitly gated migration work open.
   `cf7e28e4b`.
 - Branch and remote state:
   `codex/sept17-readiness-closeout-20260926` tracks its public remote.
-  Checkpoints through `cf7e28e4b` are pushed and triggered zero workflows
-  because the branch has no pull request and push workflows are scoped to
-  `main`.
+  Product checkpoint `cf7e28e4b` and its subsequent evidence/cleanup records
+  are pushed and triggered zero workflows because the branch has no pull
+  request and push workflows are scoped to `main`.
 - Repository visibility verified: public.
 - Version/build impact: none planned.
 - Release or distribution impact: no deployment or signed artifact.
