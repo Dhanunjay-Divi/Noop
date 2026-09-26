@@ -12,20 +12,26 @@ Last updated: **2026-09-26**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Fresh September 26 step closeout is locally green on top of remote PR head
-  `35305644f0e52670f1dad17346d877e2e10ad97a`. Exact stale all-still cleanup is
-  now source/day scoped, so another computed namespace with the same valid step
-  value is preserved; broad estimate deletion still requires authoritative
-  walk/run evidence. The supplier-wrapper quarantine now lexes outside nested
-  comments and string literals, including Swift raw strings, so
-  comment-separated vendor references cannot bypass the required release
-  control. Focused evidence passes: wrapper 7/7, WhoopStore MetricsCache 48/48,
-  Android integrity plus Full Kotlin compilation, and Apple ReadSpine 58/58.
-  The complete Tools wall passes 370/370 with one intentional skip; all 96
-  operations records, the terminology ratchet, and diff hygiene pass. One
-  replacement push, exact-SHA hosted checks, normal protected integration,
-  protected-main verification, and cleanup remain. Physical step accuracy and
-  supplier firmware classification remain external device gates.
+- Final September 26 product-code head
+  `4bcaa17a1e61eba864c03b7f1a16284cc5550c19` is pushed to PR `#17` and passes
+  all ten required protected contexts. Exact stale all-still cleanup is
+  source/day scoped, another computed namespace with the same valid step value
+  is preserved, and broad estimate deletion still requires authoritative
+  walk/run evidence. Heart rate remains wear/effort context rather than gait
+  proof. The supplier-wrapper quarantine lexes outside nested comments and
+  string literals, including Swift raw strings, so comment-separated vendor
+  references cannot bypass the release control. Focused evidence passes:
+  wrapper 7/7, WhoopStore MetricsCache 48/48, Android integrity plus Full Kotlin
+  compilation, and Apple ReadSpine 58/58. The complete Tools wall passes
+  370/370 with one intentional skip; all 97 operations records, the terminology
+  ratchet, and diff hygiene pass. Hosted Apple run `36233287879`, Android run
+  `36233287858`, package run `36233287831`, and the remaining protected
+  workflows are green. PR `#17` is mergeable and auto-merge is armed, but
+  required non-author approval remains outstanding. Exact round-owned logs,
+  Android generated output, and the regenerated 6.0-GiB Strand DerivedData were
+  removed after hosted evidence became durable; Data-volume free space is about
+  32 GiB. Protected integration/main verification and physical step accuracy
+  remain open.
 - PR `#17` implementation head
   `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16` is now hosted-green across all
   ten protected contexts. Its first iOS production-shell attempt failed only
@@ -706,15 +712,14 @@ Resume from:
 
 ## Immediate next actions
 
-1. Regenerate and review the terminology inventory after the final Android and
-   step-integrity evidence update, repin only its exact reviewed digest, and run
-   the lightweight operations/release/trust/diff wall.
-2. Commit and push the documentation-only closeout to PR `#17`.
-3. Require all ten protected contexts on the final head without bypassing
-   branch protection, then merge normally.
-4. Verify protected `main` through the trusted and required-context gates, then
-   remove the remaining exact round-owned Apple DerivedData, Python environment,
-   and temporary logs.
+1. Commit and push the documentation-only hosted closeout to PR `#17`, then
+   require the applicable protected contexts without bypassing branch
+   protection.
+2. Obtain the requested non-author approval. Auto-merge is already armed.
+3. Verify the resulting protected `main` SHA through required and trusted-main
+   checks.
+4. Execute the physical step-validation matrix with synchronized manual counts
+   and exact band/firmware classification.
 5. Keep both repositories public under D-056 while excluding supplier
    binaries, firmware, credentials, signing material, private inputs, and user
    or health data. Begin signed physical validation only after the exact

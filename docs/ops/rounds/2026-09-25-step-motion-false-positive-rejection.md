@@ -2,18 +2,11 @@
 
 ## Status
 
-- State: `remote PR head 35305644 passes every hosted required context. A fresh
-  independent closeout found two release defects and both are corrected
-  locally: comment-separated supplier API references can no longer bypass the
-  wrapper quarantine, and an all-still legacy repair clears only the exact day
-  owner/aggregate source rather than every computed namespace with an equal
-  value. Python wrapper tests pass 7/7, WhoopStore MetricsCache passes 48/48,
-  Android focused integrity plus full Kotlin compilation pass, and Apple
-  ReadSpine orchestration passes 58/58. The complete Tools wall passes 370/370
-  with one intentional skip; all 96 operations records, the terminology
-  ratchet, and diff hygiene pass. One replacement commit/push, replacement
-  exact-SHA checks, protected integration, protected-main verification,
-  cleanup, and physical accuracy validation remain`
+- State: `exact product-code head 4bcaa17a passes every hosted required context.
+  The source-scoped stale-value repair and lexical supplier-wrapper quarantine
+  are pushed and green. Exact round-owned cleanup is complete. PR #17 is
+  mergeable with auto-merge armed but still requires non-author approval;
+  protected-main verification and physical accuracy validation remain`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `4604fd53d15b459d0c2251da8e8697134bdb30e1`
@@ -27,6 +20,8 @@
   `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16`
 - Previous hosted-green documentation candidate:
   `58f4c3d5b70eb657ae3c953286d569ec76a05cff`
+- Final source-scope and wrapper closeout commit:
+  `4bcaa17a1e61eba864c03b7f1a16284cc5550c19`
 - Final Android review follow-up commit: commit containing this record
 - Record commit or PR: application pull request `#17`
 
@@ -312,6 +307,7 @@ heart-rate elevation as proof of walking.
 | Final protected-data cleanup lifecycle | Apple supplier lifecycle tests pass 51/51; exact-current unsigned generic iPhoneOS Release builds and embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | A ledger unavailable before first unlock is retried on the protected-data edge, cleanup stops after success, and a failed unlock retry cannot create an unbounded observer loop | A physical device Keychain fault, signed install, background relaunch, or supplier hardware behavior |
 | Final Android review remediation | Focused Full compile plus 76/76 source-coordinator, credential-store, active-device projection, and supplier-display cases pass. The complete Full wall passes 5,177 tests with seven intentional skips, builds the 54,399,693-byte debug APK, passes lint with zero errors, and compiles 207 instrumentation test classes. Independent final review reports no remaining correctness finding in the changed Android boundary. | Failed pending cleanup retries in-process and on foreground, authentication rejection survives process recreation for multiple devices, combined ledger/deletion failure archives the rejected source, stale active-source projections cannot cross a source-selection change, and supplier cards use only exact supplier connection/battery state | Physical encrypted-store recovery, Activity/OEM lifecycle timing, supplier BLE callbacks, installation, signed-device UI, hosted replacement checks, or protected integration |
 | Post-hosted exact-head review remediation | Apple supplier lifecycle passes 56/56; Android Full source compiles and the affected source-coordinator plus step-integrity classes pass; the generic iPhone Simulator graph builds; 68 focused trust/required-CI/wrapper tests pass; required-CI validates all ten contexts and trusted-main self-verification passes | Rejected Apple credentials have a distinct durable retry path, Oura state ownership survives source switching, `Tools/local` cannot shadow Python runtime modules without owner review, and the wrapper-boundary test is both protected and required | Physical Keychain faults, Oura hardware callbacks, supplier firmware classification, hosted replacement checks, protected integration, or physical step accuracy |
+| Final source-scope hosted closeout | Exact head `4bcaa17a1e61eba864c03b7f1a16284cc5550c19` passes all ten required contexts. Apple run `36233287879` passes macOS, the 28m44s iOS production shell, and `apple-ci-required`; Android run `36233287858` passes build/unit/lint/instrumentation compilation, both managed shells, and `android-ci-required`; package run `36233287831` and every policy workflow pass. | The exact pushed source-scoped cleanup and lexical wrapper quarantine compile and pass across the protected graph | Required non-author approval, protected-main integration, signed installation, physical BLE/background behavior, firmware classification, or step accuracy |
 
 ## Physical device and deployment
 
@@ -341,15 +337,14 @@ heart-rate elevation as proof of walking.
   keystrokes. The exact case passed six consecutive local executions, including
   five process-relaunched repetitions, and the unchanged hosted SHA then passed
   the complete iOS production shell plus `apple-ci-required`.
-- Current replacement state: exact remote head
-  `47e99f529350d5682fa0600e063d85b69eeeac87` is hosted green. Four later
-  review findings are corrected and focused verification is green locally.
-  Operations/terminology/policy closeout, one replacement commit/push,
-  replacement exact-SHA hosted verification, evidence-backed thread
-  resolution, normal protected merge, protected-main verification, and exact
-  temporary-output cleanup remain. Physical BLE, supplier firmware
-  classification, signed installation, background behavior, and synchronized
-  step-accuracy validation remain external or device gates.
+- Current replacement state: exact product-code head
+  `4bcaa17a1e61eba864c03b7f1a16284cc5550c19` is pushed and hosted green across
+  all ten required contexts. PR `#17` is mergeable and auto-merge is armed, but
+  the requested non-author approval is still pending. Exact round-owned
+  temporary output is removed. Normal protected merge, protected-main
+  verification, physical BLE, supplier firmware classification, signed
+  installation, background behavior, and synchronized step-accuracy validation
+  remain.
 - Repository visibility verified: not rechecked in this slice.
 - Version/build impact: no version bump.
 - Release or distribution impact: no release claim; physical metric validation
@@ -583,6 +578,13 @@ heart-rate elevation as proof of walking.
 - The current 3.5 GiB round-owned iPhone DerivedData is retained only until the
   replacement hosted evidence is durable; free Data-volume space was about
   13 GiB after the successful build.
+- After exact head `4bcaa17a1` passed every required hosted context, final
+  cleanup removed `/tmp/noop-step-source-scope-20260926`, repo-relative Android
+  app/build/project-cache output, and the exact regenerated
+  `Strand-aijzjsbotbmojjcctaropcqoyjpv` DerivedData directory. No build process
+  or open file handle owned those paths. About 6.3 GiB was reclaimed and
+  Data-volume free space increased to about 32 GiB. Source, SDK inputs,
+  simulator data, credentials, user data, and unrelated caches were preserved.
 - The first late-Android focused run stopped before Kotlin compilation because
   local dependency verification resolved two official Jackson 2.13.5 parent
   POMs that were not needed by the prior hosted cache path. Fresh Maven Central

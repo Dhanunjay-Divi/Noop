@@ -37113,27 +37113,27 @@
     {
       "category": "historical",
       "lineNumbers": [
-        22,
-        73,
-        94,
-        96,
-        151,
-        159,
-        171,
+        24,
+        79,
+        100,
+        102,
+        157,
+        165,
         177,
-        232,
-        277,
-        345,
-        393,
-        414,
-        558,
-        690,
-        795,
-        799
+        183,
+        238,
+        283,
+        351,
+        399,
+        420,
+        564,
+        696,
+        800,
+        804
       ],
       "occurrenceCount": 17,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "770b711bc55216d43031880faaa86b0561e0fff1971b0977ea934f024c4879e9",
+      "sha256": "61fa7d2110521af540f6d53f830bc3808244ae7ac280f548e4bff56783459fb2",
       "tokenCounts": {
         "whoop": 11,
         "whoopstore": 6
@@ -37664,51 +37664,62 @@
     {
       "category": "historical",
       "lineNumbers": [
-        10,
-        46,
-        69,
-        78,
-        140,
-        148,
-        214,
-        293,
-        300,
-        411,
-        630
+        41,
+        64,
+        73,
+        135,
+        143,
+        209,
+        288,
+        295,
+        406,
+        632
       ],
-      "occurrenceCount": 11,
+      "occurrenceCount": 10,
       "path": "docs/ops/rounds/2026-09-25-step-motion-false-positive-rejection.md",
-      "sha256": "6d2cd96b7f6210f87d372182e9b64a35528651a8d6cd4cd77ab9046be4fc2f8f",
+      "sha256": "b90672ab445efea6fa092c1739f22ad43e7e3d99164af02c9b061e7f7529d307",
       "tokenCounts": {
         "whoop": 4,
         "whoop-compatible": 1,
         "whoop-style": 3,
-        "whoopstore": 3
+        "whoopstore": 2
       }
     },
     {
       "category": "historical",
       "lineNumbers": [
-        9,
+        126
+      ],
+      "occurrenceCount": 1,
+      "path": "docs/ops/rounds/2026-09-26-pr17-hosted-closeout.md",
+      "sha256": "507375bb1849f311a59ddcc6431ef851a8bc8cbfb29651c703154a9b86413acd",
+      "tokenCounts": {
+        "whoop": 1
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
         10,
         11,
-        13,
-        13,
+        12,
+        14,
         14,
         15,
         16,
         17,
-        21,
+        18,
         22,
-        26,
-        31,
-        52,
-        88,
-        88
+        23,
+        27,
+        32,
+        53,
+        89,
+        89
       ],
       "occurrenceCount": 16,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "2dce0f65870b2eacec6209c0a5994310e1e952eb2fc4facb941209e4a7f3d5f3",
+      "sha256": "3093dd9c636db4471477951ff5f8cde0d3fd7cd89797986de94ac3f8d8fa2465",
       "tokenCounts": {
         "whoop": 11,
         "whoopstore": 5
