@@ -86,6 +86,18 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
         XCTAssertEqual(trends[.steps], [2_000, 4_000, 5_000])
     }
 
+    func testStepsTrendWithholdsGravityOnlyEstimate() {
+        let trends = LiquidTodayView.keyMetricTrendSeries(
+            days: [],
+            restSeries: [],
+            stepEstimates: [(day: "2026-08-22", value: 4_000)],
+            appleRows: [],
+            endingAt: "2026-08-22"
+        )
+
+        XCTAssertNil(trends[.steps])
+    }
+
     func testSleepAndVitalsKeepOnlyRealFinitePoints() {
         let days = [
             metric("2026-08-20", rhr: 54, respiratory: 14.2, spo2: 97),

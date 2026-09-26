@@ -11,11 +11,10 @@ final class MetricCatalogStepsTests: XCTestCase {
         XCTAssertTrue(metric?.description?.contains("Not a validated pedometer count") == true)
     }
 
-    func testTodayStepsUsesWhoopFourEstimateWhenMotionSeriesIsUnavailable() {
+    func testTodayStepsWithholdsGravityOnlyEstimateWhenMotionSeriesIsUnavailable() {
         let metric = MetricCatalog.todayStepsMetric(hasMotionDerivedSteps: false)
 
-        XCTAssertEqual(metric?.key, "steps_est")
-        XCTAssertEqual(metric?.source, "my-whoop")
+        XCTAssertNil(metric)
     }
 
     /// #377 parity: with no measured strap count but an imported Apple Health count for the day, Today
@@ -35,24 +34,24 @@ final class MetricCatalogStepsTests: XCTestCase {
         XCTAssertEqual(metric?.title, "Steps")
     }
 
-    func testTodayStepsValueUsesMeasuredFirstThenBothFallbacks() {
+    func testTodayStepsValueUsesOnlyImportedOrClassifiedCounterEvidence() {
         XCTAssertEqual(MetricCatalog.todayStepsValue(imported: 8_400, motionDerived: 7_100,
                                                      calibratedEstimate: 6_900), 8_400)
         XCTAssertEqual(MetricCatalog.todayStepsValue(imported: nil, motionDerived: 7_100,
                                                      calibratedEstimate: 6_900), 7_100)
-        XCTAssertEqual(MetricCatalog.todayStepsValue(imported: nil, motionDerived: nil,
-                                                     calibratedEstimate: 6_900), 6_900)
+        XCTAssertNil(MetricCatalog.todayStepsValue(imported: nil, motionDerived: nil,
+                                                   calibratedEstimate: 6_900) as Int?)
     }
 
-    func testTodayStepsSeriesResolvesPrecedencePerDayWithoutDroppingFallbackDays() {
+    func testTodayStepsSeriesExcludesGravityOnlyFallbackDays() {
         let merged = MetricCatalog.todayStepsSeries(
             imported: [("2026-08-10", 8_400)],
             motionDerived: [("2026-08-10", 7_100), ("2026-08-11", 7_500)],
             calibratedEstimate: [("2026-08-10", 6_900), ("2026-08-11", 7_000),
                                  ("2026-08-12", 6_200)]
         )
-        XCTAssertEqual(merged.map(\.day), ["2026-08-10", "2026-08-11", "2026-08-12"])
-        XCTAssertEqual(merged.map(\.value), [8_400, 7_500, 6_200])
+        XCTAssertEqual(merged.map(\.day), ["2026-08-10", "2026-08-11"])
+        XCTAssertEqual(merged.map(\.value), [8_400, 7_500])
     }
 
     func testAppleHealthStepsRemainsAnIndependentCatalogMetric() {

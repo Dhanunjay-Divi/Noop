@@ -6717,7 +6717,7 @@ private fun dashboardCardMetricKey(card: DashboardCard): String? = when (card) {
     DashboardCard.SKIN_TEMP -> "skin"
     DashboardCard.FITNESS_AGE -> "fitness_age"
     DashboardCard.VITALITY -> "vitality"
-    DashboardCard.STEPS -> "steps_est"
+    DashboardCard.STEPS -> "steps"
     DashboardCard.CALORIES -> "active_kcal"
     // These carry their own full screen, not a per-metric trend.
     DashboardCard.STRESS, DashboardCard.SLEEP, DashboardCard.HYDRATION, DashboardCard.COUPLED -> null
@@ -6835,8 +6835,7 @@ private fun dashboardCardValue(
         DashboardCard.STEPS -> {
             val real = importedStepsForDay?.let { intStringGrouped(it.toDouble()) }
                 ?: day?.steps?.let { intStringGrouped(it.toDouble()) }
-            val est = estimatedStepsForDay?.let { intStringGrouped(it.toDouble()) }
-            real ?: est ?: NO_DATA
+            real ?: NO_DATA
         }
         DashboardCard.CALORIES ->
             withUnit(caloriesForDay?.let { intStringGrouped(it) } ?: NO_DATA)
@@ -8165,7 +8164,8 @@ private fun MetricGrid(
             )
         },
         KeyMetric.STEPS to run {
-            // A measured phone count wins; @57 and calibration are explicitly motion-derived fallbacks.
+            // A measured phone count wins; a classified @57 counter is the only band fallback.
+            // Gravity-only calibration remains a separate motion estimate and is not primary Steps.
             val steps = resolvedSteps(importedStepsForDay, d?.steps, estimatedStepsForDay)
             KeyTileData(
                 label = stepsTileLabel(d?.steps, importedStepsForDay, estimatedStepsForDay),
@@ -8216,7 +8216,7 @@ private fun MetricGrid(
         KeyMetric.RESTING_HR -> ({ onOpenMetric("rhr") })
         KeyMetric.BLOOD_OXYGEN -> ({ onOpenMetric("spo2") })
         KeyMetric.RESPIRATORY -> ({ onOpenMetric("resp") })
-        KeyMetric.STEPS -> ({ onOpenMetric("steps_est") })
+        KeyMetric.STEPS -> ({ onOpenMetric("steps") })
         KeyMetric.CALORIES -> ({ onOpenMetric("active_kcal") })
         KeyMetric.WEIGHT -> null
     }

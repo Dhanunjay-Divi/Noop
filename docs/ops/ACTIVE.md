@@ -12,6 +12,25 @@ Last updated: **2026-09-26**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
+- The current September 26 replacement starts from remote PR `#17` head
+  `d775d7c36bed7795f67ff447f0a8d645625be5ba` and is locally verified but not
+  yet pushed. Primary Steps on Apple and Android now accepts only imported
+  pedometer data or classification-gated band counter totals; calibrated
+  gravity motion remains a separate `Steps estimate` and cannot reappear after
+  tapping a blank Steps card. Mirrored Swift/Kotlin regressions reject a
+  variable head-washing/hand-gesture sequence that advances the raw counter by
+  exactly 4,000 while still. Heart rate remains wear/effort context rather than
+  gait proof. The iOS app-report review now resets to the visible phase anchor.
+  Local evidence passes iOS report UI 3/3, Apple metric tests 22/22, Swift step
+  suites 76/76, Android focused step/Today/detail tests 104/104, and the final
+  iOS Simulator app build. Repository controls also pass: 82 focused control
+  tests, all ten required contexts, nine release checks, trusted self and exact
+  SDK artifact verification, 98 operations records, the 18,532-occurrence
+  terminology ratchet with zero forbidden mappings and unchanged customer
+  count, localization parity, and the 1,310-file health-claims scan. One
+  consolidated push, replacement exact-head hosted checks, non-author review,
+  protected integration/main verification, and synchronized physical
+  validation remain.
 - Final September 26 product-code head
   `4bcaa17a1e61eba864c03b7f1a16284cc5550c19` is pushed to PR `#17` and passes
   all ten required protected contexts. Exact stale all-still cleanup is

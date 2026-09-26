@@ -1495,9 +1495,9 @@ struct LiquidTodayView: View {
                      symbol: card.icon, tint: StrandPalette.accent,
                      frac: fracOver(displayDay?.respRateBpm, 24))
         case .steps:
-            // Route by the EXACT (key, source) the tile chose to display — WHOOP 5/MG motion estimate,
-            // imported Apple Health count, or calibrated motion estimate - NOT by bare key (bare "steps"
-            // resolves to apple-health and would mismatch a strap-derived value). Order-independent.
+            // Route by the exact measured/classified source the tile chose. When no primary source exists,
+            // the empty detail stays on the band Steps metric instead of exposing the separate calibrated
+            // gravity estimate as if it were gait.
             cardLink(.metricSourced(key: stepsDetailKey, source: stepsDetailSource), title: card.title, sub: stepsSourceCaption,
                      value: stepsText, symbol: card.icon,
                      tint: StrandPalette.metricCyan, frac: fracOver(stepCount, 10000))
@@ -3003,13 +3003,10 @@ struct LiquidTodayView: View {
             record(.rest, day: point.day, value: point.value)
         }
 
-        // Calibrated motion is the lowest-priority steps source.
-        for point in stepEstimates {
-            record(.steps, day: point.day, value: point.value)
-        }
+        // Gravity-only calibration remains an inspectable motion estimate, not a primary Steps source.
+        _ = stepEstimates
 
-        // The merged daily cache owns physiological history. A direct band step count replaces the
-        // calibrated estimate for that day, matching `MetricCatalog.todayStepsValue`.
+        // The merged daily cache owns physiological history. Classified band steps populate the series.
         for day in days {
             record(.hrv, day: day.day, value: day.avgHrv)
             record(.restingHr, day: day.day, value: day.restingHr.map(Double.init))
@@ -3915,8 +3912,8 @@ struct LiquidTodayView: View {
         )
     }
 
-    // Measured Apple Health count first, then WHOOP 5/MG @57 motion estimate, then calibrated fallback.
-    // The route and source caption below share this precedence so detail always matches the number shown.
+    // Measured Apple Health count first, then classified WHOOP 5/MG @57 motion estimate. Gravity-only
+    // calibration remains outside the primary Steps value.
     private var stepCount: Double? {
         MetricCatalog.todayStepsValue(imported: importedStepsDay.map(Double.init),
                                       motionDerived: displayDay?.steps.map(Double.init),
@@ -3933,7 +3930,6 @@ struct LiquidTodayView: View {
     private var stepsSourceCaption: String {
         if importedStepsDay != nil { return String(localized: "Imported · Apple Health") }
         if displayDay?.steps != nil { return String(localized: "Motion-derived estimate · Noop Band") }
-        if stepsEst != nil { return String(localized: "Motion-derived estimate · calibrated") }
         return String(localized: "No step source for this day")
     }
 
@@ -3963,7 +3959,7 @@ struct LiquidTodayView: View {
         UnitFormatter.massFromKilograms(kilograms, unit: massUnit)
     }
 
-    private var stepsDetailKey: String { stepsDetailMetric?.key ?? "steps_est" }
+    private var stepsDetailKey: String { stepsDetailMetric?.key ?? "steps" }
     private var stepsDetailSource: String { stepsDetailMetric?.source ?? "my-whoop" }
 
     private var energyBreakdown: DailyEnergyBreakdown {

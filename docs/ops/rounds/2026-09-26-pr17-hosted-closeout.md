@@ -2,8 +2,9 @@
 
 ## Status
 
-- State: `hosted product candidate complete; protected integration waiting for
-  required non-author approval`
+- State: `historical hosted-green product checkpoint; superseded by the
+  September 26 step-release/app-report replacement before protected
+  integration`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `4bcaa17a1e61eba864c03b7f1a16284cc5550c19`
@@ -11,6 +12,12 @@
   `4bcaa17a1e61eba864c03b7f1a16284cc5550c19`
 - Record commit or PR: application pull request `#17`; record commit is the
   documentation-only commit containing this file
+
+This record remains authoritative for exact product-code head `4bcaa17a`.
+Later PR head `d775d7c36bed7795f67ff447f0a8d645625be5ba` exposed an iOS app-report
+scroll regression and therefore is not represented as current-green by this
+checkpoint. The replacement and its current evidence are recorded in
+[Step release and app-report scroll](2026-09-26-step-release-and-report-scroll.md).
 
 ## Objective
 

@@ -573,11 +573,6 @@ struct TodayView: View {
     /// constant, so localizing both sides keeps the placeholder/real-value distinction intact.
     static let calibratingPlaceholder = String(localized: "Calibrating")
 
-    // H6, the steps-calibration sheet, opened from the Steps tile when it's showing an ESTIMATE (a WHOOP
-    // 4.0 user, whose strap doesn't transmit steps). Presents the SAME StepsCalibrationSheet Settings uses,
-    // so a 4.0 user can reach calibration from where they actually notice the "est." caption.
-    @State private var showStepsCalibration = false
-
     // A1 (#514/#706): the Charge breakdown sheet, opened by tapping the Today hero Charge ring. Its body
     // builds LAZILY on tap (#819 lag) and reads the drivers/confidence DERIVED from the same `displayDay`
     // the ring shows (never a second store read) plus the folded Readiness, so the sheet can never disagree
@@ -1734,11 +1729,6 @@ struct TodayView: View {
         .sheet(isPresented: $showUpdatesInbox) {
             UpdatesInboxView(onClose: { showUpdatesInbox = false })
         }
-        // H6, the steps-calibration sheet, opened from an estimated Steps tile (the same sheet Settings
-        // hosts). Presented from Today so a WHOOP 4.0 user can calibrate from where the "est." caption shows.
-        .sheet(isPresented: $showStepsCalibration) {
-            StepsCalibrationSheet(repo: repo, onClose: { showStepsCalibration = false })
-        }
         // A1 (#514/#706): the Charge breakdown, opened by tapping the Today hero Charge ring. The body
         // builds lazily here (#819 lag) from the drivers DERIVED off the displayed row (never a second read).
         .sheet(isPresented: $showChargeBreakdown) { chargeBreakdownSheet }
@@ -2492,7 +2482,7 @@ struct TodayView: View {
             let metric = selectedStepsMetric
             pinnedCardRow(icon: card.icon, tint: tint, title: card.title, subtitle: stepsSourceCaption,
                           value: dashboardValue(card), route: .metricSourced(
-                            key: metric?.key ?? "steps_est", source: metric?.source ?? "my-whoop"))
+                            key: metric?.key ?? "steps", source: metric?.source ?? "my-whoop"))
         case .calories:
             pinnedEnergyCardRow(card)
         case .hrv:
@@ -2604,8 +2594,8 @@ struct TodayView: View {
         case .sleep:
             return sleepValue(d)
         case .steps:
-            // #843/#813, a same-day measured phone count outranks WHOOP 5/MG's @57 motion estimate;
-            // never use a stale import or sparkline tail. The calibrated estimate is the final fallback.
+            // A same-day measured phone count outranks a classified WHOOP 5/MG @57 counter estimate.
+            // Gravity-only calibration is not gait evidence and is deliberately withheld here.
             let appleStepsForDay = appleDays.last(where: { $0.day == selectedDayKey })?.steps
             return MetricCatalog.todayStepsValue(
                 imported: appleStepsForDay.map(Double.init),
@@ -3820,7 +3810,8 @@ struct TodayView: View {
             )
         case .steps:
             // Prefer measured Apple Health steps FOR THE SELECTED DAY (#589), then WHOOP 5/MG's @57
-            // motion-derived estimate, then the calibrated fallback a WHOOP 4.0 user gets.
+            // classified motion-derived estimate. A gravity-only calibrated estimate is not gait proof
+            // and no longer fills the primary Steps tile.
             // #843/#813, a day shows a value only from @57 or a SAME-DAY phone import.
             // Never the latest imported Apple-Health row (it can be days stale) or the sparkline tail (that
             // is the most-recent value, not this day's): both froze the tile on an old import. Otherwise
@@ -3829,14 +3820,6 @@ struct TodayView: View {
             let strapMotionSteps = d?.steps.map { intString(Double($0)) }
             let importedSteps = appleStepsForDay.map { intString(Double($0)) }
             let primarySteps = importedSteps ?? strapMotionSteps
-            let estSteps = stepsEstByDay[selectedDayKey]
-            // H6, a calibrated-estimate day gets the calibration entry. @57 is already clearly labelled
-            // motion-derived, while an imported Apple Health count remains the measured source.
-            let isCalibratedEstimate = primarySteps == nil && estSteps != nil
-            // #589, when the tile would be BLANK on a strap that estimates steps (WHOOP 4.0: the steps
-            // pipeline has run, so there's calibration state recorded) explain WHY rather than a bare ", ",
-            // and still expose the ⚙︎ so the user can reach the sheet to set a manual coefficient.
-            let needsCalibration = primarySteps == nil && estSteps == nil && stepsPipelineActive
             let stepCaption: String = {
                 if importedSteps != nil {
                     return [String(localized: "Imported"), String(localized: "Apple Health")]
@@ -3846,30 +3829,16 @@ struct TodayView: View {
                     return [String(localized: "On-device"), String(localized: "Motion"), String(localized: "Steps estimate")]
                         .joined(separator: " · ")
                 }
-                if estSteps != nil { return stepsEstimateCaption }
-                if needsCalibration { return stepsCalibrationCaption }
-                return String(localized: "today")
+                return String(localized: "No step source for this day")
             }()
             StatTile(
                 label: "Steps",
-                value: primarySteps ?? estSteps.map { intString(Double($0)) } ?? StrandFormat.missing,
+                value: primarySteps ?? StrandFormat.missing,
                 systemImage: systemImage,
-                // An estimated day reads "est." plus the calibration STATUS (k / days / confidence) so a
-                // frozen-looking estimate self-explains (#760/#792); a not-yet-calibrated day says how many
-                // more phone-counted days are needed (so a blank tile is never silently unexplained, #589).
                 caption: stepCaption,
-                accent: (primarySteps != nil || estSteps != nil) ? StrandPalette.metricCyan : StrandPalette.textPrimary,
-                // H6, an estimated (or awaiting-calibration) steps tile carries a small ⚙︎ that opens the
-                // steps-calibration sheet (the SAME one Settings hosts), so a WHOOP 4.0 user can tune or
-                // hand-set the estimate from here even before enough auto-fit days exist (#589).
-                // #316, an @57 motion-estimate day with a known @63 activity class instead shows a small
-                // still/walk/run glyph, so the tile quietly says what the wrist was doing. The glyph and
-                // calibration gear are mutually exclusive, so they
-                // never collide in the single accessory slot.
+                accent: primarySteps != nil ? StrandPalette.metricCyan : StrandPalette.textPrimary,
                 accessory: {
-                    if isCalibratedEstimate || needsCalibration {
-                        stepsCalibrationButton
-                    } else if importedSteps == nil, strapMotionSteps != nil, let cls = stepActivityClassToday {
+                    if importedSteps == nil, strapMotionSteps != nil, let cls = stepActivityClassToday {
                         stepActivityIcon(cls)
                     }
                 }
@@ -4138,24 +4107,6 @@ struct TodayView: View {
         .help("How this score is calculated")
     }
 
-    /// H6, the small ⚙︎ on an ESTIMATED Steps tile that opens the steps-calibration sheet. A WHOOP 4.0
-    /// strap doesn't transmit steps, so NOOP estimates them from motion calibrated to the phone's count;
-    /// this puts the "tune that estimate" entry right where the user reads the "est." caption.
-    private var stepsCalibrationButton: some View {
-        Button {
-            showStepsCalibration = true
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 12, weight: .regular))
-                .foregroundStyle(StrandPalette.textTertiary)
-                .padding(8)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Calibrate steps estimate")
-        .help("Calibrate the steps estimate")
-    }
-
     /// #316 / @63, the small still/walk/run glyph on a REAL (measured) Steps tile. Maps the decoded
     /// activity-class enum (0=still, 1=walk, 2=run) to an SF Symbol, tinted with the tile's own metric
     /// colour so it reads as part of the tile rather than an alert. Mirrors the Android DirectionsWalk/Run
@@ -4174,43 +4125,6 @@ struct TodayView: View {
             .foregroundStyle(StrandPalette.metricCyan)
             .accessibilityLabel(label)
             .help(label)
-    }
-
-    /// #589, true once the WHOOP-4.0 steps-ESTIMATE pipeline has run for this user, i.e. the
-    /// IntelligenceEngine has mirrored some calibration state into the profile (a fitted/manual
-    /// coefficient, OR a recorded count of overlapping phone-counted days while still gathering).
-    /// Gates the "needs calibration" affordance so a user whose strap reports @57 motion steps (5/MG) or who
-    /// has no strap at all never sees a steps-calibration prompt on a blank tile.
-    private var stepsPipelineActive: Bool {
-        profile.stepsCalibrationCoefficient > 0
-            || profile.stepsManualCoefficient > 0
-            || profile.stepsCalibrationSampleDays > 0
-    }
-
-    /// #589, the honest one-liner for a blank, not-yet-calibrated Steps tile: how many more days the
-    /// phone also has to count steps before an estimate appears. Built from the SAME engine descriptor
-    /// Settings uses (`StepsEstimateEngine.CalibrationStatus`) so the wording matches across surfaces.
-    private var stepsCalibrationCaption: String {
-        let status = StepsEstimateEngine.CalibrationStatus.needsMoreDays(
-            have: profile.stepsCalibrationSampleDays,
-            need: StepsEstimateEngine.minCalibrationDays)
-        return status.headline
-    }
-
-    /// #760/#792: the caption under an ESTIMATED Steps tile: "est. · <status detail>", where the detail is
-    /// the engine's own STATUS line (manual k, or k=… from N days + confidence tier) built from the SAME
-    /// persisted calibration the estimate used. So a WHOOP 4.0 user can see WHY the number reads as it does
-    /// (and why it may look frozen at low confidence) right where they notice the "est." flag, matching
-    /// Android. Falls back to a bare "est." if no coefficient is recorded yet.
-    private var stepsEstimateCaption: String {
-        let status: StepsEstimateEngine.CalibrationStatus = profile.stepsCalibrationManual
-            ? .manual(coefficient: profile.stepsCalibrationCoefficient,
-                      sampleDays: profile.stepsCalibrationSampleDays)
-            : .calibrated(coefficient: profile.stepsCalibrationCoefficient,
-                          sampleDays: profile.stepsCalibrationSampleDays,
-                          confidence: profile.stepsCalibrationConfidence)
-        guard profile.stepsCalibrationCoefficient > 0 else { return String(localized: "est.") }
-        return String(localized: "est. · \(status.detail)")
     }
 
     // MARK: - Loading
@@ -5089,9 +5003,6 @@ struct TodayView: View {
             return String(localized: "Measured · Apple Health")
         }
         if displayDay?.steps != nil { return String(localized: "Motion-derived estimate · Noop Band") }
-        if stepsEstByDay[selectedDayKey] != nil {
-            return String(localized: "Motion-derived estimate · calibrated")
-        }
         return String(localized: "No step source for this day")
     }
 

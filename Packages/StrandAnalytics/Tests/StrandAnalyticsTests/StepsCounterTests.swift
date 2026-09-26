@@ -86,6 +86,32 @@ final class StepsCounterTests: XCTestCase {
         XCTAssertNil(StepsCounter.stepsInWindow(samples))
     }
 
+    func testHeadWashingHandGesturesDoNotIncreaseSteps() {
+        // Regression: repetitive arm/hand motion while standing in place advanced the raw wrist counter
+        // by about 4,000. Every individual delta is plausible and below the gap guard, so the stationary
+        // activity class, not a size heuristic or heart-rate threshold, must reject the whole sequence.
+        let counters = [
+            10_000, 10_180, 10_600, 10_860, 11_360, 11_670,
+            12_060, 12_510, 12_790, 13_280, 13_600, 14_000,
+        ]
+        let samples = counters.enumerated().map { index, counter in
+            step(index * 20, counter, 0)
+        }
+        let analysis = StepsCounter.analyze(
+            samples,
+            classificationPolicy: .requireActivityClass
+        )
+
+        XCTAssertEqual(analysis.unfilteredRawTicks, 4_000)
+        XCTAssertEqual(analysis.rejectedStillDeltaCount, counters.count - 1)
+        XCTAssertEqual(analysis.rawTicks, 0)
+        XCTAssertNil(analysis.steps)
+        XCTAssertNil(StepsCounter.stepsInWindow(
+            samples,
+            classificationPolicy: .requireActivityClass
+        ))
+    }
+
     func testContinuousAllStillCoverageCanRepairExactLegacyValue() {
         let samples = (0...6).map { step($0 * 600, $0 * 100, 0) }
         let analysis = StepsCounter.analyze(

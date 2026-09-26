@@ -97,6 +97,34 @@ class StepsCounterTest {
         assertNull(StepsCounter.stepsInWindow(samples))
     }
 
+    @Test fun headWashingHandGesturesDoNotIncreaseSteps() {
+        // Regression: repetitive arm/hand motion while standing in place advanced the raw wrist counter
+        // by about 4,000. Every delta is plausible and below the gap guard, so stationary classification,
+        // not a size heuristic or heart-rate threshold, must reject the complete sequence.
+        val counters = listOf(
+            10_000, 10_180, 10_600, 10_860, 11_360, 11_670,
+            12_060, 12_510, 12_790, 13_280, 13_600, 14_000,
+        )
+        val samples = counters.mapIndexed { index, counter ->
+            step(index * 20L, counter, activityClass = 0)
+        }
+        val analysis = StepsCounter.analyze(
+            samples,
+            StepsCounter.ClassificationPolicy.requireActivityClass,
+        )
+
+        assertEquals(4_000, analysis.unfilteredRawTicks)
+        assertEquals(counters.size - 1, analysis.rejectedStillDeltaCount)
+        assertEquals(0, analysis.rawTicks)
+        assertNull(analysis.steps)
+        assertNull(
+            StepsCounter.stepsInWindow(
+                samples,
+                StepsCounter.ClassificationPolicy.requireActivityClass,
+            ),
+        )
+    }
+
     @Test fun continuousAllStillCoverageCanRepairExactLegacyValue() {
         val samples = (0..6).map { index ->
             step(index * 600L, index * 100, activityClass = 0)

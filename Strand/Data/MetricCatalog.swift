@@ -368,21 +368,24 @@ enum MetricCatalog {
 
     /// The source the Today steps tile taps through to, matching the value it displays. A measured
     /// pedometer count imported from Apple Health always outranks WHOOP 5/MG's @57 motion-derived
-    /// estimate; the calibrated WHOOP 4 fallback is last. This ordering is shared with Android.
+    /// estimate. A gravity-only calibrated motion estimate is not a step source and therefore does not
+    /// make the primary Steps surface tappable. This ordering is shared with Android.
     static func todayStepsMetric(hasMotionDerivedSteps: Bool, hasImportedSteps: Bool = false) -> MetricDescriptor? {
         if hasImportedSteps { return metric(key: "steps", source: "apple-health") }
         if hasMotionDerivedSteps { return metric(key: "steps", source: "my-whoop") }
-        return metric(key: "steps_est", source: "my-whoop")
+        return nil
     }
 
-    /// One-value form of the measured-first steps contract. Keeping the arbitration here prevents a
-    /// card, dashboard row and route from independently drifting back to motion-first precedence.
+    /// One-value form of the pedometer/classified-counter-only Steps contract. `calibratedEstimate` is
+    /// accepted for call-site compatibility but intentionally withheld: sparse wrist gravity can describe
+    /// movement, not gait, and must not become a primary step count.
     static func todayStepsValue<T>(imported: T?, motionDerived: T?, calibratedEstimate: T?) -> T? {
-        imported ?? motionDerived ?? calibratedEstimate
+        _ = calibratedEstimate
+        return imported ?? motionDerived
     }
 
-    /// Per-day form used by Today sparklines. Sources are merged by day rather than choosing one whole
-    /// series, so a measured import wins every overlapping day while motion estimates still fill gaps.
+    /// Per-day form used by Today sparklines. Measured imports win overlapping days and classified
+    /// counter totals fill gaps. Gravity-only estimates remain outside the primary Steps series.
     static func todayStepsSeries(
         imported: [(day: String, value: Double)],
         motionDerived: [(day: String, value: Double)],
@@ -394,12 +397,12 @@ enum MetricCatalog {
         }
         let importedByDay = byDay(imported)
         let motionByDay = byDay(motionDerived)
-        let estimateByDay = byDay(calibratedEstimate)
-        return Set(importedByDay.keys).union(motionByDay.keys).union(estimateByDay.keys)
+        _ = calibratedEstimate
+        return Set(importedByDay.keys).union(motionByDay.keys)
             .sorted()
             .compactMap { day in
                 todayStepsValue(imported: importedByDay[day], motionDerived: motionByDay[day],
-                                calibratedEstimate: estimateByDay[day]).map { (day, $0) }
+                                calibratedEstimate: nil).map { (day, $0) }
             }
     }
 

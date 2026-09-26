@@ -146,12 +146,18 @@ class TodayMetricTilesTest {
     }
 
     @Test
-    fun calibratedFallbackIsAlsoExplicitlyMotionDerived() {
+    fun calibratedMotionDoesNotBecomePrimarySteps() {
+        assertNull(stepsSourceCaption(motionDerived = null, imported = null, calibratedEstimate = 7_000))
+        assertEquals("Steps", stepsTileLabel(null, null, 7_000))
+        assertNull(resolvedSteps(imported = null, motionDerived = null, calibratedEstimate = 7_000))
         assertEquals(
-            "Motion-derived estimate · calibrated",
-            stepsSourceCaption(motionDerived = null, imported = null, calibratedEstimate = 7_000),
+            emptyList<Pair<String, Double>>(),
+            resolvedStepsSeries(
+                imported = emptyMap(),
+                motionDerived = emptyMap(),
+                calibratedEstimate = mapOf("2026-01-04" to 7_000),
+            ),
         )
-        assertEquals("Motion-derived steps", stepsTileLabel(null, null, 7_000))
     }
 
     // MARK: buildingHint — the unscored Effort/Rest "it's coming" caption, today-only (#527)
