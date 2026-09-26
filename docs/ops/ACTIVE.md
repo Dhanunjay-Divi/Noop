@@ -12,6 +12,16 @@ Last updated: **2026-09-26**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
+- Public checkpoints `c8a986a61` and `cf7e28e4b` now simplify the mobile
+  Account/Data hierarchy and reframe the shared destination as Data & Sync.
+  Local backup and restore remain primary; legacy D-036 self-hosted sync is
+  unchanged behind a default-collapsed Advanced control. Apple contracts pass
+  17/17, Android focused navigation plus Full/Demo compilation pass, the exact
+  unsigned iPhone graph validates Watch, complications, and widgets, and a
+  1206 x 2622 iPhone 17 Pro simulator capture shows no clipping or overlap in
+  the tested dark appearance. These public branch pushes trigger no workflows
+  because there is no pull request and automatic push workflows target
+  protected `main`.
 - The September 17 readiness closeout is active on a stacked public checkpoint
   branch. macOS fresh installs now enter the viewer/account shell rather than a
   collector-only BLE dead end. Watch snapshots carry an exact optional HR

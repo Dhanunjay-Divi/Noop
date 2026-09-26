@@ -9,7 +9,7 @@
   `169230a9ae38ac8b4ca4b690489cd29f5af47ee4`
 - End implementation commit: pending
 - Record checkpoint:
-  `8ba797109f01dfe44cdd2760a6e2fa3b4f598bfc`
+  `cf7e28e4b69d7304551ac126e74833db77011d10`
 
 ## Objective
 
@@ -122,7 +122,7 @@ explicitly gated migration work open.
 - Mac account-history and enrollment copy is translated across every supported
   Apple application locale. The complete unsigned iPhone graph remains
   compatible and embeds Watch, complications, and widgets.
-- iPhone and Android More now place Band Account and Backup & Sync first as
+- iPhone and Android More now place Band Account and Data & Sync first as
   ordinary setup rows, before everyday shortcuts and the collapsible
   catalogue. Their duplicate Body/Data rows were removed, the oversized NOOP+
   hero was removed, and NOOP+ remains reachable as one conventional Data row.
@@ -133,6 +133,15 @@ explicitly gated migration work open.
   iPhone 17 Pro simulator with seeded fictional data. The 1206 x 2622 capture
   showed the revised hierarchy without clipping, overlap, or hidden setup
   actions at the tested text size and appearance.
+- Apple and Android now present the destination as Data & Sync with localized
+  title and purpose copy. Local folder backup, automatic snapshots, and restore
+  remain primary. D-036 self-hosted sync remains available and behaviorally
+  unchanged behind one default-collapsed Advanced control at the end of the
+  screen; no authority, consent, upload, credential, retention, or formula
+  contract changed.
+- macOS uses the same Data & Sync display label while preserving the legacy
+  `Backup & Sync` raw navigation identifier so existing persisted navigation
+  state remains compatible.
 - The two formula-review findings were reconciled against current source:
   Recovery education already names only the five production inputs and rejects
   recent-load wording in tests; Rest already publishes as `noop-rest-v2` with
@@ -201,14 +210,18 @@ explicitly gated migration work open.
 | Apple `MoreListParityTests` and `MoreSectionPrefsTests` through the bounded runner | 24/24 pass | Account/data rows lead More, NOOP+ has one normal catalogue row, quick access is bounded, and every typed destination remains reachable | VoiceOver traversal or physical-device rendering |
 | Android `PrimaryNavigationContractTest` plus Full/Demo Kotlin compilation through the bounded runner | 6/6 pass; both variants compile | Android mirrors the same Account/Data/NOOP+ order and retains its routes without duplicate grouped rows | TalkBack traversal, OEM rendering, or physical navigation |
 | Headless iPhone 17 Pro simulator install, seeded More launch, and 1206 x 2622 screenshot inspection | Pass | The exact built app renders the revised hierarchy without clipping or overlap in the inspected state | Other devices, Dynamic Type sizes, light mode, or physical behavior |
+| Apple `MoreListParityTests` through the bounded runner at `cf7e28e4b` | 17/17 pass | Data & Sync is the visible Apple label, local backup/restore precede Advanced, and the legacy self-hosted card remains reachable only after expansion | Physical VoiceOver traversal or live sync behavior |
+| Android `PrimaryNavigationContractTest` plus Full/Demo Kotlin compilation through the bounded runner at `cf7e28e4b` | Pass | Android localizes the new title/purpose across nine resource sets, keeps self-hosting default-collapsed after restore, and preserves both build variants | Physical TalkBack traversal, OEM rendering, or live sync behavior |
+| Exact unsigned `NOOPiOS` generic Simulator build through the bounded runner at `cf7e28e4b` | Pass | The complete iPhone graph compiles and validates embedded Watch, complications, and widgets | Signing, physical devices, BLE, background execution, or delivery |
+| Headless iPhone 17 Pro simulator install, direct `backup_sync` route, and 1206 x 2622 screenshot inspection at `cf7e28e4b` | Pass | The Data & Sync title, subtitle, local controls, persistent bottom navigation, and tested dark appearance render without clipping or overlap | Advanced expanded state, other sizes, Dynamic Type, light mode, or physical behavior |
 | `python3 Tools/i18n_audit.py --platform all --full` | Pass; tracked Apple baseline remains 129 | No localization regression; all existing focus-locale catalog keys and Android locale resources are complete | Native-speaker review or visual fit |
 | Private-data guard, 1,312-file health-claims scan, nine source release controls, operations validation, JSON/XML parsing, and diff hygiene | Pass | The change adds no tracked private filename, unsafe health claim, release-control regression, malformed catalog/resource, or operations-record error | External credentials, legal approval, hosted production state, or physical behavior |
 | Live `gh pr view 16`, `gh pr view 17`, and remote-ref queries | PR 16 merged at `9c5141754`; PR 17 exact head `169230a9a` is open, mergeable, and 10/10 required contexts pass | The release-blocker handoff is refreshed from current protected repository state | Approval, integration of this follow-on branch, or physical behavior |
 
 ## Physical device and deployment
 
-- Install/update action: exact unsigned build installed to a headless iPhone 17
-  Pro simulator for More-screen inspection; no physical install.
+- Install/update action: exact unsigned builds installed to a headless iPhone
+  17 Pro simulator for More and Data & Sync inspection; no physical install.
 - Generalized device and OS class: hosted macOS/iOS simulator, local iOS 26.5
   simulator, and source evidence only.
 - Data-preservation result: no data mutation at round start.
@@ -235,10 +248,12 @@ explicitly gated migration work open.
   baseline-state copy checkpoint `cf967394c`; authority-guidance checkpoint
   `f3c98eaa1`; managed-document conflict recovery checkpoint `8e3947854`.
   History-only managed restore checkpoint `415bf5909`; macOS account-history
-  viewer checkpoint `9d57b6b35`; evidence/cleanup checkpoint `8ba797109`.
+  viewer checkpoint `9d57b6b35`; evidence/cleanup checkpoint `8ba797109`;
+  mobile hierarchy checkpoint `c8a986a61`; Data & Sync presentation checkpoint
+  `cf7e28e4b`.
 - Branch and remote state:
   `codex/sept17-readiness-closeout-20260926` tracks its public remote.
-  Checkpoints through `8ba797109` are pushed and triggered zero workflows
+  Checkpoints through `cf7e28e4b` are pushed and triggered zero workflows
   because the branch has no pull request and push workflows are scoped to
   `main`.
 - Repository visibility verified: public.
@@ -264,21 +279,17 @@ explicitly gated migration work open.
 - The Mac viewer restore is source/simulator verified but not exercised against
   a signed production account. Large-history catch-up latency and continuation
   require staging and physical validation.
-- The More hierarchy now matches the useful part of the September 17 finding,
-  but the destination still uses the legacy `Backup & Sync` title and presents
-  self-hosted sync prominently. A separate cross-platform slice must rename it
-  to Data & Sync and demote self-hosting to an advanced option without removing
-  D-036 compatibility or changing data authority.
+- Data & Sync now matches the useful information-architecture finding without
+  removing D-036 compatibility or changing data authority. Native-speaker
+  review, physical accessibility traversal, other device sizes, and the
+  expanded Advanced state remain outside this simulator/source evidence.
 - App-level database encryption and existing-user authority migration require
   separate approved designs and evidence before activation.
 
 ## Next round
 
-1. Rename/reframe the mobile Backup & Sync destination as Data & Sync and move
-   legacy self-hosted configuration behind an advanced presentation while
-   preserving D-036 compatibility and current local/offline behavior.
-2. Run the applicable complete Apple/Android/repository-control walls.
-3. Open or update the normal protected review only after the consolidated
+1. Run the applicable complete Apple/Android/repository-control walls.
+2. Open or update the normal protected review only after the consolidated
    candidate is locally green, then require exact-head hosted checks,
    non-author approval, protected integration, and protected-main verification.
 
