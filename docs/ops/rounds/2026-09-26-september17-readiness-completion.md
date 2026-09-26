@@ -9,7 +9,7 @@
   `169230a9ae38ac8b4ca4b690489cd29f5af47ee4`
 - End implementation commit: pending
 - Record checkpoint:
-  `8e39478544cf26cc2a25fbb41e71b33fd81b530e`
+  `9d57b6b354fa1e1c843a9e9ee0f5e8c2e3020b2b`
 
 ## Objective
 
@@ -107,6 +107,21 @@ explicitly gated migration work open.
 - Conflict diagnostics remain bounded to the fixed `document_conflict`
   category. Document ids, local keys, account scopes, payloads, health values,
   and exact revisions do not enter app reports.
+- Managed sync now exposes a strict history-only restore mode for signed-in
+  viewers. It downloads retained metric chunks without source registration,
+  health or document upload, local pruning, or document download/application;
+  the existing phone sync path retains full document behavior.
+- An enrolled macOS viewer now restores retained account history during app
+  startup, refreshes the local metric repository only after applied changes,
+  displays a read-only Account history status with manual retry, and continues
+  to expose no BLE, source-registration, Friends mutation, sharing change,
+  paging, Safety mutation, or cloud-upload path.
+- The macOS restore boundary is account-fenced before, during, and after the
+  operation. Its diagnostics contain only fixed outcomes, a bounded applied
+  count, continuation state, and a categorical failure kind.
+- Mac account-history and enrollment copy is translated across every supported
+  Apple application locale. The complete unsigned iPhone graph remains
+  compatible and embeds Watch, complications, and widgets.
 - The two formula-review findings were reconciled against current source:
   Recovery education already names only the five production inputs and rejects
   recent-load wording in tests; Rest already publishes as `noop-rest-v2` with
@@ -140,11 +155,12 @@ explicitly gated migration work open.
 - Existing evidence reused: `AppDiagnosticsRecorder` ownership operation spans,
   authorized Watch snapshot tests, onboarding step-selection tests, managed
   sync operation spans, and hosted exact-SHA checks.
-- New bounded events or operation spans: no new event family was needed.
-  Existing managed-sync spans now distinguish the fixed
-  `document_conflict` category from generic `conflict`; the typed error retains
-  only an allowlisted document kind and numeric remote revision for local
-  recovery logic.
+- New bounded events or operation spans:
+  `managed_macos.history_restore` records only outcome, a capped applied-change
+  count, continuation state, and fixed failure kind. Existing managed-sync
+  spans distinguish the fixed `document_conflict` category from generic
+  `conflict`; the typed error retains only an allowlisted document kind and
+  numeric remote revision for local recovery logic.
 - Redaction, retention, and high-frequency controls: no email, phone, OTP,
   account, device, health value, provider message, or URL may enter diagnostics.
 - Cross-platform/backend correlation: Apple and Android user-visible account
@@ -166,6 +182,8 @@ explicitly gated migration work open.
 | `swift test --package-path Packages/NoopRemoteSync --filter WhoopManagedSyncAdapterTests` through the bounded runner | 13/13 pass | A newer local managed-document generation remains intact and maps to typed document kind/revision context | Production service concurrency or physical-device network transitions |
 | Apple `ManagedCloudDocumentAdapterTests` and `ManagedCloudRetryContractTests` through the bounded runner | 16/16 pass; final contract recheck 14/14 pass | Local preferences are not replaced, export recovery recognizes the typed conflict, diagnostics stay categorical, and both mobile surfaces retain a visible manual retry | Production cloud races or physical UI interaction |
 | Android Full/Demo Kotlin compilation, focused `ManagedDocumentConflictContractTest`, and Full instrumentation-source compilation through the bounded runner | Pass | Both flavors carry only bounded conflict context, retain generic conflict compatibility, compile the Room conflict assertions, and expose the localized retry path | On-device Room execution or production service races |
+| `swift test --package-path Packages/NoopRemoteSync` through the bounded runner | 193/193 pass | History-only restore excludes documents and preserves all existing full-sync/document behavior | Production service availability, large-account latency, or signed clients |
+| macOS `MacViewerRuntimeContractTests` through the bounded runner | 9/9 pass | Startup account-history restore is wired, localized, account-fenced, read-only, and remains outside BLE/mutation entitlements | Signed physical Mac behavior, live Firebase/App Check, or real account data |
 | `xcodebuild -scheme NOOPiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` through the bounded runner | Pass | iOS-only ownership code type-checks and the app embeds/validates Watch, Watch complications, and widgets | Signing, physical devices, WatchConnectivity, BLE, background execution, or delivery |
 | `python3 Tools/i18n_audit.py --platform all --full` | Pass; tracked Apple baseline remains 129 | No localization regression; all existing focus-locale catalog keys and Android locale resources are complete | Native-speaker review or visual fit |
 | Private-data guard, 1,312-file health-claims scan, nine source release controls, operations validation, JSON/XML parsing, and diff hygiene | Pass | The change adds no tracked private filename, unsafe health claim, release-control regression, malformed catalog/resource, or operations-record error | External credentials, legal approval, hosted production state, or physical behavior |
@@ -179,6 +197,12 @@ explicitly gated migration work open.
 - Data-preservation result: no data mutation at round start.
 - BLE/background/haptic/battery scenarios exercised: not run.
 - Unrun hardware gates: all physical Apple/Android/Watch and band scenarios.
+- Round-owned resource cleanup: exact-deleted
+  `/tmp/noop-mac-history-derived` and
+  `/tmp/noop-mac-history-ios-derived` after their bounded build processes
+  terminated, reclaiming about 8.7 GiB. No shared DerivedData, simulator,
+  source, session, user data, or unrelated temporary path was removed; both
+  paths were verified absent and system free space was about 23 GiB afterward.
 
 ## Git and release state
 
@@ -190,9 +214,11 @@ explicitly gated migration work open.
   first-run hierarchy and named-progress checkpoint `c71dde298`; Daily Signal
   baseline-state copy checkpoint `cf967394c`; authority-guidance checkpoint
   `f3c98eaa1`; managed-document conflict recovery checkpoint `8e3947854`.
+  History-only managed restore checkpoint `415bf5909`; macOS account-history
+  viewer checkpoint `9d57b6b35`.
 - Branch and remote state:
   `codex/sept17-readiness-closeout-20260926` tracks its public remote.
-  Checkpoints through `8e3947854` are pushed and triggered zero workflows
+  Checkpoints through `9d57b6b35` are pushed and triggered zero workflows
   because the branch has no pull request and push workflows are scoped to
   `main`.
 - Repository visibility verified: public.
@@ -215,13 +241,16 @@ explicitly gated migration work open.
 - Managed-document conflict resolution deliberately keeps the newer local
   generation and requires a later explicit retry; no automatic field merge is
   claimed.
+- The Mac viewer restore is source/simulator verified but not exercised against
+  a signed production account. Large-history catch-up latency and continuation
+  require staging and physical validation.
 - App-level database encryption and existing-user authority migration require
   separate approved designs and evidence before activation.
 
 ## Next round
 
-1. Reconcile the remaining macOS account-history viewer and Account/Data &
-   Sync information-architecture findings against current source.
+1. Reconcile the remaining Account/Data & Sync information-architecture
+   finding against current iPhone and Android source.
 2. Run the applicable complete Apple/Android/repository-control walls.
 3. Open or update the normal protected review only after the consolidated
    candidate is locally green, then require exact-head hosted checks,
