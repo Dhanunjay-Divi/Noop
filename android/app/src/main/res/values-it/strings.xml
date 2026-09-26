@@ -550,4 +550,5 @@
     <string name="ownership_verification_rate_limited">Troppe richieste di verifica. Attendi prima di riprovare.</string>
     <string name="ownership_verification_cooldown_active">Attendi la fine del conto alla rovescia prima di richiedere un altro messaggio di verifica.</string>
     <string name="ownership_network_unavailable">Riconnettiti a Internet e riprova.</string>
+    <string name="managed_cloud_error_document_conflict">NOOP ha conservato i tuoi dati attuali. Controlla le modifiche più recenti, quindi tocca “Sincronizza ora” per riprovare.</string>
 </resources>

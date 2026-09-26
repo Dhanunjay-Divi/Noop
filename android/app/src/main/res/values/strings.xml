@@ -2735,6 +2735,7 @@
     <string name="managed_cloud_error_not_found">The requested NOOP+ resource no longer exists.</string>
     <string name="managed_cloud_error_quota">This NOOP+ storage allowance is full.</string>
     <string name="managed_cloud_error_conflict">NOOP+ rejected conflicting sync state.</string>
+    <string name="managed_cloud_error_document_conflict">NOOP kept your current data. Review your latest changes, then tap Sync now to retry.</string>
     <string name="managed_cloud_error_server">NOOP+ is temporarily unavailable.</string>
     <string name="managed_cloud_error_digest">A cloud object failed its integrity check.</string>
     <string name="managed_cloud_error_generic">NOOP+ could not complete that request. Try again.</string>

@@ -656,7 +656,18 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
             )
             XCTFail("Expected local generation conflict")
         } catch {
-            XCTAssertEqual(error as? ManagedStorageError, .conflict)
+            let conflict = try XCTUnwrap(error as? ManagedStorageError)
+            XCTAssertEqual(
+                conflict,
+                ManagedStorageError.documentConflict(
+                    documentKind: .dayOwnership,
+                    remoteRevision: 2
+                )
+            )
+            XCTAssertEqual(
+                conflict.errorDescription,
+                "NOOP kept your current data. Review your latest changes, then tap Sync now to retry."
+            )
         }
 
         let retained = try await destination.registryWriter.read { db in

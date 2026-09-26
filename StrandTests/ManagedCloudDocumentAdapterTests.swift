@@ -29,7 +29,13 @@ final class ManagedCloudDocumentAdapterTests: XCTestCase {
             )
             XCTFail("Expected the unacknowledged local preference to win")
         } catch {
-            XCTAssertEqual(error as? ManagedStorageError, .conflict)
+            XCTAssertEqual(
+                error as? ManagedStorageError,
+                .documentConflict(
+                    documentKind: .preferences,
+                    remoteRevision: fixture.document.revision
+                )
+            )
         }
 
         XCTAssertEqual(

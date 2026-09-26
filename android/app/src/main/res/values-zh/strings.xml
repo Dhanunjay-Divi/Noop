@@ -2522,6 +2522,7 @@
     <string name="managed_cloud_error_not_found">请求的 NOOP+ 资源已不存在。</string>
     <string name="managed_cloud_error_quota">NOOP+ 存储空间已满。</string>
     <string name="managed_cloud_error_conflict">NOOP+ 拒绝了冲突的同步状态。</string>
+    <string name="managed_cloud_error_document_conflict">NOOP 保留了您当前的数据。请检查最近的更改，然后轻点“立即同步”重试。</string>
     <string name="managed_cloud_error_server">NOOP+ 暂时不可用。</string>
     <string name="managed_cloud_error_digest">云端对象未通过完整性检查。</string>
     <string name="managed_cloud_error_generic">NOOP+ 无法完成该请求，请重试。</string>

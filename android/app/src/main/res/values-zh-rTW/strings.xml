@@ -550,4 +550,5 @@
     <string name="ownership_verification_rate_limited">驗證要求過多。請稍候再試。</string>
     <string name="ownership_verification_cooldown_active">請等待倒數結束後再要求新的驗證訊息。</string>
     <string name="ownership_network_unavailable">請重新連接網際網路後再試。</string>
+    <string name="managed_cloud_error_document_conflict">NOOP 保留了你目前的資料。請檢查最近的變更，然後點一下「立即同步」重試。</string>
 </resources>

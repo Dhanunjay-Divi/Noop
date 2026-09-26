@@ -728,7 +728,8 @@ final class MacManagedViewerService: ObservableObject {
         if error is MacManagedViewerError { return "rejected" }
         if let storage = error as? ManagedStorageError {
             switch storage {
-            case .authentication, .forbidden, .policyChanged, .conflict:
+            case .authentication, .forbidden, .policyChanged, .conflict,
+                 .documentConflict:
                 return "rejected"
             default:
                 return "failed"
@@ -763,6 +764,7 @@ final class MacManagedViewerService: ObservableObject {
             case .cursorExpired: return "cursor"
             case .quotaExceeded: return "quota"
             case .conflict: return "conflict"
+            case .documentConflict: return "document_conflict"
             case .server: return "server"
             case .digestMismatch: return "integrity"
             }

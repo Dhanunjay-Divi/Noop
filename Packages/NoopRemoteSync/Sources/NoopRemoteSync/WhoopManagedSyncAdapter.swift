@@ -944,7 +944,10 @@ public actor WhoopManagedDocumentAdapter:
             )
             guard applyResult.acceptedRevision else { return }
         } catch ManagedDocumentStoreError.unacknowledgedLocalGeneration {
-            throw ManagedStorageError.conflict
+            throw ManagedStorageError.documentConflict(
+                documentKind: document.documentKind,
+                remoteRevision: document.revision
+            )
         } catch {
             throw ManagedStorageError.invalidResponse
         }

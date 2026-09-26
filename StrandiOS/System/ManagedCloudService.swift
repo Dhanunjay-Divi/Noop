@@ -3941,6 +3941,8 @@ final class ManagedCloudService: ObservableObject {
                 return "quota_exceeded"
             case .conflict:
                 return "conflict"
+            case .documentConflict:
+                return "document_conflict"
             case .server(let status, _):
                 return status >= 500 ? "server_5xx" : "server_rejected"
             case .digestMismatch:
@@ -3975,7 +3977,8 @@ final class ManagedCloudService: ObservableObject {
         case "input", "authentication", "forbidden", "consent",
              "identity_input", "app_verification", "identity_provider_disabled",
              "verification_expired", "rate_limited", "policy_changed",
-             "quota_exceeded", "conflict", "server_rejected",
+             "quota_exceeded", "conflict", "document_conflict",
+             "server_rejected",
              "location_not_authorized":
             return "rejected"
         case "canceled":
@@ -5593,6 +5596,11 @@ final class ManagedCloudService: ObservableObject {
                 return String(localized: "This NOOP+ storage allowance is full.")
             case .conflict:
                 return String(localized: "NOOP+ rejected conflicting sync state.")
+            case .documentConflict:
+                return String(
+                    localized:
+                        "NOOP kept your current data. Review your latest changes, then tap Sync now to retry."
+                )
             case .server:
                 return String(localized: "NOOP+ is temporarily unavailable.")
             case .digestMismatch:

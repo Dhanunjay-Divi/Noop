@@ -2522,6 +2522,7 @@
     <string name="managed_cloud_error_not_found">O recurso NOOP+ pedido já não existe.</string>
     <string name="managed_cloud_error_quota">O espaço de armazenamento do NOOP+ está cheio.</string>
     <string name="managed_cloud_error_conflict">O NOOP+ rejeitou um estado de sincronização incompatível.</string>
+    <string name="managed_cloud_error_document_conflict">O NOOP manteve os seus dados atuais. Reveja as alterações mais recentes e toque em «Sincronizar agora» para tentar novamente.</string>
     <string name="managed_cloud_error_server">O NOOP+ está temporariamente indisponível.</string>
     <string name="managed_cloud_error_digest">Um objeto da nuvem falhou a verificação de integridade.</string>
     <string name="managed_cloud_error_generic">O NOOP+ não conseguiu concluir este pedido. Tente novamente.</string>

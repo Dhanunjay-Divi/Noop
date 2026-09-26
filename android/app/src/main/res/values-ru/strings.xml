@@ -550,4 +550,5 @@
     <string name="ownership_verification_rate_limited">Слишком много запросов подтверждения. Подождите перед повторной попыткой.</string>
     <string name="ownership_verification_cooldown_active">Дождитесь окончания обратного отсчёта, прежде чем запрашивать новое сообщение для подтверждения.</string>
     <string name="ownership_network_unavailable">Восстановите подключение к Интернету и повторите попытку.</string>
+    <string name="managed_cloud_error_document_conflict">NOOP сохранил текущие данные. Проверьте последние изменения, затем нажмите «Синхронизировать сейчас», чтобы повторить попытку.</string>
 </resources>
