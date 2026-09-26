@@ -27,6 +27,8 @@ final class MacManagedViewerService: ObservableObject {
     @Published private(set) var socialRequests: [ManagedSocialRequest] = []
     @Published private(set) var socialFeed: [ManagedSocialFeedDay] = []
     @Published private(set) var lastUpdatedAt: Date?
+    @Published private(set) var historyLastUpdatedAt: Date?
+    @Published private(set) var historyHasMore = false
 
     var isAvailable: Bool { configuration != nil }
 
@@ -64,7 +66,7 @@ final class MacManagedViewerService: ObservableObject {
         phase = configuration == nil ? .unavailable : .signedOut
     }
 
-    func bootstrap() async {
+    func bootstrap(repo: Repository) async {
         guard !isBusy else { return }
         guard configuration != nil else {
             phase = .unavailable
@@ -93,7 +95,11 @@ final class MacManagedViewerService: ObservableObject {
                 return
             }
             try await user.reload()
-            try await reconcile(user: user, refreshIfEnrolled: true)
+            try await reconcile(
+                user: user,
+                refreshIfEnrolled: true,
+                repo: repo
+            )
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
                 outcome: "completed",
@@ -111,7 +117,11 @@ final class MacManagedViewerService: ObservableObject {
         }
     }
 
-    func signIn(email rawEmail: String, password: String) async {
+    func signIn(
+        email rawEmail: String,
+        password: String,
+        repo: Repository
+    ) async {
         guard !isBusy else { return }
         isBusy = true
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
@@ -130,7 +140,8 @@ final class MacManagedViewerService: ObservableObject {
             try await result.user.reload()
             try await reconcile(
                 user: result.user,
-                refreshIfEnrolled: true
+                refreshIfEnrolled: true,
+                repo: repo
             )
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -149,7 +160,7 @@ final class MacManagedViewerService: ObservableObject {
         }
     }
 
-    func checkEmailVerification() async {
+    func checkEmailVerification(repo: Repository) async {
         guard !isBusy else { return }
         isBusy = true
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
@@ -159,7 +170,11 @@ final class MacManagedViewerService: ObservableObject {
         do {
             let user = try currentUser()
             try await user.reload()
-            try await reconcile(user: user, refreshIfEnrolled: true)
+            try await reconcile(
+                user: user,
+                refreshIfEnrolled: true,
+                repo: repo
+            )
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
                 outcome: "completed",
@@ -210,7 +225,7 @@ final class MacManagedViewerService: ObservableObject {
         }
     }
 
-    func enroll() async {
+    func enroll(repo: Repository) async {
         guard !isBusy, phase == .enrollmentRequired else { return }
         isBusy = true
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
@@ -244,7 +259,7 @@ final class MacManagedViewerService: ObservableObject {
                 forKey: Key.accountAccessScopeHash
             )
             phase = .ready
-            try await loadManagedFriends(user: user)
+            try await loadManagedViewer(user: user, repo: repo)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
                 outcome: "completed"
@@ -261,19 +276,24 @@ final class MacManagedViewerService: ObservableObject {
         }
     }
 
-    func refresh() async {
+    func refresh(repo: Repository) async {
         guard !isBusy, phase == .ready else { return }
         isBusy = true
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
-            "managed_macos.friends_refresh"
+            "managed_macos.viewer_refresh"
         )
         defer { isBusy = false }
         do {
-            try await loadManagedFriends(user: currentUser())
+            try await loadManagedViewer(
+                user: currentUser(),
+                repo: repo
+            )
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
                 outcome: "completed",
                 fields: [
+                    "history_pending":
+                        historyHasMore ? "present" : "absent",
                     "profile": socialProfile == nil ? "absent" : "present",
                     "friends": String(socialFriends.count),
                     "requests": String(socialRequests.count),
@@ -320,7 +340,8 @@ final class MacManagedViewerService: ObservableObject {
 
     private func reconcile(
         user: User,
-        refreshIfEnrolled: Bool
+        refreshIfEnrolled: Bool,
+        repo: Repository
     ) async throws {
         clearPresentation()
         guard user.isEmailVerified else {
@@ -334,16 +355,13 @@ final class MacManagedViewerService: ObservableObject {
         let scope = try accountScope(for: user)
         guard hasAccountAccess(scope: scope) else {
             phase = .enrollmentRequired
-            status = String(
-                localized:
-                    "Connect this Mac for read-only access to your NOOP Friends summaries."
-            )
+            status = String(localized: "Connect this Mac")
             return
         }
         phase = .ready
         if refreshIfEnrolled {
             do {
-                try await loadManagedFriends(user: user)
+                try await loadManagedViewer(user: user, repo: repo)
             } catch ManagedStorageError.authentication,
                     ManagedStorageError.forbidden {
                 phase = .enrollmentRequired
@@ -355,7 +373,91 @@ final class MacManagedViewerService: ObservableObject {
         }
     }
 
-    private func loadManagedFriends(user: User) async throws {
+    private func loadManagedViewer(
+        user: User,
+        repo: Repository
+    ) async throws {
+        let result = try await restoreManagedHistory(
+            user: user,
+            repo: repo
+        )
+        _ = try await loadManagedFriends(user: user)
+        phase = .ready
+        lastUpdatedAt = Date()
+        status = String(
+            localized: result.hasMoreChanges
+                ? "History sync"
+                : "History synced"
+        )
+    }
+
+    private func restoreManagedHistory(
+        user: User,
+        repo: Repository
+    ) async throws -> ManagedRestoreOnlyRunResult {
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_macos.history_restore"
+        )
+        do {
+            let scope = try accountScope(for: user)
+            guard hasAccountAccess(scope: scope) else {
+                throw ManagedStorageError.invalidAuthorization
+            }
+            guard let store = await repo.storeHandle() else {
+                throw MacManagedViewerError.storeUnavailable
+            }
+            let authorization = try await authorization(
+                user: user,
+                forceRefresh: false
+            )
+            let operationValidator:
+                @Sendable () async throws -> Void = { [self] in
+                    try await validateAccountOperation(scope: scope)
+                }
+            let coordinator = ManagedSyncCoordinator(
+                transport: try client(),
+                extractor: WhoopManagedChunkExtractor(store: store),
+                state: try WhoopManagedSyncStateStore(
+                    store: store,
+                    accountScopeHash: scope
+                ),
+                restore: WhoopManagedRestoreApplier(store: store),
+                operationValidator: operationValidator
+            )
+            let result = try await coordinator.restoreOnly(
+                authorization: authorization,
+                restoreDocuments: false
+            )
+            try await operationValidator()
+            if result.appliedChanges > 0 {
+                await repo.refresh()
+            }
+            historyLastUpdatedAt = Date()
+            historyHasMore = result.hasMoreChanges
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: [
+                    "applied_changes":
+                        String(min(result.appliedChanges, 10_000)),
+                    "continuation":
+                        result.hasMoreChanges ? "pending" : "complete",
+                ]
+            )
+            return result
+        } catch {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOutcome(error),
+                fields: [
+                    "failure_kind": Self.diagnosticFailureKind(error),
+                ]
+            )
+            throw error
+        }
+    }
+
+    private func loadManagedFriends(user: User) async throws -> Bool {
         let authorization = try await authorization(
             user: user,
             forceRefresh: false
@@ -367,14 +469,8 @@ final class MacManagedViewerService: ObservableObject {
                 authorization: authorization
             )
         } catch ManagedStorageError.notFound {
-            clearPresentation()
-            phase = .ready
-            lastUpdatedAt = Date()
-            status = String(
-                localized:
-                    "Set up managed Friends on your phone before viewing it on this Mac."
-            )
-            return
+            clearSocialPresentation()
+            return false
         }
 
         let range = Self.socialFeedRange()
@@ -405,9 +501,7 @@ final class MacManagedViewerService: ObservableObject {
             }
             return lhs.day > rhs.day
         }
-        phase = .ready
-        lastUpdatedAt = Date()
-        status = String(localized: "Friends summaries are up to date.")
+        return true
     }
 
     private func authorization(
@@ -543,6 +637,14 @@ final class MacManagedViewerService: ObservableObject {
         defaults.string(forKey: Key.accountAccessScopeHash) == scope
     }
 
+    private func validateAccountOperation(scope: String) throws {
+        let user = try currentUser()
+        guard hasAccountAccess(scope: scope),
+              try accountScope(for: user) == scope else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+    }
+
     private func enrollmentRequestID(
         scope: String,
         installationID: String
@@ -559,11 +661,17 @@ final class MacManagedViewerService: ObservableObject {
     }
 
     private func clearPresentation() {
+        clearSocialPresentation()
+        historyLastUpdatedAt = nil
+        historyHasMore = false
+        lastUpdatedAt = nil
+    }
+
+    private func clearSocialPresentation() {
         socialProfile = nil
         socialFriends = []
         socialRequests = []
         socialFeed = []
-        lastUpdatedAt = nil
     }
 
     private func applyFailure(
@@ -579,7 +687,7 @@ final class MacManagedViewerService: ObservableObject {
                 phase = .signedOut
             case .unavailable, .firebaseProjectConflict:
                 phase = .unavailable
-            case .invalidCredentials, .secureStorage:
+            case .invalidCredentials, .secureStorage, .storeUnavailable:
                 break
             }
         } else if let storage = error as? ManagedStorageError {
@@ -695,6 +803,11 @@ final class MacManagedViewerService: ObservableObject {
                     localized:
                         "This Mac could not securely store its viewer credential."
                 )
+            case .storeUnavailable:
+                return String(
+                    localized:
+                        "NOOP could not open its local history on this Mac."
+                )
             }
         }
         if let value = error as? ManagedStorageError {
@@ -705,7 +818,7 @@ final class MacManagedViewerService: ObservableObject {
                 )
             }
             return value.errorDescription
-                ?? String(localized: "NOOP could not update Friends.")
+                ?? String(localized: "NOOP could not update this Mac.")
         }
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain {
@@ -720,12 +833,19 @@ final class MacManagedViewerService: ObservableObject {
                     "NOOP could not sign in. Check the account details and retry."
             )
         }
-        return String(localized: "NOOP could not update Friends.")
+        return String(localized: "NOOP could not update this Mac.")
     }
 
     private static func diagnosticOutcome(_ error: Error) -> String {
         if error is CancellationError { return "canceled" }
-        if error is MacManagedViewerError { return "rejected" }
+        if let value = error as? MacManagedViewerError {
+            switch value {
+            case .storeUnavailable:
+                return "failed"
+            default:
+                return "rejected"
+            }
+        }
         if let storage = error as? ManagedStorageError {
             switch storage {
             case .authentication, .forbidden, .policyChanged, .conflict,
@@ -747,6 +867,7 @@ final class MacManagedViewerService: ObservableObject {
             case .emailVerificationRequired: return "verification"
             case .notSignedIn: return "authentication"
             case .secureStorage: return "secure_storage"
+            case .storeUnavailable: return "store"
             case .firebaseProjectConflict: return "configuration_conflict"
             }
         }
@@ -868,6 +989,7 @@ enum MacManagedViewerError: Error {
     case emailVerificationRequired
     case notSignedIn
     case secureStorage
+    case storeUnavailable
     case firebaseProjectConflict
 }
 

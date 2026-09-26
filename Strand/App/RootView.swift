@@ -341,6 +341,7 @@ struct RootView: View {
                     try? await Task.sleep(nanoseconds: 50_000_000)
                 }
             }
+            await MacManagedViewerService.shared.bootstrap(repo: repo)
             // Backup & Sync: on-launch catch-up. Gated on the auto toggle being ON (default OFF). A
             // whole-DB ZIP can be 100MB+, so it must never block startup: fire it in a DETACHED,
             // utility-priority task AFTER the launch-critical refresh, fully off the main actor (the

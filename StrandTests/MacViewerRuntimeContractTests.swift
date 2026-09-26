@@ -206,6 +206,20 @@ final class MacViewerRuntimeContractTests: XCTestCase {
         XCTAssertTrue(viewer.contains("socialFriends("))
         XCTAssertTrue(viewer.contains("socialRequests("))
         XCTAssertTrue(viewer.contains("socialFeed("))
+        XCTAssertTrue(viewer.contains("restoreOnly("))
+        XCTAssertTrue(viewer.contains("restoreDocuments: false"))
+        XCTAssertTrue(viewer.contains("WhoopManagedSyncStateStore("))
+        XCTAssertTrue(viewer.contains("WhoopManagedRestoreApplier(store: store)"))
+        XCTAssertTrue(viewer.contains(#""managed_macos.history_restore""#))
+        XCTAssertTrue(viewer.contains("await repo.refresh()"))
+        XCTAssertTrue(
+            try text("Strand/App/RootView.swift").contains(
+                "MacManagedViewerService.shared.bootstrap(repo: repo)"
+            )
+        )
+        XCTAssertTrue(mac.contains("Text(\"Account history\")"))
+        XCTAssertTrue(mac.contains("await service.refresh(repo: repo)"))
+        XCTAssertFalse(viewer.contains(".sync("))
 
         let forbiddenMutations = [
             "createSocialProfile(",
@@ -252,7 +266,10 @@ final class MacViewerRuntimeContractTests: XCTestCase {
             "NOOP account password",
             "Finish email verification from the account message, then return here. This Mac cannot activate or claim a band.",
             "Connect this Mac",
-            "Allow this Mac to read your accepted Friends summaries. It cannot collect band data, upload health history, page contacts, poke friends, or change sharing.",
+            "Allow this Mac to read your retained account history and accepted Friends summaries. It cannot collect band data, upload health history, page contacts, poke friends, or change sharing.",
+            "Account history",
+            "NOOP could not open its local history on this Mac.",
+            "NOOP could not update this Mac.",
             "Sign out of NOOP on this Mac",
             "Finish Friends on your phone",
             "Create your private Friends profile and choose sharing from the collector phone. This Mac will then show the accepted summaries.",

@@ -5,6 +5,7 @@ import SwiftUI
 
 struct MacManagedFriendsView: View {
     @ObservedObject var service: MacManagedViewerService
+    @EnvironmentObject private var repo: Repository
 
     @State private var email = ""
     @State private var password = ""
@@ -15,7 +16,7 @@ struct MacManagedFriendsView: View {
             subtitle: "Read-only summaries from your NOOP account.",
             onRefresh: {
                 if service.phase == .ready {
-                    await service.refresh()
+                    await service.refresh(repo: repo)
                 }
             },
             topBackground: liquidScaffoldSky()
@@ -34,7 +35,9 @@ struct MacManagedFriendsView: View {
             }
         }
         .task {
-            await service.bootstrap()
+            if service.phase != .ready || service.lastUpdatedAt == nil {
+                await service.bootstrap(repo: repo)
+            }
         }
     }
 
@@ -157,7 +160,7 @@ struct MacManagedFriendsView: View {
                     fullWidth: true
                 ) {
                     Task {
-                        await service.checkEmailVerification()
+                        await service.checkEmailVerification(repo: repo)
                     }
                 }
                 .disabled(service.isBusy)
@@ -176,7 +179,7 @@ struct MacManagedFriendsView: View {
                         Text("Connect this Mac")
                             .font(StrandFont.title2)
                             .foregroundStyle(StrandPalette.textPrimary)
-                        Text("Allow this Mac to read your accepted Friends summaries. It cannot collect band data, upload health history, page contacts, poke friends, or change sharing.")
+                        Text("Allow this Mac to read your retained account history and accepted Friends summaries. It cannot collect band data, upload health history, page contacts, poke friends, or change sharing.")
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -199,7 +202,7 @@ struct MacManagedFriendsView: View {
                     fullWidth: true
                 ) {
                     Task {
-                        await service.enroll()
+                        await service.enroll(repo: repo)
                     }
                 }
                 .disabled(service.isBusy)
@@ -212,6 +215,7 @@ struct MacManagedFriendsView: View {
     @ViewBuilder
     private var readyContent: some View {
         accountCard
+        historyCard
 
         if service.socialProfile == nil {
             phoneSetupCard
@@ -220,6 +224,55 @@ struct MacManagedFriendsView: View {
             friendsSection
             recentDaysSection
         }
+    }
+
+    private var historyCard: some View {
+        StrandCard(padding: 18) {
+            HStack(alignment: .center, spacing: 14) {
+                DepthGlyph(
+                    "arrow.triangle.2.circlepath",
+                    size: 46,
+                    selected: true
+                )
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Account history")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(historyDetail)
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                NoopButton(
+                    service.isBusy ? "Syncing…" : "Sync now",
+                    systemImage: "arrow.triangle.2.circlepath",
+                    kind: .secondary
+                ) {
+                    Task {
+                        await service.refresh(repo: repo)
+                    }
+                }
+                .disabled(service.isBusy)
+            }
+        }
+    }
+
+    private var historyDetail: String {
+        if service.historyHasMore {
+            return String(localized: "History sync")
+        }
+        if let updated = service.historyLastUpdatedAt {
+            return String(localized: "History synced")
+                + " "
+                + updated.formatted(
+                    .relative(
+                        presentation: .named,
+                        unitsStyle: .abbreviated
+                    )
+                )
+        }
+        return String(localized: "History sync")
     }
 
     private var accountCard: some View {
@@ -415,7 +468,11 @@ struct MacManagedFriendsView: View {
 
     private func signIn() {
         Task {
-            await service.signIn(email: email, password: password)
+            await service.signIn(
+                email: email,
+                password: password,
+                repo: repo
+            )
             password = ""
         }
     }
