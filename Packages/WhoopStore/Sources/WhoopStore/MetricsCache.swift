@@ -497,7 +497,7 @@ extension WhoopStore {
         preserveDailyFieldsDays: Set<String> = [],
         stepEvidenceDeviceIds: [String] = [],
         deleteEstimateDays: Set<String> = [],
-        clearMatchingComputedSteps: [String: Int] = [:]
+        clearMatchingComputedStepsBySource: [String: [String: Int]] = [:]
     ) async throws -> Set<String> {
         try reconcileComputedScoreRangeImpl(
             deviceId: deviceId,
@@ -510,7 +510,7 @@ extension WhoopStore {
             preserveDailyFieldsDays: preserveDailyFieldsDays,
             stepEvidenceDeviceIds: stepEvidenceDeviceIds,
             deleteEstimateDays: deleteEstimateDays,
-            clearMatchingComputedSteps: clearMatchingComputedSteps,
+            clearMatchingComputedStepsBySource: clearMatchingComputedStepsBySource,
             beforeMetricSeriesWrite: nil,
             beforeStepEvidenceWrite: nil
         )
@@ -528,7 +528,7 @@ extension WhoopStore {
         preserveDailyFieldsDays: Set<String> = [],
         stepEvidenceDeviceIds: [String] = [],
         deleteEstimateDays: Set<String> = [],
-        clearMatchingComputedSteps: [String: Int] = [:],
+        clearMatchingComputedStepsBySource: [String: [String: Int]] = [:],
         beforeMetricSeriesWrite: @escaping () throws -> Void = {},
         beforeStepEvidenceWrite: @escaping () throws -> Void = {}
     ) async throws -> Set<String> {
@@ -543,7 +543,7 @@ extension WhoopStore {
             preserveDailyFieldsDays: preserveDailyFieldsDays,
             stepEvidenceDeviceIds: stepEvidenceDeviceIds,
             deleteEstimateDays: deleteEstimateDays,
-            clearMatchingComputedSteps: clearMatchingComputedSteps,
+            clearMatchingComputedStepsBySource: clearMatchingComputedStepsBySource,
             beforeMetricSeriesWrite: beforeMetricSeriesWrite,
             beforeStepEvidenceWrite: beforeStepEvidenceWrite
         )
@@ -560,7 +560,7 @@ extension WhoopStore {
         preserveDailyFieldsDays: Set<String>,
         stepEvidenceDeviceIds: [String],
         deleteEstimateDays: Set<String>,
-        clearMatchingComputedSteps: [String: Int],
+        clearMatchingComputedStepsBySource: [String: [String: Int]],
         beforeMetricSeriesWrite: (() throws -> Void)?,
         beforeStepEvidenceWrite: (() throws -> Void)?
     ) throws -> Set<String> {
@@ -607,18 +607,26 @@ extension WhoopStore {
         }) else {
             throw ComputedScoreReconciliationError.invalidDailyRow
         }
-        let orderedMatchingStepClears = clearMatchingComputedSteps.sorted { $0.key < $1.key }
-        guard orderedMatchingStepClears.allSatisfy({
-            Self.validComputedDay($0.key)
-                && $0.key >= from
-                && $0.key <= to
-                && $0.value > 0
+        let orderedMatchingStepClearsBySource =
+            clearMatchingComputedStepsBySource.keys.sorted().map { sourceId in
+                (
+                    sourceId: sourceId,
+                    clears: clearMatchingComputedStepsBySource[sourceId, default: [:]]
+                        .sorted { $0.key < $1.key }
+                )
+            }
+        guard orderedMatchingStepClearsBySource.allSatisfy({
+            !$0.sourceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && $0.clears.allSatisfy {
+                    Self.validComputedDay($0.key)
+                        && $0.key >= from
+                        && $0.key <= to
+                        && $0.value > 0
+                }
         }) else {
             throw ComputedScoreReconciliationError.invalidDailyRow
         }
-        let hasStepEvidenceMutation =
-            !orderedDeleteEstimateDays.isEmpty || !orderedMatchingStepClears.isEmpty
-        guard !hasStepEvidenceMutation || !normalizedStepEvidenceDeviceIds.isEmpty else {
+        guard orderedDeleteEstimateDays.isEmpty || !normalizedStepEvidenceDeviceIds.isEmpty else {
             throw ComputedScoreReconciliationError.missingDeviceIdentifier
         }
 
@@ -751,21 +759,23 @@ extension WhoopStore {
                         arguments: [stepDeviceId, day]
                     )
                 }
-                for (day, expectedSteps) in orderedMatchingStepClears {
+            }
+            for sourceClear in orderedMatchingStepClearsBySource {
+                for (day, expectedSteps) in sourceClear.clears {
                     try db.execute(
                         sql: """
                             UPDATE dailyMetric
                             SET steps = NULL
                             WHERE deviceId = ? AND day = ? AND steps = ?
                             """,
-                        arguments: [stepDeviceId, day, expectedSteps]
+                        arguments: [sourceClear.sourceId, day, expectedSteps]
                     )
                     try db.execute(
                         sql: """
                             DELETE FROM metricSeries
                             WHERE deviceId = ? AND day = ? AND key = 'steps_est' AND value = ?
                             """,
-                        arguments: [stepDeviceId, day, Double(expectedSteps)]
+                        arguments: [sourceClear.sourceId, day, Double(expectedSteps)]
                     )
                 }
             }
@@ -809,25 +819,26 @@ extension WhoopStore {
 
     /// Atomically delete superseded `steps_est` rows across computed source namespaces.
     ///
-    /// Only a retained walk/run counter total reaches this mutation. Still-only, unclassified, sparse,
-    /// flat, and discontinuous windows are non-destructive and never clear a stored daily total.
+    /// Retained walk/run evidence may delete estimates across every supplied computed source. A continuously
+    /// covered all-still day may compare-and-clear only the exact source/value pair that produced the stale
+    /// legacy result; equal values under unrelated computed or imported sources remain intact.
     @discardableResult
     public func reconcileComputedStepEvidence(
         deviceIds: [String],
         deleteEstimateDays: [String],
-        clearMatchingComputedSteps: [String: Int] = [:]
+        clearMatchingComputedStepsBySource: [String: [String: Int]] = [:]
     ) async throws -> Int {
         try reconcileComputedStepEvidenceImpl(
             deviceIds: deviceIds,
             deleteEstimateDays: deleteEstimateDays,
-            clearMatchingComputedSteps: clearMatchingComputedSteps
+            clearMatchingComputedStepsBySource: clearMatchingComputedStepsBySource
         )
     }
 
     private func reconcileComputedStepEvidenceImpl(
         deviceIds: [String],
         deleteEstimateDays: [String],
-        clearMatchingComputedSteps: [String: Int]
+        clearMatchingComputedStepsBySource: [String: [String: Int]]
     ) throws -> Int {
         let normalizedDeviceIds = Array(Set(deviceIds)).sorted()
         guard normalizedDeviceIds.allSatisfy({
@@ -839,14 +850,27 @@ extension WhoopStore {
         guard normalizedEstimateDays.allSatisfy(Self.validComputedDay) else {
             throw ComputedScoreReconciliationError.invalidDailyRow
         }
-        let normalizedMatchingStepClears = clearMatchingComputedSteps.sorted { $0.key < $1.key }
-        guard normalizedMatchingStepClears.allSatisfy({
-            Self.validComputedDay($0.key) && $0.value > 0
+        let normalizedMatchingStepClearsBySource =
+            clearMatchingComputedStepsBySource.keys.sorted().map { sourceId in
+                (
+                    sourceId: sourceId,
+                    clears: clearMatchingComputedStepsBySource[sourceId, default: [:]]
+                        .sorted { $0.key < $1.key }
+                )
+            }
+        guard normalizedMatchingStepClearsBySource.allSatisfy({
+            !$0.sourceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && $0.clears.allSatisfy {
+                    Self.validComputedDay($0.key) && $0.value > 0
+                }
         }) else {
             throw ComputedScoreReconciliationError.invalidDailyRow
         }
-        guard !normalizedDeviceIds.isEmpty,
-              !normalizedEstimateDays.isEmpty || !normalizedMatchingStepClears.isEmpty else { return 0 }
+        guard normalizedEstimateDays.isEmpty || !normalizedDeviceIds.isEmpty else {
+            throw ComputedScoreReconciliationError.missingDeviceIdentifier
+        }
+        guard !normalizedEstimateDays.isEmpty || !normalizedMatchingStepClearsBySource.isEmpty
+        else { return 0 }
         return try syncWrite { db in
             var changed = 0
             for deviceId in normalizedDeviceIds {
@@ -857,17 +881,19 @@ extension WhoopStore {
                     """, arguments: [deviceId, day])
                     changed += db.changesCount
                 }
-                for (day, expectedSteps) in normalizedMatchingStepClears {
+            }
+            for sourceClear in normalizedMatchingStepClearsBySource {
+                for (day, expectedSteps) in sourceClear.clears {
                     try db.execute(sql: """
                         UPDATE dailyMetric
                         SET steps = NULL
                         WHERE deviceId = ? AND day = ? AND steps = ?
-                        """, arguments: [deviceId, day, expectedSteps])
+                        """, arguments: [sourceClear.sourceId, day, expectedSteps])
                     changed += db.changesCount
                     try db.execute(sql: """
                         DELETE FROM metricSeries
                         WHERE deviceId = ? AND day = ? AND key = 'steps_est' AND value = ?
-                        """, arguments: [deviceId, day, Double(expectedSteps)])
+                        """, arguments: [sourceClear.sourceId, day, Double(expectedSteps)])
                     changed += db.changesCount
                 }
             }

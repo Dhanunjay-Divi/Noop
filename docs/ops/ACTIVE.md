@@ -12,6 +12,20 @@ Last updated: **2026-09-26**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
+- Fresh September 26 step closeout is locally green on top of remote PR head
+  `35305644f0e52670f1dad17346d877e2e10ad97a`. Exact stale all-still cleanup is
+  now source/day scoped, so another computed namespace with the same valid step
+  value is preserved; broad estimate deletion still requires authoritative
+  walk/run evidence. The supplier-wrapper quarantine now lexes outside nested
+  comments and string literals, including Swift raw strings, so
+  comment-separated vendor references cannot bypass the required release
+  control. Focused evidence passes: wrapper 7/7, WhoopStore MetricsCache 48/48,
+  Android integrity plus Full Kotlin compilation, and Apple ReadSpine 58/58.
+  The complete Tools wall passes 370/370 with one intentional skip; all 96
+  operations records, the terminology ratchet, and diff hygiene pass. One
+  replacement push, exact-SHA hosted checks, normal protected integration,
+  protected-main verification, and cleanup remain. Physical step accuracy and
+  supplier firmware classification remain external device gates.
 - PR `#17` implementation head
   `9474ffbb6021f186d7a381e53c6b9e20ce0f9a16` is now hosted-green across all
   ten protected contexts. Its first iOS production-shell attempt failed only

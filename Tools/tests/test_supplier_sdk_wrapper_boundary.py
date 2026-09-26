@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import re
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SWIFT_IMPORT_KIND = (
-    r"(?:typealias|struct|class|enum|protocol|let|var|func)"
+SWIFT_IMPORT_KINDS = frozenset(
+    {"typealias", "struct", "class", "enum", "protocol", "let", "var", "func"}
 )
 
 
@@ -38,43 +37,138 @@ def _manifest_android_package_prefixes() -> tuple[str, ...]:
 
 APPLE_SUPPLIER_MODULES = _manifest_framework_names()
 ANDROID_SUPPLIER_PACKAGE_PREFIXES = _manifest_android_package_prefixes()
-APPLE_MODULE_ALTERNATION = "|".join(
-    re.escape(module) for module in APPLE_SUPPLIER_MODULES
+ANDROID_SUPPLIER_PACKAGE_SEGMENTS = tuple(
+    tuple(prefix.removesuffix(".").split("."))
+    for prefix in ANDROID_SUPPLIER_PACKAGE_PREFIXES
 )
-SWIFT_IMPORT_ATTRIBUTE = (
-    r"@[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)\n]*\))?"
-)
-SWIFT_IMPORT_ACCESS = r"(?:private|fileprivate|internal|package|public|open)"
-APPLE_IMPORT = re.compile(
-    rf"(?m)(?:^|;)[ \t]*"
-    rf"(?:(?:{SWIFT_IMPORT_ATTRIBUTE}|{SWIFT_IMPORT_ACCESS})[ \t]+)*"
-    rf"import"
-    rf"(?:\s+{SWIFT_IMPORT_KIND})?\s+"
-    rf"(?:{APPLE_MODULE_ALTERNATION})"
-    rf"(?=\.|[ \t]*(?:(?://[^\n]*)?;|(?://[^\n]*)?$))"
-)
-APPLE_QUALIFIED_REFERENCE = re.compile(
-    rf"\b(?:{APPLE_MODULE_ALTERNATION})\s*\."
-)
-ANDROID_SUPPLIER_REFERENCE = re.compile(
-    r"\b(?:"
-    + "|".join(
-        re.escape(prefix.removesuffix("."))
-        for prefix in ANDROID_SUPPLIER_PACKAGE_PREFIXES
-    )
-    + r")\."
-)
+
+
+def _source_tokens(source: str) -> tuple[str, ...]:
+    """Return identifiers and punctuation outside comments and string literals."""
+    tokens: list[str] = []
+    index = 0
+    length = len(source)
+
+    def skip_quoted(start: int, quote: str, raw_hashes: int = 0) -> int:
+        delimiter = quote + ("#" * raw_hashes)
+        cursor = start + len(quote)
+        while cursor < length:
+            if source.startswith(delimiter, cursor):
+                return cursor + len(delimiter)
+            if raw_hashes == 0 and len(quote) == 1 and source[cursor] == "\\":
+                cursor += 2
+            else:
+                cursor += 1
+        return length
+
+    while index < length:
+        char = source[index]
+        if char.isspace():
+            index += 1
+            continue
+        if source.startswith("//", index):
+            newline = source.find("\n", index + 2)
+            index = length if newline < 0 else newline + 1
+            continue
+        if source.startswith("/*", index):
+            depth = 1
+            index += 2
+            while index < length and depth > 0:
+                if source.startswith("/*", index):
+                    depth += 1
+                    index += 2
+                elif source.startswith("*/", index):
+                    depth -= 1
+                    index += 2
+                else:
+                    index += 1
+            continue
+        if char == "#":
+            hash_end = index
+            while hash_end < length and source[hash_end] == "#":
+                hash_end += 1
+            quote = (
+                '"""'
+                if source.startswith('"""', hash_end)
+                else '"' if source.startswith('"', hash_end) else None
+            )
+            if quote is not None:
+                index = skip_quoted(
+                    hash_end,
+                    quote,
+                    raw_hashes=hash_end - index,
+                )
+                continue
+        if source.startswith('"""', index):
+            index = skip_quoted(index, '"""')
+            continue
+        if char in {'"', "'"}:
+            index = skip_quoted(index, char)
+            continue
+        if char == "_" or char.isalpha():
+            end = index + 1
+            while end < length and (
+                source[end] == "_" or source[end].isalnum()
+            ):
+                end += 1
+            tokens.append(source[index:end])
+            index = end
+            continue
+        tokens.append(char)
+        index += 1
+
+    return tuple(tokens)
+
+
+def _contains_qualified_path(
+    tokens: tuple[str, ...],
+    segments: tuple[str, ...],
+) -> bool:
+    if not segments:
+        return False
+    width = len(segments) * 2 - 1
+    for start in range(0, len(tokens) - width + 1):
+        for offset, segment in enumerate(segments):
+            token_index = start + offset * 2
+            if tokens[token_index] != segment:
+                break
+            if offset + 1 < len(segments) and tokens[token_index + 1] != ".":
+                break
+        else:
+            return True
+    return False
 
 
 def _uses_apple_supplier_api(source: str) -> bool:
-    return bool(
-        APPLE_IMPORT.search(source)
-        or APPLE_QUALIFIED_REFERENCE.search(source)
-    )
+    tokens = _source_tokens(source)
+    for index, token in enumerate(tokens):
+        if token == "import":
+            module_index = index + 1
+            if (
+                module_index < len(tokens)
+                and tokens[module_index] in SWIFT_IMPORT_KINDS
+            ):
+                module_index += 1
+            if (
+                module_index < len(tokens)
+                and tokens[module_index] in APPLE_SUPPLIER_MODULES
+            ):
+                return True
+        if (
+            token in APPLE_SUPPLIER_MODULES
+            and index + 1 < len(tokens)
+            and tokens[index + 1] == "."
+        ):
+            return True
+    return False
 
 
 def _uses_android_supplier_api(source: str) -> bool:
-    return bool(ANDROID_SUPPLIER_REFERENCE.search(source))
+    tokens = _source_tokens(source)
+    return any(
+        _contains_qualified_path(tokens, segments)
+        for segments in ANDROID_SUPPLIER_PACKAGE_SEGMENTS
+    )
 
 
 class SupplierSDKWrapperBoundaryTests(unittest.TestCase):
@@ -212,6 +306,45 @@ class SupplierSDKWrapperBoundaryTests(unittest.TestCase):
                 "package com.noop.ble.veepoo.vendor\n"
             )
         )
+
+    def test_detector_cannot_be_bypassed_with_comments(self) -> None:
+        for source in (
+            "import /* gap */ VeepooBleSDK\n",
+            "import class VeepooBleSDK/* gap */.VPBleCentralManage\n",
+            "let value = GRDFUSDK/* gap */.Manager.shared\n",
+            "import /* outer /* nested */ gap */ ZipZap\n",
+        ):
+            with self.subTest(swift_source=source):
+                self.assertTrue(_uses_apple_supplier_api(source))
+
+        for source in (
+            "import com/* gap */.jieli.jl_filebrowse.FileBrowseManager\n",
+            "val manager = com/* outer /* nested */ gap */.jieli."
+            "jl_filebrowse.FileBrowseManager\n",
+            "import com.bluetrum/* gap */.abpartool.ParTool\n",
+        ):
+            with self.subTest(android_source=source):
+                self.assertTrue(_uses_android_supplier_api(source))
+
+    def test_detector_ignores_comments_and_string_literals(self) -> None:
+        for source in (
+            "// import VeepooBleSDK\n",
+            "/* let value = GRDFUSDK.Manager.shared */\n",
+            'let text = "import ZipZap; JL_BLEKit.Manager.shared"\n',
+            'let raw = #"VeepooBleSDK.Manager.shared"#\n',
+            'let multiline = """GRDFUSDK.Manager.shared"""\n',
+        ):
+            with self.subTest(swift_source=source):
+                self.assertFalse(_uses_apple_supplier_api(source))
+
+        for source in (
+            "// import com.jieli.jl_filebrowse.FileBrowseManager\n",
+            "/* val manager = com.bluetrum.abpartool.ParTool */\n",
+            'val text = "com.jieli.jl_filebrowse.FileBrowseManager"\n',
+            'val raw = """com.bluetrum.abpartool.ParTool"""\n',
+        ):
+            with self.subTest(android_source=source):
+                self.assertFalse(_uses_android_supplier_api(source))
 
     def test_product_coordinators_depend_only_on_noop_owned_interfaces(self) -> None:
         apple_coordinator = (

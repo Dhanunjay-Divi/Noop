@@ -1407,7 +1407,8 @@ object IntelligenceEngine {
         val skippedDayCounts = mutableMapOf<AnalysisSkippedDayReason, Int>()
         val stepCounterObservedDays = HashSet<String>()
         val stepCounterAuthoritativeDays = HashSet<String>()
-        val stationaryLegacyStepsByDay = LinkedHashMap<String, Int>()
+        val stationaryLegacyStepsBySource =
+            LinkedHashMap<String, MutableMap<String, Int>>()
         val stepCounterSkippedDays = HashSet<String>()
         val stepOnlyDailyDays = HashSet<String>()
         val stepCounterOwnerIds = HashSet<String>()
@@ -1570,7 +1571,14 @@ object IntelligenceEngine {
                 ticksPerStep = profile.stepTicksPerStep,
                 dayStartTs = dayMidnight,
                 observedThroughTs = minOf(dayEnd, nowSeconds),
-            )?.let { stationaryLegacyStepsByDay[day] = it }
+            )?.let { legacySteps ->
+                val ownerComputedId =
+                    if (owner.endsWith("-noop")) owner else "$owner-noop"
+                linkedSetOf(ownerComputedId, computedId).forEach { targetSourceId ->
+                    stationaryLegacyStepsBySource
+                        .getOrPut(targetSourceId) { LinkedHashMap() }[day] = legacySteps
+                }
+            }
             if (hr.size < MIN_HR_SAMPLES) {
                 if (dayStepAnalysis.steps != null) {
                     stepOnlyDailyDays.add(day)
@@ -2227,7 +2235,8 @@ object IntelligenceEngine {
             .plus(computedId)
             .distinct()
         val hasStepEvidenceMutation =
-            stepCounterAuthoritativeDays.isNotEmpty() || stationaryLegacyStepsByDay.isNotEmpty()
+            stepCounterAuthoritativeDays.isNotEmpty() ||
+                stationaryLegacyStepsBySource.isNotEmpty()
         if (shouldReconcileScoreRange) {
             // Persist daily scores and their Rest evidence in one transaction. Its internal range
             // replacement is invisible until commit, so cancellation or failure keeps the prior complete
@@ -2245,7 +2254,7 @@ object IntelligenceEngine {
                 stepEvidenceDeviceIds =
                     if (hasStepEvidenceMutation) computedStepSourceIds else emptyList(),
                 deleteEstimateDays = stepCounterAuthoritativeDays,
-                clearMatchingComputedSteps = stationaryLegacyStepsByDay,
+                clearMatchingComputedStepsBySource = stationaryLegacyStepsBySource,
             )
         }
         if (activeZoneRows.isNotEmpty()) {
@@ -2261,12 +2270,14 @@ object IntelligenceEngine {
         // Counter evidence is a day-scoped integrity repair, including during historical catch-up.
         // A retained walk/run count supersedes an older gravity estimate. An all-still window may also
         // remove the exact legacy raw-motion value it proves stale; compare-and-clear keeps mismatched,
-        // imported, classless, sparse, flat, gap-only, and unknown-only history intact.
+        // imported, classless, sparse, flat, gap-only, and unknown-only history intact. Broad estimate
+        // deletion still spans computed namespaces; an exact stale-value clear is limited to the day
+        // owner and the active aggregate output source.
         if (!shouldReconcileScoreRange && hasStepEvidenceMutation) {
             repo.reconcileComputedStepEvidence(
                 deviceIds = computedStepSourceIds,
                 deleteEstimateDays = stepCounterAuthoritativeDays,
-                clearMatchingComputedSteps = stationaryLegacyStepsByDay,
+                clearMatchingComputedStepsBySource = stationaryLegacyStepsBySource,
             )
         }
 

@@ -204,6 +204,7 @@ class IntelligenceStepIntegrityTest {
     fun stationaryLegacyRepairClearsOnlyExactComputedValue() = runBlocking {
         val f = fixture()
         val matching = "active-band-noop"
+        val equalOtherComputed = "other-band-noop"
         val mismatching = "old-band-noop"
         val imported = "health-connect"
         val day = "2026-09-24"
@@ -211,6 +212,12 @@ class IntelligenceStepIntegrityTest {
             deviceId = matching,
             day = day,
             recovery = 60.0,
+            steps = 4_000,
+        )
+        f.daily[equalOtherComputed to day] = DailyMetric(
+            deviceId = equalOtherComputed,
+            day = day,
+            recovery = 62.0,
             steps = 4_000,
         )
         f.daily[mismatching to day] = DailyMetric(
@@ -227,6 +234,8 @@ class IntelligenceStepIntegrityTest {
         )
         f.series[Triple(matching, day, "steps_est")] =
             MetricSeriesRow(matching, day, "steps_est", 4_000.0)
+        f.series[Triple(equalOtherComputed, day, "steps_est")] =
+            MetricSeriesRow(equalOtherComputed, day, "steps_est", 4_000.0)
         f.series[Triple(mismatching, day, "steps_est")] =
             MetricSeriesRow(mismatching, day, "steps_est", 4_500.0)
         f.series[Triple(imported, day, "steps_est")] =
@@ -235,15 +244,22 @@ class IntelligenceStepIntegrityTest {
         assertEquals(
             2,
             f.repo.reconcileComputedStepEvidence(
-                deviceIds = listOf(matching, mismatching),
+                deviceIds = listOf(matching, equalOtherComputed, mismatching),
                 deleteEstimateDays = emptyList(),
-                clearMatchingComputedSteps = mapOf(day to 4_000),
+                clearMatchingComputedStepsBySource =
+                    mapOf(matching to mapOf(day to 4_000)),
             ),
         )
 
         assertNull(f.daily[matching to day]?.steps)
         assertEquals(60.0, f.daily[matching to day]?.recovery)
         assertNull(f.series[Triple(matching, day, "steps_est")])
+        assertEquals(4_000, f.daily[equalOtherComputed to day]?.steps)
+        assertEquals(62.0, f.daily[equalOtherComputed to day]?.recovery)
+        assertEquals(
+            4_000.0,
+            f.series[Triple(equalOtherComputed, day, "steps_est")]?.value,
+        )
         assertEquals(4_500, f.daily[mismatching to day]?.steps)
         assertEquals(4_500.0, f.series[Triple(mismatching, day, "steps_est")]?.value)
         assertEquals(4_000, f.daily[imported to day]?.steps)
@@ -270,7 +286,8 @@ class IntelligenceStepIntegrityTest {
             f.repo.reconcileComputedStepEvidence(
                 deviceIds = listOf(source),
                 deleteEstimateDays = emptyList(),
-                clearMatchingComputedSteps = mapOf(day to 4_000),
+                clearMatchingComputedStepsBySource =
+                    mapOf(source to mapOf(day to 4_000)),
             )
         }.exceptionOrNull()
 
@@ -398,6 +415,7 @@ class IntelligenceStepIntegrityTest {
     fun scoreReplacementClearsMatchingStepAfterFieldPreservation() = runBlocking {
         val f = fixture()
         val source = "whoop-ABC123-noop"
+        val equalOtherComputed = "other-band-noop"
         val day = "2026-09-24"
         f.daily[source to day] = DailyMetric(
             deviceId = source,
@@ -405,8 +423,16 @@ class IntelligenceStepIntegrityTest {
             recovery = 60.0,
             steps = 4_000,
         )
+        f.daily[equalOtherComputed to day] = DailyMetric(
+            deviceId = equalOtherComputed,
+            day = day,
+            recovery = 62.0,
+            steps = 4_000,
+        )
         f.series[Triple(source, day, "steps_est")] =
             MetricSeriesRow(source, day, "steps_est", 4_000.0)
+        f.series[Triple(equalOtherComputed, day, "steps_est")] =
+            MetricSeriesRow(equalOtherComputed, day, "steps_est", 4_000.0)
 
         val receipt = f.repo.reconcileComputedScoreRange(
             deviceId = source,
@@ -418,14 +444,21 @@ class IntelligenceStepIntegrityTest {
             managedRestKeys = setOf("sleep_performance"),
             restRows = emptyList(),
             preserveDailyFieldsDays = setOf(day),
-            stepEvidenceDeviceIds = listOf(source),
-            clearMatchingComputedSteps = mapOf(day to 4_000),
+            stepEvidenceDeviceIds = listOf(source, equalOtherComputed),
+            clearMatchingComputedStepsBySource =
+                mapOf(source to mapOf(day to 4_000)),
         )
 
         assertEquals(setOf(day), receipt)
         assertEquals(80.0, f.daily[source to day]?.recovery)
         assertNull(f.daily[source to day]?.steps)
         assertNull(f.series[Triple(source, day, "steps_est")])
+        assertEquals(4_000, f.daily[equalOtherComputed to day]?.steps)
+        assertEquals(62.0, f.daily[equalOtherComputed to day]?.recovery)
+        assertEquals(
+            4_000.0,
+            f.series[Triple(equalOtherComputed, day, "steps_est")]?.value,
+        )
     }
 
     @Test
@@ -608,6 +641,7 @@ class IntelligenceStepIntegrityTest {
         requireNotNull(sourceFile) { "IntelligenceEngine.kt source root is unavailable" }
         val source = sourceFile.readText()
         val ownerSet = source.indexOf("val stepCounterOwnerIds")
+        val stationaryBySource = source.indexOf("val stationaryLegacyStepsBySource")
         val noRetained = source.indexOf("val stepCounterNoRetainedDays")
         val computedSources = source.indexOf("val computedStepSourceIds", noRetained)
         val reconciliation = source.indexOf("repo.reconcileComputedScoreRange(", noRetained)
@@ -615,6 +649,7 @@ class IntelligenceStepIntegrityTest {
             source.indexOf("if (!shouldReconcileScoreRange &&", reconciliation)
 
         assertTrue("counter owner tracking must exist", ownerSet >= 0)
+        assertTrue("stationary repair must be source-scoped", stationaryBySource >= 0)
         assertTrue("non-retained counter-day policy must exist", noRetained >= 0)
         assertTrue("computed source expansion must follow policy derivation", computedSources > noRetained)
         assertTrue("score replacement must follow counter-day derivation", reconciliation > noRetained)
@@ -633,6 +668,11 @@ class IntelligenceStepIntegrityTest {
         )
         assertTrue(
             combinedTransaction.contains("deleteEstimateDays = stepCounterAuthoritativeDays")
+        )
+        assertTrue(
+            combinedTransaction.contains(
+                "clearMatchingComputedStepsBySource = stationaryLegacyStepsBySource"
+            )
         )
     }
 

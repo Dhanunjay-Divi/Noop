@@ -2,18 +2,18 @@
 
 ## Status
 
-- State: `exact PR head 47e99f52 passes every hosted required context. Four
-  later exact-head review findings are corrected locally: Apple authentication
-  rejection now owns a distinct durable cleanup ledger and bounded retry,
-  Android constructs Oura only after old-source teardown, the local Python
-  execution root is protected from runtime-module shadowing, and the SDK
-  wrapper boundary test is protected and executed by release controls. Apple
-  supplier lifecycle passes 56/56, Android affected source/step tests compile
-  and pass, the iPhone simulator graph builds, and 68 focused trust/release
-  tests plus all ten required-context contracts pass. One replacement
-  commit/push, replacement exact-SHA checks, review-thread resolution,
-  protected integration, protected-main verification, cleanup, and physical
-  accuracy validation remain`
+- State: `remote PR head 35305644 passes every hosted required context. A fresh
+  independent closeout found two release defects and both are corrected
+  locally: comment-separated supplier API references can no longer bypass the
+  wrapper quarantine, and an all-still legacy repair clears only the exact day
+  owner/aggregate source rather than every computed namespace with an equal
+  value. Python wrapper tests pass 7/7, WhoopStore MetricsCache passes 48/48,
+  Android focused integrity plus full Kotlin compilation pass, and Apple
+  ReadSpine orchestration passes 58/58. The complete Tools wall passes 370/370
+  with one intentional skip; all 96 operations records, the terminology
+  ratchet, and diff hygiene pass. One replacement commit/push, replacement
+  exact-SHA checks, protected integration, protected-main verification,
+  cleanup, and physical accuracy validation remain`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `4604fd53d15b459d0c2251da8e8697134bdb30e1`
@@ -222,6 +222,18 @@ heart-rate elevation as proof of walking.
   cancel the new Oura state observer. Release trust now treats `Tools/local` as
   a Python execution root, protects the supplier wrapper-boundary test itself,
   and executes that test in the required release-control workflow.
+- Closed the final independent source-scope review without changing the gait
+  formula. Broad deletion of superseded `steps_est` values remains limited to
+  authoritative walk/run evidence, while an all-still legacy compare-and-clear
+  is now keyed by computed source and day. The day-owner namespace and current
+  aggregate output are the only exact-clear targets; an equal valid value under
+  another computed or imported source survives both standalone and score-window
+  transactions.
+- Replaced the regex-only supplier wrapper detector with a bounded lexical
+  scanner. It detects comment-separated Swift imports, qualified module use,
+  and Android package paths while skipping nested comments plus ordinary,
+  multiline, and Swift raw strings, so comments cannot hide supplier use and
+  documentation strings cannot create false importers.
 
 ## Data, privacy, and medical truth
 
