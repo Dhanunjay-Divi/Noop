@@ -44,6 +44,18 @@ final class SourceCandidatesOrderTests: XCTestCase {
                        "no declared Apple equivalent , no cross-source fallback")
     }
 
+    func testApplePreferredStepsNeverFallsBackToComputedBandMotion() {
+        let cs = Repository.sourceCandidates(forKey: "steps", preferredSource: "apple-health",
+                                             actualWhoopSource: "whoop-4A0B")
+        XCTAssertEqual(cs.map(\.source), ["apple-health", "health-connect"])
+    }
+
+    func testApplePreferredActiveEnergyMayUseComputedFallback() {
+        let cs = Repository.sourceCandidates(forKey: "active_kcal", preferredSource: "apple-health",
+                                             actualWhoopSource: "whoop-4A0B")
+        XCTAssertEqual(cs.map(\.source), ["apple-health", "health-connect", "whoop-4A0B-noop"])
+    }
+
     func testNutritionLogFallsBackToLegacyCsvPerDay() {
         let cs = Repository.sourceCandidates(forKey: "calories_in",
                                              preferredSource: NutritionLogContract.deviceId,

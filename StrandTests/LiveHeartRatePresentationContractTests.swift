@@ -107,7 +107,7 @@ final class LiveHeartRatePresentationContractTests: XCTestCase {
         XCTAssertTrue(
             LiveView.shouldShowWhoopControls(activeSourceKind: .liveBLE)
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             LiveView.shouldShowWhoopControls(activeSourceKind: nil)
         )
 

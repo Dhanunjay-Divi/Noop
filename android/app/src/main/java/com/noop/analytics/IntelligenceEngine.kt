@@ -17,7 +17,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.coroutineContext
 
 /*
  * IntelligenceEngine.kt , on-device "intelligence": computes recovery / day-strain /
@@ -1406,11 +1405,7 @@ object IntelligenceEngine {
         val nightlyRestByDay = LinkedHashMap<String, Double?>()
         val skippedDayCounts = mutableMapOf<AnalysisSkippedDayReason, Int>()
         val stepCounterObservedDays = HashSet<String>()
-        val stepCounterAuthoritativeDays = HashSet<String>()
-        val stationaryLegacyStepsBySource =
-            LinkedHashMap<String, MutableMap<String, Int>>()
         val stepCounterSkippedDays = HashSet<String>()
-        val stepOnlyDailyDays = HashSet<String>()
         val stepCounterOwnerIds = HashSet<String>()
 
         fun recordSkippedDay(reason: AnalysisSkippedDayReason) {
@@ -1512,8 +1507,6 @@ object IntelligenceEngine {
                 from = from,
                 to = to,
                 importedDeviceId = importedDeviceId,
-                stepFrom = dayStart,
-                stepTo = nextMidnight - 1L,
             )
             sourceConsumed(owner)
 
@@ -1540,10 +1533,10 @@ object IntelligenceEngine {
                     ),
                 )
             }
-            // Steps are calendar-day activity evidence, not an overnight-only signal. Read them before
-            // the HR gate so classified walk/run movement remains publishable on a day without a scorable
-            // night. Remember a present counter even when every delta is rejected; a later gravity estimate
-            // must not reinterpret explicit still/unknown motion as steps.
+            // Read the calendar-day band counter before the HR gate. Any read failure propagates and aborts
+            // before reconciliation, preserving prior values. A successful read with any row is unverified
+            // motion: it publishes no steps, blocks gravity reinterpretation, and marks the computed day for
+            // transactional cleanup.
             val steps = repo.stepSamples(owner, from, to, STREAM_LIMIT)
             val daySteps = daySliceFromWindow(
                 samples = steps,
@@ -1556,35 +1549,32 @@ object IntelligenceEngine {
             ) ?: repo.stepSamples(owner, dayMidnight, dayEnd, STREAM_LIMIT)
             val dayStepAnalysis = StepsCounter.analyze(
                 daySteps,
-                classificationPolicy = StepsCounter.ClassificationPolicy.requireActivityClass,
+                classificationPolicy =
+                    StepsCounter.ClassificationPolicy.rejectUnverifiedBandCounter,
             )
+            val observedStepOwners = linkedSetOf<String>()
             if (dayStepAnalysis.counterObserved) {
+                observedStepOwners.add(owner)
+            } else {
+                // Ownership is HR-based now that band motion is not gait evidence. Still inspect each
+                // alternate candidate with a LIMIT-1 day read so unverified rows under a non-owner source
+                // cannot leave old computed steps behind. Any read failure propagates before reconciliation.
+                val alternateSources = (
+                    candidatePriorities.map { it.first } + importedDeviceId
+                ).distinct()
+                for (source in alternateSources) {
+                    if (source == owner) continue
+                    if (repo.stepSamples(source, dayMidnight, dayEnd, 1).isNotEmpty()) {
+                        observedStepOwners.add(source)
+                    }
+                }
+            }
+            if (observedStepOwners.isNotEmpty()) {
                 stepCounterObservedDays.add(day)
-                stepCounterOwnerIds.add(owner)
+                stepCounterOwnerIds.addAll(observedStepOwners)
             }
-            if (dayStepAnalysis.hasAuthoritativeCounterOutcome) {
-                stepCounterAuthoritativeDays.add(day)
-            }
-            StepsCounter.stationaryLegacyRepairSteps(
-                analysis = dayStepAnalysis,
-                samples = daySteps,
-                ticksPerStep = profile.stepTicksPerStep,
-                dayStartTs = dayMidnight,
-                observedThroughTs = minOf(dayEnd, nowSeconds),
-            )?.let { legacySteps ->
-                val ownerComputedId =
-                    if (owner.endsWith("-noop")) owner else "$owner-noop"
-                linkedSetOf(ownerComputedId, computedId).forEach { targetSourceId ->
-                    stationaryLegacyStepsBySource
-                        .getOrPut(targetSourceId) { LinkedHashMap() }[day] = legacySteps
-                }
-            }
-            if (hr.size < MIN_HR_SAMPLES) {
-                if (dayStepAnalysis.steps != null) {
-                    stepOnlyDailyDays.add(day)
-                } else if (dayStepAnalysis.counterObserved) {
-                    stepCounterSkippedDays.add(day)
-                }
+            if (hr.size < MIN_HR_SAMPLES && observedStepOwners.isNotEmpty()) {
+                stepCounterSkippedDays.add(day)
             }
 
             // CAPTURE-B: capture this day's resolved read owner + HR-row count so PASS 2 can emit the
@@ -1681,7 +1671,7 @@ object IntelligenceEngine {
                 dayHr = dayHr,
                 daySteps = daySteps,
                 stepClassificationPolicy =
-                    StepsCounter.ClassificationPolicy.requireActivityClass,
+                    StepsCounter.ClassificationPolicy.rejectUnverifiedBandCounter,
                 dayGravity = dayGrav,
                 skinTemp = skin,
                 skinTempFamily = skinFamily,   // #938
@@ -1787,7 +1777,7 @@ object IntelligenceEngine {
                     tzOffsetSeconds = dayTimezoneOffsetSeconds,
                     ticksPerStep = profile.stepTicksPerStep,
                     classificationPolicy =
-                        StepsCounter.ClassificationPolicy.requireActivityClass,
+                        StepsCounter.ClassificationPolicy.rejectUnverifiedBandCounter,
                     civilDayStartTs = exactDay.startTs,
                     civilDayEndTsExclusive = exactDay.endTs + 1L,
                 )) {
@@ -2219,12 +2209,7 @@ object IntelligenceEngine {
             hasFreshScores = dailies.isNotEmpty(),
             traversingFormulaHistory = traverseResolvableHistory,
         )
-        val stepCounterNoRetainedDays =
-            stepCounterObservedDays.minus(stepCounterAuthoritativeDays)
-        val stepOnlyPersistedDays =
-            stepOnlyDailyDays.intersect(dailies.mapTo(HashSet()) { it.day })
-        val preserveDailyFieldsDays =
-            stepOnlyPersistedDays.plus(stepCounterSkippedDays)
+        val preserveDailyFieldsDays = stepCounterSkippedDays
         val computedStepSourceIds = repo.computedSourceIds(importedDeviceId)
             .plus(allOwnerSourceIds.map { owner ->
                 if (owner.endsWith("-noop")) owner else "$owner-noop"
@@ -2234,9 +2219,7 @@ object IntelligenceEngine {
             })
             .plus(computedId)
             .distinct()
-        val hasStepEvidenceMutation =
-            stepCounterAuthoritativeDays.isNotEmpty() ||
-                stationaryLegacyStepsBySource.isNotEmpty()
+        val hasStepEvidenceMutation = stepCounterObservedDays.isNotEmpty()
         if (shouldReconcileScoreRange) {
             // Persist daily scores and their Rest evidence in one transaction. Its internal range
             // replacement is invisible until commit, so cancellation or failure keeps the prior complete
@@ -2249,12 +2232,10 @@ object IntelligenceEngine {
                 managedRestKeys = ScoreConfidence.managedRestSeriesKeys,
                 restRows = restRows,
                 allowEmptyReplacement = traverseResolvableHistory,
-                preserveDailyStepDays = stepCounterNoRetainedDays,
                 preserveDailyFieldsDays = preserveDailyFieldsDays,
                 stepEvidenceDeviceIds =
                     if (hasStepEvidenceMutation) computedStepSourceIds else emptyList(),
-                deleteEstimateDays = stepCounterAuthoritativeDays,
-                clearMatchingComputedStepsBySource = stationaryLegacyStepsBySource,
+                clearComputedStepDays = stepCounterObservedDays,
             )
         }
         if (activeZoneRows.isNotEmpty()) {
@@ -2267,17 +2248,14 @@ object IntelligenceEngine {
             )
         }
 
-        // Counter evidence is a day-scoped integrity repair, including during historical catch-up.
-        // A retained walk/run count supersedes an older gravity estimate. An all-still window may also
-        // remove the exact legacy raw-motion value it proves stale; compare-and-clear keeps mismatched,
-        // imported, classless, sparse, flat, gap-only, and unknown-only history intact. Broad estimate
-        // deletion still spans computed namespaces; an exact stale-value clear is limited to the day
-        // owner and the active aggregate output source.
+        // A successfully read band-counter day is a day-scoped integrity repair, including during
+        // historical catch-up. Clear computed daily steps and steps_est across computed namespaces;
+        // imported sources are outside the repository API. A read failure aborts before this mutation.
         if (!shouldReconcileScoreRange && hasStepEvidenceMutation) {
             repo.reconcileComputedStepEvidence(
                 deviceIds = computedStepSourceIds,
-                deleteEstimateDays = stepCounterAuthoritativeDays,
-                clearMatchingComputedStepsBySource = stationaryLegacyStepsBySource,
+                deleteEstimateDays = emptyList(),
+                clearComputedStepDays = stepCounterObservedDays,
             )
         }
 
@@ -3273,8 +3251,7 @@ object IntelligenceEngine {
      * Resolve the SINGLE device that owns [day] (invariant I2), so the day is scored from exactly one
      * source , never a mix. A locked override (dayOwnership) wins outright and skips the presence checks.
      * Otherwise builds one [DayOwnerResolver.Candidate] per device from [candidatePriorities] with a bounded
-     * per-day evidence flag (one `LIMIT 1` HR read, then a chunked classified-step probe only when HR is
-     * absent, per device),
+     * per-day evidence flag (one `LIMIT 1` HR read per device),
      * and returns the lowest-priority candidate that has data. Returns [importedDeviceId] when
      * [ownerSource] is null or the resolver yields no owner , so the legacy single-source path is
      * preserved.
@@ -3293,8 +3270,6 @@ object IntelligenceEngine {
         from: Long,
         to: Long,
         importedDeviceId: String,
-        stepFrom: Long = from,
-        stepTo: Long = to,
     ): String {
         if (ownerSource == null) return importedDeviceId
         // A locked override wins outright and skips the presence checks entirely.
@@ -3313,22 +3288,13 @@ object IntelligenceEngine {
             return importedDeviceId
         }
         val candidates = candidatePriorities.map { (id, priority) ->
-            // Resolve all usable evidence for this same source before applying source priority.
-            // Otherwise an import with one HR row can win before the active band's valid walking rows
-            // are checked. HR short-circuits the step probe; steps are independent gait evidence and
-            // do not require an overnight HR row. A raw counter row alone is not evidence: the same
-            // production classifier must retain at least one walk/run delta.
+            // Raw band-counter rows are not gait evidence and therefore cannot select the source used
+            // for physiological scoring. The analysis loop probes those rows separately for cleanup.
             val hasHeartRate = repo.hrSamples(id, from, to, 1).isNotEmpty()
-            val hasSteps = !hasHeartRate && hasRetainedStepEvidence(
-                repo = repo,
-                deviceId = id,
-                from = stepFrom,
-                to = stepTo,
-            )
             DayOwnerResolver.Candidate(
                 deviceId = id,
                 priority = priority,
-                hasData = hasHeartRate || hasSteps,
+                hasData = hasHeartRate,
             )
         }
         return DayOwnerResolver.resolve(
@@ -3336,48 +3302,6 @@ object IntelligenceEngine {
             lockedOwner = null,
             candidates = candidates,
         ) ?: importedDeviceId
-    }
-
-    /**
-     * Determine whether a source has at least one production-eligible classified step delta without
-     * materializing an entire day for every ownership candidate. The prior row is carried across chunks
-     * so a walk/run delta at a chunk boundary is evaluated exactly once.
-     */
-    private suspend fun hasRetainedStepEvidence(
-        repo: WhoopRepository,
-        deviceId: String,
-        from: Long,
-        to: Long,
-    ): Boolean {
-        if (from > to) return false
-
-        val batchSize = 8_192
-        var cursor = from
-        var previous: com.noop.data.StepSample? = null
-
-        while (cursor <= to) {
-            coroutineContext.ensureActive()
-            val batch = repo.stepSamples(deviceId, cursor, to, batchSize)
-            if (batch.isEmpty()) return false
-
-            val probe = previous?.let { listOf(it) + batch } ?: batch
-            if (
-                StepsCounter.analyze(
-                    probe,
-                    classificationPolicy = StepsCounter.ClassificationPolicy.requireActivityClass,
-                ).steps != null
-            ) {
-                return true
-            }
-
-            val last = batch.last()
-            if (batch.size < batchSize || last.ts >= to || last.ts == Long.MAX_VALUE) {
-                return false
-            }
-            previous = last
-            cursor = last.ts + 1L
-        }
-        return false
     }
 
     internal fun <T> daySliceFromWindow(

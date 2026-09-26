@@ -235,6 +235,19 @@ class DeviceRegistryTest {
     }
 
     @Test
+    fun legacyWhoopCapabilityTokensAreSanitizedAtReadTime() = runBlocking {
+        val dao = seededDao()
+        dao.devices["my-whoop"] = checkNotNull(dao.devices["my-whoop"]).copy(
+            capabilities = "hr,spo2,steps,strainLoad",
+        )
+
+        assertEquals(
+            "hr,strainLoad",
+            registryWith(dao).all().single().capabilities,
+        )
+    }
+
+    @Test
     fun addCommitsOnlyAfterVerifiedReadBack() = runBlocking {
         val dao = seededDao()
         val reg = registryWith(dao)

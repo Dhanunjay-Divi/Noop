@@ -60,7 +60,7 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
         XCTAssertEqual(trends[.hrv], [40, 42, 44])
     }
 
-    func testStepsUseDisplayedPerDaySourcePrecedence() {
+    func testStepsTrendRequiresImportedPedometerRows() {
         let days = [
             metric("2026-08-20", steps: 2_000),
             metric("2026-08-21", steps: 3_000),
@@ -83,12 +83,12 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
             endingAt: "2026-08-22"
         )
 
-        XCTAssertEqual(trends[.steps], [2_000, 4_000, 5_000])
+        XCTAssertEqual(trends[.steps], [4_000, 5_000])
     }
 
-    func testStepsTrendWithholdsGravityOnlyEstimate() {
+    func testStepsTrendWithholdsEveryMotionOnlySource() {
         let trends = LiquidTodayView.keyMetricTrendSeries(
-            days: [],
+            days: [metric("2026-08-22", steps: 4_000)],
             restSeries: [],
             stepEstimates: [(day: "2026-08-22", value: 4_000)],
             appleRows: [],

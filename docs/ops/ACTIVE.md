@@ -12,6 +12,32 @@ Last updated: **2026-09-26**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
+- The newest September 26 step-source correction supersedes older statements
+  below that describe a classification-gated band counter as valid primary
+  Steps. Historical byte 63 has conflicting wear/contact and activity
+  interpretations, so Apple and Android production paths now reject every
+  positive delta from the reverse-engineered byte-57 counter regardless of the
+  adjacent legacy value. Primary Steps therefore requires an imported OS
+  pedometer or a future validated supplier-native stream; heart rate remains
+  wear/effort context rather than gait proof. Observed counter days clear only
+  NOOP-computed `steps` and `steps_est` under validated `-noop` namespaces,
+  including when an imported source owns the usable HR day, while Apple Health
+  and Health Connect rows are preserved. Transactional guards reject imported
+  cleanup targets before mutation. Local evidence passes protocol 406 with one
+  opt-in skip, analytics 1,513 with seven documented skips, storage 555,
+  Apple app/data 75/75, primary-Steps presentation 25/25, the complete iPhone
+  Simulator graph with Watch, complications, and widgets, Android focused
+  primary-Steps 75/75, Android Full 5,213 with seven skips, Full/Demo
+  compilation, Android instrumentation-source compilation, zero-error lint,
+  and Full APK assembly. The current iPhone Simulator graph embeds Watch,
+  complications, and widgets. The complete current-tree Tools wall passes 372
+  tests with one intentional skip. Standalone controls
+  pass the 1,312-file claims scan, full localization, private-data, 12-metric
+  calibration, nine release checks, ten required contexts, trusted self,
+  exact ten-file SDK artifact, legal inventory/distribution, 18,508 classified
+  terminology occurrences across 1,629 groups with zero forbidden mappings,
+  and all 101 operations records. Commit/push, exact-head hosted checks,
+  protected integration, and synchronized physical validation remain pending.
 - September 26 exact-day step parity is locally green on the current dirty
   replacement. Apple Calendar and Workout detail now prefer the exact-day
   Apple Health pedometer aggregate over the classified band counter. Android

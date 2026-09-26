@@ -109,7 +109,7 @@ final class IntelligenceDaySourceTests: XCTestCase {
     }
 
     @MainActor
-    func testDayOwnerResolvesEachSourcesHeartRateOrStepsBeforeApplyingPriority() async throws {
+    func testDayOwnerRejectsLegacyWalkBytesBeforeApplyingPriority() async throws {
         let store = try await WhoopStore.inMemory()
         let registry = DeviceRegistryStore(dbQueue: store.registryWriter)
         try registry.add(PairedDevice(
@@ -141,8 +141,6 @@ final class IntelligenceDaySourceTests: XCTestCase {
             day: "1970-01-01",
             from: from,
             to: to,
-            stepFrom: from,
-            stepTo: to,
             store: store,
             devices: try registry.all(),
             activeId: "my-whoop",
@@ -152,8 +150,8 @@ final class IntelligenceDaySourceTests: XCTestCase {
 
         XCTAssertEqual(
             owner,
-            "my-whoop",
-            "the active band's valid step evidence must outrank an import's HR row"
+            "oura-import",
+            "an unverified band counter cannot outrank another source's usable heart-rate evidence"
         )
     }
 
@@ -189,8 +187,6 @@ final class IntelligenceDaySourceTests: XCTestCase {
             day: "1970-01-01",
             from: from,
             to: to,
-            stepFrom: from,
-            stepTo: to,
             store: store,
             devices: try registry.all(),
             activeId: "my-whoop",

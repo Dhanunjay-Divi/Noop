@@ -3457,19 +3457,14 @@ private suspend fun buildSeriesVitalDetail(
         )
     }
     "steps" -> {
-        // Primary Steps mirrors Today exactly: measured Health Connect / Apple Health first, then the
-        // classification-gated band counter. The separate gravity-only `steps_est` model is intentionally
-        // absent, so stationary wrist movement cannot reappear after tapping a blank Steps card.
-        val motionDerived = vm.repo.resolvedSeries("steps", "my-whoop", "0000-00-00", "9999-99-99",
-            strapDeviceId = activeDeviceId)
-            .points.associateBy({ it.day }, {
-                VitalReading(it.day, it.value, MOTION_DERIVED_STEPS_SOURCE)
-            })
+        // Primary Steps mirrors Today exactly: only measured Health Connect / Apple Health values qualify.
+        // Do not query the legacy band-motion series, so a stale 4,000-count wrist-motion row cannot
+        // reappear after tapping a blank Steps card.
         val imported = LinkedHashMap<String, VitalReading>()
         for (r in vm.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31") +
             vm.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31")) {
-            val s = r.steps
-            if (s != null && s > 0) {
+            val s = validImportedStepCount(r.steps)
+            if (s != null) {
                 val candidate = VitalReading(r.day, s.toDouble(), r.deviceId)
                 if (candidate.value > (imported[r.day]?.value ?: Double.NEGATIVE_INFINITY)) {
                     imported[r.day] = candidate
@@ -3481,7 +3476,7 @@ private suspend fun buildSeriesVitalDetail(
             title = uiString(R.string.l10n_health_screen_steps_cdde4f20),
             unit = "steps",
             color = Palette.metricCyan,
-            readings = mergeStepsReadings(motionDerived, imported),
+            readings = mergeStepsReadings(emptyMap(), imported),
             format = { it.roundToInt().toString() },
         )
     }

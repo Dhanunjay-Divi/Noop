@@ -312,12 +312,9 @@ data class StepSample(
     val deviceId: String,
     val ts: Long,
     val counter: Int,
-    // The per-record activity-class enum decoded from @63 (community finding #316): 0=still, 1=walk, 2=run;
-    // null when the byte was 0xFF/invalid or absent. The decoder ALREADY carries this on [StepRow], but it
-    // was DROPPED at the insert boundary (the v2_3 stepSample held only ts/counter), so it could never be
-    // persisted or read. Added by MIGRATION_12_13 (Swift WhoopStore v19 parity). Nullable INTEGER (no SQL
-    // DEFAULT, a Kotlin construction default never reaches the schema), so old rows read back null: an
-    // absent class stays absent, never a fabricated 0/"still".
+    // Compatibility-only value from rows decoded before @63 was found to overlap `motion_wear_quality`.
+    // Current protocol decode leaves this null because the byte is not validated still/walk/run evidence.
+    // The nullable v13 column remains so backups and restored legacy rows keep their original shape.
     val activityClass: Int? = null,
     val synced: Int = 0,
 )
@@ -395,9 +392,9 @@ data class DailyMetric(
     val spo2Pct: Double? = null,        // mean SpO2 (%) during sleep
     val skinTempDevC: Double? = null,   // skin-temperature deviation (°C) from baseline
     val respRateBpm: Double? = null,    // mean respiration rate (breaths/min) during sleep
-    // On-device derived or imported step total. WHOOP5 days use step_motion_counter@57 (sum of
-    // positive u16-counter deltas); activity-file imports can fill missing steps from file summaries.
-    // APPROXIMATE, not cloud/clinical parity. (#78)
+    // Imported step total, or a compatibility value computed by an older release. Current production
+    // does not publish WHOOP5 step_motion_counter@57 deltas as steps; reconciliation clears those old
+    // computed values on days where band-counter rows are observed.
     val steps: Int? = null,
     // On-device APPROXIMATE whole-day active+resting energy estimate (kcal), computed from HR alone
     // by AnalyticsEngine (Keytel active + Harris–Benedict BMR). Null when the day has no scored HR

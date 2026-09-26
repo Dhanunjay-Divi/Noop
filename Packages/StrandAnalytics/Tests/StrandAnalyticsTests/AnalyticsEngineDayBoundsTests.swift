@@ -176,14 +176,26 @@ final class AnalyticsEngineDayBoundsTests: XCTestCase {
             }
             let profile = UserProfile(weightKg: 75, heightCm: 178, age: 30, sex: "male")
 
-            let full = AnalyticsEngine.analyzeDay(day: day, dayHr: dayHr, daySteps: daySteps,
-                                                  profile: profile, tzOffsetSeconds: off)
+            let full = AnalyticsEngine.analyzeDay(
+                day: day,
+                dayHr: dayHr,
+                daySteps: daySteps,
+                stepClassificationPolicy: .allowLegacyRawMotion,
+                profile: profile,
+                tzOffsetSeconds: off
+            )
             // The OLD path, byte for byte: pre-trim each stream with the formatter compare.
             let preHr = dayHr.filter { AnalyticsEngine.dayString($0.ts, offsetSec: off) == day }
             let preSteps = daySteps.filter { AnalyticsEngine.dayString($0.ts, offsetSec: off) == day }
             XCTAssertLessThan(preHr.count, dayHr.count, "fixture must actually spill outside the day")
-            let pre = AnalyticsEngine.analyzeDay(day: day, dayHr: preHr, daySteps: preSteps,
-                                                 profile: profile, tzOffsetSeconds: off)
+            let pre = AnalyticsEngine.analyzeDay(
+                day: day,
+                dayHr: preHr,
+                daySteps: preSteps,
+                stepClassificationPolicy: .allowLegacyRawMotion,
+                profile: profile,
+                tzOffsetSeconds: off
+            )
 
             XCTAssertEqual(full.daily, pre.daily, "off=\(off)")
             XCTAssertEqual(full.activeZoneMinutes, pre.activeZoneMinutes, "off=\(off)")
@@ -228,6 +240,7 @@ final class AnalyticsEngineDayBoundsTests: XCTestCase {
             let exact = AnalyticsEngine.analyzeDay(
                 day: testCase.day,
                 daySteps: samples,
+                stepClassificationPolicy: .allowLegacyRawMotion,
                 profile: UserProfile(stepTicksPerStep: 1),
                 tzOffsetSeconds: testCase.representativeOffset,
                 civilDayStartTs: start,
@@ -236,6 +249,7 @@ final class AnalyticsEngineDayBoundsTests: XCTestCase {
             let fixedOffset = AnalyticsEngine.analyzeDay(
                 day: testCase.day,
                 daySteps: samples,
+                stepClassificationPolicy: .allowLegacyRawMotion,
                 profile: UserProfile(stepTicksPerStep: 1),
                 tzOffsetSeconds: testCase.representativeOffset
             )

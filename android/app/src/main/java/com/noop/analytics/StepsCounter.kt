@@ -36,10 +36,16 @@ object StepsCounter {
         allowLegacyRawMotion,
 
         /**
-         * Current counter-capable hardware must provide walk/run evidence. An all-unclassified window
-         * remains observed but ambiguous, yields no steps, and cannot enable another motion fallback.
+         * Research-only compatibility policy for fixtures that exercise the former @63 still/walk/run
+         * interpretation. @63 overlaps `motion_wear_quality` and is not production gait evidence.
          */
         requireActivityClass,
+
+        /**
+         * Production compatible-band policy. The counter is observed motion, not a validated pedometer, and
+         * legacy `activityClass` values came from the disputed @63 byte. Reject every positive delta.
+         */
+        rejectUnverifiedBandCounter,
     }
 
     /**
@@ -63,6 +69,7 @@ object StepsCounter {
             legacyRawMotion,
             activityClassFiltered,
             activityClassRequiredMissing,
+            unverifiedBandCounterRejected,
         }
 
         val steps: Int?
@@ -79,7 +86,7 @@ object StepsCounter {
         val allowsMotionFallback: Boolean
             get() = !counterObserved
 
-        /** Only retained walk/run evidence may replace older computed evidence. */
+        /** Only a legacy/research policy can currently retain counter evidence. */
         val hasAuthoritativeCounterOutcome: Boolean
             get() = steps != null
 
@@ -149,10 +156,10 @@ object StepsCounter {
     /**
      * Analyze wrap-aware motion-counter deltas in timestamp order.
      *
-     * Legacy windows with no non-null activity class preserve the prior raw-motion behavior. Once any class
-     * evidence exists anywhere in the window, a delta is locomotion only when its later sample is walk (1) or
-     * run (2). Still (0), unknown (null), and any other class are rejected. Gap/reset deltas remain rejected
-     * before activity classification.
+     * Legacy windows with no non-null activity class preserve the prior raw-motion behavior. The research
+     * policy retains the former class filter. Production rejects every positive counter delta because neither
+     * @57 motion nor the overlapping @63 byte is validated gait evidence. Gap/reset deltas remain rejected
+     * before policy filtering.
      */
     fun analyze(
         samples: List<StepSample>,
@@ -161,6 +168,8 @@ object StepsCounter {
         val sorted = samples.sortedBy { it.ts }
         val hasActivityClass = sorted.any { it.activityClass != null }
         val filterMode = when {
+            classificationPolicy == ClassificationPolicy.rejectUnverifiedBandCounter ->
+                Analysis.FilterMode.unverifiedBandCounterRejected
             hasActivityClass -> Analysis.FilterMode.activityClassFiltered
             classificationPolicy == ClassificationPolicy.requireActivityClass ->
                 Analysis.FilterMode.activityClassRequiredMissing
@@ -185,6 +194,10 @@ object StepsCounter {
                     unfilteredRawTicks += delta
                     rawTicks += delta
                     keptDeltaCount += 1
+                }
+                filterMode == Analysis.FilterMode.unverifiedBandCounterRejected -> {
+                    unfilteredRawTicks += delta
+                    rejectedUnknownDeltaCount += 1
                 }
                 else -> {
                     unfilteredRawTicks += delta
@@ -215,11 +228,8 @@ object StepsCounter {
     }
 
     /**
-     * Raw wrap-aware motion-tick total across [samples] — the sum of positive consecutive
-     * `step_motion_counter@57` increments in `[1, MAX_STEP_DELTA)`. Sorts by `ts` internally, so the caller
-     * may pass an unsorted window (already filtered to the range it cares about). Returns `null` when there
-     * are fewer than two samples or no forward movement (so "no data" stays distinct from a real zero). The
-     * caller applies its `stepTicksPerStep` calibration to the returned ticks.
+     * Policy-filtered wrap-aware motion-tick total across [samples]. Production callers must pass
+     * [ClassificationPolicy.rejectUnverifiedBandCounter]; the defaults remain for compatibility tests.
      */
     fun stepsInWindow(
         samples: List<StepSample>,

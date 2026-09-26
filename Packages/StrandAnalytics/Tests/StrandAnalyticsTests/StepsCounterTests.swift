@@ -112,6 +112,38 @@ final class StepsCounterTests: XCTestCase {
         ))
     }
 
+    func testHeadWashingLegacyWalkRunLabelsRemainUnverified() {
+        // The raw byte beside the counter has conflicting wear/contact and activity interpretations.
+        // A wet or poorly seated wrist may therefore carry 1/2 values during stationary hand motion.
+        // Production must reject the same exact 4,000-tick report regardless of those legacy labels.
+        let counters = [
+            10_000, 10_180, 10_600, 10_860, 11_360, 11_670,
+            12_060, 12_510, 12_790, 13_280, 13_600, 14_000,
+        ]
+        let samples = counters.enumerated().map { index, counter in
+            step(index * 20, counter, index.isMultiple(of: 2) ? 1 : 2)
+        }
+        let analysis = StepsCounter.analyze(
+            samples,
+            classificationPolicy: .rejectUnverifiedBandMotion
+        )
+
+        XCTAssertEqual(analysis.filterMode, .unverifiedBandMotion)
+        XCTAssertEqual(analysis.unfilteredRawTicks, 4_000)
+        XCTAssertEqual(analysis.keptDeltaCount, 0)
+        XCTAssertEqual(analysis.rejectedUnknownDeltaCount, counters.count - 1)
+        XCTAssertEqual(analysis.rawTicks, 0)
+        XCTAssertNil(analysis.steps)
+        XCTAssertTrue(analysis.counterObserved)
+        XCTAssertFalse(analysis.allowsMotionFallback)
+        XCTAssertFalse(analysis.hasAuthoritativeCounterOutcome)
+        XCTAssertNil(analysis.stationaryOnlyLegacyTicks)
+        XCTAssertNil(StepsCounter.stepsInWindow(
+            samples,
+            classificationPolicy: .rejectUnverifiedBandMotion
+        ))
+    }
+
     func testContinuousAllStillCoverageCanRepairExactLegacyValue() {
         let samples = (0...6).map { step($0 * 600, $0 * 100, 0) }
         let analysis = StepsCounter.analyze(

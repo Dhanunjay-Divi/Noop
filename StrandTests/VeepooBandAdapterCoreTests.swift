@@ -951,24 +951,41 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     }
 
     @MainActor
-    func testSourcePublishesNonStreamingStateWhenLiveStreamFails() {
-        let live = LiveState()
-        let adapter = FakeAdapter()
-        let source = VeepooBandSource(
-            live: live,
-            adapter: adapter,
-            password: "2468",
-            onCredentialRejected: {}
-        )
-        adapter.emit(.heartRate(.init(bpm: 72, receivedAt: Date())))
-        XCTAssertTrue(live.connected)
+    func testAuthenticatedTransportStaysConnectedWhenLiveHeartRateIsUnavailable() {
+        for failure in [
+            VeepooBandAdapterFailure.notWorn,
+            VeepooBandAdapterFailure.busy,
+        ] {
+            let live = LiveState()
+            let adapter = FakeAdapter()
+            let source = VeepooBandSource(
+                live: live,
+                adapter: adapter,
+                password: "2468",
+                onCredentialRejected: {},
+                liveRestartDelaysNanoseconds: [1_000_000_000]
+            )
+            adapter.emit(
+                .battery(
+                    .init(
+                        percent: 80,
+                        level: nil,
+                        charging: false,
+                        low: false
+                    )
+                )
+            )
+            XCTAssertTrue(live.connected)
+            adapter.emit(.heartRate(.init(bpm: 72, receivedAt: Date())))
 
-        adapter.emit(.failed(stage: .live, failure: .notWorn))
+            adapter.emit(.failed(stage: .live, failure: failure))
 
-        XCTAssertNil(live.displayOnlyHeartRate)
-        XCTAssertNil(live.displayOnlyHeartRateReceivedAt)
-        XCTAssertFalse(live.connected)
-        source.stop()
+            XCTAssertNil(live.displayOnlyHeartRate)
+            XCTAssertNil(live.displayOnlyHeartRateReceivedAt)
+            XCTAssertTrue(live.connected)
+            XCTAssertEqual(live.batteryPct, 80)
+            source.stop()
+        }
     }
 
     @MainActor
@@ -1199,6 +1216,62 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
 
         XCTAssertEqual(adapter.discoveries.count, 1)
         XCTAssertEqual(adapter.stopDiscoveryCount, 1)
+    }
+
+    @MainActor
+    func testCredentialReadContinuesWithLowFrequencyTailAfterRetryBurst()
+        async
+    {
+        let adapter = FakeAdapter()
+        let target = UUID()
+        var loadCount = 0
+        let source = VeepooBandSource(
+            live: LiveState(),
+            adapter: adapter,
+            credentialLoader: {
+                loadCount += 1
+                return loadCount < 5 ? .unavailable : .available("2468")
+            },
+            credentialRetryDelaysNanoseconds: [0, 0, 0],
+            credentialRetryTailDelayNanoseconds: 0,
+            onCredentialRejected: {},
+            onCredentialPermanentlyUnavailable: {}
+        )
+
+        source.connect(target)
+        for _ in 0..<200 where adapter.discoveries.isEmpty {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(loadCount, 5)
+        XCTAssertEqual(adapter.discoveries, [target])
+        source.stop()
+    }
+
+    @MainActor
+    func testStoppingSourceCancelsPendingCredentialReadTail() async {
+        let adapter = FakeAdapter()
+        var loadCount = 0
+        let source = VeepooBandSource(
+            live: LiveState(),
+            adapter: adapter,
+            credentialLoader: {
+                loadCount += 1
+                return .unavailable
+            },
+            credentialRetryDelaysNanoseconds: [],
+            credentialRetryTailDelayNanoseconds: 20_000_000,
+            onCredentialRejected: {},
+            onCredentialPermanentlyUnavailable: {}
+        )
+
+        source.connect(UUID())
+        XCTAssertEqual(loadCount, 1)
+        source.stop()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(loadCount, 1)
+        XCTAssertTrue(adapter.discoveries.isEmpty)
     }
 
     @MainActor

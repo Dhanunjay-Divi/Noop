@@ -97,30 +97,37 @@ class StepsCounterTest {
         assertNull(StepsCounter.stepsInWindow(samples))
     }
 
-    @Test fun headWashingHandGesturesDoNotIncreaseSteps() {
+    @Test fun productionRejectsExactFourThousandTicksDespiteLegacyWalkRunClasses() {
         // Regression: repetitive arm/hand motion while standing in place advanced the raw wrist counter
-        // by about 4,000. Every delta is plausible and below the gap guard, so stationary classification,
-        // not a size heuristic or heart-rate threshold, must reject the complete sequence.
+        // by exactly 4,000. Legacy rows contain disputed @63 values 1/2, but production must reject the
+        // complete sequence rather than treating those values as verified gait.
         val counters = listOf(
             10_000, 10_180, 10_600, 10_860, 11_360, 11_670,
             12_060, 12_510, 12_790, 13_280, 13_600, 14_000,
         )
         val samples = counters.mapIndexed { index, counter ->
-            step(index * 20L, counter, activityClass = 0)
+            step(index * 20L, counter, activityClass = if (index % 2 == 0) 1 else 2)
         }
         val analysis = StepsCounter.analyze(
             samples,
-            StepsCounter.ClassificationPolicy.requireActivityClass,
+            StepsCounter.ClassificationPolicy.rejectUnverifiedBandCounter,
         )
 
+        assertEquals(
+            StepsCounter.Analysis.FilterMode.unverifiedBandCounterRejected,
+            analysis.filterMode,
+        )
         assertEquals(4_000, analysis.unfilteredRawTicks)
-        assertEquals(counters.size - 1, analysis.rejectedStillDeltaCount)
+        assertEquals(counters.size - 1, analysis.rejectedUnknownDeltaCount)
+        assertEquals(0, analysis.keptDeltaCount)
         assertEquals(0, analysis.rawTicks)
         assertNull(analysis.steps)
+        assertEquals(true, analysis.counterObserved)
+        assertEquals(false, analysis.allowsMotionFallback)
         assertNull(
             StepsCounter.stepsInWindow(
                 samples,
-                StepsCounter.ClassificationPolicy.requireActivityClass,
+                StepsCounter.ClassificationPolicy.rejectUnverifiedBandCounter,
             ),
         )
     }

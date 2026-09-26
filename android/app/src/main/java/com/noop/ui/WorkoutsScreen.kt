@@ -1100,7 +1100,6 @@ internal fun dayOverviewSleepScore(daily: DailyMetric?): Double? {
 
 internal enum class DayOverviewStepSource {
     IMPORTED_PEDOMETER,
-    CLASSIFIED_BAND,
 }
 
 internal data class ResolvedDayOverviewSteps(
@@ -1108,13 +1107,12 @@ internal data class ResolvedDayOverviewSteps(
     val source: DayOverviewStepSource,
 )
 
+@Suppress("UNUSED_PARAMETER")
 internal fun resolvedDayOverviewSteps(
     imported: Int?,
     classifiedBand: Int?,
 ): ResolvedDayOverviewSteps? = when {
     imported != null -> ResolvedDayOverviewSteps(imported, DayOverviewStepSource.IMPORTED_PEDOMETER)
-    classifiedBand != null ->
-        ResolvedDayOverviewSteps(classifiedBand, DayOverviewStepSource.CLASSIFIED_BAND)
     else -> null
 }
 
@@ -1217,8 +1215,6 @@ internal fun WorkoutDayOverviewSheet(
     val overviewStepsLabel = when (overviewSteps?.source) {
         DayOverviewStepSource.IMPORTED_PEDOMETER ->
             uiString(R.string.appwide_day_overview_phone_watch_steps)
-        DayOverviewStepSource.CLASSIFIED_BAND ->
-            uiString(R.string.appwide_day_overview_band_steps)
         null -> uiString(R.string.appwide_day_overview_steps)
     }
 

@@ -58,6 +58,20 @@ class IntelligenceStepIntegrityTest {
                         0
                     }
                 }
+                "clearComputedDailySteps" -> {
+                    val source = args!![0] as String
+                    @Suppress("UNCHECKED_CAST")
+                    val days = (args[1] as List<String>).toSet()
+                    val targets = daily.keys.filter {
+                        it.first == source &&
+                            it.second in days &&
+                            daily[it]?.steps != null
+                    }
+                    targets.forEach { key ->
+                        daily[key] = requireNotNull(daily[key]).copy(steps = null)
+                    }
+                    targets.size
+                }
                 "deleteMatchingMetricSeriesPoint" -> {
                     if (fixture.failEstimateDelete) error("injected estimate delete failure")
                     val source = args!![0] as String
@@ -172,6 +186,65 @@ class IntelligenceStepIntegrityTest {
     }
 
     @Test
+    fun clearComputedStepDaysRemovesOldFourThousandButPreservesImportedRows() = runBlocking {
+        val f = fixture()
+        val computedSource = "whoop-ABC123-noop"
+        val healthConnect = "health-connect"
+        val osImport = "apple-health"
+        val day = "2026-09-24"
+        val oldComputed = DailyMetric(
+            deviceId = computedSource,
+            day = day,
+            recovery = 60.0,
+            steps = 4_000,
+        )
+        f.daily[computedSource to day] = oldComputed
+        f.daily[healthConnect to day] =
+            oldComputed.copy(deviceId = healthConnect, recovery = 75.0, steps = 8_000)
+        f.daily[osImport to day] =
+            oldComputed.copy(deviceId = osImport, recovery = 80.0, steps = 9_000)
+        f.series[Triple(computedSource, day, "steps_est")] =
+            MetricSeriesRow(computedSource, day, "steps_est", 4_000.0)
+        f.series[Triple(healthConnect, day, "steps_est")] =
+            MetricSeriesRow(healthConnect, day, "steps_est", 8_000.0)
+        f.series[Triple(osImport, day, "steps_est")] =
+            MetricSeriesRow(osImport, day, "steps_est", 9_000.0)
+
+        assertEquals(
+            2,
+            f.repo.reconcileComputedStepEvidence(
+                deviceIds = listOf(computedSource),
+                deleteEstimateDays = emptyList(),
+                clearComputedStepDays = listOf(day),
+            ),
+        )
+
+        assertNull(f.daily[computedSource to day]?.steps)
+        assertEquals(60.0, f.daily[computedSource to day]?.recovery)
+        assertNull(f.series[Triple(computedSource, day, "steps_est")])
+        assertEquals(8_000, f.daily[healthConnect to day]?.steps)
+        assertEquals(75.0, f.daily[healthConnect to day]?.recovery)
+        assertEquals(8_000.0, f.series[Triple(healthConnect, day, "steps_est")]?.value)
+        assertEquals(9_000, f.daily[osImport to day]?.steps)
+        assertEquals(80.0, f.daily[osImport to day]?.recovery)
+        assertEquals(9_000.0, f.series[Triple(osImport, day, "steps_est")]?.value)
+        assertEquals(1L, f.repo.metricDataVersion.value)
+    }
+
+    @Test
+    fun clearComputedStepDaysRejectsImportedSourceIds() = runBlocking {
+        val failure = runCatching {
+            fixture().repo.reconcileComputedStepEvidence(
+                deviceIds = listOf("health-connect"),
+                deleteEstimateDays = emptyList(),
+                clearComputedStepDays = listOf("2026-09-24"),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalArgumentException)
+    }
+
+    @Test
     fun estimateRepairFailureLeavesDailyEvidenceUntouched() = runBlocking {
         val f = fixture()
         val source = "whoop-ABC123-noop"
@@ -268,7 +341,7 @@ class IntelligenceStepIntegrityTest {
     }
 
     @Test
-    fun stationaryLegacyRepairRollsBackDailyClearWhenEstimateDeleteFails() = runBlocking {
+    fun computedDayClearRollsBackWhenEstimateDeleteFails() = runBlocking {
         val f = fixture()
         val source = "active-band-noop"
         val day = "2026-09-24"
@@ -286,8 +359,7 @@ class IntelligenceStepIntegrityTest {
             f.repo.reconcileComputedStepEvidence(
                 deviceIds = listOf(source),
                 deleteEstimateDays = emptyList(),
-                clearMatchingComputedStepsBySource =
-                    mapOf(source to mapOf(day to 4_000)),
+                clearComputedStepDays = listOf(day),
             )
         }.exceptionOrNull()
 
@@ -412,7 +484,7 @@ class IntelligenceStepIntegrityTest {
     }
 
     @Test
-    fun scoreReplacementClearsMatchingStepAfterFieldPreservation() = runBlocking {
+    fun scoreReplacementClearsComputedStepsAfterFieldPreservation() = runBlocking {
         val f = fixture()
         val source = "whoop-ABC123-noop"
         val equalOtherComputed = "other-band-noop"
@@ -445,20 +517,59 @@ class IntelligenceStepIntegrityTest {
             restRows = emptyList(),
             preserveDailyFieldsDays = setOf(day),
             stepEvidenceDeviceIds = listOf(source, equalOtherComputed),
-            clearMatchingComputedStepsBySource =
-                mapOf(source to mapOf(day to 4_000)),
+            clearComputedStepDays = listOf(day),
         )
 
         assertEquals(setOf(day), receipt)
         assertEquals(80.0, f.daily[source to day]?.recovery)
         assertNull(f.daily[source to day]?.steps)
         assertNull(f.series[Triple(source, day, "steps_est")])
-        assertEquals(4_000, f.daily[equalOtherComputed to day]?.steps)
+        assertNull(f.daily[equalOtherComputed to day]?.steps)
         assertEquals(62.0, f.daily[equalOtherComputed to day]?.recovery)
-        assertEquals(
-            4_000.0,
-            f.series[Triple(equalOtherComputed, day, "steps_est")]?.value,
+        assertNull(f.series[Triple(equalOtherComputed, day, "steps_est")])
+    }
+
+    @Test
+    fun scoreStepCleanupRejectsImportedPrimaryTargetBeforeMutation() = runBlocking {
+        val f = fixture()
+        val imported = "health-connect"
+        val computed = "whoop-ABC123-noop"
+        val day = "2026-09-24"
+        f.daily[imported to day] = DailyMetric(
+            deviceId = imported,
+            day = day,
+            recovery = 90.0,
+            steps = 8_000,
         )
+        f.daily[computed to day] = DailyMetric(
+            deviceId = computed,
+            day = day,
+            recovery = 60.0,
+            steps = 4_000,
+        )
+
+        val failure = runCatching {
+            f.repo.reconcileComputedScoreRange(
+                deviceId = imported,
+                fromDay = day,
+                toDay = day,
+                dailyRows = listOf(
+                    DailyMetric(deviceId = imported, day = day, recovery = 50.0),
+                ),
+                managedRestKeys = setOf("sleep_performance"),
+                restRows = emptyList(),
+                stepEvidenceDeviceIds = listOf(computed),
+                clearComputedStepDays = listOf(day),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalArgumentException)
+        assertEquals(90.0, f.daily[imported to day]?.recovery)
+        assertEquals(8_000, f.daily[imported to day]?.steps)
+        assertEquals(60.0, f.daily[computed to day]?.recovery)
+        assertEquals(4_000, f.daily[computed to day]?.steps)
+        assertEquals(0L, f.repo.metricDataVersion.value)
+        assertEquals(0L, f.repo.restDataVersion.value)
     }
 
     @Test
@@ -632,7 +743,7 @@ class IntelligenceStepIntegrityTest {
     }
 
     @Test
-    fun ambiguousCounterDaysArePassedToScoreReplacement() {
+    fun observedUnverifiedCounterDaysArePassedToScoreReplacement() {
         val sourceFile = listOf(
             File("src/main/java/com/noop/analytics/IntelligenceEngine.kt"),
             File("app/src/main/java/com/noop/analytics/IntelligenceEngine.kt"),
@@ -640,39 +751,41 @@ class IntelligenceStepIntegrityTest {
         ).firstOrNull(File::isFile)
         requireNotNull(sourceFile) { "IntelligenceEngine.kt source root is unavailable" }
         val source = sourceFile.readText()
+        val observedSet = source.indexOf("val stepCounterObservedDays")
         val ownerSet = source.indexOf("val stepCounterOwnerIds")
-        val stationaryBySource = source.indexOf("val stationaryLegacyStepsBySource")
-        val noRetained = source.indexOf("val stepCounterNoRetainedDays")
-        val computedSources = source.indexOf("val computedStepSourceIds", noRetained)
-        val reconciliation = source.indexOf("repo.reconcileComputedScoreRange(", noRetained)
+        val counterRead = source.indexOf("val dayStepAnalysis = StepsCounter.analyze(", observedSet)
+        val observedMark = source.indexOf("stepCounterObservedDays.add(day)", counterRead)
+        val computedSources = source.indexOf("val computedStepSourceIds", observedMark)
+        val reconciliation = source.indexOf("repo.reconcileComputedScoreRange(", computedSources)
         val standaloneRepair =
             source.indexOf("if (!shouldReconcileScoreRange &&", reconciliation)
 
+        assertTrue("observed counter-day tracking must exist", observedSet >= 0)
         assertTrue("counter owner tracking must exist", ownerSet >= 0)
-        assertTrue("stationary repair must be source-scoped", stationaryBySource >= 0)
-        assertTrue("non-retained counter-day policy must exist", noRetained >= 0)
-        assertTrue("computed source expansion must follow policy derivation", computedSources > noRetained)
-        assertTrue("score replacement must follow counter-day derivation", reconciliation > noRetained)
+        assertTrue("production counter analysis must follow tracking setup", counterRead > observedSet)
+        assertTrue("every observed row day must be marked for cleanup", observedMark > counterRead)
+        assertTrue("computed source expansion must follow observed-day marking", computedSources > observedMark)
+        assertTrue("score replacement must follow counter-day derivation", reconciliation > computedSources)
         assertTrue("standalone repair guard must follow score replacement", standaloneRepair > reconciliation)
+        assertTrue(
+            source.substring(counterRead, observedMark).contains(
+                "ClassificationPolicy.rejectUnverifiedBandCounter"
+            )
+        )
+        assertTrue(source.contains("val alternateSources = ("))
+        assertTrue(source.contains("repo.stepSamples(source, dayMidnight, dayEnd, 1)"))
         assertTrue(
             source.substring(computedSources, reconciliation).contains(
                 ".plus(stepCounterOwnerIds.map"
             )
         )
         val combinedTransaction = source.substring(reconciliation, standaloneRepair)
-        assertTrue(
-            combinedTransaction.contains("preserveDailyStepDays = stepCounterNoRetainedDays")
-        )
+        assertTrue(!combinedTransaction.contains("preserveDailyStepDays ="))
         assertTrue(
             combinedTransaction.contains("preserveDailyFieldsDays = preserveDailyFieldsDays")
         )
         assertTrue(
-            combinedTransaction.contains("deleteEstimateDays = stepCounterAuthoritativeDays")
-        )
-        assertTrue(
-            combinedTransaction.contains(
-                "clearMatchingComputedStepsBySource = stationaryLegacyStepsBySource"
-            )
+            combinedTransaction.contains("clearComputedStepDays = stepCounterObservedDays")
         )
     }
 
@@ -705,7 +818,7 @@ class IntelligenceStepIntegrityTest {
         )
         assertTrue(
             source.substring(repair, historicalGuard).contains(
-                "deleteEstimateDays = stepCounterAuthoritativeDays"
+                "clearComputedStepDays = stepCounterObservedDays"
             )
         )
     }

@@ -13,6 +13,28 @@ import org.junit.Test
 
 class SupplierDeviceCardPolicyTest {
     @Test
+    fun onlyActiveWhoopCardOffersConnectionActions() {
+        assertTrue(
+            deviceCardShowsWhoopConnectionActions(
+                isActive = true,
+                isWhoop = true,
+            ),
+        )
+        assertFalse(
+            deviceCardShowsWhoopConnectionActions(
+                isActive = false,
+                isWhoop = true,
+            ),
+        )
+        assertFalse(
+            deviceCardShowsWhoopConnectionActions(
+                isActive = true,
+                isWhoop = false,
+            ),
+        )
+    }
+
+    @Test
     fun supplierProfileClaimsOnlyDisplayHeartRateAndConnectedBattery() {
         val profile = deviceProfile(
             device(

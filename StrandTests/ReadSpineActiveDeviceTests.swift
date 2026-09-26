@@ -49,10 +49,10 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         }
     }
 
-    private func dailyMetric(day: String, recovery: Double) -> DailyMetric {
+    private func dailyMetric(day: String, recovery: Double, steps: Int? = nil) -> DailyMetric {
         DailyMetric(day: day, totalSleepMin: 420, efficiency: 0.9, deepMin: 90, remMin: 100, lightMin: 230,
                     disturbances: 2, restingHr: 52, avgHrv: 70, recovery: recovery, strain: 8, exerciseCount: 0,
-                    spo2Pct: nil, skinTempDevC: nil, respRateBpm: 14, steps: nil, activeKcalEst: nil)
+                    spo2Pct: nil, skinTempDevC: nil, respRateBpm: 14, steps: steps, activeKcalEst: nil)
     }
 
     @MainActor
@@ -2440,113 +2440,10 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         )
     }
 
-    // MARK: - #316 / @63 step activity-class union (the Steps tile icon)
-
-    /// Pure union pick: `latestActivityClass` returns the non-nil class on the greatest-ts sample across the
-    /// per-id lists, resolves a ts tie in favour of the FIRST list (active strap), and passes an empty union
-    /// through as nil. A nil-class sample never masks an earlier real class.
-    func testLatestActivityClassUnionPickAndTieBreak() {
-        // Single list reduces to "last non-nil class in that list": ts 30 is nil, so ts 20's walk (1) wins.
-        let single = [[
-            StepSample(ts: 10, counter: 1, activityClass: 0),
-            StepSample(ts: 20, counter: 2, activityClass: 1),
-            StepSample(ts: 30, counter: 3, activityClass: nil),
-        ]]
-        XCTAssertEqual(Repository.latestActivityClass(single), 1,
-                       "the latest NON-NIL class wins; a trailing nil-class sample does not blank the icon")
-
-        // Two lists, greatest ts across the union wins: active strap's ts=100 run (2) beats canonical ts=90.
-        let active = [StepSample(ts: 100, counter: 5, activityClass: 2)]
-        let canonical = [StepSample(ts: 90, counter: 4, activityClass: 0)]
-        XCTAssertEqual(Repository.latestActivityClass([active, canonical]), 2,
-                       "the greatest-ts classed sample across the union wins")
-
-        // Exact ts tie: the FIRST list (active strap) wins, matching the union's active-wins rule.
-        let activeTie = [StepSample(ts: 200, counter: 6, activityClass: 1)]
-        let canonicalTie = [StepSample(ts: 200, counter: 7, activityClass: 0)]
-        XCTAssertEqual(Repository.latestActivityClass([activeTie, canonicalTie]), 1,
-                       "on a ts tie the active strap's class wins")
-
-        // An empty union passes through as nil (no icon), never a crash.
-        XCTAssertNil(Repository.latestActivityClass([[], []]), "an empty union hides the icon")
-    }
-
-    /// End-to-end #904/#908 family: a re-added strap banks its live STEP samples (carrying @63 activityClass)
-    /// under its OWN fresh id, exactly like HR. A read pinned to the canonical "my-whoop" finds NO class (the
-    /// tile icon vanishes); `stepActivityClassLatest` reads the union and surfaces the re-added strap's class.
+    /// A legacy byte labelled walk cannot authorize Steps when no validated pedometer source exists.
+    /// The production orchestration must also remove a previously cached computed value.
     @MainActor
-    func testStepActivityClassUnionSurfacesReAddedStrapClass() async throws {
-        let store = try await WhoopStore.inMemory()
-        try await store.upsertDevice(id: canonicalId, mac: nil, name: "WHOOP")
-        try await store.upsertDevice(id: newId, mac: nil, name: "WHOOP")
-
-        // Today's live step samples land under the re-added strap's fresh id; the latest carries class 2 (run).
-        // The canonical "my-whoop" namespace has NO steps today (imports never drift to the active id).
-        let base = 1_780_000_000
-        let liveSteps = (0..<20).map { StepSample(ts: base + $0, counter: $0, activityClass: $0 == 19 ? 2 : 1) }
-        try await store.insert(Streams(steps: liveSteps), deviceId: newId)
-
-        let repo = Repository(deviceId: canonicalId)
-        repo.setStoreForTesting(store)
-
-        // Before the re-add the read model is the canonical namespace only, which has no step class today.
-        let pinned = await repo.stepActivityClassLatest(from: base, to: base + 100)
-        XCTAssertNil(pinned, "with only the canonical id active, a re-added strap's step class is not yet reachable")
-
-        // Re-add → the active-strap read id follows, and the union surfaces the re-added strap's latest class.
-        repo.adoptActiveDeviceId(newId)
-        let surfaced = await repo.stepActivityClassLatest(from: base, to: base + 100)
-        XCTAssertEqual(surfaced, 2,
-                       "the union must surface the re-added strap's live activity class, not an empty pinned read")
-    }
-
-    /// Manual-workout steps follow the same active-source ownership rule as the daily counter. If the
-    /// active source has explicit classed still motion, an older canonical legacy counter must not restore it.
-    @MainActor
-    func testStrapStepAnalysisDoesNotFallThroughAfterActiveClassedRejection() async throws {
-        let store = try await WhoopStore.inMemory()
-        try await store.upsertDevice(id: canonicalId, mac: nil, name: "WHOOP")
-        try await store.upsertDevice(id: newId, mac: nil, name: "WHOOP")
-        let base = 1_780_000_000
-        let activeStill = (0...10).map {
-            StepSample(ts: base + $0 * 60, counter: $0 * 400, activityClass: 0)
-        }
-        let canonicalLegacy = (0...10).map {
-            StepSample(ts: base + $0 * 60, counter: $0 * 100)
-        }
-        try await store.insert(Streams(steps: activeStill), deviceId: newId)
-        try await store.insert(Streams(steps: canonicalLegacy), deviceId: canonicalId)
-
-        let repo = Repository(deviceId: canonicalId)
-        repo.setStoreForTesting(store)
-        XCTAssertTrue(repo.adoptActiveDeviceId(newId))
-
-        let analysis = try await repo.strapStepAnalysis(
-            from: base,
-            to: base + 10 * 60
-        )
-        XCTAssertNotNil(analysis, "the rejected active counter must stay distinguishable from no counter")
-        XCTAssertNil(analysis?.steps,
-                     "active classed-still evidence must own the window and suppress every fallback")
-    }
-
-    /// Phone-pedometer fallback is allowed only when the complete active/canonical union has no counter rows.
-    @MainActor
-    func testStrapStepAnalysisReturnsNilOnlyWhenCounterIsAbsent() async throws {
-        let store = try await WhoopStore.inMemory()
-        try await store.upsertDevice(id: canonicalId, mac: nil, name: "WHOOP")
-        let repo = Repository(deviceId: canonicalId)
-        repo.setStoreForTesting(store)
-
-        let analysis = try await repo.strapStepAnalysis(from: 1_780_000_000, to: 1_780_000_600)
-
-        XCTAssertNil(analysis, "an actually absent counter may use the phone-pedometer fallback")
-    }
-
-    /// Calendar-day locomotion must not depend on an overnight HR window. This pins the production
-    /// orchestration, not only the pure analytics kernel.
-    @MainActor
-    func testClassifiedWalkStepsPublishWithoutOvernightHeartRate() async throws {
+    func testLegacyWalkByteCannotPublishWithoutValidatedPedometerEvidence() async throws {
         let store = try await WhoopStore.inMemory()
         let calendar = Calendar.current
         let yesterday = try XCTUnwrap(
@@ -2599,11 +2496,7 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
             from: day,
             to: day
         )
-        XCTAssertEqual(
-            rows.first?.steps,
-            1_715,
-            "classified walking must publish even when the day has no qualifying overnight HR"
-        )
+        XCTAssertNil(rows.first?.steps)
         XCTAssertEqual(rows.first?.totalSleepMin, 420)
         XCTAssertEqual(rows.first?.recovery, 71)
         XCTAssertEqual(rows.first?.avgHrv, 62)
@@ -2611,11 +2504,10 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         XCTAssertEqual(rows.first?.activeKcalEst, 560)
     }
 
-    /// Explicit stationary counter evidence suppresses a new gravity estimate, but it is not authoritative
-    /// evidence that an earlier same-day total was wrong. Preserve prior daily/estimate evidence until a
-    /// retained walk/run counter total supersedes it.
+    /// Any customer-facing value derived from the unverified band counter is invalidated, even when the
+    /// adjacent legacy byte says still. Unrelated daily fields remain intact.
     @MainActor
-    func testClassedStationaryCounterPreservesPriorStepEvidence() async throws {
+    func testClassedStationaryCounterClearsPriorComputedStepEvidence() async throws {
         let store = try await WhoopStore.inMemory()
         let calendar = Calendar.current
         let yesterday = try XCTUnwrap(
@@ -2663,14 +2555,14 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
             from: day,
             to: day
         )
-        XCTAssertEqual(estimates.map(\.value), [4_000])
+        XCTAssertTrue(estimates.isEmpty)
         let daily = try await store.dailyMetrics(
             deviceId: canonicalId + "-noop",
             from: day,
             to: day
         )
         XCTAssertEqual(daily.count, 1)
-        XCTAssertEqual(daily.first?.steps, 4_000)
+        XCTAssertNil(daily.first?.steps)
         XCTAssertEqual(daily.first?.recovery, 60, "unrelated daily evidence must remain intact")
     }
 
@@ -2753,11 +2645,10 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         XCTAssertEqual(daily.first?.recovery, 60, "unrelated daily evidence must remain intact")
     }
 
-    /// Mixed still plus unknown evidence is ambiguous: a normal score-window replacement may refresh the
-    /// day's sleep/Recovery fields, but it must preserve the previously stored computed step value and
-    /// motion estimate until authoritative walk/run or wholly-still evidence arrives.
+    /// Mixed legacy labels do not make the disputed counter trustworthy. Previously computed Steps and
+    /// motion estimates are removed while newly scored physiological fields remain independent.
     @MainActor
-    func testAmbiguousMixedCounterPreservesStoredComputedSteps() async throws {
+    func testAmbiguousMixedCounterClearsStoredComputedSteps() async throws {
         let store = try await WhoopStore.inMemory()
         let seeded = try await seedScorableNight(
             store: store,
@@ -2813,13 +2704,109 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
             from: seeded.day,
             to: seeded.day
         )
-        XCTAssertEqual(daily.first?.steps, 4_000)
+        XCTAssertNil(daily.first?.steps)
         let estimates = try await store.metricSeries(
             deviceId: canonicalId + "-noop",
             key: "steps_est",
             from: seeded.day,
             to: seeded.day
         )
-        XCTAssertEqual(estimates.first?.value, 4_000)
+        XCTAssertTrue(estimates.isEmpty)
+    }
+
+    /// When imported HR owns the day, the raw band counter lives under a different registered source.
+    /// The bounded alternate-source probe must still invalidate every NOOP-computed step cache while
+    /// leaving the imported pedometer row untouched.
+    @MainActor
+    func testImportedHeartRateOwnerStillClearsAlternateBandStepCaches() async throws {
+        let store = try await WhoopStore.inMemory()
+        let importedOwner = "apple-health"
+        let registry = DeviceRegistryStore(dbQueue: store.registryWriter)
+        try registry.add(PairedDevice(
+            id: newId,
+            brand: "WHOOP",
+            model: "WHOOP 5.0",
+            sourceKind: .liveBLE,
+            capabilities: [.steps],
+            status: .active,
+            addedAt: 1,
+            lastSeenAt: 1
+        ))
+        try registry.add(PairedDevice(
+            id: importedOwner,
+            brand: "Apple",
+            model: "Health",
+            sourceKind: .cloudImport,
+            capabilities: [.hr, .steps],
+            status: .paired,
+            addedAt: 1,
+            lastSeenAt: 1
+        ))
+        try registry.setActive(newId)
+
+        let calendar = Calendar.current
+        let yesterday = try XCTUnwrap(
+            calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: Date()))
+        )
+        let day = Repository.localDayKey(yesterday)
+        let hrStart = Int(yesterday.addingTimeInterval(3 * 3_600).timeIntervalSince1970)
+        try await store.insert(
+            Streams(hr: (0..<300).map { HRSample(ts: hrStart + $0, bpm: 58) }),
+            deviceId: importedOwner
+        )
+        let counterStart = Int(yesterday.addingTimeInterval(12 * 3_600).timeIntervalSince1970)
+        try await store.insert(
+            Streams(steps: [
+                StepSample(ts: counterStart, counter: 1_000, activityClass: 1),
+                StepSample(ts: counterStart + 60, counter: 1_400, activityClass: 2),
+            ]),
+            deviceId: newId
+        )
+
+        _ = try await store.upsertDailyMetrics(
+            [dailyMetric(day: day, recovery: 80, steps: 8_000)],
+            deviceId: canonicalId
+        )
+        for computedSource in [canonicalId + "-noop", newId + "-noop"] {
+            _ = try await store.upsertDailyMetrics(
+                [dailyMetric(day: day, recovery: 60, steps: 4_000)],
+                deviceId: computedSource
+            )
+            _ = try await store.upsertMetricSeries(
+                [MetricPoint(day: day, key: "steps_est", value: 4_000)],
+                deviceId: computedSource
+            )
+        }
+
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+        XCTAssertTrue(repo.adoptActiveDeviceId(newId))
+        let engine = analysisEngine(repo: repo)
+        let receipt = await engine.analyzeRecent(maxDays: 2, force: true)
+        XCTAssertNotNil(receipt)
+
+        let imported = try await store.dailyMetrics(
+            deviceId: canonicalId,
+            from: day,
+            to: day
+        )
+        XCTAssertEqual(imported.first?.steps, 8_000)
+        XCTAssertEqual(imported.first?.recovery, 80)
+
+        for computedSource in [canonicalId + "-noop", newId + "-noop"] {
+            let daily = try await store.dailyMetrics(
+                deviceId: computedSource,
+                from: day,
+                to: day
+            )
+            XCTAssertNil(daily.first?.steps)
+            let estimate = try await store.metricSeries(
+                deviceId: computedSource,
+                key: "steps_est",
+                from: day,
+                to: day
+            )
+            XCTAssertTrue(estimate.isEmpty)
+        }
     }
 }

@@ -212,7 +212,6 @@ struct DayOverviewTarget: Identifiable {
 enum DailyOverviewPresentation {
     enum StepSource: Equatable {
         case importedPedometer
-        case classifiedBand
     }
 
     static func efficiencyFraction(_ value: Double?) -> Double? {
@@ -253,14 +252,16 @@ enum DailyOverviewPresentation {
         return AnalyticsEngine.Rest.composite(daily: normalized)
     }
 
-    /// Imported pedometer aggregates outrank the band's classified counter total.
+    /// Primary Steps requires an imported pedometer aggregate. `daily.steps` is retained in storage for
+    /// compatibility but cannot fill this customer-facing value.
     static func steps(daily: DailyMetric?, importedSteps: Int?) -> Int? {
-        importedSteps ?? daily?.steps
+        _ = daily
+        return importedSteps
     }
 
     static func stepSource(daily: DailyMetric?, importedSteps: Int?) -> StepSource? {
+        _ = daily
         if importedSteps != nil { return .importedPedometer }
-        if daily?.steps != nil { return .classifiedBand }
         return nil
     }
 }
@@ -3108,8 +3109,6 @@ struct DailyOverviewSheet: View {
         ) {
         case .importedPedometer:
             return "appwide.day_overview.phone_watch_steps"
-        case .classifiedBand:
-            return "appwide.day_overview.band_steps"
         case nil:
             return "appwide.day_overview.steps"
         }

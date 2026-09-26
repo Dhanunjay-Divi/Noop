@@ -122,6 +122,42 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testSupplierActivationClearsWhoopGuidanceBeforeSourceConnect()
+        async throws
+    {
+        let (_, registry) = try await makeRegistry()
+        let device = supplierDevice(id: "supplier-guidance")
+        registry.add(device)
+
+        let live = LiveState()
+        live.pairingHint = "WHOOP pairing guidance"
+        live.reconnectGuide = "WHOOP reconnect guidance"
+        let source = FakeLiveSource(id: device.id)
+        var didConnect = false
+        var pairingHintAtConnect: String?
+        var reconnectGuideAtConnect: String?
+        source.onConnect = {
+            didConnect = true
+            pairingHintAtConnect = live.pairingHint
+            reconnectGuideAtConnect = live.reconnectGuide
+        }
+        let coordinator = makeCoordinator(
+            registry: registry,
+            live: live,
+            sources: [device.id: source]
+        )
+        coordinator.start()
+
+        registry.setActive(device.id)
+
+        XCTAssertTrue(didConnect)
+        XCTAssertNil(pairingHintAtConnect)
+        XCTAssertNil(reconnectGuideAtConnect)
+        XCTAssertNil(live.pairingHint)
+        XCTAssertNil(live.reconnectGuide)
+    }
+
+    @MainActor
     func testSynchronousPermanentCredentialFailureRestoresWhoopOwnership()
         async throws
     {
@@ -295,6 +331,54 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
             registry.devices.first { $0.id == device.id }?.status,
             .archived
         )
+    }
+
+    @MainActor
+    func testArchivingFinalActiveSupplierPublishesNoActiveDevice()
+        async throws
+    {
+        let (_, registry) = try await makeRegistry()
+        let device = supplierDevice(id: "supplier-final-active")
+        registry.add(device)
+        let source = FakeLiveSource(id: device.id)
+        let coordinator = makeCoordinator(
+            registry: registry,
+            sources: [device.id: source]
+        )
+        coordinator.start()
+        registry.setActive(device.id)
+        XCTAssertEqual(source.connects.count, 1)
+
+        coordinator.prepareForRemoval(deviceId: device.id)
+        XCTAssertTrue(registry.archive(device.id))
+
+        XCTAssertNil(registry.activeDeviceId)
+        XCTAssertEqual(source.stops, 1)
+        XCTAssertEqual(
+            registry.devices.first { $0.id == device.id }?.status,
+            .archived
+        )
+    }
+
+    @MainActor
+    func testWhoopRestartsAfterNoActiveDeviceTransition() async throws {
+        let (_, registry) = try await makeRegistry()
+        var whoopStarts = 0
+        var whoopStops = 0
+        let coordinator = makeCoordinator(
+            registry: registry,
+            sources: [:],
+            startWhoop: { whoopStarts += 1 },
+            stopWhoop: { whoopStops += 1 }
+        )
+        coordinator.start()
+
+        XCTAssertEqual(whoopStarts, 0, "Normal launch already owns the initial WHOOP start.")
+        coordinator.activeDeviceChanged(to: nil)
+        XCTAssertEqual(whoopStops, 1)
+
+        coordinator.activeDeviceChanged(to: "my-whoop")
+        XCTAssertEqual(whoopStarts, 1)
     }
 
     @MainActor
@@ -840,13 +924,15 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
     @MainActor
     private func makeCoordinator(
         registry: DeviceRegistry,
+        live: LiveState? = nil,
         sources: [String: any LiveHRSource],
         startWhoop: @escaping () -> Void = {},
         stopWhoop: @escaping () -> Void = {}
     ) -> SourceCoordinator {
-        SourceCoordinator(
+        let live = live ?? LiveState()
+        return SourceCoordinator(
             registry: registry,
-            live: LiveState(),
+            live: live,
             storeHandle: { nil },
             startWhoop: startWhoop,
             stopWhoop: stopWhoop,

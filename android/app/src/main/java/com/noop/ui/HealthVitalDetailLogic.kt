@@ -18,16 +18,19 @@ internal data class VitalReading(
 internal const val MOTION_DERIVED_STEPS_SOURCE = "noop-motion-derived-steps"
 internal const val CALIBRATED_MOTION_STEPS_SOURCE = "noop-calibrated-motion-steps"
 
-/** Merge the two primary step stores into one per-day series with the SAME precedence as the Today
- *  Steps tile: an imported measured Health Connect / Apple Health count wins, else a classified band
- *  counter estimate. The gravity-only calibrated `steps_est` series is deliberately excluded because
- *  motion without gait evidence must not become primary Steps. Ascending by day. Pure for testability. */
+/** Zero is a valid imported pedometer total; negative or missing values are not publishable. */
+internal fun validImportedStepCount(value: Int?): Int? =
+    value?.takeIf { it >= 0 }
+
+/** Build the primary per-day Steps series with the SAME contract as Today: only imported measured
+ *  Health Connect / Apple Health counts qualify. The legacy motion map remains in the signature for
+ *  compatibility but is ignored. Ascending by day. Pure for testability. */
+@Suppress("UNUSED_PARAMETER")
 internal fun mergeStepsReadings(
     motionDerived: Map<String, VitalReading>,
     imported: Map<String, VitalReading>,
 ): List<VitalReading> =
-    (motionDerived.keys + imported.keys).toSortedSet()
-        .mapNotNull { d -> imported[d] ?: motionDerived[d] }
+    imported.keys.toSortedSet().mapNotNull(imported::get)
 
 /** #616: per-day precedence merge for a metric with disjoint stores (first non-null per day wins),
  *  ascending. The N-store generalisation of [mergeStepsReadings]; calories reuse it as the two-store

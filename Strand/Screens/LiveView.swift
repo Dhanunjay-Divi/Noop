@@ -56,19 +56,27 @@ struct LiveView: View {
         live.connected && !live.bonded && live.heartRate != nil
     }
     private var activeSourceKind: SourceKind? {
-        guard let registry = model.deviceRegistry else { return nil }
-        let activeID = registry.activeDeviceId
+        guard let registry = model.deviceRegistry,
+              let activeID = registry.activeDeviceId else { return nil }
         return registry.devices.first(where: { $0.id == activeID })?.sourceKind
+    }
+    private var hasActiveDevice: Bool {
+        guard let registry = model.deviceRegistry else { return true }
+        return registry.activeDeviceId != nil
     }
     static func shouldShowWhoopControls(
         activeSourceKind: SourceKind?
     ) -> Bool {
-        activeSourceKind != .veepoo
+        guard let activeSourceKind else { return false }
+        return activeSourceKind != .veepoo
     }
     private var showsWhoopControls: Bool {
-        Self.shouldShowWhoopControls(activeSourceKind: activeSourceKind)
+        guard model.deviceRegistry != nil else { return true }
+        return Self.shouldShowWhoopControls(
+            activeSourceKind: activeSourceKind
+        )
     }
-    private var supplierSourceActive: Bool { !showsWhoopControls }
+    private var supplierSourceActive: Bool { activeSourceKind == .veepoo }
     private var supplierDisplayStreaming: Bool {
         supplierSourceActive
             && live.connected
@@ -82,7 +90,8 @@ struct LiveView: View {
     /// the registry opens. Transport-generation names never leak into the customer-facing Live screen.
     private var activeDeviceName: String {
         guard let registry = model.deviceRegistry,
-              let active = registry.devices.first(where: { $0.id == registry.activeDeviceId })
+              let activeID = registry.activeDeviceId,
+              let active = registry.devices.first(where: { $0.id == activeID })
         else { return WhoopModel.customerName }
         return CustomerFacingBrand.text(active.displayName)
     }
@@ -152,6 +161,12 @@ struct LiveView: View {
                     manageDevicesRow
                     // Diagnostics remain available while a stream exists, but no longer dominate the
                     // disconnected first impression. Test Centre remains the durable diagnostics home.
+                    LiveLogCard()
+                } else if !hasActiveDevice {
+                    Label("No active stream", systemImage: "waveform.slash")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    manageDevicesRow
                     LiveLogCard()
                 } else if supplierSourceActive {
                     // Supplier transport is owned by SourceCoordinator, not BLEManager. Keep the
@@ -858,7 +873,10 @@ struct LiveView: View {
     /// One-line subtitle for the Manage-devices row — names the active band and reads correctly whether
     /// it's the live link ("Connected to …") or just the band Scan would target ("… is your active band").
     private var manageDevicesDetail: String {
-        activeConnection
+        guard hasActiveDevice else {
+            return String(localized: "No active stream")
+        }
+        return activeConnection
             ? String(localized: "Connected to \(activeDeviceName). Pair or switch bands in Devices.")
             : String(localized: "\(activeDeviceName) is your active band. Pair or switch bands in Devices.")
     }

@@ -371,7 +371,7 @@ public struct DeviceRegistryStore: Sendable {
         requested: PairedDevice
     ) -> Bool {
         let expectedCapabilities = isWhoop(requested)
-            ? WhoopLiveCapabilities.withoutCalibratedSpo2(
+            ? WhoopLiveCapabilities.withoutUnvalidatedLiveMetrics(
                 requested.capabilities
             )
             : requested.capabilities
@@ -386,8 +386,8 @@ public struct DeviceRegistryStore: Sendable {
     }
 
     private static func updateModel(_ db: Database, id: String, model: String) throws {
-        // A model attestation also repairs the seeded WHOOP's capability truth. This is important
-        // for a 5/MG: only after generation is known can the live `steps` capability be advertised.
+        // A model attestation also repairs the seeded compatible band's capability truth.
+        // Unvalidated SpO2 and motion-counter Steps remain excluded for every generation.
         let capabilities = WhoopLiveCapabilities.encoded(forModel: model)
         try db.execute(sql: """
             UPDATE pairedDevice SET model = ?,
@@ -417,7 +417,7 @@ public struct DeviceRegistryStore: Sendable {
         let id = row["id"] as String
         let brand = row["brand"] as String
         if brand.caseInsensitiveCompare("WHOOP") == .orderedSame || id == "my-whoop" || id.hasPrefix("whoop-") {
-            caps = WhoopLiveCapabilities.withoutCalibratedSpo2(caps)
+            caps = WhoopLiveCapabilities.withoutUnvalidatedLiveMetrics(caps)
         }
         return PairedDevice(id: id, brand: brand, model: row["model"], nickname: row["nickname"],
                             peripheralId: row["peripheralId"],

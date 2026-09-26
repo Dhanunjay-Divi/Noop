@@ -1901,25 +1901,9 @@ final class Repository: ObservableObject {
         return byStart.values.sorted { $0.ts < $1.ts }
     }
 
-    /// The latest (greatest-ts) non-nil @63 activity class over `[from, to]`, read across the active strap +
-    /// canonical UNION (`importedReadIds`), for the Steps tile icon (#316 / @63). A re-added strap banks its
-    /// LIVE step samples (which carry `activityClass`) under its OWN fresh id via the Collector, exactly like
-    /// HR, so a read pinned to the canonical "my-whoop" would return nothing and the tile icon would vanish for
-    /// a re-added strap (the #904/#908 family). Reading the union keeps the icon whichever id the samples
-    /// landed under; a single-device install reads one id (byte-identical). Ties on ts favour the active strap
-    /// (its list is scanned first by `latestActivityClass`).
-    func stepActivityClassLatest(from: Int, to: Int) async -> Int? {
-        guard let store = await ensureStore() else { return nil }
-        var perId: [[StepSample]] = []
-        for id in importedReadIds {   // active strap FIRST so it wins a ts tie
-            perId.append((try? await store.stepSamples(deviceId: id, from: from, to: to, limit: 200_000)) ?? [])
-        }
-        return Self.latestActivityClass(perId)
-    }
-
-    /// Full step/activity-class series over the same active/canonical union used by HR and gravity.
-    /// Auto-workout type hints need the window composition, not just the latest class. Active wins a
-    /// timestamp tie; a single-device install remains a single indexed read.
+    /// Full motion-counter series over the same active/canonical union used by HR and gravity. The
+    /// counter remains available to bounded research and diagnostics, but its legacy activity class is
+    /// not gait authority. Active wins a timestamp tie.
     func stepSamplesUnion(from: Int, to: Int, limit: Int = 200_000) async -> [StepSample] {
         guard let store = await ensureStore() else { return [] }
         var byTs: [Int: StepSample] = [:]
@@ -1928,52 +1912,6 @@ final class Repository: ObservableObject {
             for row in rows where byTs[row.ts] == nil { byTs[row.ts] = row }
         }
         return byTs.values.sorted { $0.ts < $1.ts }
-    }
-
-    /// Strap counter analysis over `[from, to]` for a manual-workout summary (#398). The first source with
-    /// any counter evidence owns the result — the active strap wins, and counters are never interleaved across
-    /// devices. Returning the full analysis keeps "counter absent" distinct from "counter present but every
-    /// delta rejected as still/unknown", so only the truly absent case may use the phone-pedometer fallback.
-    /// A failed active read throws and cannot fall through to another source or fallback.
-    func strapStepAnalysis(from: Int, to: Int) async throws -> StepsCounter.Analysis? {
-        guard let store = await ensureStore() else {
-            throw RepositoryReadError.storeUnavailable
-        }
-        try Task.checkCancellation()
-        for id in importedReadIds {   // active strap FIRST
-            try Task.checkCancellation()
-            let samples = try await store.stepSamples(
-                deviceId: id,
-                from: from,
-                to: to,
-                limit: 200_000
-            )
-            try Task.checkCancellation()
-            if !samples.isEmpty {
-                return StepsCounter.analyze(
-                    samples,
-                    classificationPolicy: .requireActivityClass
-                )
-            }
-        }
-        return nil
-    }
-
-    /// Pure pick of the latest classed activity across the union's per-id step lists: the non-nil
-    /// `activityClass` on the sample with the greatest ts, resolving a ts tie in favour of the FIRST list (the
-    /// active strap, mirroring the union's active-wins rule). Static + pure so it's unit-testable without a
-    /// store. A single non-empty list reduces to "last non-nil class in that list".
-    nonisolated static func latestActivityClass(_ perId: [[StepSample]]) -> Int? {
-        var bestTs = Int.min
-        var bestClass: Int? = nil
-        for list in perId {
-            for s in list where s.activityClass != nil {
-                // Strict `>` keeps the FIRST list's sample on an exact ts tie: earlier lists are scanned
-                // first, so a later list's equal-ts sample never overwrites the active strap's.
-                if s.ts > bestTs { bestTs = s.ts; bestClass = s.activityClass }
-            }
-        }
-        return bestClass
     }
 
     func sleepSessions(from: Int, to: Int, limit: Int = 100) async -> [CachedSleepSession] {
@@ -2476,16 +2414,10 @@ final class Repository: ObservableObject {
             deviceId: deviceId, from: lo, to: hi, limit: 200_000)
         let resp = try await store.respSamples(
             deviceId: deviceId, from: lo, to: hi, limit: 200_000)
-        // Read only when the refinement below might actually use it (see `useMotionAwareWake`) — a plain
-        // read cost, but no point paying it on the (default) off path.
-        let useMotionAwareWake = PuffinExperiment.motionAwareWakeEnabled
-        let steps: [StepSample]
-        if useMotionAwareWake {
-            steps = try await store.stepSamples(
-                deviceId: deviceId, from: lo, to: hi, limit: 200_000)
-        } else {
-            steps = []
-        }
+        // The retired motion-aware wake experiment depended on a historical byte whose semantics are
+        // disputed. Do not read that stream or let a stale preference rewrite production sleep stages.
+        let useMotionAwareWake = false
+        let steps: [StepSample] = []
         // V2 staging ships enabled after cross-subject validation; disabling its setting selects the
         // retained V1 `SleepStager`. Read once here off the actor; the switch only chooses which engine
         // runs over the already-detected window. (V7 Pillar 3b)
@@ -2496,8 +2428,7 @@ final class Repository: ObservableObject {
             let staged = useV2
                 ? SleepStagerV2.stageSession(start: start, end: end, grav: grav, hr: hr, rr: rr, resp: resp)
                 : SleepStager.stageSession(start: start, end: end, grav: grav, hr: hr, rr: rr, resp: resp)
-            // #364 follow-up: motion-aware wake refinement post-pass, same toggle-shaped no-op when off
-            // as every other Experimental switch here.
+            // The API remains for explicit synthetic/research calls; production is fixed off above.
             let refined = WakeMotionRefinement.apply(
                 staged,
                 grav: grav,
@@ -2995,7 +2926,7 @@ final class Repository: ObservableObject {
     /// sibling is `actualWhoopSource + "-noop"`.
     ///  • strap-preferred → [imported strap, computed strap, compatible Apple] (Apple only for vitals
     ///    that have a declared 1:1 mapping);
-    ///  • Apple-preferred → [Apple] (+ computed strap ONLY for steps/active_kcal, which the strap
+    ///  • Apple-preferred → [Apple] (+ computed strap only for active energy, which the strap
     ///    estimates and Apple may not carry);
     ///  • nutrition-log → editable combined log, then legacy nutrition-csv as a migration fallback;
     ///  • any other source → itself only.
@@ -3065,12 +2996,13 @@ final class Repository: ObservableObject {
         }
     }
 
-    /// Whether the NOOP-computed strap source may fill an Apple-preferred metric. Only the two daily
-    /// totals the strap genuinely estimates (steps, calories) , never a derived WHOOP score.
+    /// Whether the NOOP-computed strap source may fill an Apple-preferred metric. The reverse-engineered
+    /// motion counter is not a validated pedometer, so only active energy may fall back to the computed
+    /// source.
     private static func noopComputedCanFillAppleMetric(_ key: String) -> Bool {
         switch key {
-        case "steps", "active_kcal": return true
-        default:                     return false
+        case "active_kcal": return true
+        default:            return false
         }
     }
 

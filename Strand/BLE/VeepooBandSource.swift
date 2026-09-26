@@ -722,6 +722,7 @@ final class VeepooBandSource: LiveHRSource {
     private let credentialLoader: (() -> VeepooCredentialLoadResult)?
     private let protectedDataAvailablePublisher: AnyPublisher<Void, Never>
     private let credentialRetryDelaysNanoseconds: [UInt64]
+    private let credentialRetryTailDelayNanoseconds: UInt64
     private let onCredentialRejected: () -> Void
     private let onCredentialPermanentlyUnavailable: () -> Void
     private let onCompatibilityFailure: () -> Void
@@ -779,6 +780,7 @@ final class VeepooBandSource: LiveHRSource {
         self.protectedDataAvailablePublisher =
             Empty<Void, Never>().eraseToAnyPublisher()
         self.credentialRetryDelaysNanoseconds = []
+        self.credentialRetryTailDelayNanoseconds = 60_000_000_000
         self.onCredentialRejected = onCredentialRejected
         self.onCredentialPermanentlyUnavailable = {}
         self.onCompatibilityFailure = onCompatibilityFailure
@@ -805,6 +807,7 @@ final class VeepooBandSource: LiveHRSource {
             5_000_000_000,
             15_000_000_000,
         ],
+        credentialRetryTailDelayNanoseconds: UInt64 = 60_000_000_000,
         onCredentialRejected: @escaping () -> Void,
         onCredentialPermanentlyUnavailable: @escaping () -> Void,
         onCompatibilityFailure: @escaping () -> Void = {},
@@ -834,6 +837,8 @@ final class VeepooBandSource: LiveHRSource {
                 ?? VeepooBandSource.systemProtectedDataAvailablePublisher()
         self.credentialRetryDelaysNanoseconds =
             credentialRetryDelaysNanoseconds
+        self.credentialRetryTailDelayNanoseconds =
+            credentialRetryTailDelayNanoseconds
         self.onCredentialRejected = onCredentialRejected
         self.onCredentialPermanentlyUnavailable =
             onCredentialPermanentlyUnavailable
@@ -911,6 +916,9 @@ final class VeepooBandSource: LiveHRSource {
             }
             adapter.verifyPassword(password)
         case .battery(let reading):
+            // Password verification and a valid battery response prove the supplier transport independently
+            // of whether the optional live-HR stream has a fresh sample or reports not-worn/busy.
+            live.connected = true
             live.charging = reading.charging
             if let percent =
                 reading.percent ?? reading.level.map({ $0 * 25 })
@@ -992,9 +1000,11 @@ final class VeepooBandSource: LiveHRSource {
                 return
             }
             if stage == .live {
-                publishNonStreamingDisplayState()
                 if failure == .notWorn || failure == .busy {
+                    clearDisplayHeartRate()
                     scheduleLiveRestart()
+                } else {
+                    publishNonStreamingDisplayState()
                 }
             }
             if stage == .connection || stage == .disconnect {
@@ -1100,15 +1110,19 @@ final class VeepooBandSource: LiveHRSource {
 
     private func scheduleCredentialRetry() {
         guard !stopped,
-              credentialRetryTask == nil,
-              credentialRetryAttempt <
-                credentialRetryDelaysNanoseconds.count
+              credentialRetryTask == nil
         else {
             return
         }
-        let delay =
-            credentialRetryDelaysNanoseconds[credentialRetryAttempt]
-        credentialRetryAttempt += 1
+        let delay: UInt64
+        if credentialRetryAttempt < credentialRetryDelaysNanoseconds.count {
+            delay = credentialRetryDelaysNanoseconds[credentialRetryAttempt]
+            credentialRetryAttempt += 1
+        } else {
+            // Keep one cancellable, low-frequency secure-read owner alive after the startup burst.
+            // Source stop, successful load, permanent failure, and protected-data recovery all cancel it.
+            delay = credentialRetryTailDelayNanoseconds
+        }
         credentialRetryTask = Task { @MainActor [weak self] in
             if delay > 0 {
                 try? await Task.sleep(nanoseconds: delay)
@@ -1117,7 +1131,7 @@ final class VeepooBandSource: LiveHRSource {
             self.credentialRetryTask = nil
             self.retryCredentialAfterTransientFailure(
                 resetBudget: false,
-                trigger: nil
+                trigger: .scheduledRetry
             )
         }
     }

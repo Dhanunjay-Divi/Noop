@@ -234,12 +234,12 @@ final class DeviceRegistryStoreTests: XCTestCase {
         XCTAssertNil(seeded?.peripheralId)
     }
 
-    func testWhoopModelAttestationRepairsGenerationCapabilities() throws {
+    func testWhoopModelAttestationKeepsUnvalidatedCapabilitiesWithheld() throws {
         let store = DeviceRegistryStore(dbQueue: try makeDB())
 
         try store.setModel("my-whoop", model: "WHOOP 5.0 / MG")
         var device = try XCTUnwrap(store.all().first { $0.id == "my-whoop" })
-        XCTAssertTrue(device.capabilities.contains(.steps))
+        XCTAssertFalse(device.capabilities.contains(.steps))
         XCTAssertFalse(device.capabilities.contains(.spo2))
 
         try store.setModel("my-whoop", model: "WHOOP 4.0")
@@ -255,12 +255,30 @@ final class DeviceRegistryStoreTests: XCTestCase {
         XCTAssertTrue(try store.reconcileActiveWhoopModel(observedFamily: .whoop5))
         var device = try XCTUnwrap(store.all().first { $0.id == "my-whoop" })
         XCTAssertEqual(device.model, "WHOOP 5.0 / MG")
-        XCTAssertTrue(device.capabilities.contains(.steps))
+        XCTAssertFalse(device.capabilities.contains(.steps))
 
         XCTAssertTrue(try store.reconcileActiveWhoopModel(observedFamily: .whoop4))
         device = try XCTUnwrap(store.all().first { $0.id == "my-whoop" })
         XCTAssertEqual(device.model, "WHOOP 4.0")
         XCTAssertFalse(device.capabilities.contains(.steps))
+    }
+
+    func testLegacyWhoopCapabilityTokensAreSanitizedAtReadTime() throws {
+        let dbq = try makeDB()
+        try dbq.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE pairedDevice
+                    SET capabilities = 'hr,spo2,steps,strainLoad'
+                    WHERE id = 'my-whoop'
+                    """
+            )
+        }
+
+        let device = try XCTUnwrap(
+            DeviceRegistryStore(dbQueue: dbq).all().first { $0.id == "my-whoop" }
+        )
+        XCTAssertEqual(device.capabilities, [.hr, .strainLoad])
     }
 
     func testPositiveDisAttestationStoresExactVariant() throws {

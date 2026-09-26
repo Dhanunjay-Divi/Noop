@@ -21,16 +21,23 @@ public enum StepsCounter {
 
     /// Maximum tolerated absence at either edge of a day, or between adjacent rows, before an all-still
     /// window becomes too sparse to repair a previously persisted whole-day value. This is an integrity
-    /// threshold, not a gait detector: current step publication still requires walk/run classification.
+    /// threshold, not a gait detector. It is retained only for legacy repair research; production rejects
+    /// the reverse-engineered counter regardless of the adjacent stored byte.
     public static let stationaryRepairMaxCoverageGapSeconds = 15 * 60
 
     public enum ClassificationPolicy: Equatable, Sendable {
         /// Preserve the historical raw-motion estimate when every persisted class is absent.
         case allowLegacyRawMotion
 
-        /// Current counter-capable hardware must provide walk/run evidence. An all-unclassified
-        /// window remains observed but ambiguous: it yields no steps and cannot enable motion fallback.
+        /// Historical compatibility policy for already-persisted research rows. This policy treats the
+        /// legacy 0/1/2 field as still/walk/run, but the field is not validated gait evidence and must not
+        /// be used by customer-facing production paths.
         case requireActivityClass
+
+        /// Production policy for the reverse-engineered band motion counter. The adjacent legacy byte has
+        /// conflicting wear/contact and activity interpretations, so every positive delta remains observed
+        /// but is withheld from Steps regardless of its stored class.
+        case rejectUnverifiedBandMotion
     }
 
     public struct Analysis: Equatable, Sendable {
@@ -46,6 +53,10 @@ public enum StepsCounter {
             /// The production source is expected to classify locomotion, but the complete window is
             /// unclassified. Positive deltas are rejected as unknown rather than counted as steps.
             case activityClassRequiredMissing
+
+            /// The counter and its adjacent legacy class are not validated gait evidence. Positive deltas
+            /// are retained only as aggregate diagnostic evidence and never published as Steps.
+            case unverifiedBandMotion
         }
 
         public let filterMode: FilterMode
@@ -79,9 +90,8 @@ public enum StepsCounter {
             !counterObserved
         }
 
-        /// Only retained walk/run evidence is authoritative enough to replace an older estimate.
-        /// Still-only or unclassified partial windows suppress new fallbacks but do not prove that the
-        /// entire day's previously stored steps were false.
+        /// Compatibility verdict for callers explicitly using a legacy policy. Production's
+        /// `unverifiedBandMotion` mode always returns false.
         public var hasAuthoritativeCounterOutcome: Bool { steps != nil }
 
         /// The exact raw-motion total the former algorithm would have published when every usable positive
@@ -146,9 +156,9 @@ public enum StepsCounter {
     }
 
     /// Pure analysis of a counter window. Deltas remain wrap-aware and the `maxStepDelta` boundary is
-    /// applied before activity filtering. A window with no non-nil activity class keeps legacy behavior.
-    /// Once any class evidence exists, each in-range positive delta is attributed to its later sample:
-    /// walk/run is retained, still is rejected, and nil/unknown classes fail closed.
+    /// applied before policy filtering. Legacy policies preserve the historical class behavior for
+    /// research fixtures. Production uses `rejectUnverifiedBandMotion`, which rejects every positive
+    /// in-range delta regardless of the persisted class.
     public static func analyze(
         _ samples: [StepSample],
         classificationPolicy: ClassificationPolicy = .allowLegacyRawMotion
@@ -156,7 +166,9 @@ public enum StepsCounter {
         let sorted = samples.sorted { $0.ts < $1.ts }
         let hasActivityClass = sorted.contains { $0.activityClass != nil }
         let filterMode: Analysis.FilterMode
-        if hasActivityClass {
+        if classificationPolicy == .rejectUnverifiedBandMotion {
+            filterMode = .unverifiedBandMotion
+        } else if hasActivityClass {
             filterMode = .activityClassFiltered
         } else if classificationPolicy == .requireActivityClass {
             filterMode = .activityClassRequiredMissing
@@ -184,6 +196,9 @@ public enum StepsCounter {
                     unfilteredRawTicks += delta
                     rawTicks += delta
                     keptDeltaCount += 1
+                } else if filterMode == .unverifiedBandMotion {
+                    unfilteredRawTicks += delta
+                    rejectedUnknownDeltaCount += 1
                 } else {
                     unfilteredRawTicks += delta
                     switch later.activityClass {
@@ -213,9 +228,8 @@ public enum StepsCounter {
         )
     }
 
-    /// Compatibility wrapper for the retained raw tick total from `analyze`. Completely unclassified
-    /// windows keep the legacy positive-delta sum; classed windows keep only walk/run deltas. Returns `nil`
-    /// when no retained movement remains, and leaves `stepTicksPerStep` calibration to the caller.
+    /// Compatibility wrapper for the retained raw tick total from `analyze`. Callers must select the
+    /// production rejection policy unless they are explicitly exercising a legacy research fixture.
     public static func stepsInWindow(
         _ samples: [StepSample],
         classificationPolicy: ClassificationPolicy = .allowLegacyRawMotion

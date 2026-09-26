@@ -1,6 +1,7 @@
 package com.noop.protocol
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -47,8 +48,7 @@ class Whoop5HistoricalDecodeTest {
         // @57 decodes as the FULL little-endian u16 at [57:59], not byte @57 alone (the over-count fix).
         assertEquals(50, p["step_motion_counter"])
         assertEquals(0, p["motion_wear_quality"])
-        // @63 also reads as the activity-class enum (#316): this worn-still frame's byte is 0 => still.
-        assertEquals(0, p["activity_class"])
+        assertFalse("@63 must not be emitted as gait evidence", p.containsKey("activity_class"))
         assertTrue((p["dynamic_acceleration"] as Double) in 0.0..8.0)
     }
 
@@ -63,14 +63,30 @@ class Whoop5HistoricalDecodeTest {
     }
 
     @Test
-    fun decodesV18ActivityClassEnum() {
-        // @63 is a small validated activity-class enum: 0=still, 1=walk, 2=run, 0xFF=invalid (#316).
-        // The four known codes map through; 0xFF and any other value store nothing (null).
-        assertEquals(0, decodeHistorical(mutateAndReCrc(63, 0), DeviceFamily.WHOOP5)!!["activity_class"]) // still
-        assertEquals(1, decodeHistorical(mutateAndReCrc(63, 1), DeviceFamily.WHOOP5)!!["activity_class"]) // walk
-        assertEquals(2, decodeHistorical(mutateAndReCrc(63, 2), DeviceFamily.WHOOP5)!!["activity_class"]) // run
-        assertNull(decodeHistorical(mutateAndReCrc(63, 0xFF), DeviceFamily.WHOOP5)!!["activity_class"])   // invalid
-        assertNull(decodeHistorical(mutateAndReCrc(63, 7), DeviceFamily.WHOOP5)!!["activity_class"])      // unknown
+    fun byte63RemainsMotionWearQualityOnly() {
+        for (raw in listOf(0, 1, 2)) {
+            val decoded = decodeHistorical(mutateAndReCrc(63, raw), DeviceFamily.WHOOP5)!!
+            assertEquals(raw, decoded["motion_wear_quality"])
+            assertFalse(decoded.containsKey("activity_class"))
+        }
+        for (raw in listOf(0xFF, 7)) {
+            val decoded = decodeHistorical(mutateAndReCrc(63, raw), DeviceFamily.WHOOP5)!!
+            assertNull(decoded["motion_wear_quality"])
+            assertFalse(decoded.containsKey("activity_class"))
+        }
+    }
+
+    @Test
+    fun extractedStepRowsDoNotCarryActivityClass() {
+        val streams = extractHistoricalStreams(
+            listOf(bytes(wornV18)),
+            1780916150,
+            1780916150,
+            DeviceFamily.WHOOP5,
+        )
+
+        assertEquals(1, streams.steps.size)
+        assertNull(streams.steps.single().activityClass)
     }
 
     @Test

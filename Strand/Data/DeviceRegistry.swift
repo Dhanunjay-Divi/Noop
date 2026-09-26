@@ -16,9 +16,9 @@ import WhoopStore
 final class DeviceRegistry: ObservableObject {
     /// All paired devices (any status), oldest-added first — the store's `all()` ordering.
     @Published private(set) var devices: [PairedDevice] = []
-    /// The active device's id. Defaults to "my-whoop" so callers have a safe value before the
-    /// first `reload()` and if the registry can't be read.
-    @Published private(set) var activeDeviceId: String = "my-whoop"
+    /// The active device's id. The seeded source is used before the first successful read, while `nil`
+    /// explicitly represents a readable registry with no active row.
+    @Published private(set) var activeDeviceId: String? = "my-whoop"
 
     private let store: DeviceRegistryStore
 
@@ -27,7 +27,7 @@ final class DeviceRegistry: ObservableObject {
     }
 
     /// Load the device list and active id from the store. Best-effort: on any error the published
-    /// values are left untouched (keeping the safe "my-whoop" fallback), never crashing.
+    /// values are left untouched, never crashing.
     func reload() {
         guard let rows = try? store.all() else { return }
         publish(rows)
@@ -92,7 +92,7 @@ final class DeviceRegistry: ObservableObject {
                   saved.sourceKind == device.sourceKind,
                   saved.capabilities
                     == (Self.isWhoop(device)
-                        ? WhoopLiveCapabilities.withoutCalibratedSpo2(
+                        ? WhoopLiveCapabilities.withoutUnvalidatedLiveMetrics(
                             device.capabilities
                         )
                         : device.capabilities),
@@ -214,7 +214,7 @@ final class DeviceRegistry: ObservableObject {
     /// Archive (remove) a device: NOOP stops connecting to it, but its recorded data is kept. The store
     /// verifies the status change and clears day ownership in one transaction, so a failed archive leaves
     /// both the registry row and every ownership override unchanged. If the archived device was active,
-    /// `activeDeviceId` is left as-is here; the caller decides the next active device.
+    /// publication emits `nil` until the caller selects a verified replacement.
     @discardableResult
     func archive(_ id: String) -> Bool {
         do {
@@ -282,9 +282,7 @@ final class DeviceRegistry: ObservableObject {
 
     private func publish(_ rows: [PairedDevice]) {
         devices = rows
-        if let active = rows.first(where: { $0.status == .active })?.id {
-            activeDeviceId = active
-        }
+        activeDeviceId = rows.first(where: { $0.status == .active })?.id
     }
 
     private static func isWhoop(_ device: PairedDevice) -> Bool {

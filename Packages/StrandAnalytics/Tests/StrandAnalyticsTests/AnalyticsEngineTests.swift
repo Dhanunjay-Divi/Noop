@@ -320,7 +320,9 @@ final class AnalyticsEngineTests: XCTestCase {
                                              cfg: Baselines.metricCfg["skin_temp"]!)
         XCTAssertTrue(skinBase.usable)
         let result = AnalyticsEngine.analyzeDay(
-            day: day, hr: n.hr, rr: rr, gravity: n.gravity, steps: steps, skinTemp: skin,
+            day: day, hr: n.hr, rr: rr, gravity: n.gravity, steps: steps,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            skinTemp: skin,
             profile: UserProfile(age: 30),
             baselines: AnalyticsEngine.ProfileBaselines(skinTemp: skinBase))
         XCTAssertEqual(result.sleepSessions.count, 1)
@@ -491,12 +493,20 @@ final class AnalyticsEngineTests: XCTestCase {
         let steps = [StepSample(ts: lateEveningUtc, counter: 100),
                      StepSample(ts: lateEveningUtc + 1800, counter: 360)]  // +260 within the local day
         let result = AnalyticsEngine.analyzeDay(
-            day: day, steps: steps, profile: UserProfile(), tzOffsetSeconds: offset)
+            day: day,
+            steps: steps,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            profile: UserProfile(),
+            tzOffsetSeconds: offset)
         XCTAssertEqual(result.daily.steps, 260)
         // Sanity: the OLD UTC bucketing would have dropped these (they're UTC day 2021-06-16) →
         // verify offset 0 with the UTC day produces nil, proving the offset is what saves them.
         let utcResult = AnalyticsEngine.analyzeDay(
-            day: day, steps: steps, profile: UserProfile(), tzOffsetSeconds: 0)
+            day: day,
+            steps: steps,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            profile: UserProfile(),
+            tzOffsetSeconds: 0)
         XCTAssertNil(utcResult.daily.steps)
     }
 

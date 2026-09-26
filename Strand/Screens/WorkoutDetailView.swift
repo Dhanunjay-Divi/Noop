@@ -129,46 +129,18 @@ struct WorkoutDetailView: View {
         let hrr = await repo.workoutHeartRateRecovery(
             from: row.startTs, to: row.endTs, maxHR: Double(profile.hrMax))
 
-        // Steps for an on-foot session (#398), computed at display time over the exact window so it
-        // "fills in after sync": prefer the strap's own classified counter once it has offloaded the window.
-        // Use the phone pedometer only when no strap counter rows exist. A present counter whose motion is
-        // rejected as still/unknown owns the window and remains blank instead of re-entering through a less
-        // specific fallback. Never shown for non-foot sports (cycling/rowing/… have no footfalls).
+        // Steps for an on-foot session come from the phone/watch pedometer over the exact window. The
+        // reverse-engineered band motion counter is not validated gait evidence and cannot authorize a
+        // workout step count. Never shown for non-foot sports (cycling/rowing/… have no footfalls).
         var stepReadout: StepReadout? = nil
         if WorkoutCatalog.isOnFoot(row.sport) {
-            var strapAnalysis: StepsCounter.Analysis?
-            var strapReadSucceeded = false
-            do {
-                strapAnalysis = try await repo.strapStepAnalysis(
-                    from: row.startTs,
-                    to: row.endTs
-                )
-                strapReadSucceeded = true
-            } catch is CancellationError {
-                return
-            } catch {
-                AppDiagnosticsRecorder.shared.record(
-                    "workouts.step_summary",
-                    fields: [
-                        "outcome": "failed",
-                        "failure_kind": "storage",
-                    ]
-                )
-            }
-            if let ticks = strapAnalysis?.steps {
-                // Same per-user ticks-per-step calibration the daily total applies (#139), floor 0.5.
-                let scaled = Int((Double(ticks) / max(profile.stepTicksPerStep, 0.5)).rounded())
-                if scaled > 0 { stepReadout = StepReadout(count: scaled, fromStrap: true) }
-            }
-            if strapReadSucceeded && strapAnalysis == nil {
-                let pedometerSteps = await WorkoutPedometer.steps(
-                    fromSec: row.startTs,
-                    toSec: row.endTs
-                )
-                guard !Task.isCancelled else { return }
-                if let pedometerSteps, pedometerSteps > 0 {
-                    stepReadout = StepReadout(count: pedometerSteps, fromStrap: false)
-                }
+            let pedometerSteps = await WorkoutPedometer.steps(
+                fromSec: row.startTs,
+                toSec: row.endTs
+            )
+            guard !Task.isCancelled else { return }
+            if let pedometerSteps, pedometerSteps > 0 {
+                stepReadout = StepReadout(count: pedometerSteps, fromStrap: false)
             }
         }
 

@@ -32,6 +32,7 @@ EXPECTED_TOP_LEVEL_ENTRIES = {
     "production",
     "test-support",
 }
+IGNORED_GENERATED_TOP_LEVEL_DIRECTORIES = {".swiftpm"}
 FORBIDDEN_SUFFIXES = {
     ".7z",
     ".aar",
@@ -178,6 +179,39 @@ def _git_index_paths(root: Path) -> set[str]:
     return indexed_paths
 
 
+def _validated_generated_top_level_directories(
+    root: Path,
+    indexed_paths: set[str],
+) -> set[str]:
+    present: set[str] = set()
+    for name in IGNORED_GENERATED_TOP_LEVEL_DIRECTORIES:
+        path = root / name
+        if not path.exists() and not path.is_symlink():
+            continue
+        if path.is_symlink() or not path.is_dir():
+            raise VerificationError(
+                f"generated cache must be a real directory: {name}"
+            )
+        if any(
+            indexed == name or indexed.startswith(f"{name}/")
+            for indexed in indexed_paths
+        ):
+            raise VerificationError(
+                f"generated cache must remain untracked: {name}"
+            )
+        for descendant in path.rglob("*"):
+            if descendant.is_symlink():
+                raise VerificationError(
+                    f"generated cache must not contain symlinks: {name}"
+                )
+            if descendant.is_file():
+                raise VerificationError(
+                    f"generated cache must contain directories only: {name}"
+                )
+        present.add(name)
+    return present
+
+
 def verify_artifact(root: Path) -> dict[str, Any]:
     _reject_symlinked_artifact_path(root)
     root = root.resolve()
@@ -207,6 +241,12 @@ def verify_artifact(root: Path) -> dict[str, Any]:
     if manifest["supplierArtifactsIncluded"] is not False:
         raise VerificationError("supplier artifacts must not be included")
 
+    indexed_paths = _git_index_paths(root)
+    generated_directories = _validated_generated_top_level_directories(
+        root,
+        indexed_paths,
+    )
+
     for path in root.rglob("*"):
         if path.is_symlink():
             raise VerificationError("artifact tree must not contain symlinks")
@@ -222,7 +262,10 @@ def verify_artifact(root: Path) -> dict[str, Any]:
                 f"binary or archive payload is forbidden: {path.relative_to(root)}"
             )
 
-    top_level_entries = {path.name for path in root.iterdir()}
+    top_level_entries = {
+        path.name for path in root.iterdir()
+        if path.name not in generated_directories
+    }
     if top_level_entries != EXPECTED_TOP_LEVEL_ENTRIES:
         raise VerificationError("artifact top-level layout is not exact")
 
@@ -282,7 +325,7 @@ def verify_artifact(root: Path) -> dict[str, Any]:
         | set(EXPECTED_INTEGRATION_FILES)
         | listed_paths
     )
-    if _git_index_paths(root) != expected_index_paths:
+    if indexed_paths != expected_index_paths:
         raise VerificationError("artifact Git index layout is not exact")
 
     return {

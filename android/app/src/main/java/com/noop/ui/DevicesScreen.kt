@@ -240,10 +240,18 @@ fun DevicesScreen(
                 onRemove = { removeTarget = device },
                 // Manual connect and disconnect for the WHOOP. A short toast confirms the tap, since the link
                 // state only changes a few seconds later.
-                onConnect = if (device.brand.equals("WHOOP", ignoreCase = true)) {
+                onConnect = if (deviceCardShowsWhoopConnectionActions(
+                        isActive = isActive,
+                        isWhoop = SourceCoordinator.isWhoop(device),
+                    )
+                ) {
                     { Toast.makeText(context, "Reconnecting…", Toast.LENGTH_SHORT).show(); viewModel.connect() }
                 } else null,
-                onDisconnect = if (device.brand.equals("WHOOP", ignoreCase = true)) {
+                onDisconnect = if (deviceCardShowsWhoopConnectionActions(
+                        isActive = isActive,
+                        isWhoop = SourceCoordinator.isWhoop(device),
+                    )
+                ) {
                     { Toast.makeText(context, "Disconnecting", Toast.LENGTH_SHORT).show(); viewModel.disconnect() }
                 } else null,
                 // Restart is offered only for a live-connected WHOOP that is NOT a 4.0: the strap-log
@@ -1551,6 +1559,11 @@ private fun lastSeenLine(device: PairedDeviceRow, isLiveConnected: Boolean, bond
 
 internal fun historyLayoutLine(version: Int?): String? =
     version?.let { "v$it history" }
+
+internal fun deviceCardShowsWhoopConnectionActions(
+    isActive: Boolean,
+    isWhoop: Boolean,
+): Boolean = isActive && isWhoop
 
 /** Best-effort brand from the advertised name. Falls back to a neutral label. Mirrors Swift brandGuess.
  *  Delegates to the pure [com.noop.data.DeviceBrandCatalog] (single source of truth) so the token table

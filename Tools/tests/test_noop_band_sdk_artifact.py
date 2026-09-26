@@ -34,7 +34,11 @@ class NoopBandSDKArtifactTest(unittest.TestCase):
         repository = Path(temporary).resolve() / "candidate"
         artifact = repository / "Vendor" / "NoopBandSDK"
         artifact.parent.mkdir(parents=True)
-        shutil.copytree(ROOT / "Vendor" / "NoopBandSDK", artifact)
+        shutil.copytree(
+            ROOT / "Vendor" / "NoopBandSDK",
+            artifact,
+            ignore=shutil.ignore_patterns(".swiftpm"),
+        )
         self._git(repository, "init", "-q")
         self._git(repository, "config", "user.name", "NOOP Test")
         self._git(repository, "config", "user.email", "noop@example.invalid")
@@ -79,6 +83,31 @@ class NoopBandSDKArtifactTest(unittest.TestCase):
             with self.assertRaisesRegex(
                 VERIFIER.VerificationError,
                 "top-level layout is not exact",
+            ):
+                VERIFIER.verify_artifact(copied)
+
+    def test_directory_only_swiftpm_cache_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _, copied = self._copy_artifact(temporary)
+            (copied / ".swiftpm" / "xcode").mkdir(parents=True)
+
+            result = VERIFIER.verify_artifact(copied)
+
+            self.assertEqual(10, result["files"])
+
+    def test_swiftpm_cache_file_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _, copied = self._copy_artifact(temporary)
+            configuration = copied / ".swiftpm" / "configuration"
+            configuration.mkdir(parents=True)
+            (configuration / "mirrors.json").write_text(
+                "{}\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationError,
+                "generated cache must contain directories only",
             ):
                 VERIFIER.verify_artifact(copied)
 

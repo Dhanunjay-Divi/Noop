@@ -2,6 +2,7 @@ package com.noop.analytics
 
 import com.noop.data.DailyMetric
 import com.noop.ui.VITALITY_WELLNESS_AGE_INPUT_CLAIM
+import java.io.File
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -37,5 +38,41 @@ class StepProvenanceSafetyTest {
         assertFalse(claim.contains("steps"))
         assertFalse(claim.contains("activity"))
         assertTrue(claim.contains("profile age"))
+    }
+
+    @Test
+    fun unvalidatedMotionControlsCannotReenterProduction() {
+        val root = sourceRoot()
+        val settings = File(root, "ui/SettingsScreen.kt").readText()
+        val viewModel = File(root, "ui/AppViewModel.kt").readText()
+        val bleClient = File(root, "ble/WhoopBleClient.kt").readText()
+        val todayLogic = File(root, "ui/TodayMetricsLogic.kt").readText()
+        val workouts = File(root, "ui/WorkoutsScreen.kt").readText()
+        val health = File(root, "ui/HealthScreen.kt").readText()
+
+        assertFalse(settings.contains("l10n_settings_screen_step_calibration_351c09bf"))
+        assertFalse(settings.contains("motionAwareWake"))
+        assertFalse(viewModel.contains("useMotionAwareWake = PuffinExperiment"))
+        assertFalse(viewModel.contains("repository.strapStepTicks"))
+        assertFalse(bleClient.contains("useMotionAwareWake = PuffinExperiment"))
+        assertFalse(todayLogic.contains("imported ?: motionDerived"))
+        assertFalse(todayLogic.contains("imported ?: calibratedEstimate"))
+        assertTrue(todayLogic.contains("internal fun resolvedSteps("))
+        assertTrue(
+            File(root, "ui/TodayScreen.kt").readText().contains(
+                "resolvedSteps(\n                imported = importedStepsForDay,"
+            )
+        )
+        assertFalse(workouts.contains("CLASSIFIED_BAND"))
+        assertFalse(health.contains("resolvedSeries(\"steps\", \"my-whoop\""))
+    }
+
+    private fun sourceRoot(): File {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        return listOf(
+            File(root, "src/main/java/com/noop"),
+            File(root, "app/src/main/java/com/noop"),
+            File(root, "android/app/src/main/java/com/noop"),
+        ).firstOrNull(File::isDirectory) ?: error("Could not locate source root from $root")
     }
 }

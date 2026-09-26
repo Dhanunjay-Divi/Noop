@@ -20,7 +20,12 @@ final class StepsDailyTests: XCTestCase {
     }
 
     private func stepsFor(_ samples: [StepSample]) -> Int? {
-        AnalyticsEngine.analyzeDay(day: dayUtc, steps: samples, profile: profile).daily.steps
+        AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            steps: samples,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            profile: profile
+        ).daily.steps
     }
 
     private var lowHeartRateWearEvidence: [HRSample] {
@@ -112,7 +117,12 @@ final class StepsDailyTests: XCTestCase {
             step(11 * 3_600, 1_100),
         ]
         let total = AnalyticsEngine.analyzeDay(
-            day: dayUtc, steps: nightWindow, daySteps: fullDay, profile: profile).daily.steps
+            day: dayUtc,
+            steps: nightWindow,
+            daySteps: fullDay,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            profile: profile
+        ).daily.steps
         // deltas over the full day: 100->300=200, 300->700=400, 700->1100=400 => 1000 (all < 512 guard).
         XCTAssertEqual(total, 1_000)
     }
@@ -121,15 +131,26 @@ final class StepsDailyTests: XCTestCase {
         // No calendar-day stream supplied (pure-function callers / old tests) -> total falls
         // back to the night-window `steps` exactly as before.
         let s = [step(0, 100), step(60, 150), step(120, 220)]  // 50 + 70 = 120
-        XCTAssertEqual(AnalyticsEngine.analyzeDay(day: dayUtc, steps: s, profile: profile).daily.steps,
-                       120)
+        XCTAssertEqual(
+            AnalyticsEngine.analyzeDay(
+                day: dayUtc,
+                steps: s,
+                stepClassificationPolicy: .allowLegacyRawMotion,
+                profile: profile
+            ).daily.steps,
+            120
+        )
     }
 
     // MARK: - Step-scale calibration (#139)
 
     private func stepsFor(_ samples: [StepSample], ticksPerStep: Double) -> Int? {
-        AnalyticsEngine.analyzeDay(day: dayUtc, steps: samples,
-                                   profile: UserProfile(stepTicksPerStep: ticksPerStep)).daily.steps
+        AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            steps: samples,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            profile: UserProfile(stepTicksPerStep: ticksPerStep)
+        ).daily.steps
     }
 
     func testTicksPerStepTwoHalvesTheTotal() {
@@ -167,6 +188,7 @@ final class StepsDailyTests: XCTestCase {
         let result = AnalyticsEngine.analyzeDay(
             day: dayUtc,
             steps: samples,
+            stepClassificationPolicy: .requireActivityClass,
             profile: profile
         )
 
@@ -218,8 +240,7 @@ final class StepsDailyTests: XCTestCase {
     }
 
     func testDailyNoHRWalkClassStepsStillCount() {
-        // 1,715 calibrated steps and no HR stream: the daily movement floor should keep Effort from
-        // reading zero, while the same calibrated total remains visible on the Steps metric.
+        // Research compatibility policy only: retain the former class-filter behavior explicitly.
         let counters = [100, 400, 700, 1_000, 1_300, 1_600, 1_815]
         let samples = counters.enumerated().map {
             step($0.offset * 60, $0.element, activityClass: 1)
@@ -227,6 +248,7 @@ final class StepsDailyTests: XCTestCase {
         let result = AnalyticsEngine.analyzeDay(
             day: dayUtc,
             steps: samples,
+            stepClassificationPolicy: .requireActivityClass,
             profile: profile
         )
 

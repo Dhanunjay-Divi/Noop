@@ -161,7 +161,7 @@ class RegistryDayOwnerSourceTest {
     }
 
     @Test
-    fun dayOwnerResolvesEachSourcesHeartRateOrStepsBeforeApplyingPriority() = runBlocking {
+    fun dayOwnerUsesHeartRateAndNeverTreatsBandCounterAsGaitEvidence() = runBlocking {
         val heartRateCalls = mutableListOf<String>()
         val stepCalls = mutableListOf<String>()
         val dao = Proxy.newProxyInstance(
@@ -206,20 +206,15 @@ class RegistryDayOwnerSourceTest {
             from = 1_000,
             to = 2_000,
             importedDeviceId = "my-whoop",
-            stepFrom = 1_000,
-            stepTo = 2_000,
         )
 
-        assertEquals("my-whoop", owner)
+        assertEquals("oura", owner)
         assertEquals(listOf("my-whoop", "oura"), heartRateCalls)
-        assertEquals(
-            listOf("my-whoop"),
-            stepCalls,
-        )
+        assertEquals(emptyList<String>(), stepCalls)
     }
 
     @Test
-    fun dayOwnerRejectsAClassifiedRowWithoutAUsableDelta() = runBlocking {
+    fun dayOwnerIgnoresEvenAClassifiedBandCounterRow() = runBlocking {
         val dao = Proxy.newProxyInstance(
             WhoopDao::class.java.classLoader,
             arrayOf(WhoopDao::class.java),
@@ -257,8 +252,6 @@ class RegistryDayOwnerSourceTest {
             from = 1_000,
             to = 2_000,
             importedDeviceId = "my-whoop",
-            stepFrom = 1_000,
-            stepTo = 2_000,
         )
 
         assertEquals(

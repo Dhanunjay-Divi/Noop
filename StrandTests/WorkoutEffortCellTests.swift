@@ -185,26 +185,20 @@ final class DailyOverviewPresentationTests: XCTestCase {
         XCTAssertNil(DailyOverviewPresentation.sleepScore(daily(efficiency: .infinity)))
     }
 
-    func testImportedPedometerStepsOutrankBandMotionEstimate() {
+    func testDayOverviewRequiresImportedPedometerSteps() {
         let band = daily(efficiency: 0.9, steps: 4_000)
 
         XCTAssertEqual(
             DailyOverviewPresentation.steps(daily: band, importedSteps: 9_500),
             9_500
         )
-        XCTAssertEqual(
-            DailyOverviewPresentation.steps(daily: band, importedSteps: nil),
-            4_000
-        )
+        XCTAssertNil(DailyOverviewPresentation.steps(daily: band, importedSteps: nil))
         XCTAssertNil(DailyOverviewPresentation.steps(daily: nil, importedSteps: nil))
         XCTAssertEqual(
             DailyOverviewPresentation.stepSource(daily: band, importedSteps: 9_500),
             .importedPedometer
         )
-        XCTAssertEqual(
-            DailyOverviewPresentation.stepSource(daily: band, importedSteps: nil),
-            .classifiedBand
-        )
+        XCTAssertNil(DailyOverviewPresentation.stepSource(daily: band, importedSteps: nil))
         XCTAssertNil(DailyOverviewPresentation.stepSource(daily: nil, importedSteps: nil))
     }
 

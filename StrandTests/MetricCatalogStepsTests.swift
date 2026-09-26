@@ -2,13 +2,10 @@ import XCTest
 @testable import Strand
 
 final class MetricCatalogStepsTests: XCTestCase {
-    func testTodayStepsUsesMotionDerivedWhoopSeriesWhenAvailable() {
+    func testTodayStepsWithholdsUnvalidatedBandMotion() {
         let metric = MetricCatalog.todayStepsMetric(hasMotionDerivedSteps: true)
 
-        XCTAssertEqual(metric?.key, "steps")
-        XCTAssertEqual(metric?.source, "my-whoop")
-        XCTAssertEqual(metric?.title, "Steps (motion estimate)")
-        XCTAssertTrue(metric?.description?.contains("Not a validated pedometer count") == true)
+        XCTAssertNil(metric)
     }
 
     func testTodayStepsWithholdsGravityOnlyEstimateWhenMotionSeriesIsUnavailable() {
@@ -34,24 +31,24 @@ final class MetricCatalogStepsTests: XCTestCase {
         XCTAssertEqual(metric?.title, "Steps")
     }
 
-    func testTodayStepsValueUsesOnlyImportedOrClassifiedCounterEvidence() {
+    func testTodayStepsValueRequiresImportedPedometerEvidence() {
         XCTAssertEqual(MetricCatalog.todayStepsValue(imported: 8_400, motionDerived: 7_100,
                                                      calibratedEstimate: 6_900), 8_400)
-        XCTAssertEqual(MetricCatalog.todayStepsValue(imported: nil, motionDerived: 7_100,
-                                                     calibratedEstimate: 6_900), 7_100)
+        XCTAssertNil(MetricCatalog.todayStepsValue(imported: nil, motionDerived: 7_100,
+                                                   calibratedEstimate: 6_900) as Int?)
         XCTAssertNil(MetricCatalog.todayStepsValue(imported: nil, motionDerived: nil,
                                                    calibratedEstimate: 6_900) as Int?)
     }
 
-    func testTodayStepsSeriesExcludesGravityOnlyFallbackDays() {
+    func testTodayStepsSeriesExcludesEveryMotionOnlyDay() {
         let merged = MetricCatalog.todayStepsSeries(
             imported: [("2026-08-10", 8_400)],
             motionDerived: [("2026-08-10", 7_100), ("2026-08-11", 7_500)],
             calibratedEstimate: [("2026-08-10", 6_900), ("2026-08-11", 7_000),
                                  ("2026-08-12", 6_200)]
         )
-        XCTAssertEqual(merged.map(\.day), ["2026-08-10", "2026-08-11"])
-        XCTAssertEqual(merged.map(\.value), [8_400, 7_500])
+        XCTAssertEqual(merged.map(\.day), ["2026-08-10"])
+        XCTAssertEqual(merged.map(\.value), [8_400])
     }
 
     func testAppleHealthStepsRemainsAnIndependentCatalogMetric() {
@@ -60,12 +57,13 @@ final class MetricCatalogStepsTests: XCTestCase {
         XCTAssertEqual(metric?.id, "apple-health:steps")
     }
 
-    /// Both WHOOP motion estimates must be resolvable by EXACT source, so the
-    /// Today card/tile can route to them (via `.metricSourced` / `todayStepsMetric`) without depending on
-    /// catalog declaration order.
-    func testWhoopStepsAreResolvableBySource() {
-        XCTAssertEqual(MetricCatalog.metric(key: "steps", source: "my-whoop")?.id, "my-whoop:steps")
-        XCTAssertEqual(MetricCatalog.metric(key: "steps_est", source: "my-whoop")?.id, "my-whoop:steps_est")
+    /// Historical motion estimates remain in the canonical catalog for diagnostics/export, but customer
+    /// pickers must not offer them as walking metrics.
+    func testMotionDerivedStepNamespacesAreNotCustomerVisible() {
+        XCTAssertTrue(MetricCatalog.all.contains { $0.id == "my-whoop:steps" })
+        XCTAssertTrue(MetricCatalog.all.contains { $0.id == "my-whoop:steps_est" })
+        XCTAssertFalse(MetricCatalog.visible(allowsBMI: true).contains { $0.id == "my-whoop:steps" })
+        XCTAssertFalse(MetricCatalog.visible(allowsBMI: true).contains { $0.id == "my-whoop:steps_est" })
     }
 
     /// Regression guard: the bare-key `first { $0.key == "steps" }` resolvers that are NOT source-aware

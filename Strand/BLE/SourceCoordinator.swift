@@ -118,6 +118,9 @@ final class SourceCoordinator: ObservableObject {
     /// every WHOOP→WHOOP re-point. nil until the first WHOOP activation is handled. Lets us tell "same
     /// WHOOP, no change" (no churn) from "a DIFFERENT WHOOP became active" (re-point + reconnect).
     private var activeWhoopId: String?
+    /// `activeWhoopId == nil` also describes normal launch before the existing WHOOP flow starts.
+    /// Preserve an explicit teardown edge so a later selection restarts BLE instead of only repointing.
+    private var whoopRestartRequired = false
     /// The uuid of the strap the WHOOP link is CURRENTLY connected to (from `connectedPeripheralUUID`).
     /// Lets a WHOOP→WHOOP make-active adopt IN PLACE when the newly-activated row is the same physical
     /// strap (#74 keep): a stop/start churn there would drop the live link and reconnect via scan. Cleared
@@ -191,7 +194,12 @@ final class SourceCoordinator: ObservableObject {
     ///   • A DIFFERENT WHOOP → re-point the WHOOP connection (preferred peripheral + deviceId) + reconnect.
     ///   • WHOOP active after a strap → stop the strap source + resume WHOOP.
     ///   • A generic strap → pause WHOOP + (re)start `StandardHRSource` for that strap's id.
-    func activeDeviceChanged(to id: String) {
+    func activeDeviceChanged(to id: String?) {
+        guard let id else {
+            clearActiveDevice()
+            return
+        }
+
         if supplierPairingLease != nil {
             if let device = activeDevice(for: id),
                device.sourceKind == .veepoo {
@@ -214,6 +222,24 @@ final class SourceCoordinator: ObservableObject {
         } else {
             switchToStrap(id: id)
         }
+    }
+
+    /// A readable registry with no active row owns no live transport. Stop the current source and clear
+    /// source-specific guidance while preserving stored history for a later selection.
+    private func clearActiveDevice() {
+        if onStrap || activeSource != nil {
+            tearDownNonWhoopSource()
+        } else {
+            stopWhoop()
+        }
+        activeStrapId = nil
+        activeWhoopId = nil
+        onStrap = false
+        whoopRestartRequired = true
+        setWhoopPreferredPeripheral(nil)
+        live.pairingHint = nil
+        live.reconnectGuide = nil
+        BluetoothAvailabilityNotifications.setMonitoringExpected(false)
     }
 
     /// Active device is the Apple Watch (a `.liveAppleWatch` HealthKit pseudo-device). It has no BLE
@@ -251,13 +277,17 @@ final class SourceCoordinator: ObservableObject {
             activeStrapId = nil
             onStrap = false
             pointWhoop(at: id, peripheralId: peripheralId)
-            startWhoop()
+            restartWhoop()
         } else if activeWhoopId == nil {
             // First WHOOP activation of the session (the normal launch path). Set the targeting so the
             // existing WHOOP flow — already kicked off elsewhere on launch — uses it. For the single
             // seeded source (peripheralId nil) this is setPreferredPeripheral(nil), an idempotent writer
-            // re-point, and no scan/disconnect.
+            // re-point, and no scan/disconnect. After an explicit no-active-device teardown, however,
+            // selecting WHOOP again must restart the scan entry point that teardown stopped.
             pointWhoop(at: id, peripheralId: peripheralId)
+            if whoopRestartRequired {
+                restartWhoop()
+            }
         } else if let peripheralId, peripheralId.caseInsensitiveCompare(connectedWhoopUuid ?? "") == .orderedSame {
             // WHOOP → the SAME physical strap (make-active on the row we're already connected to): adopt IN
             // PLACE. A stop/start churn here would drop the #74-kept live link and force a scan reconnect.
@@ -267,8 +297,13 @@ final class SourceCoordinator: ObservableObject {
             // WHOOP → a DIFFERENT WHOOP: drop the current link, re-point, and reconnect.
             stopWhoop()
             pointWhoop(at: id, peripheralId: peripheralId)
-            startWhoop()
+            restartWhoop()
         }
+    }
+
+    private func restartWhoop() {
+        whoopRestartRequired = false
+        startWhoop()
     }
 
     /// Apply the band targeting for the now-active `id`. Always sets both the preferred peripheral and
@@ -317,6 +352,14 @@ final class SourceCoordinator: ObservableObject {
                 failure: reconciled ? nil : .fallbackUnavailable
             )
             return
+        }
+
+        if sourceKind == .veepoo {
+            // These guides describe WHOOP encrypted-bond recovery only. Clear them after supplier
+            // preflight succeeds but before its source is activated, so the supplier card cannot inherit
+            // stale WHOOP pairing or reconnect instructions during the transport handoff.
+            live.pairingHint = nil
+            live.reconnectGuide = nil
         }
 
         // Leaving WHOOP for the first non-WHOOP source: pause WHOOP's BLE via its existing teardown.
@@ -613,8 +656,8 @@ final class SourceCoordinator: ObservableObject {
         let previousUuid = connectedWhoopUuid
         connectedWhoopUuid = uuid
 
-        let activeId = registry.activeDeviceId
-        guard isWhoop(activeId),
+        guard let activeId = registry.activeDeviceId,
+              isWhoop(activeId),
               let device = registry.devices.first(where: { $0.id == activeId }) else { return }
 
         // Connection recency is a transition fact, not a sample counter. Touch once when a link comes up
@@ -660,8 +703,9 @@ final class SourceCoordinator: ObservableObject {
         registry.devices.first(where: { $0.id == id })?.sourceKind
     }
 
-    private func activeDevice(for id: String) -> PairedDevice? {
-        registry.devices.first {
+    private func activeDevice(for id: String?) -> PairedDevice? {
+        guard let id else { return nil }
+        return registry.devices.first {
             $0.id == id && $0.status == .active
         }
     }

@@ -100,6 +100,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
@@ -505,7 +506,9 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     }
 
     Surface(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("noop.onboarding.root"),
         color = Palette.surfaceBase,
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -554,7 +557,8 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .widthIn(max = 620.dp),
+                        .widthIn(max = 620.dp)
+                        .testTag("noop.onboarding.page.${page.storageValue}"),
                     label = onboardingPageLabel,
                 ) { targetPage ->
                     if (targetPage == OnboardingPage.Account && ownershipConfigured) {
@@ -1322,7 +1326,8 @@ private fun OnboardingFooter(
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 50.dp),
+                .heightIn(min = 50.dp)
+                .testTag("noop.onboarding.primary"),
             shape = RoundedCornerShape(14.dp),
         ) {
             Text(cta, style = NoopType.headline)
@@ -1555,6 +1560,7 @@ private fun ConnectStep(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("noop.onboarding.choose-device")
                     .semantics { contentDescription = action },
             ) {
                 Icon(

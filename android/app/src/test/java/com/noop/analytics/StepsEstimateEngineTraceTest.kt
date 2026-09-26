@@ -79,10 +79,17 @@ class StepsEstimateEngineTraceTest {
 
     @Test fun rawTotalEqualsAnalyzeDaySteps() {
         val samples = listOf(step(0, 100), step(60, 150), step(120, 220)) // 50 + 70 = 120
-        val production = AnalyticsEngine.analyzeDay(day = dayUtc, steps = samples, profile = profile).daily.steps
+        val production = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = profile,
+        ).daily.steps
         assertEquals(120, production)
         val lines = StepsEstimateEngineTrace.rawCounterTrace(
             daySteps = samples, dayKey = dayUtc, tzOffsetSeconds = 0L, ticksPerStep = profile.stepTicksPerStep,
+            classificationPolicy = StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
         )
         val total = lines.first { it.startsWith("stepsRaw total ") }
         assertTrue(total, total.contains("scaledSteps=$production"))
@@ -93,10 +100,17 @@ class StepsEstimateEngineTraceTest {
     @Test fun wrapAwareDeltaIsReportedAndCounted() {
         // 65500 -> 30 wraps: (30 - 65500) and 0xFFFF = 66; 30 -> 90 = 60. Both kept (< 512).
         val samples = listOf(step(0, 65_500), step(60, 30), step(120, 90))
-        val production = AnalyticsEngine.analyzeDay(day = dayUtc, steps = samples, profile = profile).daily.steps
+        val production = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = profile,
+        ).daily.steps
         assertEquals(66 + 60, production)
         val lines = StepsEstimateEngineTrace.rawCounterTrace(
             daySteps = samples, dayKey = dayUtc, tzOffsetSeconds = 0L, ticksPerStep = profile.stepTicksPerStep,
+            classificationPolicy = StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
         )
         assertTrue(lines.any { it.contains("kept=2") && it.contains("rejectedGap=0") })
         assertTrue(lines.first { it.startsWith("stepsRaw total ") }.contains("scaledSteps=$production"))
@@ -106,10 +120,17 @@ class StepsEstimateEngineTraceTest {
     @Test fun droppedDeltaIsCountedAndExcluded() {
         // 100 -> 150 (kept, 50) -> 1000 (delta 850 >= 512, DROPPED) -> 1050 (kept, 50).
         val samples = listOf(step(0, 100), step(60, 150), step(120, 1_000), step(180, 1_050))
-        val production = AnalyticsEngine.analyzeDay(day = dayUtc, steps = samples, profile = profile).daily.steps
+        val production = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = profile,
+        ).daily.steps
         assertEquals(100, production)
         val lines = StepsEstimateEngineTrace.rawCounterTrace(
             daySteps = samples, dayKey = dayUtc, tzOffsetSeconds = 0L, ticksPerStep = profile.stepTicksPerStep,
+            classificationPolicy = StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
         )
         assertTrue(lines.any { it.contains("kept=2") && it.contains("rejectedGap=1") })
         assertTrue(lines.first { it.startsWith("stepsRaw total ") }.contains("scaledSteps=$production"))
@@ -123,10 +144,15 @@ class StepsEstimateEngineTraceTest {
             step(180, 550, activityClass = 1),
             step(240, 1_200, activityClass = 1),
         )
-        val analysis = StepsCounter.analyze(samples)
+        val analysis = StepsCounter.analyze(
+            samples,
+            classificationPolicy = StepsCounter.ClassificationPolicy.requireActivityClass,
+        )
         val production = AnalyticsEngine.analyzeDay(
             day = dayUtc,
             steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.requireActivityClass,
             profile = profile,
         ).daily.steps
 
@@ -137,6 +163,7 @@ class StepsEstimateEngineTraceTest {
             dayKey = dayUtc,
             tzOffsetSeconds = 0L,
             ticksPerStep = profile.stepTicksPerStep,
+            classificationPolicy = StepsCounter.ClassificationPolicy.requireActivityClass,
         )
         assertEquals(
             listOf(
@@ -152,12 +179,51 @@ class StepsEstimateEngineTraceTest {
         assertFalse(lines.any { it.contains("ticksPerStep=") || it.contains("keptRange") })
     }
 
+    @Test
+    fun productionTraceRejectsExactFourThousandLegacyClassedTicks() {
+        val counters = listOf(
+            10_000, 10_180, 10_600, 10_860, 11_360, 11_670,
+            12_060, 12_510, 12_790, 13_280, 13_600, 14_000,
+        )
+        val samples = counters.mapIndexed { index, counter ->
+            step(
+                tsOffsetSec = index * 20L,
+                counter = counter,
+                activityClass = if (index % 2 == 0) 1 else 2,
+            )
+        }
+
+        val lines = StepsEstimateEngineTrace.rawCounterTrace(
+            daySteps = samples,
+            dayKey = dayUtc,
+            tzOffsetSeconds = 0L,
+            ticksPerStep = 1.0,
+            classificationPolicy =
+                StepsCounter.ClassificationPolicy.rejectUnverifiedBandCounter,
+        )
+
+        assertEquals(
+            "stepsRaw analysis status=analyzed mode=unverifiedBandCounterRejected " +
+                "counterSamples=12 deltaCount=11 kept=0 rejectedStill=0 " +
+                "rejectedUnknown=11 rejectedGap=0 zero=0",
+            lines[0],
+        )
+        assertEquals("stepsRaw total rawTicks=0 scaledSteps=none", lines[1])
+    }
+
     @Test fun ticksPerStepScalingMatchesAnalyzeDay() {
         val scaledProfile = UserProfile(stepTicksPerStep = 2.0)
         val samples = listOf(step(0, 0), step(60, 100), step(120, 200)) // raw ticks = 200
-        val production = AnalyticsEngine.analyzeDay(day = dayUtc, steps = samples, profile = scaledProfile).daily.steps
+        val production = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = samples,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = scaledProfile,
+        ).daily.steps
         val lines = StepsEstimateEngineTrace.rawCounterTrace(
             daySteps = samples, dayKey = dayUtc, tzOffsetSeconds = 0L, ticksPerStep = scaledProfile.stepTicksPerStep,
+            classificationPolicy = StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
         )
         assertTrue(lines.first { it.startsWith("stepsRaw total ") }.contains("scaledSteps=$production"))
     }

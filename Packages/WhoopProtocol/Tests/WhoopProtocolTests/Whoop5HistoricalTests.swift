@@ -73,11 +73,11 @@ final class Whoop5HistoricalTests: XCTestCase {
         let dyn = p["dynamic_acceleration"]?.doubleValue ?? -1
         XCTAssertTrue((0.0...8.0).contains(dyn))
         XCTAssertEqual(dyn, 0.0092, accuracy: 0.001)
-        // cumulative motion counter (full u16 at [57:59], not byte @57 alone) + wear/contact quality enum.
+        // Cumulative motion counter (full u16 at [57:59], not byte @57 alone) plus the raw
+        // three-valued wear/motion-quality byte. The byte is not emitted as gait evidence.
         XCTAssertEqual(p["step_motion_counter"]?.intValue, 50)
         XCTAssertEqual(p["motion_wear_quality"]?.intValue, 0)
-        // @63 also reads as the activity-class enum (#316): this worn-still frame's byte is 0 => still.
-        XCTAssertEqual(p["activity_class"]?.intValue, 0)
+        XCTAssertNil(p["activity_class"])
     }
 
     /// Flip a single absolute frame byte to a new value (CRC is not re-checked — the field tests read
@@ -86,14 +86,16 @@ final class Whoop5HistoricalTests: XCTestCase {
         var b = bytes(historicalHex); b[index] = value; return b
     }
 
-    func testHistoricalV18ActivityClassEnum() {
-        // @63 is a small validated activity-class enum: 0=still, 1=walk, 2=run, 0xFF=invalid (#316).
-        // The four known codes map through; 0xFF and any other value store nothing (nil).
-        XCTAssertEqual(parseFrame(mutating(63, to: 0), family: .whoop5).parsed["activity_class"]?.intValue, 0) // still
-        XCTAssertEqual(parseFrame(mutating(63, to: 1), family: .whoop5).parsed["activity_class"]?.intValue, 1) // walk
-        XCTAssertEqual(parseFrame(mutating(63, to: 2), family: .whoop5).parsed["activity_class"]?.intValue, 2) // run
-        XCTAssertNil(parseFrame(mutating(63, to: 0xFF), family: .whoop5).parsed["activity_class"]?.intValue)   // invalid
-        XCTAssertNil(parseFrame(mutating(63, to: 7), family: .whoop5).parsed["activity_class"]?.intValue)      // unknown
+    func testHistoricalV18WearMotionQualityIsNotActivityClass() {
+        // The same 0/1/2 byte previously had two contradictory meanings. Keep the bounded raw quality
+        // field, but never project it into still/walk/run without synchronized physical validation.
+        for raw in 0...2 {
+            let parsed = parseFrame(mutating(63, to: UInt8(raw)), family: .whoop5).parsed
+            XCTAssertEqual(parsed["motion_wear_quality"]?.intValue, raw)
+            XCTAssertNil(parsed["activity_class"])
+        }
+        XCTAssertNil(parseFrame(mutating(63, to: 0xFF), family: .whoop5).parsed["motion_wear_quality"])
+        XCTAssertNil(parseFrame(mutating(63, to: 7), family: .whoop5).parsed["motion_wear_quality"])
     }
 
     func testHistoricalV18StepCounterIsFullU16NotLowByte() {

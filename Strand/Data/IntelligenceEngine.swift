@@ -2233,9 +2233,6 @@ final class IntelligenceEngine: ObservableObject {
                 Set<OptionalAnalysisEvidence>,
                 Set<String>,
                 Set<String>,
-                [String: [String: Int]],
-                Set<String>,
-                Set<String>,
                 Set<String>,
                 Set<String>
             ) in
@@ -2246,11 +2243,8 @@ final class IntelligenceEngine: ObservableObject {
             var skippedDayLines: [String] = []
             var activeZoneByDay: [String: ActiveZoneMinutes] = [:]
             var optionalEvidenceFailures = Set<OptionalAnalysisEvidence>()
-            var stepCounterObservedDays = Set<String>()
-            var stepCounterAuthoritativeDays = Set<String>()
-            var stationaryLegacyStepsBySource: [String: [String: Int]] = [:]
+            var stepCounterInvalidatedDays = Set<String>()
             var stepCounterSkippedDays = Set<String>()
-            var stepOnlyDailyDays = Set<String>()
             var stepCounterOwnerIDs = Set<String>()
             var consumedSourceIDs = Set<String>()
             // #938: the WHOOP 4.0 ADC offset is per-device, not per-night. Learn one anchor per owner
@@ -2286,7 +2280,6 @@ final class IntelligenceEngine: ObservableObject {
                 // imports, or a locked override). Falls back to `deviceId` if the registry is unreadable.
                 let owner = try await Self.resolveDayOwner(
                     day: day, from: from, to: to,
-                    stepFrom: dayStart, stepTo: nextMidnight - 1,
                     store: store,
                     devices: regDevices, activeId: regActiveId,
                     registry: registry, fallbackDeviceId: ownerFallbackId)
@@ -2324,10 +2317,9 @@ final class IntelligenceEngine: ObservableObject {
                     activeZoneByDay[day] = minutes
                 }
 
-                // Steps are a calendar-day activity signal, not an overnight-only metric. Read them before
-                // the sleep/Recovery HR gate so classified walking can still produce the day's steps and
-                // movement Effort when the band was not worn overnight. A present counter is remembered even
-                // when every delta is rejected; later motion-estimate fallbacks must not reinterpret it.
+                // Read the calendar-day counter before the sleep/Recovery HR gate so any stale computed
+                // Steps can be invalidated even when the band was not worn overnight. The counter is motion
+                // evidence only; it cannot satisfy the scoring gate or re-enter through gravity fallback.
                 let steps: [StepSample]
                 var stepWindowReadSucceeded = true
                 do {
@@ -2363,47 +2355,45 @@ final class IntelligenceEngine: ObservableObject {
                 }
                 let dayStepAnalysis = StepsCounter.analyze(
                     daySteps,
-                    classificationPolicy: .requireActivityClass
+                    classificationPolicy: .rejectUnverifiedBandMotion
                 )
+                var observedStepOwners = Set<String>()
                 if dayStepAnalysis.counterObserved {
-                    stepCounterObservedDays.insert(day)
-                    stepCounterOwnerIDs.insert(owner)
-                }
-                if dayStepAnalysis.hasAuthoritativeCounterOutcome {
-                    stepCounterAuthoritativeDays.insert(day)
-                }
-                if let legacySteps = StepsCounter.stationaryLegacyRepairSteps(
-                    analysis: dayStepAnalysis,
-                    samples: daySteps,
-                    ticksPerStep: up.stepTicksPerStep,
-                    dayStartTs: dayMid,
-                    observedThroughTs: min(dayEnd, actualNow)
-                ) {
-                    let ownerComputedID =
-                        owner.hasSuffix("-noop") ? owner : owner + "-noop"
-                    for targetSourceID in Set([ownerComputedID, computedId]) {
-                        stationaryLegacyStepsBySource[
-                            targetSourceID,
-                            default: [:]
-                        ][day] = legacySteps
+                    observedStepOwners.insert(owner)
+                } else {
+                    // Day ownership is now based on usable physiological evidence, so a band counter can
+                    // exist under a non-owner source. Probe alternate registered/fallback sources with a
+                    // bounded LIMIT-1 read; otherwise stale computed Steps could survive simply because an
+                    // import owned the night's HR. A read failure aborts before any reconciliation.
+                    let alternateSourceIDs =
+                        Set(regDevices.map(\.id)).union([ownerFallbackId])
+                    for sourceID in alternateSourceIDs.sorted() where sourceID != owner {
+                        let hasCounter = try await !store.stepSamples(
+                            deviceId: sourceID,
+                            from: dayMid,
+                            to: dayEnd,
+                            limit: 1
+                        ).isEmpty
+                        if hasCounter {
+                            observedStepOwners.insert(sourceID)
+                        }
                     }
                 }
-                if hr.count < 200 {
-                    if dayStepAnalysis.steps != nil {
-                        stepOnlyDailyDays.insert(day)
-                    } else if dayStepAnalysis.counterObserved {
+                if !observedStepOwners.isEmpty {
+                    stepCounterInvalidatedDays.insert(day)
+                    stepCounterOwnerIDs.formUnion(observedStepOwners)
+                    if hr.count < 200 {
                         stepCounterSkippedDays.insert(day)
                     }
                 }
 
-                guard hr.count >= 200 || dayStepAnalysis.steps != nil else {
+                guard hr.count >= 200 else {
                     skippedDayLines.append("insufficient_hr")
                     continue
                 }
                 try Task.checkCancellation()
-                // Required scoring spine: ownership plus either a qualifying night HR window or retained
-                // classified/legacy step movement. The remaining streams refine HRV, respiration, wear,
-                // staging, temperature, oxygen, and daytime load.
+                // Required scoring spine: ownership plus a qualifying night HR window. The remaining streams
+                // refine HRV, respiration, wear, staging, temperature, oxygen, and daytime load.
                 let grav = try await store.gravitySamples(
                     deviceId: owner, from: from, to: to, limit: 200_000)
                 let rr: [RRInterval]
@@ -2583,11 +2573,10 @@ final class IntelligenceEngine: ObservableObject {
                 // toggle is the honest escape until real 4.0 ground truth settles it (#271/#319). Matches the
                 // self-heal restage below, which reads the same toggle.
                 let useSleepStagerV2 = PuffinExperiment.experimentalSleepV2Enabled
-                // #364 follow-up: read the motion-aware wake refinement toggle the same way (once, off the
-                // detached executor). Default OFF — see `PuffinExperiment.motionAwareWakeEnabled`. It only
-                // ever runs AFTER whichever stager above just ran, and self-gates on the night's observed
-                // gravity + step density, so flipping it on is a no-op for any night too sparse to trust.
-                let useMotionAwareWake = PuffinExperiment.motionAwareWakeEnabled
+                // The historical motion byte has conflicting wear/contact and activity meanings.
+                // Production sleep staging therefore cannot use it to rewrite wake, even if an older
+                // install still has the retired experimental preference set.
+                let useMotionAwareWake = false
 
                 // Already OFF the main actor , score directly (the prior nested `Task.detached` here only
                 // existed to hop off the main actor; the whole loop now runs off it, so the score is computed
@@ -2601,7 +2590,7 @@ final class IntelligenceEngine: ObservableObject {
                 let hrvTraceSink: ((String) -> Void)? = hrvTraceActive ? { hrvTrace.append($0) } : nil
                 let res = AnalyticsEngine.analyzeDay(day: day, hr: hr, rr: rr, resp: resp, gravity: grav,
                                                      steps: steps, dayHr: dayHr, daySteps: daySteps,
-                                                     stepClassificationPolicy: .requireActivityClass,
+                                                     stepClassificationPolicy: .rejectUnverifiedBandMotion,
                                                      dayGravity: dayGrav,
                                                      skinTemp: skin,
                                                      skinTempFamily: skinFamily,   // #938
@@ -2618,8 +2607,8 @@ final class IntelligenceEngine: ObservableObject {
                                                      // #690: thread the V2 toggle into the NORMAL staging path so
                                                      // it affects detected nights, not just the self-heal restage.
                                                      useSleepStagerV2: useSleepStagerV2,
-                                                     // #364 follow-up: same threading for the motion-aware wake
-                                                     // refinement post-pass.
+                                                     // Retained as an analytics API seam for research tests;
+                                                     // production always passes false above.
                                                      useMotionAwareWake: useMotionAwareWake,
                                                      traceSink: traceSink,
                                                      hrvTraceSink: hrvTraceSink,
@@ -2695,7 +2684,7 @@ final class IntelligenceEngine: ObservableObject {
                         daySteps: daySteps, dayKey: day,
                         tzOffsetSeconds: dayTimezoneOffsetSeconds,
                         ticksPerStep: up.stepTicksPerStep,
-                        classificationPolicy: .requireActivityClass,
+                        classificationPolicy: .rejectUnverifiedBandMotion,
                         civilDayStartTs: exactDay.startTs,
                         civilDayEndTsExclusive: exactDay.endTs + 1)
                 }
@@ -2732,11 +2721,8 @@ final class IntelligenceEngine: ObservableObject {
                 skippedDayLines,
                 activeZoneByDay,
                 optionalEvidenceFailures,
-                stepCounterObservedDays,
-                stepCounterAuthoritativeDays,
-                stationaryLegacyStepsBySource,
+                stepCounterInvalidatedDays,
                 stepCounterSkippedDays,
-                stepOnlyDailyDays,
                 stepCounterOwnerIDs,
                 consumedSourceIDs
             )
@@ -2745,11 +2731,8 @@ final class IntelligenceEngine: ObservableObject {
         let skippedDayLines: [String]
         let activeZoneByDay: [String: ActiveZoneMinutes]
         let optionalEvidenceFailures: Set<OptionalAnalysisEvidence>
-        let stepCounterObservedDays: Set<String>
-        let stepCounterAuthoritativeDays: Set<String>
-        let stationaryLegacyStepsBySource: [String: [String: Int]]
+        let stepCounterInvalidatedDays: Set<String>
         let stepCounterSkippedDays: Set<String>
-        let stepOnlyDailyDays: Set<String>
         let stepCounterOwnerIDs: Set<String>
         let consumedAnalysisSourceIDs: Set<String>
         do {
@@ -2758,11 +2741,8 @@ final class IntelligenceEngine: ObservableObject {
                 skippedDayLines,
                 activeZoneByDay,
                 optionalEvidenceFailures,
-                stepCounterObservedDays,
-                stepCounterAuthoritativeDays,
-                stationaryLegacyStepsBySource,
+                stepCounterInvalidatedDays,
                 stepCounterSkippedDays,
-                stepOnlyDailyDays,
                 stepCounterOwnerIDs,
                 consumedAnalysisSourceIDs
             ) =
@@ -3338,12 +3318,6 @@ final class IntelligenceEngine: ObservableObject {
                 hasFreshScores: !dailies.isEmpty,
                 traversingFormulaHistory: traverseResolvableHistory
             )
-        let stepCounterNoRetainedDays =
-            stepCounterObservedDays.subtracting(stepCounterAuthoritativeDays)
-        let stepOnlyPersistedDays =
-            stepOnlyDailyDays.intersection(Set(dailies.map(\.day)))
-        let preserveDailyFieldsDays =
-            stepOnlyPersistedDays.union(stepCounterSkippedDays)
         var computedStepSourceIds = repo.computedReadIds
         let registryStepSourceIDs =
             Set(regDevices.map(\.id)).union(stepCounterOwnerIDs)
@@ -3357,8 +3331,7 @@ final class IntelligenceEngine: ObservableObject {
         if !computedStepSourceIds.contains(computedId) {
             computedStepSourceIds.append(computedId)
         }
-        let hasStepEvidenceMutation =
-            !stepCounterAuthoritativeDays.isEmpty || !stationaryLegacyStepsBySource.isEmpty
+        let hasStepEvidenceMutation = !stepCounterInvalidatedDays.isEmpty
         var scorePersistenceSucceeded = !shouldReconcileScoreRange
         if shouldReconcileScoreRange {
             do {
@@ -3369,11 +3342,9 @@ final class IntelligenceEngine: ObservableObject {
                     dailyRows: dailies,
                     managedMetricKeys: ScoreConfidence.managedRestSeriesKeys,
                     metricRows: restPoints,
-                    preserveDailyStepDays: stepCounterNoRetainedDays,
-                    preserveDailyFieldsDays: preserveDailyFieldsDays,
+                    preserveDailyFieldsDays: stepCounterSkippedDays,
                     stepEvidenceDeviceIds: hasStepEvidenceMutation ? computedStepSourceIds : [],
-                    deleteEstimateDays: stepCounterAuthoritativeDays,
-                    clearMatchingComputedStepsBySource: stationaryLegacyStepsBySource
+                    clearComputedStepDays: stepCounterInvalidatedDays
                 )
                 persistedWhoopStrapDays = freshlyScoredWhoopStrapDays
                     .intersection(persistedDays)
@@ -3423,19 +3394,17 @@ final class IntelligenceEngine: ObservableObject {
             }
         }
 
-        // Counter evidence is day-scoped integrity data, including on a historical catch-up pass.
-        // A retained walk/run count supersedes an older gravity estimate. An all-still window may also
-        // remove the exact legacy raw-motion value it proves stale; compare-and-clear keeps mismatched,
-        // imported, classless, sparse, flat, gap-only, and unknown-only history intact. Estimate deletion
-        // spans every known computed namespace; exact stale-value clearing is limited to the day owner and
-        // the active aggregate output source.
+        // Counter evidence is day-scoped integrity data, including on a historical catch-up pass. The
+        // reverse-engineered band counter is not a validated pedometer, so any affected NOOP-computed
+        // daily Steps or motion estimate is removed across known computed namespaces. Imported pedometer
+        // sources are separate rows and are not part of this mutation.
         if !shouldReconcileScoreRange && hasStepEvidenceMutation {
             do {
                 try Task.checkCancellation()
                 _ = try await store.reconcileComputedStepEvidence(
                     deviceIds: computedStepSourceIds,
-                    deleteEstimateDays: Array(stepCounterAuthoritativeDays),
-                    clearMatchingComputedStepsBySource: stationaryLegacyStepsBySource
+                    deleteEstimateDays: [],
+                    clearComputedStepDays: Array(stepCounterInvalidatedDays)
                 )
             } catch {
                 if error is CancellationError || Task.isCancelled {
@@ -3741,7 +3710,7 @@ final class IntelligenceEngine: ObservableObject {
             var estPts: [MetricPoint] = []
             for dm in dailies
             where refStepsByDay[dm.day] == nil
-                && !stepCounterObservedDays.contains(dm.day) {
+                && !stepCounterInvalidatedDays.contains(dm.day) {
                 guard let motion = motionByDay[dm.day],
                       let est = StepsEstimateEngine.estimate(motion: motion, calibration: cal) else { continue }
                 estPts.append(MetricPoint(day: dm.day, key: "steps_est", value: Double(est)))
@@ -3792,7 +3761,7 @@ final class IntelligenceEngine: ObservableObject {
             if let cal = StepsEstimateEngine.calibrate(calPoints, manualOverride: profile.stepsManualOverride) {
                 for dm in dailies
                 where refStepsByDay[dm.day] == nil
-                    && !stepCounterObservedDays.contains(dm.day) {
+                    && !stepCounterInvalidatedDays.contains(dm.day) {
                     guard let motion = motionByDay[dm.day],
                           let est = StepsEstimateEngine.estimate(motion: motion, calibration: cal) else { continue }
                     diagnosticSink?("stepsEst day=\(dm.day) steps=\(est) "
@@ -5118,7 +5087,6 @@ final class IntelligenceEngine: ObservableObject {
     /// hopping back to the main actor each iteration, which is the whole point of FIX 1. Logic identical.
     nonisolated static func resolveDayOwner(
                                             day: String, from: Int, to: Int,
-                                            stepFrom: Int? = nil, stepTo: Int? = nil,
                                             store: WhoopStore,
                                             devices: [PairedDevice], activeId: String,
                                             registry: DeviceRegistryStore,
@@ -5157,34 +5125,18 @@ final class IntelligenceEngine: ObservableObject {
             prioritiesByDevice.append((d.id, priority))
         }
 
-        let stepWindowFrom = stepFrom ?? from
-        let stepWindowTo = stepTo ?? to
         var candidates: [DayOwnerResolver.Candidate] = []
         for candidate in prioritiesByDevice {
             try Task.checkCancellation()
-            // Resolve all usable evidence for this same source before applying source priority.
-            // Otherwise an import with one HR row can win before the active band's valid walking rows
-            // are checked. HR short-circuits the step probe; steps are independent gait evidence and
-            // do not require an overnight HR row. A raw counter row alone is not evidence: the same
-            // production classifier must retain at least one walk/run delta.
+            // Apply source priority only to evidence that can currently drive day scoring. The historical
+            // motion counter is not a validated pedometer and therefore cannot make a source own the day.
             let hasHeartRate = !(try await store.hrSamples(
                 deviceId: candidate.deviceId, from: from, to: to, limit: 1
             )).isEmpty
-            let hasSteps: Bool
-            if hasHeartRate {
-                hasSteps = false
-            } else {
-                hasSteps = try await hasRetainedStepEvidence(
-                    store: store,
-                    deviceId: candidate.deviceId,
-                    from: stepWindowFrom,
-                    to: stepWindowTo
-                )
-            }
             candidates.append(DayOwnerResolver.Candidate(
                 deviceId: candidate.deviceId,
                 priority: candidate.priority,
-                hasData: hasHeartRate || hasSteps
+                hasData: hasHeartRate
             ))
         }
         return DayOwnerResolver.resolve(
@@ -5192,51 +5144,6 @@ final class IntelligenceEngine: ObservableObject {
             lockedOwner: nil,
             candidates: candidates
         ) ?? fallbackDeviceId
-    }
-
-    /// Determine whether a source has at least one production-eligible classified step delta without
-    /// materializing an entire day for every ownership candidate. The prior sample is carried across
-    /// chunks so a walk/run delta at a chunk boundary is evaluated exactly once.
-    nonisolated private static func hasRetainedStepEvidence(
-        store: WhoopStore,
-        deviceId: String,
-        from: Int,
-        to: Int
-    ) async throws -> Bool {
-        guard from <= to else { return false }
-
-        let batchSize = 8_192
-        var cursor = from
-        var previous: StepSample?
-
-        while cursor <= to {
-            try Task.checkCancellation()
-            let batch = try await store.stepSamples(
-                deviceId: deviceId,
-                from: cursor,
-                to: to,
-                limit: batchSize
-            )
-            guard !batch.isEmpty else { return false }
-
-            let probe = previous.map { [$0] + batch } ?? batch
-            if StepsCounter.analyze(
-                probe,
-                classificationPolicy: .requireActivityClass
-            ).steps != nil {
-                return true
-            }
-
-            guard batch.count == batchSize,
-                  let last = batch.last,
-                  last.ts < to,
-                  last.ts < Int.max else {
-                return false
-            }
-            previous = last
-            cursor = last.ts + 1
-        }
-        return false
     }
 
     /// The strap family that wrote `owner`'s skin-temp rows (#938), so the nightly funnel converts the raw

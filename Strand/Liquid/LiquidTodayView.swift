@@ -92,7 +92,7 @@ struct LiquidTodayView: View {
     private var visibleVitality: Double? {
         ageMetricsLoadedProfileState == profile.ageMetricStateToken ? vitality : nil
     }
-    @State private var stepsEst: Double?           // steps_est, day-keyed to the selected day (fallback)
+    @State private var stepsEst: Double?           // steps_est, selected-day diagnostic only
     @State private var importedStepsDay: Int?      // Apple Health measured steps for the selected day (preferred)
     @State private var importedActiveKcalDay: Double?  // Apple Health active component for the selected day
     @State private var importedRestingKcalDay: Double? // Apple Health basal/resting component for the selected day
@@ -1495,10 +1495,10 @@ struct LiquidTodayView: View {
                      symbol: card.icon, tint: StrandPalette.accent,
                      frac: fracOver(displayDay?.respRateBpm, 24))
         case .steps:
-            // Route by the exact measured/classified source the tile chose. When no primary source exists,
-            // the empty detail stays on the band Steps metric instead of exposing the separate calibrated
-            // gravity estimate as if it were gait.
-            cardLink(.metricSourced(key: stepsDetailKey, source: stepsDetailSource), title: card.title, sub: stepsSourceCaption,
+            // A blank primary Steps card is intentionally not a link: there is no measured source whose
+            // dossier can be opened without exposing wrist motion as walking.
+            cardLink(stepsDetailMetric.map { .metricSourced(key: $0.key, source: $0.source) },
+                     title: card.title, sub: stepsSourceCaption,
                      value: stepsText, symbol: card.icon,
                      tint: StrandPalette.metricCyan, frac: fracOver(stepCount, 10000))
         case .bloodOxygen:
@@ -1537,32 +1537,54 @@ struct LiquidTodayView: View {
 
     /// One card row pushing its `TabRoute` by value — the first hop off the Today root must ride
     /// the tab's `NavigationPath` so a re-tap of the Today tab can pop it (#198; see TabRoute.swift).
-    private func cardLink(_ route: TabRoute, title: String, sub: String,
+    @ViewBuilder
+    private func cardLink(_ route: TabRoute?, title: String, sub: String,
                           value: String, symbol: String, tint: Color, frac: Double?) -> some View {
-        NavigationLink(value: route) {
-            HStack(spacing: 12) {
-                MetricGlyph(symbol, size: 32)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title.uppercased()).font(StrandFont.overlineScaled(11)).tracking(0)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                    Text(sub).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
-                }
-                Spacer(minLength: 8)
-                Text(value).font(StrandFont.number(17)).foregroundStyle(StrandPalette.textPrimary)
+        if let route {
+            NavigationLink(value: route) {
+                cardLinkContent(
+                    title: title, sub: sub, value: value, symbol: symbol,
+                    tint: tint, showsChevron: true)
+            }
+            .buttonStyle(LiquidPressStyle())
+        } else {
+            cardLinkContent(
+                title: title, sub: sub, value: value, symbol: symbol,
+                tint: tint, showsChevron: false)
+        }
+    }
+
+    private func cardLinkContent(
+        title: String,
+        sub: String,
+        value: String,
+        symbol: String,
+        tint: Color,
+        showsChevron: Bool
+    ) -> some View {
+        HStack(spacing: 12) {
+            MetricGlyph(symbol, size: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title.uppercased()).font(StrandFont.overlineScaled(11)).tracking(0)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(sub).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+            }
+            Spacer(minLength: 8)
+            Text(value).font(StrandFont.number(17)).foregroundStyle(StrandPalette.textPrimary)
+            if showsChevron {
                 Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(StrandPalette.textTertiary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(
-                FrostedCardSurface(
-                    tint: tint,
-                    cornerRadius: 20,
-                    washStrength: 0.60
-                )
-            )
         }
-        .buttonStyle(LiquidPressStyle())
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(
+            FrostedCardSurface(
+                tint: tint,
+                cornerRadius: 20,
+                washStrength: 0.60
+            )
+        )
     }
 
     /// Calories need more hierarchy than a one-number dashboard row. The large number is Total only
@@ -2723,7 +2745,7 @@ struct LiquidTodayView: View {
                   symbol: metric.icon, key: "resp_rate")
         case .steps:
             ktile(String(localized: "Steps"), stepsText, "", StrandPalette.chargeColor,
-                  nil, trend: keyMetricTrends[.steps], symbol: metric.icon, key: stepsDetailKey,
+                  nil, trend: keyMetricTrends[.steps], symbol: metric.icon, key: nil,
                   detailMetric: stepsDetailMetric)
         case .weight:
             ktile(String(localized: "Weight"), importedWeightKg.map(weightText) ?? StrandFormat.missing, "",
@@ -3006,13 +3028,13 @@ struct LiquidTodayView: View {
         // Gravity-only calibration remains an inspectable motion estimate, not a primary Steps source.
         _ = stepEstimates
 
-        // The merged daily cache owns physiological history. Classified band steps populate the series.
+        // The merged daily cache owns physiological history. Its legacy `steps` field may contain
+        // reverse-engineered wrist motion, so it cannot populate the primary Steps trend.
         for day in days {
             record(.hrv, day: day.day, value: day.avgHrv)
             record(.restingHr, day: day.day, value: day.restingHr.map(Double.init))
             record(.bloodOxygen, day: day.day, value: day.spo2Pct)
             record(.respiratory, day: day.day, value: day.respRateBpm)
-            record(.steps, day: day.day, value: day.steps.map(Double.init))
         }
 
         // The resolver contributes only calibrated daily percentages from compatible sources. It can
@@ -3021,8 +3043,8 @@ struct LiquidTodayView: View {
             record(.bloodOxygen, day: point.day, value: point.value)
         }
 
-        // Apple Health is measured and therefore wins the per-day steps slot. Weight is naturally
-        // sparse; it only draws once two actual weigh-ins fall inside the selected window.
+        // Apple Health pedometer rows are the only primary Steps source. Weight is naturally sparse; it
+        // only draws once two actual weigh-ins fall inside the selected window.
         for day in appleRows {
             record(.steps, day: day.day, value: day.steps.map(Double.init))
             record(.weight, day: day.day, value: day.weightKg)
@@ -3515,9 +3537,8 @@ struct LiquidTodayView: View {
         // Never let the history tail pose as today's count. An exact-day row may be absent while an
         // older estimate exists; Today must stay empty until this selected day actually has a point.
         let stepsEstLocal = stepsByDay[requestedDayKey]
-        // Imported Apple Health steps for the SELECTED day (max across rows), the middle tier between the
-        // measured strap count and the motion estimate. Health Connect is Android-only, so apple-health is
-        // the sole import source on iOS. Mirrors Android `stepsForDay` (#377).
+        // Imported Apple Health steps for the selected day (max across rows). Health Connect is
+        // Android-only, so Apple Health is the sole primary Steps source on iOS.
         let importedStepsLocal = appleRows.filter { $0.day == requestedDayKey }.compactMap { $0.steps }.max()
         // Weight is not expected every day. Use the freshest measured Apple Health value no later than
         // the day being viewed; never borrow from a future day when navigating backwards.
@@ -3912,8 +3933,8 @@ struct LiquidTodayView: View {
         )
     }
 
-    // Measured Apple Health count first, then classified WHOOP 5/MG @57 motion estimate. Gravity-only
-    // calibration remains outside the primary Steps value.
+    // Primary Steps requires a measured Apple Health pedometer count. Band motion and calibration remain
+    // separate research/diagnostic series.
     private var stepCount: Double? {
         MetricCatalog.todayStepsValue(imported: importedStepsDay.map(Double.init),
                                       motionDerived: displayDay?.steps.map(Double.init),
@@ -3925,11 +3946,9 @@ struct LiquidTodayView: View {
                                        hasImportedSteps: importedStepsDay != nil)
     }
 
-    /// Truthful source caption for the number on the Liquid Steps card. Apple Health remains an imported
-    /// pedometer count; both local strap paths are clearly labelled as motion-derived estimates.
+    /// Truthful source caption for the number on the Liquid Steps card.
     private var stepsSourceCaption: String {
         if importedStepsDay != nil { return String(localized: "Imported · Apple Health") }
-        if displayDay?.steps != nil { return String(localized: "Motion-derived estimate · Noop Band") }
         return String(localized: "No step source for this day")
     }
 
@@ -3958,9 +3977,6 @@ struct LiquidTodayView: View {
     private func weightText(_ kilograms: Double) -> String {
         UnitFormatter.massFromKilograms(kilograms, unit: massUnit)
     }
-
-    private var stepsDetailKey: String { stepsDetailMetric?.key ?? "steps" }
-    private var stepsDetailSource: String { stepsDetailMetric?.source ?? "my-whoop" }
 
     private var energyBreakdown: DailyEnergyBreakdown {
         DailyEnergyBreakdown.resolve(

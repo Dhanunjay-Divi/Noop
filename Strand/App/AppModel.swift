@@ -1123,11 +1123,19 @@ final class AppModel: ObservableObject {
     /// already resolves the active strap per day via the registry's own active id (`resolveDayOwner`), so it
     /// reads + scores the re-added strap's raw and writes the computed result to the STABLE canonical
     /// `-noop` sibling, no engine re-point needed.
-    private func adoptActiveDevice(_ activeId: String) async {
-        let trimmed = activeId.trimmingCharacters(in: .whitespaces)
-        let repoMoved = repo.adoptActiveDeviceId(trimmed)
+    private func adoptActiveDevice(_ activeId: String?) async {
+        let trimmed = activeId?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        let readDeviceID = trimmed.isEmpty
+            ? deviceId
+            : trimmed
+        let repoMoved = repo.adoptActiveDeviceId(readDeviceID)
         guard repoMoved else { return }
-        live.append(log: "Read spine re-pointed to active device after registry change (#814).")
+        live.append(
+            log: activeId == nil
+                ? "Read spine returned to canonical history because no wearable is active."
+                : "Read spine re-pointed to active device after registry change (#814)."
+        )
         await repo.refresh()
         await intelligence.analyzeRecent()
     }
@@ -2084,7 +2092,9 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let current = registry.devices.first(where: { $0.id == registry.activeDeviceId })
+        let current = registry.activeDeviceId.flatMap { activeID in
+            registry.devices.first(where: { $0.id == activeID })
+        }
         var currentHasRecentData = false
         if let current {
             let range = AppleWatchDevice.recentDayRange(now: now)
@@ -3487,7 +3497,7 @@ final class AppModel: ObservableObject {
         for spec in specs {
             var inputs: [FusionInput] = []
             for (src, daily) in rowsBySource {
-                if let v = Self.fusionColumn(key: spec.key, day: daily) {
+                if let v = Self.fusionColumn(key: spec.key, day: daily, source: src) {
                     inputs.append(FusionInput(source: src, value: v))
                     contributingSources.insert(src)
                 }
@@ -3506,7 +3516,12 @@ final class AppModel: ObservableObject {
 
     /// The DailyMetric column a fusion metric key maps to (mirrors Repository.dailyColumn for the keys
     /// the fused record surfaces). nil when the source row doesn't carry that metric.
-    private static func fusionColumn(key: String, day d: DailyMetric) -> Double? {
+    /// Adapter-level provenance gate for primary Steps. The generic resolver can compare future
+    /// validated sources, but the app may publish Steps only from an OS pedometer aggregate.
+    static func fusionColumn(key: String, day d: DailyMetric, source: FusionSource) -> Double? {
+        if key == "steps", source != .appleHealth, source != .healthConnect {
+            return nil
+        }
         switch key {
         case "rhr":             return d.restingHr.map(Double.init)
         case "hrv":             return d.avgHrv

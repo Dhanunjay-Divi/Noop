@@ -91,7 +91,7 @@ class DeviceRegistry(
     suspend fun all(): List<PairedDeviceRow> = dao.pairedDevices().map { row ->
         val whoop = row.brand.equals("WHOOP", ignoreCase = true) || row.id == "my-whoop" || row.id.startsWith("whoop-")
         if (!whoop) row else {
-            val stripped = WhoopLiveCapabilities.stripSpo2Token(row.capabilities)
+            val stripped = WhoopLiveCapabilities.stripUnvalidatedLiveTokens(row.capabilities)
             if (stripped == row.capabilities) row else row.copy(capabilities = stripped)
         }
     }

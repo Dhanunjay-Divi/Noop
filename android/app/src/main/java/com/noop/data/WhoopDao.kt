@@ -1164,6 +1164,15 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun dailyMetricsRange(deviceId: String, from: String, to: String): List<DailyMetric>
 
     @Query(
+        "UPDATE dailyMetric SET steps = NULL WHERE deviceId = :computedDeviceId " +
+            "AND day IN (:days) AND steps IS NOT NULL"
+    )
+    suspend fun clearComputedDailySteps(
+        computedDeviceId: String,
+        days: List<String>,
+    ): Int
+
+    @Query(
         "UPDATE dailyMetric SET steps = NULL WHERE deviceId = :deviceId " +
             "AND day = :day AND steps = :expectedSteps"
     )

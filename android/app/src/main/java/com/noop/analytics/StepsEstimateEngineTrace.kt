@@ -13,8 +13,8 @@ import kotlin.math.max
 //     coefficient the Settings/Steps screen shows; when withheld it names the status (the "Need N more days"
 //     reason), the same status the tile renders.
 //
-//  2. rawCounterTrace(...) - the WHOOP 5/MG raw path. Reuses StepsCounter.analyze so activity filtering,
-//     wrap handling, the MAX_STEP_DELTA boundary, and the retained raw total cannot diverge from production.
+//  2. rawCounterTrace(...) - the WHOOP 5/MG raw path. Reuses StepsCounter.analyze so policy filtering,
+//     wrap handling, the MAX_STEP_DELTA boundary, and the retained raw total cannot diverge from its caller.
 //     It reports only fixed categories and aggregate counts, never counter values or per-sample details.
 //
 // No clock, no IO, no PII (counts and ratios only). The Steps test mode gates each call behind
@@ -85,7 +85,7 @@ object StepsEstimateEngineTrace {
 
     /**
      * The WHOOP 5/MG raw-counter trace for one day. It filters the same local-day window as production, then
-     * reuses [StepsCounter.analyze] for the wrap-aware and activity-class-aware result. Output is limited to
+     * reuses [StepsCounter.analyze] for the wrap-aware, policy-filtered result. Output is limited to
      * bounded status/mode categories and aggregate counts.
      */
     fun rawCounterTrace(

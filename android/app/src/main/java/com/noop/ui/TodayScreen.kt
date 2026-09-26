@@ -55,7 +55,6 @@ import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
@@ -1402,8 +1401,10 @@ fun TodayScreen(
             fromDay,
             toDay,
         )
-        val loaded = (apple + healthConnect).filter { it.steps != null }
-            .groupBy { it.day }.mapValues { (_, rows) -> rows.mapNotNull { it.steps }.max() }
+        val loaded = (apple + healthConnect)
+            .filter { row -> row.steps?.let { it >= 0 } == true }
+            .groupBy { it.day }
+            .mapValues { (_, rows) -> rows.mapNotNull { it.steps }.max() }
         currentCoroutineContext().ensureActive()
         if (viewModel.activeStrapId == activeStrapId) {
             importedStepsByDay = loaded
@@ -1411,11 +1412,10 @@ fun TodayScreen(
         }
     }
 
-    // On-device steps ESTIMATE for the selected day (key "steps_est", computed "-noop" source). The
-    // Steps tile prefers a measured phone import, then the @57 motion-derived value; only when a day has
-    // neither does it fall back to this calibrated estimate. Every strap-derived path is labelled as an
-    // estimate. resolvedSeries reads the computed source for the my-whoop key, exactly like
-    // the Explore "steps_est" metric. Null until loaded / no estimate for the day. (#150)
+    // On-device steps ESTIMATE for the selected day (key "steps_est", computed "-noop" source). It remains
+    // available to the explicitly labelled calibration/research screen but cannot fill primary Steps.
+    // resolvedSeries reads the computed source for the my-whoop key. Null until loaded or when no
+    // estimate exists for the day. (#150)
     var stepsEstForDay by remember(activeStrapId) { mutableStateOf<Int?>(null) }
     var stepsEstByDay by remember(activeStrapId) {
         mutableStateOf<Map<String, Int>>(emptyMap())
@@ -1441,31 +1441,6 @@ fun TodayScreen(
             stepsEstByDay = loaded
             stepsEstForDay = loaded[selectedDayKey]
         }
-    }
-
-    // The selected day's representative activity class for the Steps tile icon (#316 / @63). Reads the day's
-    // step samples (now carrying `activityClass` after the v13 column) over the local-day window and takes the
-    // LAST non-null class as "what the wrist was doing most recently today" (0=still, 1=walk, 2=run). null when
-    // the day has no classed sample (a 4.0 strap, a pre-v13 row, or every record's @63 byte was invalid), then
-    // the tile shows NO icon. Mirrors the iOS Today step-activity read exactly. Best-effort: a read hiccup just
-    // drops the optional icon.
-    var stepActivityClassForDay by remember(activeStrapId) { mutableStateOf<Int?>(null) }
-    LaunchedEffect(days, selectedDay, today, activeStrapId, deferHistoricalQueries) {
-        if (deferHistoricalQueries) return@LaunchedEffect
-        val zone = ZoneId.systemDefault()
-        val start = selectedDay.atStartOfDay(zone).toEpochSecond()
-        val nextStart = selectedDay.plusDays(1).atStartOfDay(zone).toEpochSecond()
-        val now = System.currentTimeMillis() / 1000
-        val end = if (selectedDayOffset == 0) now else (nextStart - 1)
-        // #908 family: read the active strap ∪ canonical "my-whoop" union, NOT a hardcoded "my-whoop". A strap
-        // re-added through the device manager banks its live step samples (which carry the @63 class) under its
-        // own fresh id, so a pinned "my-whoop" read dropped the tile icon for a re-added strap. Single-WHOOP ⇒
-        // one id ⇒ byte-identical read. Mirrors the iOS Repository.stepActivityClassLatest union.
-        val loaded = loadTodayBestEffort {
-            viewModel.repo.stepActivityClassLatestUnion(activeStrapId, start, end)
-        }
-        currentCoroutineContext().ensureActive()
-        if (viewModel.activeStrapId == activeStrapId) stepActivityClassForDay = loaded
     }
 
     // Rest number + sparkline share one resolved history read. The day/value map lives on the ViewModel so
@@ -2452,7 +2427,6 @@ fun TodayScreen(
                                     estimatedStepsForDay = stepsEstForDay,
                                     caloriesForDay = caloriesByDay[selectedDayKey],   // #616: imported-first per day
                                     caloriesSpark = caloriesSpark,                    // #616: imported-first trend
-                                    stepActivityClassForDay = stepActivityClassForDay,
                                     stepsEstimateCaption = stepsEstimateCaption(profileStore),
                                     restScore = restScoreForDay,
                                     restSpark = restCompositeSpark,
@@ -6844,9 +6818,11 @@ private fun dashboardCardValue(
             } ?: NO_DATA
         DashboardCard.SLEEP -> sleepValue(vd)
         DashboardCard.STEPS -> {
-            val real = importedStepsForDay?.let { intStringGrouped(it.toDouble()) }
-                ?: day?.steps?.let { intStringGrouped(it.toDouble()) }
-            real ?: NO_DATA
+            resolvedSteps(
+                imported = importedStepsForDay,
+                motionDerived = day?.steps,
+                calibratedEstimate = estimatedStepsForDay,
+            )?.let { intStringGrouped(it.toDouble()) } ?: NO_DATA
         }
         DashboardCard.CALORIES ->
             withUnit(caloriesForDay?.let { intStringGrouped(it) } ?: NO_DATA)
@@ -8062,9 +8038,6 @@ private fun MetricGrid(
     // #616: the Calories tile's imported-first 14-day trend (see caloriesSpark above) — threaded like
     // restSpark because it isn't a plain DailyMetric column (it unions the imported + on-device series).
     caloriesSpark: List<Double> = emptyList(),
-    // #316 / @63, the selected day's representative activity class (0=still, 1=walk, 2=run), shown beside
-    // the WHOOP 5/MG motion estimate. null hides it when no classed sample exists for the day.
-    stepActivityClassForDay: Int? = null,
     // #760/#792: the caption under an ESTIMATED Steps tile: the engine's STATUS line (manual k, or
     // k=… from N days + confidence tier) so a frozen-looking estimate self-explains. Built from the SAME
     // persisted calibration the estimate used; defaults to a bare "est." for callers that don't supply it.
@@ -8175,8 +8148,8 @@ private fun MetricGrid(
             )
         },
         KeyMetric.STEPS to run {
-            // A measured phone count wins; a classified @57 counter is the only band fallback.
-            // Gravity-only calibration remains a separate motion estimate and is not primary Steps.
+            // Primary Steps requires a measured phone/watch pedometer count. DailyMetric remains a
+            // compatibility read only and cannot fill this value.
             val steps = resolvedSteps(importedStepsForDay, d?.steps, estimatedStepsForDay)
             KeyTileData(
                 label = stepsTileLabel(d?.steps, importedStepsForDay, estimatedStepsForDay),
@@ -9703,19 +9676,6 @@ private fun flagColor(flag: ReadinessEngine.Flag): Color = when (flag) {
     ReadinessEngine.Flag.BAD -> Palette.metricRose
 }
 
-/**
- * #316 / @63, map a step-sample activity class (0=still, 1=walk, 2=run) to the still/walk/run icon + an
- * accessibility label. Mirrors the iOS Steps-tile glyph set (figure.stand / figure.walk / figure.run) and
- * semantics exactly (cross-platform parity). Returns (null, "") for any other code so an unmapped value
- * shows nothing rather than a wrong glyph.
- */
-private fun stepActivityIconFor(activityClass: Int): Pair<ImageVector?, String> = when (activityClass) {
-    0 -> Icons.Filled.Accessibility to "Still"
-    1 -> Icons.AutoMirrored.Filled.DirectionsWalk to "Walking"
-    2 -> Icons.AutoMirrored.Filled.DirectionsRun to "Running"
-    else -> null to ""
-}
-
 // MARK: - SparkStatTile
 //
 // A fixed-height metric tile: overline label, big value + caption, and a 14-day
@@ -9734,16 +9694,13 @@ private fun SparkStatTile(
     sparkColor: Color = Palette.accent,
     onInfo: (() -> Unit)? = null,
     badge: String? = null,
-    // #316 / @63, an optional activity-class code (0=still, 1=walk, 2=run) rendered as a small still/walk/run
-    // glyph in the label row, tinted with the tile accent. null = no icon. Used by the Steps tile.
-    trailingIcon: Int? = null,
 ) {
     NoopCard(modifier = modifier.height(Metrics.tileHeight), padding = Metrics.space14) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // Label row carries the overline, an optional low-confidence [badge] (H9, e.g. "Estimated"
-            // stages), an optional activity glyph ([trailingIcon], #316), and, for the three headline scores
-            // only, a trailing ⓘ that opens the scoring guide at this score. Other tiles render as before.
-            if (onInfo != null || badge != null || trailingIcon != null) {
+            // stages), and, for the three headline scores only, a trailing info control that opens the
+            // scoring guide at this score. Other tiles render as before.
+            if (onInfo != null || badge != null) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -9756,18 +9713,6 @@ private fun SparkStatTile(
                         SourceBadge(badge, tint = Palette.textTertiary)
                     }
                     Spacer(Modifier.weight(1f))
-                    // #316, still/walk/run glyph, before the optional ⓘ. Self-hides for an unknown code.
-                    if (trailingIcon != null) {
-                        val (vector, desc) = stepActivityIconFor(trailingIcon)
-                        if (vector != null) {
-                            Icon(
-                                vector,
-                                contentDescription = desc,
-                                tint = accent,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
-                    }
                     if (onInfo != null) ScoreInfoButton(section = null, onClick = onInfo, compact = true)
                 }
             } else {
@@ -9887,10 +9832,7 @@ private data class Window(
     val rhr: List<Double>,
     val spo2: List<Double>,
     val resp: List<Double>,
-    // #616: the Steps tile carried no `spark` series, so it drew no trend line while every other tile did.
-    // On-device DailyMetric.steps (the strap @57 motion-derived estimate) — the same signal the Steps tile VALUE reads
-    // (on-device-first), matching iOS kSparks "steps". (Calories is imported-first, so its spark is threaded
-    // separately as caloriesSpark, not read off a DailyMetric column here.)
+    // Primary Steps trend, populated only by imported pedometer values.
     val steps: List<Double>,
 )
 
@@ -9905,6 +9847,7 @@ private data class ResolvedSpo2Window(
  * only, so stale imports do not draw a current-day trend.
  */
 @Composable
+@Suppress("UNUSED_PARAMETER")
 private fun rememberTrendWindow(
     days: List<com.noop.data.DailyMetric>,
     anchorDay: LocalDate,
@@ -9914,7 +9857,7 @@ private fun rememberTrendWindow(
     resolvedSpo2ByDay: Map<String, Double> = emptyMap(),
 ): Window =
     androidx.compose.runtime.remember(
-        days, anchorDay, windowDays, importedStepsByDay, calibratedStepsByDay, resolvedSpo2ByDay,
+        days, anchorDay, windowDays, importedStepsByDay, resolvedSpo2ByDay,
     ) {
         // Trailing CALENDAR days ending today, NOT the last N stored rows, which on an old import
         // were months-old data shown as a fresh trend (issue #23). ISO yyyy-MM-dd sorts chronologically.
@@ -9922,9 +9865,7 @@ private fun rememberTrendWindow(
         val end = anchorDay.toString()
         val recent = days.filter { it.day >= cutoff && it.day <= end }
         fun series(pick: (DailyMetric) -> Double?): List<Double> = recent.mapNotNull(pick)
-        val motionStepsByDay = recent.mapNotNull { row -> row.steps?.let { row.day to it } }.toMap()
         val measuredWindow = importedStepsByDay.filterKeys { it >= cutoff && it <= end }
-        val calibratedWindow = calibratedStepsByDay.filterKeys { it >= cutoff && it <= end }
         Window(
             recovery = series { it.recovery },
             strain = series { it.strain },
@@ -9937,7 +9878,7 @@ private fun rememberTrendWindow(
                 .map { it.value }
                 .ifEmpty { series { it.spo2Pct } },
             resp = series { it.respRateBpm },
-            steps = resolvedStepsSeries(measuredWindow, motionStepsByDay, calibratedWindow).map { it.second },
+            steps = resolvedStepsSeries(measuredWindow, emptyMap(), emptyMap()).map { it.second },
         )
     }
 

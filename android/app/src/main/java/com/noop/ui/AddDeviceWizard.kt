@@ -766,7 +766,7 @@ fun AddDeviceWizard(
                         SupplierBandConfirmStep(
                             state = supplierPairingState,
                             password = supplierPassword,
-                            onPassword = { supplierPassword = it.filter(Char::isDigit).take(4) },
+                            onPassword = { supplierPassword = supplierPairingPasswordInput(it) },
                             nickname = supplierNickname,
                             onNickname = { supplierNickname = it },
                             onAuthenticate = {
@@ -2254,3 +2254,6 @@ private fun wizardFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedContainerColor = Palette.surfaceInset,
     unfocusedContainerColor = Palette.surfaceInset,
 )
+
+internal fun supplierPairingPasswordInput(value: String): String =
+    value.filter { it in '0'..'9' }.take(4)

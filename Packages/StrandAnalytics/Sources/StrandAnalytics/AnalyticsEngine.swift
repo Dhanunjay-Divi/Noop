@@ -451,7 +451,7 @@ public enum AnalyticsEngine {
                                   // pre-midnight night span the calendar day omits.
                                   dayHr: [HRSample]? = nil,
                                   daySteps: [StepSample]? = nil,
-                                  stepClassificationPolicy: StepsCounter.ClassificationPolicy = .allowLegacyRawMotion,
+                                  stepClassificationPolicy: StepsCounter.ClassificationPolicy = .rejectUnverifiedBandMotion,
                                   dayGravity: [GravitySample]? = nil,
                                   // Wear-gated nightly skin-temp mean is harvested here
                                   // (baseline-independent); IntelligenceEngine seeds a personal

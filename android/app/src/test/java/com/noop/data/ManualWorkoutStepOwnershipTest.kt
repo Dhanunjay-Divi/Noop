@@ -63,7 +63,7 @@ class ManualWorkoutStepOwnershipTest {
     }
 
     @Test
-    fun emptyActiveSourceMayUseCanonicalCounter() = runBlocking {
+    fun emptyActiveSourceMayReadCanonicalButStillRejectsItsCounter() = runBlocking {
         val active = "whoop-active"
         val f = fixture(
             mapOf(
@@ -75,7 +75,7 @@ class ManualWorkoutStepOwnershipTest {
             )
         )
 
-        assertEquals(100, f.repository.strapStepTicks(active, 100, 160))
+        assertNull(f.repository.strapStepTicks(active, 100, 160))
         assertEquals(listOf(active, WhoopRepository.WHOOP_SOURCE), f.reads)
     }
 

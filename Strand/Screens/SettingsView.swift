@@ -94,13 +94,6 @@ struct SettingsView: View {
     /// `Repository`. See [PuffinExperiment.experimentalSleepV2Key].
     @AppStorage(PuffinExperiment.experimentalSleepV2Key) private var experimentalSleepV2Enabled = true
 
-    /// "Motion-aware wake refinement" (#364 follow-up, OFF by default). A post-pass over the already-staged
-    /// hypnogram: reclassifies a scored WAKE segment to `light` when its per-minute step-tick cadence shows
-    /// no locomotion and its per-minute gravity posture is stable outside a minority of isolated burst
-    /// minutes. Self-gates on OBSERVED gravity + step density (#345) — a no-op on a sparse night (e.g.
-    /// WHOOP 4.0) regardless of this switch. See [PuffinExperiment.motionAwareWakeKey].
-    @AppStorage(PuffinExperiment.motionAwareWakeKey) private var motionAwareWakeEnabled = false
-
     // Imperial/Metric display preference (D#103). Stored data is always SI; this only changes how
     // distances/weights/heights/temperatures are SHOWN — and lets the profile fields below take
     // imperial entry. Temperature has a separate override so °C/°F can be picked independently.
@@ -645,34 +638,9 @@ struct SettingsView: View {
                     }
                 }
                 rowDivider
-                // Step calibration (#139/#132): daily steps = @57 counter ticks ÷ this divisor.
-                // 1.0 = raw pass-through until the true 5/MG tick rate is known. The divisor goes
-                // up to 30 because a 5/MG motion counter can overcount by ~24×; the stepper uses a
-                // variable increment (fine near 1.0, coarse up top) so high values stay reachable.
-                FormRow(label: "Step calibration") {
-                    HStack(spacing: 10) {
-                        Text(String(format: "%.1f", profile.stepTicksPerStep))
-                            .font(StrandFont.bodyNumber)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                            .frame(minWidth: 44, alignment: .trailing)
-                        Stepper("Step calibration") {
-                            profile.stepTicksPerStep = ProfileStore.steppedStepScale(profile.stepTicksPerStep, up: true)
-                        } onDecrement: {
-                            profile.stepTicksPerStep = ProfileStore.steppedStepScale(profile.stepTicksPerStep, up: false)
-                        }
-                            .labelsHidden()
-                            .accessibilityLabel("Step calibration, \(String(format: "%.1f", profile.stepTicksPerStep)) counter ticks per step")
-                    }
-                }
-                Text("Counter ticks per step. Leave at 1.0 unless your steps run high. Some Noop Band firmware reports a high-rate motion counter, so this goes up to 30. Walk a known 1,000 steps and divide NOOP's count by the real count to get your value.")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                rowDivider
-                // Tap-through to the WHOOP 4.0 steps-ESTIMATE calibration (a SEPARATE thing from the
-                // 5/MG @57 counter divisor above): a 4.0 sends no step count, so NOOP estimates steps
-                // from motion and calibrates that to the phone. The sheet explains it, shows the fit +
-                // a recent estimated-vs-phone comparison, and offers a manual coefficient.
+                // Tap through to the explicitly labelled motion estimate. Primary Steps never use the
+                // unvalidated band motion counter; this calibration remains separate and compares a
+                // non-primary estimate with the phone pedometer.
                 Button {
                     showStepsCalibration = true
                 } label: {
@@ -1758,19 +1726,6 @@ struct SettingsView: View {
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Divider().overlay(StrandPalette.hairline)
-
-                // MARK: Motion-aware wake refinement (#364 follow-up) — default OFF.
-                Toggle(isOn: $motionAwareWakeEnabled) {
-                    Text("Motion-aware wake refinement")
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                }
-                .toggleStyle(.noopSwitch)
-                Text("Reviews each scored wake block for real evidence of getting up (walking cadence, a change in body position) instead of just a heart-rate rise. A wake block with no locomotion and a stable posture - a hot night, a brief turn-over - is folded back into light sleep; a real get-up is left alone. It checks how much motion detail Noop Band actually recorded and stays off when a night is too sparse to trust. Off by default; takes effect on the next nights staged.")
-                    .font(StrandFont.caption)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
