@@ -2887,7 +2887,7 @@ private fun DailyPlanWhySection(
             if (signals.isEmpty()) {
                 DailyPlanEmptyRow(
                     icon = Icons.Filled.MonitorHeart,
-                    text = stringResource(R.string.daily_plan_why_unavailable),
+                    text = stringResource(R.string.daily_plan_watch_unavailable),
                 )
             } else {
                 Column {

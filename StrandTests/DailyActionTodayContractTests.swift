@@ -54,6 +54,8 @@ final class DailyActionTodayContractTests: XCTestCase {
         }
 
         XCTAssertTrue(today.contains("readiness.signals"))
+        XCTAssertTrue(today.contains(#"String(localized: "daily_plan.watch.unavailable")"#))
+        XCTAssertFalse(today.contains(#"String(localized: "daily_plan.why.unavailable")"#))
         XCTAssertTrue(today.contains("$0.flag == .watch || $0.flag == .bad"))
         XCTAssertTrue(today.contains(#"String(localized: "daily_plan.effort.scale")"#))
         XCTAssertFalse(today.contains("effortTargetBand"))
@@ -86,6 +88,8 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(today.contains(
             "it.flag == ReadinessEngine.Flag.WATCH || it.flag == ReadinessEngine.Flag.BAD"
         ))
+        XCTAssertTrue(today.contains("R.string.daily_plan_watch_unavailable"))
+        XCTAssertFalse(today.contains("R.string.daily_plan_why_unavailable"))
 
         for state in ["CHECK_IN_NEEDED", "CALIBRATING", "RECOVERY_SHIFT", "STOP", "READY"] {
             XCTAssertTrue(today.contains("Availability.\(state)"), "Missing \(state) presentation")

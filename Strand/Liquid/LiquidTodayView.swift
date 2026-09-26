@@ -1867,7 +1867,7 @@ struct LiquidTodayView: View {
                 if signals.isEmpty {
                     dailyPlanEmptyRow(
                         symbol: "waveform.path.ecg",
-                        text: String(localized: "daily_plan.why.unavailable")
+                        text: String(localized: "daily_plan.watch.unavailable")
                     )
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
