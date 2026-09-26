@@ -1114,36 +1114,40 @@ class SourceCoordinator(
         val supplier = row.sourceKind == SourceKind.veepoo.name
         val previousTransportDeviceId = currentTransportDeviceId(excluding = id)
 
-        // Construct the supplier source before disturbing the source that is already running. A missing
-        // provider, credential, or valid reflected bridge therefore leaves that transport live while the
-        // durable active row is reconciled back to it.
-        val source = try {
-            makeSource(id, row)
-        } catch (_: SupplierCredentialTemporarilyUnavailable) {
-            quiesceCurrentTransportForSupplierRetry()
-            lastSeenId = null
-            val retryAlreadyActive =
-                supplierCredentialRetryJob?.isActive == true &&
-                    supplierCredentialRetryDeviceId == id
-            if (!retryAlreadyActive) {
-                veepooLifecycleDiagnostics.recordSafely(
-                    stage = VeepooSupplierLifecycleStage.SECURE_READ,
-                    outcome = VeepooSupplierLifecycleOutcome.FAILED,
+        // Only supplier construction is a preflight operation. It can fail because a credential or the
+        // optional native bridge is unavailable, so preserve the currently running transport until that
+        // check succeeds. Other sources are built after teardown: Oura construction installs its state
+        // observer, and constructing it before teardown would immediately cancel that new observer.
+        val preflightSupplierSource = if (supplier) {
+            try {
+                makeSource(id, row)
+            } catch (_: SupplierCredentialTemporarilyUnavailable) {
+                quiesceCurrentTransportForSupplierRetry()
+                lastSeenId = null
+                val retryAlreadyActive =
+                    supplierCredentialRetryJob?.isActive == true &&
+                        supplierCredentialRetryDeviceId == id
+                if (!retryAlreadyActive) {
+                    veepooLifecycleDiagnostics.recordSafely(
+                        stage = VeepooSupplierLifecycleStage.SECURE_READ,
+                        outcome = VeepooSupplierLifecycleOutcome.FAILED,
+                        trigger = VeepooSupplierLifecycleTrigger.SOURCE_UNAVAILABLE,
+                        failure = VeepooSupplierLifecycleFailure.SECURE_READ_UNAVAILABLE,
+                    )
+                }
+                scheduleSupplierCredentialRetry(id)
+                return
+            } catch (_: Throwable) {
+                straplog("Supplier band: adapter unavailable in this build")
+                reconcileUnavailableSupplier(
+                    id = id,
                     trigger = VeepooSupplierLifecycleTrigger.SOURCE_UNAVAILABLE,
-                    failure = VeepooSupplierLifecycleFailure.SECURE_READ_UNAVAILABLE,
+                    preferredTransportDeviceId = previousTransportDeviceId,
                 )
+                return
             }
-            scheduleSupplierCredentialRetry(id)
-            return
-        } catch (failure: Throwable) {
-            if (!supplier) throw failure
-            straplog("Supplier band: adapter unavailable in this build")
-            reconcileUnavailableSupplier(
-                id = id,
-                trigger = VeepooSupplierLifecycleTrigger.SOURCE_UNAVAILABLE,
-                preferredTransportDeviceId = previousTransportDeviceId,
-            )
-            return
+        } else {
+            null
         }
 
         val whoopAlreadyPaused =
@@ -1152,6 +1156,15 @@ class SourceCoordinator(
         veepooPairingPausedTransport = null
         tearDownNonWhoopSource()
 
+        val source = try {
+            preflightSupplierSource ?: makeSource(id, row)
+        } catch (failure: Throwable) {
+            restorePreviousTransportAfterConstructionFailure(
+                previousTransportDeviceId = previousTransportDeviceId,
+                devices = devices,
+            )
+            throw failure
+        }
         val address = row.peripheralId
 
         // Publish ownership before connect so a synchronous provider callback still observes the source it
@@ -1176,6 +1189,66 @@ class SourceCoordinator(
                 trigger = VeepooSupplierLifecycleTrigger.SOURCE_UNAVAILABLE,
                 preferredTransportDeviceId = previousTransportDeviceId,
             )
+        }
+    }
+
+    /**
+     * Reconstruct the transport that was live before a post-teardown source-construction failure.
+     *
+     * Reusing the stopped instance is unsafe for Oura because teardown cancels the coordinator-owned state
+     * observer. Building it again restores those bindings as well as the connection. Any restoration failure
+     * leaves the coordinator honestly disconnected so a later selection can retry instead of inheriting a
+     * stopped source or a stale WHOOP id.
+     */
+    private fun restorePreviousTransportAfterConstructionFailure(
+        previousTransportDeviceId: String?,
+        devices: List<PairedDeviceRow>,
+    ) {
+        activeStrapId = null
+        onStrap = false
+        val previousId = previousTransportDeviceId ?: run {
+            activeWhoopId = null
+            return
+        }
+        if (isWhoop(previousId, devices)) {
+            activeWhoopId = null
+            val priorWhoop = devices.firstOrNull { it.id == previousId }
+            try {
+                pointWhoop(previousId, priorWhoop?.peripheralId)
+                startWhoop()
+            } catch (failure: Throwable) {
+                activeWhoopId = null
+                throw failure
+            }
+            return
+        }
+
+        val previousRow = devices.firstOrNull { it.id == previousId }
+            ?.takeIf { it.isActivatableLiveTransport }
+            ?: run {
+                activeWhoopId = null
+                return
+            }
+        try {
+            val restored = makeSource(previousId, previousRow)
+            activeSource = restored
+            activeStrapId = previousId
+            onStrap = true
+            if (restored is VeepooManagedSource) {
+                mirrorVeepooActiveDisplay(previousId, restored)
+            }
+            val address = previousRow.peripheralId
+            if (!address.isNullOrEmpty()) {
+                restored.connect(address)
+            } else {
+                restored.scan()
+            }
+        } catch (_: Throwable) {
+            tearDownNonWhoopSource()
+            activeStrapId = null
+            activeWhoopId = null
+            onStrap = false
+            straplog("HR-strap: previous source could not be restored")
         }
     }
 

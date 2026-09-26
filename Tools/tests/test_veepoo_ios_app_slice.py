@@ -206,12 +206,31 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
                 source.index("let reconcileAuthenticationRejection = {"),
             )
         ]
-        self.assertIn("credentials.clear(deviceID: deviceID)", rejected)
+        self.assertIn("VeepooRejectedCredentialCleanup.begin(", rejected)
+        self.assertIn("persistFailClosedRejection:", rejected)
+        self.assertIn("registry.persistRejectedSupplier(", rejected)
         self.assertIn("registry.reconcileUnavailableSupplier(", rejected)
         self.assertLess(
-            rejected.index("credentials.clear(deviceID: deviceID)"),
+            rejected.index("VeepooRejectedCredentialCleanup.begin("),
             rejected.index("registry.reconcileUnavailableSupplier("),
         )
+        cleanup = source[
+            source.index("enum VeepooRejectedCredentialCleanup") :
+            source.index(
+                "final class VeepooPendingCredentialCleanupReconciler"
+            )
+        ]
+        mark = cleanup.index(
+            "cleanup.markRejectedPending(deviceID: deviceID)"
+        )
+        clear = cleanup.index(
+            "credentials.clear(deviceID: deviceID)"
+        )
+        clear_marker = cleanup.index(
+            "cleanup.clearRejectedPending(deviceID: deviceID)"
+        )
+        self.assertLess(mark, clear)
+        self.assertLess(clear, clear_marker)
         factory_switch = source[
             source.index("switch credentials.load(deviceID: deviceID)") :
             source.index("private static func credentialAvailability(")

@@ -44,7 +44,7 @@ RELEASE_SOURCE_DIGESTS = {
         "75020df9587cc34387f41b3b9482bd71187639e39a79a3db97cb1dfd13552719"
     ),
     ".github/workflows/release-controls.yml": (
-        "07ad8fe7364cd154e3efc04f779eb5a364d23922fc1f151c49d8cffe7c7789eb"
+        "1b0a3034daf10964b99da99c81ac02fd40d3bcc86509d515e43fdbe04b047bd8"
     ),
     ".github/workflows/release.yml": (
         "08751fb8e82e0c14fdb4630f45262892077b42e644d740219e7750494c34c01b"
@@ -71,7 +71,7 @@ RELEASE_SOURCE_DIGESTS = {
         "372362b7a0f7026708dab00e422e37e2caf63bf274fcc151b0a4645182a6020d"
     ),
     "release/terminology/legacy-inventory.json": (
-        "8a71fc395a72d6fffb0e025e75471fc88d340cdacce84a4865cdacab1d4e97e8"
+        "6340cd05c0358fc27fe79c488a1ff8867709b19a587f66f0113d9eda3c75d686"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -140,7 +140,7 @@ RELEASE_SOURCE_DIGESTS = {
         "8cb907cd981db978a895668bfc97e9c66d9ae632957032dec727ea5c8450b983"
     ),
     "Tools/trusted-release-controls.py": (
-        "e81965b73e54a1c994f9c63186fff1fa9efe82373b54c72d81c92be0e9353d77"
+        "cb4260aae16ace02a58c69655414db649199c104bd09c116dad719341a9f11ab"
     ),
     "Tools/update-homebrew-cask.sh": (
         "1733e7b43266ac7f16ed3043cef4bea51f8353ebe533fb9aa3d260fa76639989"

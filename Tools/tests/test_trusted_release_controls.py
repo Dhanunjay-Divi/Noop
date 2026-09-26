@@ -91,6 +91,7 @@ class TrustedReleaseControlTests(unittest.TestCase):
             "Tools/tests/test_android_supplier_sdk_verifier.py",
             "Tools/tests/test_noop_band_sdk_artifact.py",
             "Tools/tests/test_supplier_band_compatibility_manifest.py",
+            "Tools/tests/test_supplier_sdk_wrapper_boundary.py",
             "Tools/tests/test_trusted_release_controls.py",
             "Tools/tests/test_veepoo_ios_sdk_wiring.py",
             "Tools/release.sh",
@@ -111,14 +112,30 @@ class TrustedReleaseControlTests(unittest.TestCase):
             "sitecustomize.py",
             "Tools/json.py",
             "Tools/pathlib/__init__.py",
+            "Tools/local/hashlib.py",
+            "Tools/local/hashlib.pyc",
+            "Tools/local/hashlib.abi3.so",
+            "Tools/local/hashlib.cpython-314-darwin.so",
+            "Tools/local/Json.py",
+            "Tools/local/COMPRESSION.py",
+            "Tools/local/compression.py",
+            "Tools/local/pathlib/__init__.py",
+            "Tools/local/sitecustomize.py",
+            "Tools/__init__.py",
+            "Tools/yaml.py",
+            "Tools/yaml/__init__.py",
+            "Tools/tests/__init__.py",
+            "Tools/tests/test_unittest.py",
             "Tools/tests/re.py",
             "Tools/tests/usercustomize.py",
+            "yaml.py",
+            "yaml/__init__.py",
         ):
             with self.subTest(path=path):
                 self.assertTrue(TRUSTED.is_protected_path(path))
         for path in (
-            "Tools/tests/test_unittest.py",
             "server/app/unittest.py",
+            "server/app/yaml.py",
             "Strand/App/AppModel.swift",
         ):
             with self.subTest(path=path):
@@ -130,6 +147,16 @@ class TrustedReleaseControlTests(unittest.TestCase):
         ):
             TRUSTED.authorize_changed_paths(
                 ["unittest/__init__.py", "unittest/__main__.py"],
+                repository_owner="Dhanunjay-Divi",
+                actor="another-builder",
+            )
+
+    def test_non_owner_cannot_shadow_third_party_release_dependency(self) -> None:
+        with self.assertRaisesRegex(
+            TRUSTED.TrustedControlError, "require the repository owner"
+        ):
+            TRUSTED.authorize_changed_paths(
+                ["Tools/yaml.py"],
                 repository_owner="Dhanunjay-Divi",
                 actor="another-builder",
             )

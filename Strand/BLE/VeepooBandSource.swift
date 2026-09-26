@@ -20,13 +20,90 @@ protocol VeepooCredentialCleanupAccess: AnyObject {
     func pendingDeviceIDs() -> Set<String>?
     @discardableResult
     func clearPending(deviceID: String) -> Bool
+    func markRejectedPending(deviceID: String) -> Bool
+    func rejectedPendingDeviceIDs() -> Set<String>?
+    @discardableResult
+    func clearRejectedPending(deviceID: String) -> Bool
+}
+
+@MainActor
+protocol VeepooCredentialCleanupFallbackAccess: AnyObject {
+    func mark(deviceID: String) -> Bool
+    func pendingDeviceIDs() -> Set<String>?
+    @discardableResult
+    func clear(deviceID: String) -> Bool
+}
+
+@MainActor
+final class VeepooCredentialCleanupFallbackStore:
+    VeepooCredentialCleanupFallbackAccess
+{
+    static let shared = VeepooCredentialCleanupFallbackStore()
+
+    private let defaults: UserDefaults
+    private let key = "supplierRejectedCredentialCleanup.v1"
+    private let maximumPendingIDs = 64
+    private let maximumDeviceIDLength = 256
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func mark(deviceID: String) -> Bool {
+        guard valid(deviceID), var pending = pendingDeviceIDs() else {
+            return false
+        }
+        if pending.contains(deviceID) { return true }
+        guard pending.count < maximumPendingIDs else { return false }
+        pending.insert(deviceID)
+        defaults.set(pending.sorted(), forKey: key)
+        return pendingDeviceIDs() == pending
+    }
+
+    func pendingDeviceIDs() -> Set<String>? {
+        guard let value = defaults.object(forKey: key) else { return [] }
+        guard let values = value as? [String],
+              values.count <= maximumPendingIDs,
+              values.allSatisfy(valid)
+        else {
+            return nil
+        }
+        let pending = Set(values)
+        guard pending.count == values.count else { return nil }
+        return pending
+    }
+
+    @discardableResult
+    func clear(deviceID: String) -> Bool {
+        guard valid(deviceID), var pending = pendingDeviceIDs() else {
+            return false
+        }
+        pending.remove(deviceID)
+        if pending.isEmpty {
+            defaults.removeObject(forKey: key)
+        } else {
+            defaults.set(pending.sorted(), forKey: key)
+        }
+        return pendingDeviceIDs() == pending
+    }
+
+    private func valid(_ deviceID: String) -> Bool {
+        !deviceID.isEmpty
+            && deviceID.count <= maximumDeviceIDLength
+            && deviceID.unicodeScalars.allSatisfy {
+                !CharacterSet.controlCharacters.contains($0)
+            }
+    }
 }
 
 @MainActor
 final class VeepooCredentialCleanupStore: VeepooCredentialCleanupAccess {
     static let shared = VeepooCredentialCleanupStore()
 
-    private let service = "com.noop.supplier-band.pending-credential-cleanup"
+    private let archiveService =
+        "com.noop.supplier-band.pending-credential-cleanup"
+    private let rejectionService =
+        "com.noop.supplier-band.pending-rejection-credential-cleanup"
     private let maximumPendingIDs = 64
     private let maximumDeviceIDLength = 256
     private let copyMatching:
@@ -34,6 +111,8 @@ final class VeepooCredentialCleanupStore: VeepooCredentialCleanupAccess {
     private let addItem:
         (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
     private let deleteItem: (CFDictionary) -> OSStatus
+    private let rejectionFallback:
+        any VeepooCredentialCleanupFallbackAccess
 
     init(
         copyMatching: @escaping (
@@ -44,22 +123,69 @@ final class VeepooCredentialCleanupStore: VeepooCredentialCleanupAccess {
             CFDictionary,
             UnsafeMutablePointer<CFTypeRef?>?
         ) -> OSStatus = SecItemAdd,
-        deleteItem: @escaping (CFDictionary) -> OSStatus = SecItemDelete
+        deleteItem: @escaping (CFDictionary) -> OSStatus = SecItemDelete,
+        rejectionFallback:
+            (any VeepooCredentialCleanupFallbackAccess)? = nil
     ) {
         self.copyMatching = copyMatching
         self.addItem = addItem
         self.deleteItem = deleteItem
+        self.rejectionFallback =
+            rejectionFallback ?? VeepooCredentialCleanupFallbackStore.shared
     }
 
     func markPending(deviceID: String) -> Bool {
+        markPending(deviceID: deviceID, service: archiveService)
+    }
+
+    func pendingDeviceIDs() -> Set<String>? {
+        pendingDeviceIDs(service: archiveService)
+    }
+
+    @discardableResult
+    func clearPending(deviceID: String) -> Bool {
+        clearPending(deviceID: deviceID, service: archiveService)
+    }
+
+    func markRejectedPending(deviceID: String) -> Bool {
+        if markPending(deviceID: deviceID, service: rejectionService) {
+            _ = rejectionFallback.clear(deviceID: deviceID)
+            return true
+        }
+        return rejectionFallback.mark(deviceID: deviceID)
+    }
+
+    func rejectedPendingDeviceIDs() -> Set<String>? {
+        guard let fallbackPending = rejectionFallback.pendingDeviceIDs() else {
+            return nil
+        }
+        guard let keychainPending = pendingDeviceIDs(
+            service: rejectionService
+        ) else {
+            // A fallback marker proves at least one pending rejection, but it
+            // cannot prove the Keychain ledger is empty. Treat the inventory
+            // as incomplete until both stores are readable so reconciliation
+            // cannot finish while a Keychain-only credential remains.
+            return nil
+        }
+        return keychainPending.union(fallbackPending)
+    }
+
+    @discardableResult
+    func clearRejectedPending(deviceID: String) -> Bool {
+        clearPending(deviceID: deviceID, service: rejectionService)
+            && rejectionFallback.clear(deviceID: deviceID)
+    }
+
+    private func markPending(deviceID: String, service: String) -> Bool {
         guard valid(deviceID),
-              let pending = pendingDeviceIDs()
+              let pending = pendingDeviceIDs(service: service)
         else {
             return false
         }
         if pending.contains(deviceID) { return true }
         guard pending.count < maximumPendingIDs else { return false }
-        var item = baseQuery(deviceID: deviceID)
+        var item = baseQuery(deviceID: deviceID, service: service)
         item[kSecValueData as String] = Data("v1".utf8)
         item[kSecAttrAccessible as String] =
             kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -67,7 +193,7 @@ final class VeepooCredentialCleanupStore: VeepooCredentialCleanupAccess {
         return status == errSecSuccess || status == errSecDuplicateItem
     }
 
-    func pendingDeviceIDs() -> Set<String>? {
+    private func pendingDeviceIDs(service: String) -> Set<String>? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -99,10 +225,11 @@ final class VeepooCredentialCleanupStore: VeepooCredentialCleanupAccess {
         return Set(deviceIDs)
     }
 
-    @discardableResult
-    func clearPending(deviceID: String) -> Bool {
+    private func clearPending(deviceID: String, service: String) -> Bool {
         guard valid(deviceID) else { return false }
-        let status = deleteItem(baseQuery(deviceID: deviceID) as CFDictionary)
+        let status = deleteItem(
+            baseQuery(deviceID: deviceID, service: service) as CFDictionary
+        )
         return status == errSecSuccess || status == errSecItemNotFound
     }
 
@@ -114,7 +241,10 @@ final class VeepooCredentialCleanupStore: VeepooCredentialCleanupAccess {
             }
     }
 
-    private func baseQuery(deviceID: String) -> [String: Any] {
+    private func baseQuery(
+        deviceID: String,
+        service: String
+    ) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -328,10 +458,42 @@ enum VeepooPendingCredentialCleanup {
     @discardableResult
     static func reconcile(
         registeredDeviceIDs: Set<String>?,
+        archivedDeviceIDs: Set<String> = [],
         credentials: any VeepooCredentialAccess,
         cleanup: any VeepooCredentialCleanupAccess,
         trigger: VeepooSupplierLifecycleTrigger? = nil
     ) -> Bool {
+        var allCompleted = true
+        for deviceID in archivedDeviceIDs.sorted() {
+            let completed = credentials.clear(deviceID: deviceID)
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .secureCleanup,
+                outcome: completed ? .completed : .failed,
+                trigger: trigger ?? .authenticationRejected,
+                failure: completed ? nil : .cleanupFailed
+            )
+            allCompleted = allCompleted && completed
+        }
+        guard let rejectedPending = cleanup.rejectedPendingDeviceIDs() else {
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .secureCleanup,
+                outcome: .failed,
+                trigger: trigger,
+                failure: .cleanupFailed
+            )
+            return false
+        }
+        for deviceID in rejectedPending.sorted() {
+            let completed = credentials.clear(deviceID: deviceID)
+                && cleanup.clearRejectedPending(deviceID: deviceID)
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .secureCleanup,
+                outcome: completed ? .completed : .failed,
+                trigger: trigger ?? .authenticationRejected,
+                failure: completed ? nil : .cleanupFailed
+            )
+            allCompleted = allCompleted && completed
+        }
         guard let registeredDeviceIDs else {
             VeepooSupplierLifecycleDiagnostics.record(
                 stage: .secureCleanup,
@@ -350,7 +512,6 @@ enum VeepooPendingCredentialCleanup {
             )
             return false
         }
-        var allCompleted = true
         for deviceID in pending.sorted() {
             let completed: Bool
             if registeredDeviceIDs.contains(deviceID) {
@@ -372,8 +533,41 @@ enum VeepooPendingCredentialCleanup {
 }
 
 @MainActor
+enum VeepooRejectedCredentialCleanup {
+    @discardableResult
+    static func begin(
+        deviceID: String,
+        credentials: any VeepooCredentialAccess,
+        cleanup: any VeepooCredentialCleanupAccess,
+        persistFailClosedRejection: () -> Bool,
+        retry: (String) -> Void
+    ) -> Bool {
+        let markedPending = cleanup.markRejectedPending(deviceID: deviceID)
+        if !markedPending {
+            _ = persistFailClosedRejection()
+        }
+        let credentialCleared = markedPending
+            && credentials.clear(deviceID: deviceID)
+        let markerCleared = credentialCleared
+            && cleanup.clearRejectedPending(deviceID: deviceID)
+        let completed = markedPending && credentialCleared && markerCleared
+        if !completed {
+            retry(deviceID)
+        }
+        VeepooSupplierLifecycleDiagnostics.record(
+            stage: .secureCleanup,
+            outcome: completed ? .completed : .failed,
+            trigger: .authenticationRejected,
+            failure: completed ? nil : .cleanupFailed
+        )
+        return completed
+    }
+}
+
+@MainActor
 final class VeepooPendingCredentialCleanupReconciler {
     private let registeredDeviceIDs: () -> Set<String>?
+    private let archivedDeviceIDs: () -> Set<String>?
     private let credentials: any VeepooCredentialAccess
     private let cleanup: any VeepooCredentialCleanupAccess
     private let protectedDataAvailablePublisher: AnyPublisher<Void, Never>
@@ -383,9 +577,11 @@ final class VeepooPendingCredentialCleanupReconciler {
     private var retryAttempt = 0
     private var protectedDataRetryConsumed = false
     private var finished = false
+    private var unpersistedRejectedDeviceIDs = Set<String>()
 
     init(
         registeredDeviceIDs: @escaping () -> Set<String>?,
+        archivedDeviceIDs: @escaping () -> Set<String>? = { [] },
         credentials: any VeepooCredentialAccess,
         cleanup: any VeepooCredentialCleanupAccess,
         protectedDataAvailablePublisher: AnyPublisher<Void, Never>? = nil,
@@ -396,6 +592,7 @@ final class VeepooPendingCredentialCleanupReconciler {
         ]
     ) {
         self.registeredDeviceIDs = registeredDeviceIDs
+        self.archivedDeviceIDs = archivedDeviceIDs
         self.credentials = credentials
         self.cleanup = cleanup
         self.protectedDataAvailablePublisher =
@@ -409,6 +606,22 @@ final class VeepooPendingCredentialCleanupReconciler {
         reconcile(trigger: nil, resetRetryBudget: true)
     }
 
+    func enqueueAuthenticationRejection(deviceID: String) {
+        unpersistedRejectedDeviceIDs.insert(deviceID)
+        restart(trigger: .authenticationRejected)
+    }
+
+    private func restart(trigger: VeepooSupplierLifecycleTrigger) {
+        retryTask?.cancel()
+        retryTask = nil
+        protectedDataCancellable?.cancel()
+        protectedDataCancellable = nil
+        retryAttempt = 0
+        protectedDataRetryConsumed = false
+        finished = false
+        reconcile(trigger: trigger, resetRetryBudget: true)
+    }
+
     private func reconcile(
         trigger: VeepooSupplierLifecycleTrigger?,
         resetRetryBudget: Bool
@@ -417,12 +630,28 @@ final class VeepooPendingCredentialCleanupReconciler {
         if resetRetryBudget {
             retryAttempt = 0
         }
-        if VeepooPendingCredentialCleanup.reconcile(
-            registeredDeviceIDs: registeredDeviceIDs(),
-            credentials: credentials,
-            cleanup: cleanup,
-            trigger: trigger
-        ) {
+        var queuedMarkersPersisted = true
+        for deviceID in unpersistedRejectedDeviceIDs.sorted() {
+            if cleanup.markRejectedPending(deviceID: deviceID) {
+                unpersistedRejectedDeviceIDs.remove(deviceID)
+            } else {
+                queuedMarkersPersisted = false
+            }
+        }
+        let durableCleanupCompleted =
+            archivedDeviceIDs().map {
+                VeepooPendingCredentialCleanup.reconcile(
+                    registeredDeviceIDs: registeredDeviceIDs(),
+                    archivedDeviceIDs: $0,
+                    credentials: credentials,
+                    cleanup: cleanup,
+                    trigger: trigger
+                )
+            } ?? false
+        if queuedMarkersPersisted
+            && unpersistedRejectedDeviceIDs.isEmpty
+            && durableCleanupCompleted
+        {
             finish()
             return
         }
@@ -1062,10 +1291,14 @@ enum VeepooBandSourceFactory {
     static func productionFactory(
         registry: DeviceRegistry,
         live: LiveState,
-        credentials: (any VeepooCredentialAccess)? = nil
+        credentials: (any VeepooCredentialAccess)? = nil,
+        credentialCleanup: (any VeepooCredentialCleanupAccess)? = nil,
+        retryCredentialCleanup: @escaping (String) -> Void = { _ in }
     ) -> ((String) -> (any LiveHRSource)?)? {
         guard VeepooBandAdapterFactory.productionEnabled else { return nil }
         let credentials = credentials ?? VeepooCredentialStore.shared
+        let credentialCleanup =
+            credentialCleanup ?? VeepooCredentialCleanupStore.shared
         return { deviceID in
             guard let row = registry.devices.first(where: { $0.id == deviceID }),
                   isStructurallyUsable(row, adapterAvailable: true),
@@ -1087,12 +1320,14 @@ enum VeepooBandSourceFactory {
                 )
             }
             let reconcileAuthenticationRejection = {
-                let cleared = credentials.clear(deviceID: deviceID)
-                VeepooSupplierLifecycleDiagnostics.record(
-                    stage: .secureCleanup,
-                    outcome: cleared ? .completed : .failed,
-                    trigger: .authenticationRejected,
-                    failure: cleared ? nil : .cleanupFailed
+                VeepooRejectedCredentialCleanup.begin(
+                    deviceID: deviceID,
+                    credentials: credentials,
+                    cleanup: credentialCleanup,
+                    persistFailClosedRejection: {
+                        registry.persistRejectedSupplier(deviceID)
+                    },
+                    retry: retryCredentialCleanup
                 )
                 let reconciled = registry.reconcileUnavailableSupplier(
                     deviceID

@@ -51,6 +51,25 @@ final class DeviceRegistry: ObservableObject {
         }
     }
 
+    /// Archived supplier rows are a durable fail-closed cleanup ledger. A
+    /// rejected credential whose Keychain and fallback markers were both
+    /// unavailable cannot become active again, and a later process can retry
+    /// deleting its credential from this inventory.
+    func archivedSupplierCredentialDeviceIDs() -> Set<String>? {
+        do {
+            return Set(
+                try store.all()
+                    .filter {
+                        $0.sourceKind == .veepoo
+                            && $0.status == .archived
+                    }
+                    .map(\.id)
+            )
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - UI mutations (Devices screen)
     //
     // Each op delegates to the synchronous store, then `reload()`s so the published `devices` /
@@ -135,6 +154,49 @@ final class DeviceRegistry: ObservableObject {
             guard let fallback = preferred ?? defaultWhoop else { return false }
 
             publish(try store.setActiveVerified(fallback.id))
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Persist an authentication rejection when neither secure cleanup marker
+    /// can be written. Archiving happens before fallback selection, so a crash
+    /// cannot leave the rejected supplier eligible for activation. A fallback
+    /// activation failure does not undo that fail-closed state.
+    @discardableResult
+    func persistRejectedSupplier(_ rejectedDeviceID: String) -> Bool {
+        do {
+            let rows = try store.all()
+            guard let rejected = rows.first(
+                where: { $0.id == rejectedDeviceID }
+            ), rejected.sourceKind == .veepoo else {
+                return false
+            }
+            let existingActive = rows.first {
+                $0.id != rejectedDeviceID
+                    && $0.status == .active
+                    && $0.status != .archived
+            }
+            let defaultWhoop = rows.first {
+                $0.id != rejectedDeviceID
+                    && $0.id == "my-whoop"
+                    && $0.status != .archived
+            } ?? rows.first {
+                $0.id != rejectedDeviceID
+                    && Self.isWhoop($0)
+                    && $0.status != .archived
+            }
+
+            guard try store.archiveVerified(rejectedDeviceID) else {
+                return false
+            }
+            if let fallback = existingActive ?? defaultWhoop,
+               let activated = try? store.setActiveVerified(fallback.id) {
+                publish(activated)
+            } else {
+                reload()
+            }
             return true
         } catch {
             return false

@@ -49,6 +49,7 @@ jobs:
           Tools.tests.test_required_ci_gate
           Tools.tests.test_release_version_gate
           Tools.tests.test_supplier_band_compatibility_manifest
+          Tools.tests.test_supplier_sdk_wrapper_boundary
           Tools.tests.test_testing_release_workflow
           Tools.tests.test_terminology_audit
           Tools.tests.test_trusted_release_controls

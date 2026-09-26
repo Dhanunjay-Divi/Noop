@@ -25,11 +25,67 @@ CHECK_SCOPES = {"protected-main", "pull-request"}
 GITHUB_ACTIONS_APP_ID = 15368
 MAX_RESPONSE_BYTES = 1024 * 1024
 PROTECTED_PREFIXES = (".github/workflows/",)
-PYTHON_EXECUTION_ROOTS = ((), ("Tools",), ("Tools", "tests"))
-PYTHON_RUNTIME_MODULES = frozenset(sys.stdlib_module_names) | {
-    "sitecustomize",
-    "usercustomize",
-}
+PYTHON_EXECUTION_ROOTS = (
+    (),
+    ("Tools",),
+    ("Tools", "local"),
+    ("Tools", "tests"),
+)
+PYTHON_IMPORTABLE_SUFFIXES = (
+    ".py",
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".pyd",
+    ".dylib",
+)
+# Reviewed union of the Python 3.12-3.14 top-level standard-library modules
+# used by supported local/hosted release tooling. Trust decisions must not vary
+# with whichever `python3` happens to execute this verifier.
+PYTHON_RUNTIME_MODULES = frozenset(
+    """
+    __future__ _abc _aix_support _android_support _apple_support _ast
+    _ast_unparse _asyncio _bisect _blake2 _bz2 _codecs _codecs_cn
+    _codecs_hk _codecs_iso2022 _codecs_jp _codecs_kr _codecs_tw
+    _collections _collections_abc _colorize _compat_pickle _compression
+    _contextvars _crypt _csv _ctypes _curses _curses_panel _datetime _dbm
+    _decimal _elementtree _frozen_importlib _frozen_importlib_external
+    _functools _gdbm _hashlib _heapq _hmac _imp _interpchannels
+    _interpqueues _interpreters _io _ios_support _json _locale _lsprof
+    _lzma _markupbase _md5 _msi _multibytecodec _multiprocessing _opcode
+    _opcode_metadata _operator _osx_support _overlapped _pickle _posixshmem
+    _posixsubprocess _py_abc _py_warnings _pydatetime _pydecimal _pyio
+    _pylong _pyrepl _queue _random _remote_debugging _scproxy _sha1 _sha2
+    _sha3 _signal _sitebuiltins _socket _sqlite3 _sre _ssl _stat
+    _statistics _string _strptime _struct _suggestions _symtable _sysconfig
+    _thread _threading_local _tkinter _tokenize _tracemalloc _types _typing
+    _uuid _warnings _weakref _weakrefset _winapi _wmi _zoneinfo _zstd abc
+    aifc annotationlib antigravity argparse array ast asyncio atexit audioop
+    base64 bdb binascii bisect builtins bz2 cProfile calendar cgi cgitb chunk
+    cmath cmd code codecs codeop collections colorsys compileall compression
+    concurrent configparser contextlib contextvars copy copyreg crypt csv
+    ctypes curses dataclasses datetime dbm decimal difflib dis doctest email
+    encodings ensurepip enum errno faulthandler fcntl filecmp fileinput fnmatch
+    fractions ftplib functools gc genericpath getopt getpass gettext glob
+    graphlib grp gzip hashlib heapq hmac html http idlelib imaplib imghdr
+    importlib inspect io ipaddress itertools json keyword lib2to3 linecache
+    locale logging lzma mailbox mailcap marshal math mimetypes mmap
+    modulefinder msilib msvcrt multiprocessing netrc nis nntplib nt ntpath
+    nturl2path numbers opcode operator optparse os ossaudiodev pathlib pdb
+    pickle pickletools pipes pkgutil platform plistlib poplib posix posixpath
+    pprint profile pstats pty pwd py_compile pyclbr pydoc pydoc_data pyexpat
+    queue quopri random re readline reprlib resource rlcompleter runpy sched
+    secrets select selectors shelve shlex shutil signal site sitecustomize
+    smtplib sndhdr socket socketserver spwd sqlite3 sre_compile sre_constants
+    sre_parse ssl stat statistics string stringprep struct subprocess sunau
+    symtable sys sysconfig syslog tabnanny tarfile telnetlib tempfile termios
+    textwrap this threading time timeit tkinter token tokenize tomllib trace
+    traceback tracemalloc tty turtle turtledemo types typing unicodedata
+    unittest urllib usercustomize uu uuid venv warnings wave weakref webbrowser
+    winreg winsound wsgiref xdrlib xml xmlrpc zipapp zipfile zipimport zlib
+    zoneinfo
+    """.split()
+)
 PROTECTED_PATHS = {
     "Config/VeepooLocalSDK.example.xcconfig",
     "release/required-ci.json",
@@ -70,6 +126,7 @@ PROTECTED_PATHS = {
     "Tools/tests/test_noop_band_sdk_artifact.py",
     "Tools/tests/test_android_supplier_sdk_verifier.py",
     "Tools/tests/test_supplier_band_compatibility_manifest.py",
+    "Tools/tests/test_supplier_sdk_wrapper_boundary.py",
     "Tools/tests/test_trusted_release_controls.py",
     "Tools/tests/test_veepoo_ios_sdk_wiring.py",
     "Tools/trusted-release-controls.py",
@@ -181,7 +238,7 @@ def is_protected_path(value: str) -> bool:
 
 
 def _python_runtime_shadow_module(value: str) -> str | None:
-    """Return the stdlib/startup module shadowed from a Python execution root."""
+    """Return an executable/importable Python surface under a release root."""
     parts = PurePosixPath(value).parts
     for root in PYTHON_EXECUTION_ROOTS:
         if parts[: len(root)] != root:
@@ -190,8 +247,24 @@ def _python_runtime_shadow_module(value: str) -> str | None:
         if not relative:
             continue
         entry = relative[0]
-        module = entry[:-3] if entry.endswith(".py") else entry
+        lower_entry = entry.casefold()
+        importable_file = lower_entry.endswith(PYTHON_IMPORTABLE_SUFFIXES)
+        module = (
+            entry.split(".", 1)[0] if importable_file else entry
+        ).casefold()
         if module in PYTHON_RUNTIME_MODULES:
+            return module
+        if root:
+            leaf = relative[-1].casefold()
+            if leaf.endswith(PYTHON_IMPORTABLE_SUFFIXES):
+                return "/".join(relative)
+        elif (
+            len(relative) == 1
+            and importable_file
+        ) or (
+            len(relative) == 2
+            and relative[1].casefold() == "__init__.py"
+        ):
             return module
     return None
 

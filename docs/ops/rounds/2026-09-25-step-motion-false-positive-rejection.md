@@ -2,22 +2,18 @@
 
 ## Status
 
-- State: `the final implementation candidate and final Android review
-  remediation are independently reviewed; the
-  class-aware step correction, no-fallback boundary, non-destructive
-  stale-estimate replacement, archive-before-credential-cleanup lifecycle,
-  bounded first-unlock credential cleanup, battery-confirmed supplier pairing,
-  approved warm revision rebind, atomic source publication, supplier battery
-  mapping, day-owner resolution, supplier-onboarding credential gates, Android
-  cleanup retry, startup active-source retry, and source-correct device cards pass
-  the complete local Android Full, macOS, unsigned iPhone/Watch/widget,
-  repository/server/SDK, and direct policy walls; prior exact implementation
-  head 9474ffbb passes every hosted required context after the sole first-attempt
-  iOS profile-entry event-loss failure passed six local repetitions and the
-  complete hosted retry; remote documentation head 58f4c3d5 is also hosted
-  green but predates the final Android fixes; one replacement commit/push,
-  replacement exact-SHA checks, protected integration, protected-main
-  verification, cleanup, and physical accuracy validation remain`
+- State: `exact PR head 47e99f52 passes every hosted required context. Four
+  later exact-head review findings are corrected locally: Apple authentication
+  rejection now owns a distinct durable cleanup ledger and bounded retry,
+  Android constructs Oura only after old-source teardown, the local Python
+  execution root is protected from runtime-module shadowing, and the SDK
+  wrapper boundary test is protected and executed by release controls. Apple
+  supplier lifecycle passes 56/56, Android affected source/step tests compile
+  and pass, the iPhone simulator graph builds, and 68 focused trust/release
+  tests plus all ten required-context contracts pass. One replacement
+  commit/push, replacement exact-SHA checks, review-thread resolution,
+  protected integration, protected-main verification, cleanup, and physical
+  accuracy validation remain`
 - Owner: project team
 - Branch: `codex/noop-band-sdk-app-integration-20260921`
 - Start commit: `4604fd53d15b459d0c2251da8e8697134bdb30e1`
@@ -217,6 +213,15 @@ heart-rate elevation as proof of walking.
   Device cards select connection and battery state by exact durable device and
   source kind, so a supplier card cannot inherit stale WHOOP state and a
   working supplier card can show only its own live state and battery.
+- Closed four post-hosted exact-head findings without changing the step
+  formula. Apple persists authentication-rejection cleanup in a separate
+  Keychain ledger before credential deletion, reopens the retained bounded
+  retry owner after startup, and preserves a rejected credential when the
+  marker itself cannot yet be written. Android keeps only supplier construction
+  in the preflight path and constructs Oura after teardown, so teardown cannot
+  cancel the new Oura state observer. Release trust now treats `Tools/local` as
+  a Python execution root, protects the supplier wrapper-boundary test itself,
+  and executes that test in the required release-control workflow.
 
 ## Data, privacy, and medical truth
 
@@ -294,6 +299,7 @@ heart-rate elevation as proof of walking.
 | Final supplier compatibility, pairing, revision, owner, picker, and archive review | Apple supplier lifecycle tests pass 49/49; Android supplier adapter/coordinator tests pass 75/75; complete Android Full passes 5,164 with seven intentional skips; complete macOS passes 2,336 with one intentional fixture skip; the unsigned Release iPhone graph embeds Watch, complications, and widgets | A singleton/raw step row cannot own the day, battery verification is sufficient for supplier registration, archive failure cannot destroy a credential, post-archive cleanup is restart-safe, approved warm revision drift rebinds durably, and model/peripheral substitution remains rejected | Signed installation, physical BLE, real revision callbacks, secure-store faults on devices, firmware activity classification, background execution, or physical step accuracy |
 | Final protected-data cleanup lifecycle | Apple supplier lifecycle tests pass 51/51; exact-current unsigned generic iPhoneOS Release builds and embeds `NOOPWatch.app`, `NOOPWatchComplications.appex`, and `NOOPWidgets.appex` | A ledger unavailable before first unlock is retried on the protected-data edge, cleanup stops after success, and a failed unlock retry cannot create an unbounded observer loop | A physical device Keychain fault, signed install, background relaunch, or supplier hardware behavior |
 | Final Android review remediation | Focused Full compile plus 76/76 source-coordinator, credential-store, active-device projection, and supplier-display cases pass. The complete Full wall passes 5,177 tests with seven intentional skips, builds the 54,399,693-byte debug APK, passes lint with zero errors, and compiles 207 instrumentation test classes. Independent final review reports no remaining correctness finding in the changed Android boundary. | Failed pending cleanup retries in-process and on foreground, authentication rejection survives process recreation for multiple devices, combined ledger/deletion failure archives the rejected source, stale active-source projections cannot cross a source-selection change, and supplier cards use only exact supplier connection/battery state | Physical encrypted-store recovery, Activity/OEM lifecycle timing, supplier BLE callbacks, installation, signed-device UI, hosted replacement checks, or protected integration |
+| Post-hosted exact-head review remediation | Apple supplier lifecycle passes 56/56; Android Full source compiles and the affected source-coordinator plus step-integrity classes pass; the generic iPhone Simulator graph builds; 68 focused trust/required-CI/wrapper tests pass; required-CI validates all ten contexts and trusted-main self-verification passes | Rejected Apple credentials have a distinct durable retry path, Oura state ownership survives source switching, `Tools/local` cannot shadow Python runtime modules without owner review, and the wrapper-boundary test is both protected and required | Physical Keychain faults, Oura hardware callbacks, supplier firmware classification, hosted replacement checks, protected integration, or physical step accuracy |
 
 ## Physical device and deployment
 
@@ -310,10 +316,10 @@ heart-rate elevation as proof of walking.
 
 ## Git and release state
 
-- Changed paths in this final local slice: Android source coordination,
-  active-device presentation, device-card source routing, their focused
-  regressions, and closeout operations records. Earlier PR changes remain as
-  recorded above.
+- Changed paths in this final local slice: Apple rejected-credential cleanup
+  and app wiring, Android source-construction ordering, release trust roots and
+  workflow coverage, their focused regressions, and closeout operations
+  records. Earlier PR changes remain as recorded above.
 - Commits: implementation `db7de8e2571b1effd8278537d63bd7019b2b0d28`;
   review closeout `93d5ffed104d7e3b9f193c2af71c9dfb57d486c8`.
 - Branch and remote state: PR `#17` implementation head
@@ -323,14 +329,15 @@ heart-rate elevation as proof of walking.
   keystrokes. The exact case passed six consecutive local executions, including
   five process-relaunched repetitions, and the unchanged hosted SHA then passed
   the complete iOS production shell plus `apple-ci-required`.
-- Current replacement state: the prior implementation and documentation heads
-  are hosted green. The final Android findings are corrected locally and
-  the complete Full wall is green. Operations/terminology/policy closeout, one
-  replacement commit/push, replacement exact-SHA hosted verification,
-  evidence-backed thread resolution, normal protected merge, protected-main
-  verification, and exact temporary-output cleanup remain. Physical BLE,
-  supplier firmware classification, signed installation, background behavior,
-  and synchronized step-accuracy validation remain external or device gates.
+- Current replacement state: exact remote head
+  `47e99f529350d5682fa0600e063d85b69eeeac87` is hosted green. Four later
+  review findings are corrected and focused verification is green locally.
+  Operations/terminology/policy closeout, one replacement commit/push,
+  replacement exact-SHA hosted verification, evidence-backed thread
+  resolution, normal protected merge, protected-main verification, and exact
+  temporary-output cleanup remain. Physical BLE, supplier firmware
+  classification, signed installation, background behavior, and synchronized
+  step-accuracy validation remain external or device gates.
 - Repository visibility verified: not rechecked in this slice.
 - Version/build impact: no version bump.
 - Release or distribution impact: no release claim; physical metric validation
@@ -584,10 +591,56 @@ heart-rate elevation as proof of walking.
   simulators, credentials, SDK inputs, and user data were preserved. The
   Android wall then regenerated only its current build output; free space
   remained about 32 GiB afterward.
-- The final documentation and terminology closeout records 18,533 classified
-  occurrences across 1,628 groups with no active-use expansion. The reviewed
-  inventory and allowlist digests are repinned after this record so the
-  complete Tools and direct policy walls cover the exact replacement bytes.
+- The final terminology inventory is regenerated only after this independent
+  review record is durable. Its exact reviewed digest is then repinned before
+  the complete Tools and direct policy walls run.
+
+## September 26 independent review remediation
+
+- A read-only independent review found five additional exact-source defects.
+  No new step-filtering or health-claim defect was found.
+- Protected release tooling now treats every importable Python file below the
+  Tools execution roots, repository-root modules, and package initializers as
+  owner-protected. This closes both standard-library and third-party dependency
+  shadowing, including package initialization before the protected unittest
+  suite. Focused trust tests include mixed-case, native-extension, package,
+  startup-hook, and third-party dependency cases.
+- The supplier wrapper boundary now recognizes Swift import attributes, access
+  modifiers, scoped imports, semicolon-separated declarations, and qualified
+  module references for every framework in the protected artifact manifest.
+  Android package-family detection remains derived from the protected required-
+  class inventory.
+- If Apple cannot persist either authentication-rejection cleanup marker, it
+  archives the supplier row before fallback selection. Archived supplier rows
+  form a process-durable cleanup inventory, so a recreated reconciler retries
+  credential deletion without making the rejected source activatable. The
+  focused Apple lifecycle and registry suites pass 79/79.
+- If Android fails while restarting the prior WHOOP transport after a post-
+  teardown source-construction failure, it clears the tentative active identity.
+  A later selection therefore re-enters targeting instead of hitting the same-
+  identity no-op guard. The focused coordinator class compiles and passes.
+- The first exact iPhone graph exposed a Swift 6 isolation warning from using a
+  main-actor singleton in a default argument. The fallback parameter is now
+  optional and the singleton is resolved inside the main-actor initializer.
+  Focused Apple lifecycle/registry verification remains 79/79 and the final
+  iPhone graph contains no copy of that warning.
+- The prior macOS wall was cancelled after review edits because it no longer
+  represented an exact candidate. The exact-current replacement passes 2,349
+  tests with one intentional skip and zero failures. No stale invocation is
+  counted as final evidence.
+- The exact-current Android Full wall passes unit tests, APK assembly, lint,
+  and instrumentation-source compilation in 73 tasks. The resulting
+  `app-full-debug.apk` is 54,402,643 bytes. No persistent Gradle daemon remains.
+- The exact-current generic iPhone Simulator graph succeeds and the built
+  `NOOP Staging.app` embeds `NOOPWidgets.appex`, `NOOPWatch.app`, and
+  `NOOPWatchComplications.appex` with the expected app-family bundle
+  identifiers.
+- The pre-closeout Tools wall passed 368 tests with one intentional dependency
+  skip, and the direct release, required-CI, trust, calibration, terminology,
+  localization, operations, health-claim, privacy-filename, legal-inventory,
+  and diff gates passed. They are rerun after this final documentation and
+  terminology snapshot so only exact replacement bytes count as final policy
+  evidence.
 
 ## Next round
 

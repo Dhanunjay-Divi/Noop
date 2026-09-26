@@ -48,6 +48,32 @@ Last updated: **2026-09-26**
   seven intentional skips and 551 storage tests with zero failures. Physical
   firmware classification and synchronized manual-count accuracy remain
   external gates.
+- Exact PR `#17` head
+  `47e99f529350d5682fa0600e063d85b69eeeac87` passes every hosted required
+  context. Nine later review findings are corrected locally across two review
+  passes. Apple authentication rejection now writes a distinct durable cleanup
+  intent before credential deletion, can reopen its retained bounded retry
+  owner after startup, and archives the supplier registration as a process-
+  durable fail-closed fallback when both marker stores are unavailable. A new
+  process clears credentials for archived supplier rows. Android constructs
+  Oura only after old-source teardown and clears a failed restored WHOOP
+  identity so a later selection can retry. Release controls protect every
+  importable Python surface under the Tools execution roots, including
+  third-party dependency shadows and package initializers. The supplier wrapper
+  boundary recognizes attributed, access-qualified, scoped, and semicolon-
+  separated Swift imports. Focused Apple lifecycle/registry verification passes
+  79/79, the Android coordinator class builds and passes, and 15 focused
+  trust/wrapper/app-slice cases pass. The exact-current macOS wall passes 2,349
+  tests with one intentional skip; Android Full unit tests, APK assembly, lint,
+  and instrumentation-source compilation pass in one 73-task wall and produce
+  a 54,402,643-byte APK; the iPhone Simulator graph succeeds without the new
+  isolation warning and embeds widgets, Watch, and Watch complications under
+  their expected bundle identifiers. Final terminology regeneration,
+  repository-control rerun, one replacement commit/push, replacement exact-SHA
+  checks, review resolution, normal protected integration, protected-main
+  verification, and exact round-owned cleanup remain. Physical BLE, supplier
+  firmware classification, and synchronized step accuracy remain explicit
+  device gates.
 - Current integration state: PR `#17` includes the supplier qualification
   candidate whose first hosted run used exact head
   `25b239a9cca9b5f5da15bc882d51fc344fe122b0`. The same Full/iPhone app

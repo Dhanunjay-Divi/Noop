@@ -68,6 +68,7 @@ class SourceCoordinatorAdoptionTest {
 
     private class FakeNoopBandSource(
         private val lifecycleOperations: MutableList<String>? = null,
+        private val lifecycleLabel: String = "source",
     ) : LiveHrSource {
         var scans = 0
         val connections = mutableListOf<String>()
@@ -75,17 +76,17 @@ class SourceCoordinatorAdoptionTest {
 
         override fun scan() {
             scans += 1
-            lifecycleOperations?.add("source.scan")
+            lifecycleOperations?.add("$lifecycleLabel.scan")
         }
 
         override fun connect(address: String) {
             connections += address
-            lifecycleOperations?.add("source.connect")
+            lifecycleOperations?.add("$lifecycleLabel.connect")
         }
 
         override fun stop() {
             stops += 1
-            lifecycleOperations?.add("source.stop")
+            lifecycleOperations?.add("$lifecycleLabel.stop")
         }
     }
 
@@ -691,6 +692,188 @@ class SourceCoordinatorAdoptionTest {
         coordinator.onActiveDeviceChanged("my-whoop")
         assertEquals(1, source.stops)
         assertEquals(1, starts)
+    }
+
+    @Test
+    fun ouraSourceConstructsAfterPreviousSourceTeardown() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["standard"] = liveTransportRow(
+                "standard",
+                SourceKind.liveBLE,
+            )
+            devices["oura"] = liveTransportRow(
+                "oura",
+                SourceKind.oura,
+                DeviceStatus.paired,
+            )
+        }
+        val operations = mutableListOf<String>()
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            noopBandSourceFactory = { id, _ ->
+                operations += "$id.construct"
+                FakeNoopBandSource(
+                    lifecycleOperations = operations,
+                    lifecycleLabel = id,
+                )
+            },
+        )
+        coordinator.onActiveDeviceChanged("standard")
+        operations.clear()
+
+        dao.demoteActive()
+        dao.promote("oura", 300)
+        coordinator.onActiveDeviceChanged("oura")
+
+        assertEquals(
+            listOf(
+                "standard.stop",
+                "oura.construct",
+                "oura.scan",
+            ),
+            operations,
+        )
+    }
+
+    @Test
+    fun ouraConstructionFailureRestartsPreviousWhoop() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+            devices["oura"] = liveTransportRow(
+                "oura",
+                SourceKind.oura,
+                DeviceStatus.paired,
+            )
+        }
+        var starts = 0
+        var stops = 0
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = { starts += 1 },
+            stopWhoop = { stops += 1 },
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            log = {},
+            noopBandSourceFactory = { id, _ ->
+                if (id == "oura") error("injected Oura construction failure")
+                null
+            },
+        )
+        coordinator.start()
+
+        dao.demoteActive()
+        dao.promote("oura", 300)
+        coordinator.onActiveDeviceChanged("oura")
+
+        assertEquals(1, stops)
+        assertEquals(1, starts)
+    }
+
+    @Test
+    fun failedWhoopRestorationClearsIdentityForLaterRetry() = runBlocking<Unit> {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", null)
+            devices["oura"] = liveTransportRow(
+                "oura",
+                SourceKind.oura,
+                DeviceStatus.paired,
+            )
+        }
+        var startAttempts = 0
+        var preferredAddressUpdates = 0
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {
+                startAttempts += 1
+                error("injected WHOOP restart failure")
+            },
+            stopWhoop = {},
+            setWhoopPreferredAddress = { _: String? ->
+                preferredAddressUpdates += 1
+            },
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            log = {},
+            noopBandSourceFactory = { id, _ ->
+                if (id == "oura") error("injected Oura construction failure")
+                null
+            },
+        )
+        coordinator.start()
+
+        dao.demoteActive()
+        dao.promote("oura", 300)
+        coordinator.onActiveDeviceChanged("oura")
+        coordinator.onActiveDeviceChanged("my-whoop")
+
+        assertEquals(1, startAttempts)
+        assertEquals(
+            "A failed restart must clear activeWhoopId so the later selection is not skipped.",
+            3,
+            preferredAddressUpdates,
+        )
+    }
+
+    @Test
+    fun ouraConstructionFailureReconstructsPreviousGenericSource() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["standard"] = liveTransportRow(
+                "standard",
+                SourceKind.liveBLE,
+            )
+            devices["oura"] = liveTransportRow(
+                "oura",
+                SourceKind.oura,
+                DeviceStatus.paired,
+            )
+        }
+        val operations = mutableListOf<String>()
+        val coordinator = SourceCoordinator(
+            context = null,
+            registry = registryWith(dao),
+            repository = null,
+            liveSink = { _, _ -> },
+            startWhoop = {},
+            stopWhoop = {},
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            log = {},
+            noopBandSourceFactory = { id, _ ->
+                operations += "$id.construct"
+                if (id == "oura") {
+                    error("injected Oura construction failure")
+                }
+                FakeNoopBandSource(
+                    lifecycleOperations = operations,
+                    lifecycleLabel = id,
+                )
+            },
+        )
+        coordinator.onActiveDeviceChanged("standard")
+        operations.clear()
+
+        dao.demoteActive()
+        dao.promote("oura", 300)
+        coordinator.onActiveDeviceChanged("oura")
+
+        assertEquals(
+            listOf(
+                "standard.stop",
+                "oura.construct",
+                "standard.construct",
+                "standard.scan",
+            ),
+            operations,
+        )
     }
 
     @Test

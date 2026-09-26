@@ -1050,6 +1050,9 @@ final class AppModel: ObservableObject {
             registeredDeviceIDs: { [weak registry] in
                 registry?.registeredSupplierCredentialDeviceIDs()
             },
+            archivedDeviceIDs: { [weak registry] in
+                registry?.archivedSupplierCredentialDeviceIDs()
+            },
             credentials: VeepooCredentialStore.shared,
             cleanup: VeepooCredentialCleanupStore.shared
         )
@@ -1081,7 +1084,13 @@ final class AppModel: ObservableObject {
             },
             noopBandSourceFactory: VeepooBandSourceFactory.productionFactory(
                 registry: registry,
-                live: live
+                live: live,
+                credentialCleanup: VeepooCredentialCleanupStore.shared,
+                retryCredentialCleanup: { [weak cleanupReconciler] deviceID in
+                    cleanupReconciler?.enqueueAuthenticationRejection(
+                        deviceID: deviceID
+                    )
+                }
             ))
         coordinator.start()
         self.sourceCoordinator = coordinator

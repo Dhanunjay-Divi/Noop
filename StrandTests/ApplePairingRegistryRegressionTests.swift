@@ -690,6 +690,36 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
             registry.registeredSupplierCredentialDeviceIDs(),
             Set<String>()
         )
+        XCTAssertEqual(
+            registry.archivedSupplierCredentialDeviceIDs(),
+            Set([device.id])
+        )
+    }
+
+    @MainActor
+    func testRejectedSupplierPersistsArchiveBeforeFallbackSelection()
+        async throws
+    {
+        let (store, registry) = try await makeRegistry()
+        let device = supplierDevice(
+            id: "supplier-rejected-persistence",
+            status: .paired
+        )
+        XCTAssertTrue(registry.addAndSetActive(device))
+
+        XCTAssertTrue(registry.persistRejectedSupplier(device.id))
+
+        let rows = try DeviceRegistryStore(
+            dbQueue: store.registryWriter
+        ).all()
+        XCTAssertEqual(
+            rows.first { $0.id == device.id }?.status,
+            .archived
+        )
+        XCTAssertEqual(
+            rows.first { $0.status == .active }?.id,
+            "my-whoop"
+        )
     }
 
     @MainActor

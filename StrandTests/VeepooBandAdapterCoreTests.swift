@@ -178,6 +178,7 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         VeepooCredentialCleanupAccess
     {
         var pending = Set<String>()
+        var rejectedPending = Set<String>()
         var readsAvailable = true
         var readCount = 0
         var markSucceeds = true
@@ -200,19 +201,76 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             pending.remove(deviceID)
             return true
         }
+
+        func markRejectedPending(deviceID: String) -> Bool {
+            guard markSucceeds else { return false }
+            rejectedPending.insert(deviceID)
+            return true
+        }
+
+        func rejectedPendingDeviceIDs() -> Set<String>? {
+            readCount += 1
+            return readsAvailable ? rejectedPending : nil
+        }
+
+        @discardableResult
+        func clearRejectedPending(deviceID: String) -> Bool {
+            guard clearSucceeds else { return false }
+            rejectedPending.remove(deviceID)
+            return true
+        }
+    }
+
+    @MainActor
+    private final class FakeCredentialCleanupFallback:
+        VeepooCredentialCleanupFallbackAccess
+    {
+        var pending = Set<String>()
+        var available = true
+
+        func mark(deviceID: String) -> Bool {
+            guard available else { return false }
+            pending.insert(deviceID)
+            return true
+        }
+
+        func pendingDeviceIDs() -> Set<String>? {
+            available ? pending : nil
+        }
+
+        @discardableResult
+        func clear(deviceID: String) -> Bool {
+            guard available else { return false }
+            pending.remove(deviceID)
+            return true
+        }
     }
 
     @MainActor
     private final class FakeCredentialCleanupKeychain {
-        var accounts = Set<String>()
+        var accountsByService = [String: Set<String>]()
         var forcedRows: [[String: Any]]?
+        var copyStatusOverride: OSStatus?
+        let fallback = FakeCredentialCleanupFallback()
 
         func makeStore() -> VeepooCredentialCleanupStore {
             VeepooCredentialCleanupStore(
-                copyMatching: { [weak self] _, result in
-                    guard let self else { return errSecNotAvailable }
+                copyMatching: { [weak self] query, result in
+                    guard let self,
+                          let service = (query as NSDictionary)[
+                              kSecAttrService
+                          ] as? String
+                    else {
+                        return errSecNotAvailable
+                    }
+                    if let copyStatusOverride = self.copyStatusOverride {
+                        return copyStatusOverride
+                    }
                     let rows = self.forcedRows
-                        ?? self.accounts.sorted().map {
+                        ?? self.accountsByService[
+                            service,
+                            default: []
+                        ].sorted().map {
                             [kSecAttrAccount as String: $0]
                         }
                     guard !rows.isEmpty else { return errSecItemNotFound }
@@ -221,30 +279,46 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
                 },
                 addItem: { [weak self] item, _ in
                     guard let self,
+                          let service = (item as NSDictionary)[
+                              kSecAttrService
+                          ] as? String,
                           let account = (item as NSDictionary)[
                               kSecAttrAccount
                           ] as? String
                     else {
                         return errSecParam
                     }
-                    if self.accounts.contains(account) {
+                    if self.accountsByService[
+                        service,
+                        default: []
+                    ].contains(account) {
                         return errSecDuplicateItem
                     }
-                    self.accounts.insert(account)
+                    self.accountsByService[
+                        service,
+                        default: []
+                    ].insert(account)
                     return errSecSuccess
                 },
                 deleteItem: { [weak self] query in
                     guard let self,
+                          let service = (query as NSDictionary)[
+                              kSecAttrService
+                          ] as? String,
                           let account = (query as NSDictionary)[
                               kSecAttrAccount
                           ] as? String
                     else {
                         return errSecParam
                     }
-                    return self.accounts.remove(account) == nil
+                    return self.accountsByService[
+                        service,
+                        default: []
+                    ].remove(account) == nil
                         ? errSecItemNotFound
                         : errSecSuccess
-                }
+                },
+                rejectionFallback: fallback
             )
         }
     }
@@ -1348,6 +1422,118 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
     }
 
     @MainActor
+    func testRejectedCredentialCleanupLedgerSurvivesStoreRecreation() {
+        let keychain = FakeCredentialCleanupKeychain()
+        let first = keychain.makeStore()
+        XCTAssertTrue(
+            first.markRejectedPending(deviceID: "veepoo-rejected")
+        )
+
+        let restored = keychain.makeStore()
+        XCTAssertEqual(
+            restored.rejectedPendingDeviceIDs(),
+            Set(["veepoo-rejected"])
+        )
+        XCTAssertTrue(
+            restored.clearRejectedPending(deviceID: "veepoo-rejected")
+        )
+        XCTAssertEqual(
+            first.rejectedPendingDeviceIDs(),
+            Set<String>()
+        )
+    }
+
+    @MainActor
+    func testRejectedCleanupFallbackLedgerSurvivesStoreRecreation() throws {
+        let suite = "noop.rejected-cleanup.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = VeepooCredentialCleanupFallbackStore(defaults: defaults)
+
+        XCTAssertTrue(first.mark(deviceID: "veepoo-fallback"))
+
+        let restored = VeepooCredentialCleanupFallbackStore(
+            defaults: defaults
+        )
+        XCTAssertEqual(
+            restored.pendingDeviceIDs(),
+            Set(["veepoo-fallback"])
+        )
+        XCTAssertTrue(restored.clear(deviceID: "veepoo-fallback"))
+        XCTAssertEqual(first.pendingDeviceIDs(), Set<String>())
+    }
+
+    @MainActor
+    func testRejectedCleanupUsesFallbackWhenKeychainIsUnavailable() {
+        let fallback = FakeCredentialCleanupFallback()
+        var keychainAvailable = false
+        let store = VeepooCredentialCleanupStore(
+            copyMatching: { _, _ in
+                keychainAvailable
+                    ? errSecItemNotFound
+                    : errSecInteractionNotAllowed
+            },
+            addItem: { _, _ in errSecInteractionNotAllowed },
+            deleteItem: { _ in errSecInteractionNotAllowed },
+            rejectionFallback: fallback
+        )
+
+        XCTAssertTrue(store.markRejectedPending(deviceID: "supplier"))
+        XCTAssertEqual(fallback.pending, Set(["supplier"]))
+        XCTAssertNil(store.rejectedPendingDeviceIDs())
+        keychainAvailable = true
+        XCTAssertEqual(
+            store.rejectedPendingDeviceIDs(),
+            Set(["supplier"])
+        )
+    }
+
+    @MainActor
+    func testRejectedCleanupDoesNotFinishFromPartialFallbackInventory() {
+        let keychain = FakeCredentialCleanupKeychain()
+        let store = keychain.makeStore()
+        let credentials = FakeCredentials()
+        credentials.values["keychain-only"] = "2468"
+        credentials.values["fallback-only"] = "1357"
+
+        XCTAssertTrue(
+            store.markRejectedPending(deviceID: "keychain-only")
+        )
+        keychain.fallback.pending.insert("fallback-only")
+        keychain.copyStatusOverride = errSecInteractionNotAllowed
+
+        XCTAssertNil(store.rejectedPendingDeviceIDs())
+        XCTAssertFalse(
+            VeepooPendingCredentialCleanup.reconcile(
+                registeredDeviceIDs: ["keychain-only", "fallback-only"],
+                credentials: credentials,
+                cleanup: store,
+                trigger: .scheduledRetry
+            )
+        )
+        XCTAssertEqual(credentials.clearCount, 0)
+        XCTAssertEqual(credentials.values["keychain-only"], "2468")
+        XCTAssertEqual(credentials.values["fallback-only"], "1357")
+        XCTAssertEqual(
+            keychain.fallback.pending,
+            Set(["fallback-only"])
+        )
+
+        keychain.copyStatusOverride = nil
+        XCTAssertTrue(
+            VeepooPendingCredentialCleanup.reconcile(
+                registeredDeviceIDs: ["keychain-only", "fallback-only"],
+                credentials: credentials,
+                cleanup: store,
+                trigger: .protectedDataAvailable
+            )
+        )
+        XCTAssertTrue(credentials.values.isEmpty)
+        XCTAssertTrue(keychain.fallback.pending.isEmpty)
+        XCTAssertEqual(store.rejectedPendingDeviceIDs(), Set<String>())
+    }
+
+    @MainActor
     func testCredentialCleanupLedgerRejectsMalformedAndOversizedRows() {
         let keychain = FakeCredentialCleanupKeychain()
         let store = keychain.makeStore()
@@ -1359,6 +1545,118 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             [kSecAttrAccount as String: "supplier-\($0)"]
         }
         XCTAssertNil(store.pendingDeviceIDs())
+    }
+
+    @MainActor
+    func testAuthenticationRejectionRequiresDurableMarkerBeforeDeletion() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        let cleanup = FakeCredentialCleanup()
+        cleanup.markSucceeds = false
+        var retryDeviceIDs = [String]()
+        var persistedRejections = Set<String>()
+
+        let completed = VeepooRejectedCredentialCleanup.begin(
+            deviceID: "supplier",
+            credentials: credentials,
+            cleanup: cleanup,
+            persistFailClosedRejection: {
+                persistedRejections.insert("supplier")
+                return true
+            },
+            retry: { retryDeviceIDs.append($0) }
+        )
+
+        XCTAssertFalse(completed)
+        XCTAssertEqual(credentials.clearCount, 0)
+        XCTAssertEqual(credentials.values["supplier"], "2468")
+        XCTAssertTrue(cleanup.rejectedPending.isEmpty)
+        XCTAssertEqual(persistedRejections, Set(["supplier"]))
+        XCTAssertEqual(retryDeviceIDs, ["supplier"])
+    }
+
+    @MainActor
+    func testAuthenticationRejectionRetainsMarkerWhenDeletionFails() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        credentials.clearSucceeds = false
+        let cleanup = FakeCredentialCleanup()
+        var retryDeviceIDs = [String]()
+        var persistedRejections = Set<String>()
+
+        let completed = VeepooRejectedCredentialCleanup.begin(
+            deviceID: "supplier",
+            credentials: credentials,
+            cleanup: cleanup,
+            persistFailClosedRejection: {
+                persistedRejections.insert("supplier")
+                return true
+            },
+            retry: { retryDeviceIDs.append($0) }
+        )
+
+        XCTAssertFalse(completed)
+        XCTAssertEqual(credentials.clearCount, 1)
+        XCTAssertEqual(credentials.values["supplier"], "2468")
+        XCTAssertEqual(cleanup.rejectedPending, Set(["supplier"]))
+        XCTAssertTrue(persistedRejections.isEmpty)
+        XCTAssertEqual(retryDeviceIDs, ["supplier"])
+    }
+
+    @MainActor
+    func testArchivedRejectionCleanupSurvivesReconcilerRecreation() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        let cleanup = FakeCredentialCleanup()
+        cleanup.markSucceeds = false
+        var archivedDeviceIDs = Set<String>()
+
+        XCTAssertFalse(
+            VeepooRejectedCredentialCleanup.begin(
+                deviceID: "supplier",
+                credentials: credentials,
+                cleanup: cleanup,
+                persistFailClosedRejection: {
+                    archivedDeviceIDs.insert("supplier")
+                    return true
+                },
+                retry: { _ in }
+            )
+        )
+        XCTAssertEqual(credentials.values["supplier"], "2468")
+
+        let restarted = VeepooPendingCredentialCleanupReconciler(
+            registeredDeviceIDs: { [] },
+            archivedDeviceIDs: { archivedDeviceIDs },
+            credentials: credentials,
+            cleanup: cleanup,
+            protectedDataAvailablePublisher:
+                Empty<Void, Never>().eraseToAnyPublisher(),
+            retryDelaysNanoseconds: []
+        )
+        restarted.start()
+
+        XCTAssertNil(credentials.values["supplier"])
+        XCTAssertEqual(credentials.clearCount, 1)
+    }
+
+    @MainActor
+    func testRejectedCleanupDeletesCredentialForRegisteredSupplier() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        let cleanup = FakeCredentialCleanup()
+        cleanup.rejectedPending.insert("supplier")
+
+        let completed = VeepooPendingCredentialCleanup.reconcile(
+            registeredDeviceIDs: ["supplier"],
+            credentials: credentials,
+            cleanup: cleanup,
+            trigger: .authenticationRejected
+        )
+
+        XCTAssertTrue(completed)
+        XCTAssertNil(credentials.values["supplier"])
+        XCTAssertTrue(cleanup.rejectedPending.isEmpty)
     }
 
     @MainActor
@@ -1377,6 +1675,37 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         XCTAssertEqual(credentials.clearCount, 0)
         XCTAssertEqual(credentials.values["supplier"], "2468")
         XCTAssertEqual(cleanup.pending, Set(["supplier"]))
+    }
+
+    @MainActor
+    func testReconcilerPersistsQueuedRejectionAfterProtectedDataRecovery() {
+        let credentials = FakeCredentials()
+        credentials.values["supplier"] = "2468"
+        let cleanup = FakeCredentialCleanup()
+        let protectedData = PassthroughSubject<Void, Never>()
+        let reconciler = VeepooPendingCredentialCleanupReconciler(
+            registeredDeviceIDs: { ["supplier"] },
+            credentials: credentials,
+            cleanup: cleanup,
+            protectedDataAvailablePublisher:
+                protectedData.eraseToAnyPublisher(),
+            retryDelaysNanoseconds: []
+        )
+        reconciler.start()
+        cleanup.markSucceeds = false
+
+        reconciler.enqueueAuthenticationRejection(deviceID: "supplier")
+
+        XCTAssertEqual(credentials.clearCount, 0)
+        XCTAssertEqual(credentials.values["supplier"], "2468")
+        XCTAssertTrue(cleanup.rejectedPending.isEmpty)
+
+        cleanup.markSucceeds = true
+        protectedData.send()
+
+        XCTAssertEqual(credentials.clearCount, 1)
+        XCTAssertNil(credentials.values["supplier"])
+        XCTAssertTrue(cleanup.rejectedPending.isEmpty)
     }
 
     @MainActor
@@ -1405,13 +1734,13 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         cleanup.readsAvailable = true
         protectedData.send()
 
-        XCTAssertEqual(cleanup.readCount, 2)
+        XCTAssertEqual(cleanup.readCount, 3)
         XCTAssertEqual(credentials.clearCount, 1)
         XCTAssertNil(credentials.values["supplier"])
         XCTAssertTrue(cleanup.pending.isEmpty)
 
         protectedData.send()
-        XCTAssertEqual(cleanup.readCount, 2)
+        XCTAssertEqual(cleanup.readCount, 3)
         XCTAssertEqual(credentials.clearCount, 1)
     }
 
