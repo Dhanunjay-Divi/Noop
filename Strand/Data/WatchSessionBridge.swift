@@ -124,6 +124,7 @@ final class WatchSessionBridge: NSObject, ObservableObject {
         // without touching lastPushedAt/lastSent, so the first real snapshot passes the gate untouched.
         let contentless = snap.scoreDay == nil && snap.charge == nil && snap.effort == nil
             && snap.rest == nil && snap.sleepSummary.isEmpty
+            && snap.liveHeartRate(at: snap.asOf) == nil
         if contentless { return }
         let now = Date()
         guard shouldPush(snap, now: now) else { return }
@@ -196,15 +197,19 @@ final class WatchSessionBridge: NSObject, ObservableObject {
     /// pushed one, so an unchanged dashboard never burns a transfer re-stating the same scores.
     private func shouldPush(_ snap: WatchScoreSnapshot, now: Date) -> Bool {
         if let at = lastPushedAt, now.timeIntervalSince(at) < Self.minPushInterval { return false }
-        return Self.headlineChanged(from: lastSent, to: snap)
+        return Self.headlineChanged(from: lastSent, to: snap, now: now)
     }
 
-    /// Whether the headline content of `next` differs from the last-pushed snapshot. Headline = the
-    /// scores (with their calibrating flags), the sleep summary line, and the day the scores are ABOUT.
-    /// `hr` and `asOf` are deliberately NOT headline: hr ticks ~1 Hz and `asOf` differs on every build,
-    /// so counting either as "changed" would defeat the dedup and re-send identical scores all day.
-    /// nil `last` (nothing pushed yet) always counts as changed.
-    static func headlineChanged(from last: WatchScoreSnapshot?, to next: WatchScoreSnapshot) -> Bool {
+    /// Whether publishable content in `next` differs from the last-pushed snapshot. Score fields retain
+    /// their existing dedup semantics. A genuinely fresh HR observation also counts, including the same
+    /// BPM arriving in a newer packet, while an undated or already-stale held value does not. The separate
+    /// 30-minute spacing gate still bounds WatchConnectivity budget use. `asOf` remains excluded because it
+    /// differs on every build. nil `last` (nothing pushed yet) always counts as changed.
+    static func headlineChanged(
+        from last: WatchScoreSnapshot?,
+        to next: WatchScoreSnapshot,
+        now: Date = Date()
+    ) -> Bool {
         guard let last else { return true }
         return last.charge != next.charge
             || last.chargeCalibrating != next.chargeCalibrating
@@ -217,6 +222,17 @@ final class WatchSessionBridge: NSObject, ObservableObject {
             || last.launchGateRequired != next.launchGateRequired
             || last.launchGateVersion != next.launchGateVersion
             || last.launchGateAuthorized != next.launchGateAuthorized
+            || Self.freshHeartRateChanged(from: last, to: next, now: now)
+    }
+
+    private static func freshHeartRateChanged(
+        from last: WatchScoreSnapshot,
+        to next: WatchScoreSnapshot,
+        now: Date
+    ) -> Bool {
+        guard let nextHR = next.liveHeartRate(at: now) else { return false }
+        return last.liveHeartRate(at: now) != nextHR
+            || last.heartRateObservedAt != next.heartRateObservedAt
     }
 
     /// Build the snapshot off the app state. Pure read; no side effects. Split out so the wiring is easy
@@ -288,6 +304,9 @@ final class WatchSessionBridge: NSObject, ObservableObject {
             rest: rest,
             restCalibrating: false,
             hr: model.bpm ?? model.live.heartRate,
+            // Match the widget contract: use the accepted transport event's real receipt time so a later
+            // score refresh cannot make a held BPM look live on the Watch.
+            heartRateObservedAt: model.live.heartRateSample?.receivedAt,
             sleepSummary: sleepSummary(for: summaryDay),
             asOf: Date(),
             // The day the scores are ABOUT (not when we built this), so the watch can label recency

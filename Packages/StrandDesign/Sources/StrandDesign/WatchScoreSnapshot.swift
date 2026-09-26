@@ -59,6 +59,10 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
     /// Most recent heart rate the phone knows about (bpm). The watch shows its OWN live HR off its
     /// sensor; this is just the last value the phone had, used as a fallback / sync indicator.
     public var hr: Int?
+    /// Wall-clock instant when the phone accepted the heart-rate packet represented by `hr`.
+    /// This is deliberately distinct from `asOf`: rebuilding a score snapshot must not renew a held
+    /// physiological value. Optional so payloads written by older phone builds continue to decode.
+    public var heartRateObservedAt: Date?
 
     /// A one line sleep summary for the glance (e.g. "7h 12m · 81% efficiency"), already formatted by
     /// the phone. Empty string when there is nothing to show.
@@ -85,7 +89,8 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
     public init(charge: Double?, chargeCalibrating: Bool,
                 effort: Double?, effortCalibrating: Bool,
                 rest: Double?, restCalibrating: Bool,
-                hr: Int?, sleepSummary: String, asOf: Date,
+                hr: Int?, heartRateObservedAt: Date? = nil,
+                sleepSummary: String, asOf: Date,
                 scoreDay: String? = nil,
                 launchGateRequired: Bool = true,
                 launchGateVersion: String? = nil,
@@ -97,6 +102,7 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
         self.rest = rest
         self.restCalibrating = restCalibrating
         self.hr = hr
+        self.heartRateObservedAt = heartRateObservedAt
         self.sleepSummary = sleepSummary
         self.asOf = asOf
         self.scoreDay = scoreDay
@@ -109,7 +115,7 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
         case charge, chargeCalibrating
         case effort, effortCalibrating
         case rest, restCalibrating
-        case hr, sleepSummary, asOf, scoreDay
+        case hr, heartRateObservedAt, sleepSummary, asOf, scoreDay
         case launchGateRequired, launchGateVersion, launchGateAuthorized
     }
 
@@ -123,6 +129,7 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
         rest = try container.decodeIfPresent(Double.self, forKey: .rest)
         restCalibrating = try container.decode(Bool.self, forKey: .restCalibrating)
         hr = try container.decodeIfPresent(Int.self, forKey: .hr)
+        heartRateObservedAt = try container.decodeIfPresent(Date.self, forKey: .heartRateObservedAt)
         sleepSummary = try container.decode(String.self, forKey: .sleepSummary)
         asOf = try container.decode(Date.self, forKey: .asOf)
         scoreDay = try container.decodeIfPresent(String.self, forKey: .scoreDay)
@@ -194,6 +201,7 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
             rest: nil,
             restCalibrating: false,
             hr: nil,
+            heartRateObservedAt: nil,
             sleepSummary: "",
             asOf: Date(timeIntervalSince1970: 0),
             scoreDay: nil,
@@ -220,6 +228,35 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
     /// The placeholder (asOf at the epoch) always reads stale, which is what we want for a never-synced watch.
     public func isStale(now: Date = Date()) -> Bool {
         now.timeIntervalSince(asOf) > Self.stalenessThreshold
+    }
+
+    /// A phone-provided heart-rate value is live only for this long after its actual transport event.
+    /// This intentionally mirrors the iPhone widget contract: publication time cannot extend sample life.
+    public static let liveHeartRateMaxAge: TimeInterval = 2 * 60
+
+    /// Small wall-clock disagreement between phone and Watch is tolerated, while a materially future
+    /// timestamp is withheld rather than being presented as a current physiological value.
+    private static let maximumFutureHeartRateClockSkew: TimeInterval = 5 * 60
+
+    /// The phone-provided HR only while its original observation remains inside the conservative live
+    /// window. Legacy payloads have no observation timestamp and therefore return nil without affecting
+    /// the snapshot's daily scores.
+    public func liveHeartRate(at now: Date = Date()) -> Int? {
+        guard let hr,
+              let observed = heartRateObservedAt,
+              observed <= now.addingTimeInterval(Self.maximumFutureHeartRateClockSkew) else {
+            return nil
+        }
+        let age = max(0, now.timeIntervalSince(observed))
+        return age <= Self.liveHeartRateMaxAge ? hr : nil
+    }
+
+    /// First instant at which the represented phone HR stops qualifying as live. Complication timelines
+    /// use this to insert an expiry entry instead of holding a fresh-looking value until the 30-minute
+    /// score-refresh backstop.
+    public var liveHeartRateExpiresAt: Date? {
+        guard hr != nil, let observed = heartRateObservedAt else { return nil }
+        return observed.addingTimeInterval(Self.liveHeartRateMaxAge)
     }
 
     /// The semantic freshness buckets behind `freshnessText`. Display code that needs to REASON about

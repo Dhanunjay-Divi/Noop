@@ -12,6 +12,7 @@ final class WatchScoreSnapshotTests: XCTestCase {
 
     func testFullSnapshotRoundTrips() throws {
         let asOf = Date(timeIntervalSince1970: 1_700_000_000)
+        let heartRateObservedAt = asOf.addingTimeInterval(-30)
         let original = WatchScoreSnapshot(
             charge: 72,
             chargeCalibrating: false,
@@ -20,6 +21,7 @@ final class WatchScoreSnapshotTests: XCTestCase {
             rest: 81,
             restCalibrating: false,
             hr: 58,
+            heartRateObservedAt: heartRateObservedAt,
             sleepSummary: "7h 12m · 81% sleep efficiency",
             asOf: asOf
         )
@@ -32,6 +34,7 @@ final class WatchScoreSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.effort, 8.5)
         XCTAssertEqual(decoded.rest, 81)
         XCTAssertEqual(decoded.hr, 58)
+        XCTAssertEqual(decoded.heartRateObservedAt, heartRateObservedAt)
         XCTAssertEqual(decoded.sleepSummary, "7h 12m · 81% sleep efficiency")
         XCTAssertEqual(decoded.asOf, asOf)
         XCTAssertFalse(decoded.chargeCalibrating)
@@ -106,5 +109,106 @@ final class WatchScoreSnapshotTests: XCTestCase {
         // has none), so this only pins the canonical UPSTREAM fallback, not the real cross-target value.
         XCTAssertEqual(WatchScoreSnapshot.appGroupId, "group.com.noopapp.noop")
         XCTAssertEqual(WatchScoreSnapshot.storageKey, "latestWatchSnapshot")
+    }
+
+    func testLegacySnapshotWithoutHeartRateObservationDecodesWithoutInventingFreshness() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let current = WatchScoreSnapshot(
+            charge: 72, chargeCalibrating: false,
+            effort: 8.5, effortCalibrating: false,
+            rest: 81, restCalibrating: false,
+            hr: 58, heartRateObservedAt: now,
+            sleepSummary: "7h 12m", asOf: now
+        )
+        let encoded = try JSONEncoder().encode(current)
+        var legacyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        legacyObject.removeValue(forKey: "heartRateObservedAt")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+
+        let decoded = try JSONDecoder().decode(WatchScoreSnapshot.self, from: legacyData)
+
+        XCTAssertEqual(decoded.hr, 58, "The legacy value remains wire-compatible")
+        XCTAssertNil(decoded.heartRateObservedAt)
+        XCTAssertNil(decoded.liveHeartRate(at: now),
+                     "An undated legacy value must never be upgraded to live")
+        XCTAssertEqual(decoded.charge, 72)
+        XCTAssertEqual(decoded.effort, 8.5)
+        XCTAssertEqual(decoded.rest, 81)
+    }
+
+    func testPhoneHeartRateUsesTwoMinuteObservationWindowWithoutSuppressingScores() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var snapshot = WatchScoreSnapshot(
+            charge: 72, chargeCalibrating: false,
+            effort: 8.5, effortCalibrating: false,
+            rest: 81, restCalibrating: false,
+            hr: 58,
+            heartRateObservedAt: now.addingTimeInterval(-WatchScoreSnapshot.liveHeartRateMaxAge),
+            sleepSummary: "7h 12m", asOf: now
+        )
+
+        XCTAssertEqual(WatchScoreSnapshot.liveHeartRateMaxAge, 2 * 60)
+        XCTAssertEqual(snapshot.liveHeartRate(at: now), 58)
+        XCTAssertEqual(
+            snapshot.liveHeartRateExpiresAt,
+            snapshot.heartRateObservedAt?.addingTimeInterval(WatchScoreSnapshot.liveHeartRateMaxAge)
+        )
+
+        snapshot.heartRateObservedAt = now.addingTimeInterval(
+            -(WatchScoreSnapshot.liveHeartRateMaxAge + 1)
+        )
+        XCTAssertNil(snapshot.liveHeartRate(at: now))
+        XCTAssertEqual(snapshot.charge, 72)
+        XCTAssertEqual(snapshot.effort, 8.5)
+        XCTAssertEqual(snapshot.rest, 81)
+    }
+
+    @MainActor
+    func testPublicationReactsToNewFreshHeartRateObservationButNotHeldStaleValue() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let last = WatchScoreSnapshot(
+            charge: 72, chargeCalibrating: false,
+            effort: 8.5, effortCalibrating: false,
+            rest: 81, restCalibrating: false,
+            hr: 58, heartRateObservedAt: now.addingTimeInterval(-90),
+            sleepSummary: "7h 12m", asOf: now.addingTimeInterval(-60)
+        )
+        var fresh = last
+        fresh.asOf = now
+        fresh.heartRateObservedAt = now.addingTimeInterval(-30)
+
+        XCTAssertTrue(
+            WatchSessionBridge.headlineChanged(from: last, to: fresh, now: now),
+            "A newer accepted packet matters even when its rounded BPM is unchanged"
+        )
+
+        var stale = last
+        stale.asOf = now
+        stale.heartRateObservedAt = now.addingTimeInterval(
+            -(WatchScoreSnapshot.liveHeartRateMaxAge + 1)
+        )
+        XCTAssertFalse(
+            WatchSessionBridge.headlineChanged(from: last, to: stale, now: now),
+            "A held or already-stale HR value must not spend the Watch transfer budget"
+        )
+    }
+
+    func testLockedSnapshotScrubsHeartRateObservationAlongsideHealthValues() {
+        let scrub = WatchScoreSnapshot.launchLocked(
+            authorization: LaunchSurfaceAuthorization(
+                required: true,
+                gateVersion: "test",
+                authorized: false
+            )
+        )
+
+        XCTAssertNil(scrub.hr)
+        XCTAssertNil(scrub.heartRateObservedAt)
+        XCTAssertNil(scrub.liveHeartRate(at: Date()))
+        XCTAssertNil(scrub.charge)
+        XCTAssertNil(scrub.effort)
+        XCTAssertNil(scrub.rest)
     }
 }
