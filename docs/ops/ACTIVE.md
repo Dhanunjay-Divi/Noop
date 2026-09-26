@@ -12,6 +12,25 @@ Last updated: **2026-09-26**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
+- September 26 exact-day step parity is locally green on the current dirty
+  replacement. Apple Calendar and Workout detail now prefer the exact-day
+  Apple Health pedometer aggregate over the classified band counter. Android
+  Health Connect projects owned steps into its daily row, and Calendar,
+  Workout detail, Today, and Fusion share imported-first arbitration without
+  admitting gravity-only motion or heart rate as gait proof. Apple tests pass
+  8/8; Swift counter/Fusion tests pass 42/42; Android focused tests pass 58/58,
+  and its complete Full Debug wall passes 5,196 tests with seven intentional
+  skips plus compile, lint, and APK assembly. The unsigned macOS test graph and
+  iPhone Simulator graph pass, with Watch, complications, and widgets embedded.
+  The reviewed terminology inventory contains 18,537 classified occurrences
+  across 1,628 groups. All 370 Tools tests, all ten required contexts, nine
+  release checks, trusted protected-main self-verification, exact SDK artifact
+  verification, legal distribution, 12-metric calibration parity, 99
+  operations records, private-data, the 1,311-file claims scan, terminology,
+  and full localization pass. The consolidated replacement containing this
+  record still requires exact-head hosted checks, non-author approval,
+  protected integration/main verification, and synchronized physical
+  manual-count validation.
 - The current September 26 replacement starts from remote PR `#17` head
   `d775d7c36bed7795f67ff447f0a8d645625be5ba` and is locally verified but not
   yet pushed. Primary Steps on Apple and Android now accepts only imported

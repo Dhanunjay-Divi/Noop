@@ -147,6 +147,7 @@
     <string name="appwide_daily_signal_status_recheck">Beobachten</string>
     <string name="appwide_day_overview_active_time">Aktivzeit</string>
     <string name="appwide_day_overview_activity">Aktivität</string>
+    <string name="appwide_day_overview_band_steps">Band-Schritte</string>
     <string name="appwide_day_overview_blood_oxygen">Blutsauerstoff</string>
     <string name="appwide_day_overview_calories_format">%1$s kcal</string>
     <string name="appwide_day_overview_daily_scores">Tageswerte</string>
@@ -167,6 +168,7 @@
     <string name="appwide_day_overview_no_sessions">Für diesen Tag sind keine Einheiten aufgezeichnet.</string>
     <string name="appwide_day_overview_open_hint">Öffnet die Tagesübersicht</string>
     <string name="appwide_day_overview_overall">Gesamtbild</string>
+    <string name="appwide_day_overview_phone_watch_steps">Telefon-/Uhrschritte</string>
     <string name="appwide_day_overview_recovery">Erholung</string>
     <string name="appwide_day_overview_rem_sleep">REM-Schlaf</string>
     <string name="appwide_day_overview_respiratory_rate">Atemfrequenz</string>

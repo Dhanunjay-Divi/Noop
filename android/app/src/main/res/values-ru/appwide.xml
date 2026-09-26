@@ -147,6 +147,7 @@
     <string name="appwide_daily_signal_status_recheck">Наблюдать</string>
     <string name="appwide_day_overview_active_time">Время активности</string>
     <string name="appwide_day_overview_activity">Активность</string>
+    <string name="appwide_day_overview_band_steps">Шаги с браслета</string>
     <string name="appwide_day_overview_blood_oxygen">Кислород в крови</string>
     <string name="appwide_day_overview_calories_format">%1$s ккал</string>
     <string name="appwide_day_overview_daily_scores">Дневные оценки</string>
@@ -167,6 +168,7 @@
     <string name="appwide_day_overview_no_sessions">За этот день тренировок не записано.</string>
     <string name="appwide_day_overview_open_hint">Открывает обзор дня</string>
     <string name="appwide_day_overview_overall">Общая картина</string>
+    <string name="appwide_day_overview_phone_watch_steps">Шаги с телефона/часов</string>
     <string name="appwide_day_overview_recovery">Восстановление</string>
     <string name="appwide_day_overview_rem_sleep">Быстрый сон</string>
     <string name="appwide_day_overview_respiratory_rate">Частота дыхания</string>

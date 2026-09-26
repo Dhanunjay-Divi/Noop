@@ -147,6 +147,7 @@
     <string name="appwide_daily_signal_status_recheck">留意</string>
     <string name="appwide_day_overview_active_time">活动时长</string>
     <string name="appwide_day_overview_activity">活动</string>
+    <string name="appwide_day_overview_band_steps">手环步数</string>
     <string name="appwide_day_overview_blood_oxygen">血氧</string>
     <string name="appwide_day_overview_calories_format">%1$s 千卡</string>
     <string name="appwide_day_overview_daily_scores">每日评分</string>
@@ -167,6 +168,7 @@
     <string name="appwide_day_overview_no_sessions">这一天没有记录训练。</string>
     <string name="appwide_day_overview_open_hint">打开当日概览</string>
     <string name="appwide_day_overview_overall">总览</string>
+    <string name="appwide_day_overview_phone_watch_steps">手机/手表步数</string>
     <string name="appwide_day_overview_recovery">恢复</string>
     <string name="appwide_day_overview_rem_sleep">快速眼动睡眠</string>
     <string name="appwide_day_overview_respiratory_rate">呼吸频率</string>

@@ -42,16 +42,44 @@ final class FusionResolverTests: XCTestCase {
         XCTAssertEqual(point?.value, 52)
     }
 
-    func testTieBrokenStablyBySourcePriority() {
-        // Two tier-0 step counters (band + phone). The phone has the lower source-priority for steps?
-        // No — for steps both are tier 0; the stable tiebreak is sourcePriority: appleHealth (2) <
-        // xiaomiBand (4), so Apple wins the tie even though the band is listed first.
+    func testEqualTrustStepCountersUseLargestCumulativeTotalWithoutSumming() {
+        // Apple Health and Health Connect can cover different portions of the day. Max keeps the
+        // more-complete phone/watch total while avoiding the double count that summing would introduce.
         let point = FusionResolver.resolve(metricKey: "steps", inputs: [
-            FusionInput(source: .xiaomiBand, value: 8000),
-            FusionInput(source: .appleHealth, value: 8100),
+            FusionInput(source: .appleHealth, value: 8000),
+            FusionInput(source: .healthConnect, value: 8100),
+        ])
+        XCTAssertEqual(point?.winningSource, .healthConnect)
+        XCTAssertEqual(point?.value, 8100)
+    }
+
+    func testHigherBandCounterDoesNotDisplacePhoneWatchSteps() {
+        // A noisy wrist counter may overcount repetitive hand motion. Its larger total is not evidence
+        // of walking and must not override the higher-priority phone/watch pedometer.
+        let point = FusionResolver.resolve(metricKey: "steps", inputs: [
+            FusionInput(source: .xiaomiBand, value: 12_000),
+            FusionInput(source: .appleHealth, value: 8_000),
         ])
         XCTAssertEqual(point?.winningSource, .appleHealth)
-        XCTAssertEqual(point?.value, 8100)
+        XCTAssertEqual(point?.value, 8_000)
+    }
+
+    func testEqualTrustNonStepMetricsStillUseStableSourcePriority() {
+        let point = FusionResolver.resolve(metricKey: "rhr", inputs: [
+            FusionInput(source: .healthConnect, value: 52),
+            FusionInput(source: .appleHealth, value: 54),
+        ])
+        XCTAssertEqual(point?.winningSource, .appleHealth)
+        XCTAssertEqual(point?.value, 54)
+    }
+
+    func testEqualTierStepEstimatesStillUseStableSourcePriority() {
+        let point = FusionResolver.resolve(metricKey: "steps", inputs: [
+            FusionInput(source: .noopComputed, value: 8500),
+            FusionInput(source: .whoopImport, value: 8000),
+        ])
+        XCTAssertEqual(point?.winningSource, .whoopImport)
+        XCTAssertEqual(point?.value, 8000)
     }
 
     // MARK: - 2. Cross-validation classification at boundaries

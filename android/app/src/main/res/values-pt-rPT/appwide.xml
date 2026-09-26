@@ -147,6 +147,7 @@
     <string name="appwide_daily_signal_status_recheck">A vigiar</string>
     <string name="appwide_day_overview_active_time">Tempo ativo</string>
     <string name="appwide_day_overview_activity">Atividade</string>
+    <string name="appwide_day_overview_band_steps">Passos da pulseira</string>
     <string name="appwide_day_overview_blood_oxygen">Oxigénio no sangue</string>
     <string name="appwide_day_overview_calories_format">%1$s kcal</string>
     <string name="appwide_day_overview_daily_scores">Pontuações diárias</string>
@@ -167,6 +168,7 @@
     <string name="appwide_day_overview_no_sessions">Não foram registadas sessões neste dia.</string>
     <string name="appwide_day_overview_open_hint">Abre o resumo do dia</string>
     <string name="appwide_day_overview_overall">Visão geral</string>
+    <string name="appwide_day_overview_phone_watch_steps">Passos do telemóvel/relógio</string>
     <string name="appwide_day_overview_recovery">Recuperação</string>
     <string name="appwide_day_overview_rem_sleep">Sono REM</string>
     <string name="appwide_day_overview_respiratory_rate">Frequência respiratória</string>

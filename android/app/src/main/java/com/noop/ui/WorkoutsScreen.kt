@@ -156,6 +156,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
     val activeDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
     val lastHistorySyncAt by vm.lastHistorySyncAt.collectAsStateWithLifecycle()
     val workoutDataVersion by vm.workoutDataVersion.collectAsStateWithLifecycle()
+    val metricDataVersion by vm.metricDataVersion.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val workoutProfile = remember(context) { ProfileStore.from(context) }
     val workoutProfileRevision by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
@@ -205,6 +206,19 @@ fun WorkoutsScreen(vm: AppViewModel) {
         appliedHistory?.customEndDate ?: initialCustomEndDate
     var showStrengthTrainer by remember { mutableStateOf(false) }
     var selectedOverviewDay by remember { mutableStateOf<LocalDate?>(null) }
+    var selectedOverviewImportedSteps by remember(activeDeviceId) { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(
+        selectedOverviewDay,
+        workoutDataVersion,
+        metricDataVersion,
+        activeDeviceId,
+    ) {
+        selectedOverviewImportedSteps = null
+        selectedOverviewImportedSteps = selectedOverviewDay?.let {
+            runCatching { vm.importedStepsForDay(it.toString()) }.getOrNull()
+        }
+    }
 
     // The manual add/edit dialog target: Some(null) = add, Some(row) = edit, null = closed.
     var dialog by remember { mutableStateOf<DialogTarget?>(null) }
@@ -804,6 +818,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
             scope = DayOverviewScope.ACTIVITY,
             focusValue = daily?.strain,
             daily = daily,
+            importedSteps = selectedOverviewImportedSteps,
             workouts = dayWorkouts,
             metricRows = emptyList(),
             journal = emptyList(),
@@ -1083,6 +1098,26 @@ internal fun dayOverviewSleepScore(daily: DailyMetric?): Double? {
     return RestScorer.restFromDaily(daily.copy(efficiency = efficiency))
 }
 
+internal enum class DayOverviewStepSource {
+    IMPORTED_PEDOMETER,
+    CLASSIFIED_BAND,
+}
+
+internal data class ResolvedDayOverviewSteps(
+    val value: Int,
+    val source: DayOverviewStepSource,
+)
+
+internal fun resolvedDayOverviewSteps(
+    imported: Int?,
+    classifiedBand: Int?,
+): ResolvedDayOverviewSteps? = when {
+    imported != null -> ResolvedDayOverviewSteps(imported, DayOverviewStepSource.IMPORTED_PEDOMETER)
+    classifiedBand != null ->
+        ResolvedDayOverviewSteps(classifiedBand, DayOverviewStepSource.CLASSIFIED_BAND)
+    else -> null
+}
+
 internal enum class DayOverviewScope(
     val includesWholeDayMetrics: Boolean = false,
     val includesSleepMetrics: Boolean = false,
@@ -1140,6 +1175,7 @@ internal fun WorkoutDayOverviewSheet(
     scope: DayOverviewScope,
     focusValue: Double?,
     daily: DailyMetric?,
+    importedSteps: Int?,
     workouts: List<WorkoutRow>,
     metricRows: List<MetricSeriesRow>,
     journal: List<JournalEntry>,
@@ -1173,6 +1209,17 @@ internal fun WorkoutDayOverviewSheet(
     val workoutCalories = workouts.mapNotNull { it.energyKcal?.takeIf(Double::isFinite) }
     val workoutDistances = workouts.mapNotNull {
         it.distanceM?.takeIf { value -> value.isFinite() && value > 0.0 }
+    }
+    val overviewSteps = resolvedDayOverviewSteps(
+        imported = importedSteps,
+        classifiedBand = daily?.steps,
+    )
+    val overviewStepsLabel = when (overviewSteps?.source) {
+        DayOverviewStepSource.IMPORTED_PEDOMETER ->
+            uiString(R.string.appwide_day_overview_phone_watch_steps)
+        DayOverviewStepSource.CLASSIFIED_BAND ->
+            uiString(R.string.appwide_day_overview_band_steps)
+        null -> uiString(R.string.appwide_day_overview_steps)
     }
 
     fun score(value: Double?): String =
@@ -1241,8 +1288,8 @@ internal fun WorkoutDayOverviewSheet(
     )
     val activityItems = listOf(
         DayOverviewMetric(
-            uiString(R.string.appwide_day_overview_steps),
-            daily?.steps?.let { dayOverviewGrouped(it.toDouble()) } ?: noData,
+            overviewStepsLabel,
+            overviewSteps?.let { dayOverviewGrouped(it.value.toDouble()) } ?: noData,
             Palette.statusPositive,
         ),
         DayOverviewMetric(
@@ -1290,8 +1337,8 @@ internal fun WorkoutDayOverviewSheet(
             Palette.effortColor,
         ),
         DayOverviewMetric(
-            uiString(R.string.appwide_day_overview_steps),
-            daily?.steps?.let { dayOverviewGrouped(it.toDouble()) } ?: noData,
+            overviewStepsLabel,
+            overviewSteps?.let { dayOverviewGrouped(it.value.toDouble()) } ?: noData,
             Palette.statusPositive,
         ),
     )

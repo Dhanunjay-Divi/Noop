@@ -147,6 +147,7 @@
     <string name="appwide_daily_signal_status_recheck">Watch</string>
     <string name="appwide_day_overview_active_time">Active time</string>
     <string name="appwide_day_overview_activity">Activity</string>
+    <string name="appwide_day_overview_band_steps">Band steps</string>
     <string name="appwide_day_overview_blood_oxygen">Blood oxygen</string>
     <string name="appwide_day_overview_calories_format">%1$s kcal</string>
     <string name="appwide_day_overview_daily_scores">Daily scores</string>
@@ -167,6 +168,7 @@
     <string name="appwide_day_overview_no_sessions">No sessions were recorded for this day.</string>
     <string name="appwide_day_overview_open_hint">Opens the day overview</string>
     <string name="appwide_day_overview_overall">Overall</string>
+    <string name="appwide_day_overview_phone_watch_steps">Phone/watch steps</string>
     <string name="appwide_day_overview_recovery">Recovery</string>
     <string name="appwide_day_overview_rem_sleep">REM sleep</string>
     <string name="appwide_day_overview_respiratory_rate">Respiratory rate</string>

@@ -740,7 +740,7 @@ object HealthConnectImporter {
                 val spo2 = if (a.spo2Count > 0) round1(a.spo2Sum / a.spo2Count) else null
                 val resp = if (a.respCount > 0) round1(a.respSum / a.respCount) else null
                 val exCount = if (a.exerciseCount > 0) a.exerciseCount else null
-                val hasMetric = rhr != null || hrv != null || sleep != null ||
+                val hasMetric = daySteps > 0L || rhr != null || hrv != null || sleep != null ||
                     spo2 != null || resp != null || exCount != null
                 if (hasMetric) {
                     dailyRows.add(
@@ -752,6 +752,7 @@ object HealthConnectImporter {
                             avgHrv = hrv,
                             spo2Pct = spo2,
                             respRateBpm = resp,
+                            steps = if (daySteps > 0L) daySteps.toInt() else null,
                             exerciseCount = exCount,
                             hrvMethod = hrv?.let { DailyHrvMethod.RMSSD },
                         )
@@ -856,12 +857,11 @@ object HealthConnectImporter {
      * Live top-up of TODAY's Health Connect step total (#150 follow-up). [import] is a manual
      * one-shot, so today's stored steps freeze at import time while the real count keeps climbing —
      * past days were fine, today wasn't. This does ONE StepsRecord read with a one-day filter slack,
-     * buckets by record START day exactly like [import], and rewrites only today's "health-connect"
-     * [AppleDaily] row. The slack lets a record-zone today survive a different phone-zone midnight;
-     * exact day-key matching still rejects older rows. The existing row is read first and updated via
-     * `copy(steps = …)` because
-     * [WhoopRepository.upsertAppleDaily] is a Room `@Upsert` — on a (deviceId, day) conflict it
-     * REPLACES the whole row, so a fresh steps-only row would null every other column.
+     * buckets by record START day exactly like [import], and atomically merges today's
+     * "health-connect" [AppleDaily] and [DailyMetric] rows. The slack lets a record-zone today survive
+     * a different phone-zone midnight; exact day-key matching still rejects older rows. The additive
+     * repository transaction preserves every non-step column while keeping Today/detail reads and
+     * Fusion's daily projection on the same live total.
      *
      * Returns the live sum, or the stored count when today read zero, or null when Health Connect
      * is unavailable / steps aren't granted / there's nothing at all. Never throws.
@@ -911,11 +911,19 @@ object HealthConnectImporter {
         // Zero is indistinguishable from "no data yet today" - never overwrite a stored count with it.
         if (sum <= 0L) return existing?.steps
 
-        val updated = existing?.copy(steps = sum.toInt())
-            ?: AppleDaily(deviceId = HC_DEVICE, day = dayKey, steps = sum.toInt())
         try {
             if (existing == null) repo.upsertDevice(HC_DEVICE, name = "Health Connect")
-            repo.upsertAppleDaily(listOf(updated))
+            repo.mergeHealthConnectProjectionAdditive(
+                appleRows = listOf(
+                    AppleDaily(deviceId = HC_DEVICE, day = dayKey, steps = sum.toInt()),
+                ),
+                dailyRows = listOf(
+                    DailyMetric(deviceId = HC_DEVICE, day = dayKey, steps = sum.toInt()),
+                ),
+                metricRows = emptyList(),
+                sleepRows = emptyList(),
+                workoutRows = emptyList(),
+            )
         } catch (e: Exception) {
             rethrowCancellation(e)
             return existing?.steps

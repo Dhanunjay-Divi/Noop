@@ -846,12 +846,14 @@ class WhoopRepository internal constructor(
             workoutRows = workoutRows,
         )
         if (scope.exercise) noteWorkoutsChanged()
-        if (dailyRows.isNotEmpty() || scope.vo2Max || scope.seriesKeys.isNotEmpty() ||
+        if (scope.ownsDailyMetricColumns || scope.totalCalories ||
+            scope.activeCalories || scope.heartRate || scope.vo2Max ||
+            scope.seriesKeys.isNotEmpty() ||
             metricRows.isNotEmpty()
         ) {
             noteMetricsChanged(
                 keys = scope.seriesKeys + metricRows.map(MetricSeriesRow::key),
-                dailyMetricsChanged = dailyRows.isNotEmpty(),
+                dailyMetricsChanged = scope.ownsDailyMetricColumns,
             )
         }
     }

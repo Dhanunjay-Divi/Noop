@@ -5411,6 +5411,28 @@
     "zh-Hans": "步数",
     "zh-Hant": "步數"
   },
+  "appwide.day_overview.phone_watch_steps": {
+    "de": "Telefon-/Uhrschritte",
+    "en": "Phone/watch steps",
+    "es": "Pasos del teléfono/reloj",
+    "fr": "Pas du téléphone/de la montre",
+    "it": "Passi da telefono/orologio",
+    "pt-PT": "Passos do telemóvel/relógio",
+    "ru": "Шаги с телефона/часов",
+    "zh-Hans": "手机/手表步数",
+    "zh-Hant": "手機/手錶步數"
+  },
+  "appwide.day_overview.band_steps": {
+    "de": "Band-Schritte",
+    "en": "Band steps",
+    "es": "Pasos de la pulsera",
+    "fr": "Pas du bracelet",
+    "it": "Passi dal bracciale",
+    "pt-PT": "Passos da pulseira",
+    "ru": "Шаги с браслета",
+    "zh-Hans": "手环步数",
+    "zh-Hant": "手環步數"
+  },
   "appwide.day_overview.estimated_total_energy": {
     "de": "Geschätzte Gesamtenergie",
     "en": "Estimated total energy",

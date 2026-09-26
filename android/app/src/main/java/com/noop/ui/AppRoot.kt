@@ -2087,10 +2087,12 @@ private fun NavHostController.returnToTabRoot(route: String) {
  */
 @Composable
 private fun FusedRecordRoute(viewModel: AppViewModel) {
+    val metricDataVersion by viewModel.metricDataVersion.collectAsStateWithLifecycle()
+    val activeDeviceId by viewModel.selectedDeviceId.collectAsStateWithLifecycle()
     var record by remember {
         mutableStateOf(FusedRecord(rows = emptyList(), dayOwner = null as FusionSource?, contributingSourceCount = 0))
     }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(metricDataVersion, activeDeviceId) {
         record = runCatching { viewModel.fusedRecordForToday() }.getOrDefault(record)
     }
     FusedRecordScreen(record = record)

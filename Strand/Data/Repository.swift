@@ -4606,6 +4606,16 @@ final class Repository: ObservableObject {
             to: Self.dayString(now.addingTimeInterval(86_400)))) ?? []
     }
 
+    /// Bounded Apple Health daily aggregates for exact-day and calendar-detail surfaces.
+    func appleDailyRows(fromDay: String, toDay: String) async -> [AppleDaily] {
+        guard let store = await ensureStore() else { return [] }
+        return (try? await store.appleDaily(
+            deviceId: Self.appleHealthSource,
+            from: fromDay,
+            to: toDay
+        )) ?? []
+    }
+
     /// #833/v7.7.2 (Apple Health per-source freeze): the SHARED heavy-load seam behind `AppleHealthView.load()`.
     /// It owns the cache short-circuit, the DEBUG fire tally, the whole-history store reads, and the write-back,
     /// so the freeze fix lives in ONE testable place instead of the view's `@State` (which can't be driven

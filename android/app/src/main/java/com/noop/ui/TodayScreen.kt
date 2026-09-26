@@ -1361,11 +1361,12 @@ fun TodayScreen(
     var importedStepsByDay by remember(activeStrapId) {
         mutableStateOf<Map<String, Int>>(emptyMap())
     }
-    LaunchedEffect(days, selectedDayKey, activeStrapId, deferHistoricalQueries) {
+    LaunchedEffect(selectedDayKey, activeStrapId, deferHistoricalQueries) {
         if (deferHistoricalQueries) return@LaunchedEffect
         // Today's steps keep moving after the manual one-shot HC import, so the stored row goes
-        // stale within minutes, top it up with ONE live StepsRecord read before the stored-row
-        // read below. Best-effort: any HC hiccup just falls through to whatever is stored. (#150)
+        // stale within minutes. Top it up once for this selected-day/device state. This write is
+        // intentionally separate from the metric-version-keyed read below, otherwise its own version
+        // increment would form an unbounded refresh loop. Best-effort: any HC hiccup leaves storage.
         if (selectedDayOffset == 0) {
             try {
                 HealthConnectImporter.refreshTodaySteps(context, viewModel.repo)
@@ -1373,6 +1374,16 @@ fun TodayScreen(
                 throw cancelled
             } catch (_: Exception) { /* best-effort */ }
         }
+    }
+
+    LaunchedEffect(
+        days,
+        selectedDayKey,
+        activeStrapId,
+        deferHistoricalQueries,
+        ageMetricDataVersion,
+    ) {
+        if (deferHistoricalQueries) return@LaunchedEffect
         val fromDay = minOf(
             days.minOfOrNull { it.day } ?: selectedDayKey,
             selectedDayKey,
