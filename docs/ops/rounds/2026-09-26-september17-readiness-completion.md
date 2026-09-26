@@ -9,7 +9,7 @@
   `169230a9ae38ac8b4ca4b690489cd29f5af47ee4`
 - End implementation commit: pending
 - Record checkpoint:
-  `7b3250b9ef255a9786a8fa6be1cb519fc96dac81`
+  `8e39478544cf26cc2a25fbb41e71b33fd81b530e`
 
 ## Objective
 
@@ -99,6 +99,14 @@ explicitly gated migration work open.
 - Apple and Android Daily Signal empty rationale now explains that current
   baseline-relative signals are insufficient instead of claiming that no
   recovery signal has enough history when a Recovery score is already visible.
+- Managed-document restore conflicts now preserve the affected document kind
+  and remote revision in typed local error context on Apple and Android while
+  retaining the newer local generation. The cloud document is not applied,
+  generic server conflicts remain distinct, and the user sees that current
+  data was kept with an explicit `Sync now` retry path.
+- Conflict diagnostics remain bounded to the fixed `document_conflict`
+  category. Document ids, local keys, account scopes, payloads, health values,
+  and exact revisions do not enter app reports.
 - The two formula-review findings were reconciled against current source:
   Recovery education already names only the five production inputs and rejects
   recent-load wording in tests; Rest already publishes as `noop-rest-v2` with
@@ -130,11 +138,13 @@ explicitly gated migration work open.
   so tests must prove accepted, rejected, offline, expired, and cooldown states
   without recording addresses, codes, or provider payloads.
 - Existing evidence reused: `AppDiagnosticsRecorder` ownership operation spans,
-  authorized Watch snapshot tests, onboarding step-selection tests, and hosted
-  exact-SHA checks.
+  authorized Watch snapshot tests, onboarding step-selection tests, managed
+  sync operation spans, and hosted exact-SHA checks.
 - New bounded events or operation spans: no new event family was needed.
-  Existing identity-operation spans cover the changed boundary with the new
-  categorical failure kinds.
+  Existing managed-sync spans now distinguish the fixed
+  `document_conflict` category from generic `conflict`; the typed error retains
+  only an allowlisted document kind and numeric remote revision for local
+  recovery logic.
 - Redaction, retention, and high-frequency controls: no email, phone, OTP,
   account, device, health value, provider message, or URL may enter diagnostics.
 - Cross-platform/backend correlation: Apple and Android user-visible account
@@ -153,8 +163,12 @@ explicitly gated migration work open.
 | Android Full/Demo compilation plus `OwnershipVerificationRecoveryTest` through the bounded runner | 7/7 pass | Both Android flavors compile; monotonic countdowns, provider mapping, UI disable/countdown state, nine resource sets, and payload-free diagnostics agree | Real provider throttling, OTP delivery, or physical UI |
 | Android Full/Demo compilation plus `ReviewSampleModeContractTest` | Pass | Both Android source graphs compile with the new progress semantics and real setup remains the primary entry action | Physical TalkBack behavior or OEM rendering |
 | Apple `DailyActionTodayContractTests` plus Android Full/Demo compilation and focused `DailyActionTodayContractTest` | Apple 5/5 pass; Android pass | A visible Recovery score can coexist with a Building Daily Signal without contradictory empty-state copy on either mobile implementation | Physical visual fit, real physiological inputs, or recommendation accuracy |
+| `swift test --package-path Packages/NoopRemoteSync --filter WhoopManagedSyncAdapterTests` through the bounded runner | 13/13 pass | A newer local managed-document generation remains intact and maps to typed document kind/revision context | Production service concurrency or physical-device network transitions |
+| Apple `ManagedCloudDocumentAdapterTests` and `ManagedCloudRetryContractTests` through the bounded runner | 16/16 pass; final contract recheck 14/14 pass | Local preferences are not replaced, export recovery recognizes the typed conflict, diagnostics stay categorical, and both mobile surfaces retain a visible manual retry | Production cloud races or physical UI interaction |
+| Android Full/Demo Kotlin compilation, focused `ManagedDocumentConflictContractTest`, and Full instrumentation-source compilation through the bounded runner | Pass | Both flavors carry only bounded conflict context, retain generic conflict compatibility, compile the Room conflict assertions, and expose the localized retry path | On-device Room execution or production service races |
 | `xcodebuild -scheme NOOPiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` through the bounded runner | Pass | iOS-only ownership code type-checks and the app embeds/validates Watch, Watch complications, and widgets | Signing, physical devices, WatchConnectivity, BLE, background execution, or delivery |
 | `python3 Tools/i18n_audit.py --platform all --full` | Pass; tracked Apple baseline remains 129 | No localization regression; all existing focus-locale catalog keys and Android locale resources are complete | Native-speaker review or visual fit |
+| Private-data guard, 1,312-file health-claims scan, nine source release controls, operations validation, JSON/XML parsing, and diff hygiene | Pass | The change adds no tracked private filename, unsafe health claim, release-control regression, malformed catalog/resource, or operations-record error | External credentials, legal approval, hosted production state, or physical behavior |
 | Live `gh pr view 16`, `gh pr view 17`, and remote-ref queries | PR 16 merged at `9c5141754`; PR 17 exact head `169230a9a` is open, mergeable, and 10/10 required contexts pass | The release-blocker handoff is refreshed from current protected repository state | Approval, integration of this follow-on branch, or physical behavior |
 
 ## Physical device and deployment
@@ -174,10 +188,11 @@ explicitly gated migration work open.
 - Commits: macOS/Watch checkpoint `50d41e5c8` and `6b36f035e`;
   account-recovery and Watch-policy correction checkpoint `7b3250b9e`;
   first-run hierarchy and named-progress checkpoint `c71dde298`; Daily Signal
-  baseline-state copy checkpoint `cf967394c`.
+  baseline-state copy checkpoint `cf967394c`; authority-guidance checkpoint
+  `f3c98eaa1`; managed-document conflict recovery checkpoint `8e3947854`.
 - Branch and remote state:
   `codex/sept17-readiness-closeout-20260926` tracks its public remote.
-  Checkpoints through `cf967394c` are pushed and triggered zero workflows
+  Checkpoints through `8e3947854` are pushed and triggered zero workflows
   because the branch has no pull request and push workflows are scoped to
   `main`.
 - Repository visibility verified: public.
@@ -197,12 +212,16 @@ explicitly gated migration work open.
 - PR 17 still requires non-author approval and protected integration.
 - The localization baseline is not zero; native-speaker and visual-fit review
   remain unproved.
+- Managed-document conflict resolution deliberately keeps the newer local
+  generation and requires a later explicit retry; no automatic field merge is
+  claimed.
 - App-level database encryption and existing-user authority migration require
   separate approved designs and evidence before activation.
 
 ## Next round
 
-1. Reconcile the remaining Claude findings and stale release-readiness records.
+1. Reconcile the remaining macOS account-history viewer and Account/Data &
+   Sync information-architecture findings against current source.
 2. Run the applicable complete Apple/Android/repository-control walls.
 3. Open or update the normal protected review only after the consolidated
    candidate is locally green, then require exact-head hosted checks,
@@ -212,3 +231,5 @@ explicitly gated migration work open.
 
 - [x] No credentials, emails, raw biometric exports, personal names, device
       identifiers, signing identities, or absolute personal paths are present.
+- [x] Round-owned isolated DerivedData, bounded logs, status files, and release
+      report were removed after their outcomes were recorded.
