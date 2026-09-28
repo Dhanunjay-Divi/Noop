@@ -146,10 +146,43 @@ explicitly gated migration work open.
   Recovery education already names only the five production inputs and rejects
   recent-load wording in tests; Rest already publishes as `noop-rest-v2` with
   full-history rescore gates. No formula change was justified in this round.
+- The September 17 account/cloud and UI findings were re-audited against the
+  current branch rather than accepted as current defects. The disposition
+  matrix below is authoritative for this round.
 - The release-blocker handoff now reflects protected `main` after PR `#16`,
   exact hosted-green PR `#17`, its outstanding non-author review, and this
   follow-on branch without confusing an intermittent checkpoint with protected
   integration.
+
+## September 17 review reconciliation
+
+The supplied review was produced against an older source snapshot. Its
+recommendations remain useful, but an old finding is not completion evidence
+and must not override D-059 or current source.
+
+| Review finding | Current disposition | Current evidence or remaining gate |
+|---|---|---|
+| Account/cloud P0-1: cloud authority contradicts the then-current local-first contract | Superseded only by the staged D-059 target; no authority flip in this round | Cloud remains an optional replica until consent, migration, restore/deletion, performance, rollback, security, and physical gates pass |
+| P0-2: add SQLCipher immediately | Not approved for implementation in this round | Apple file protection and Android device encryption remain the recorded edge boundary; an application-level encryption change still needs key recovery, migration, backup, performance, and rollback design |
+| P0-3: migrate existing local-only history | Gated, not silently implemented | Existing users are not enrolled or pruned; resumable consented backfill remains a separate migration round |
+| P0-4: cloud is not yet authoritative-operable | Still open externally | Production ingress, App Check, identity recovery, restore drills, load, legal, monitoring, and operator evidence remain launch gates |
+| P1-1: automatic 7/30-day pruning and phone-storage disclosure | Partially implemented and intentionally opt-in | Processor-validated ack-before-prune remains available only through the explicit optimize-storage setting; no default prune or authority change was introduced |
+| P1-2: cross-device document conflicts need resolution | Bounded recovery implemented; automatic merge remains gated | Apple and Android preserve the newer local generation, retain typed document context, show that current data was kept, and expose `Sync now`; no unsafe field merge is claimed |
+| P1-3: scalable restore chooser and large-account proof | History-only viewer restore implemented; scale proof remains open | macOS can restore retained metric chunks without upload, source registration, document application, or pruning; staging and physical large-account continuation remain required |
+| P1-4 and UI P1-4: growth, lag, and blank Trends | Loading-state defect fixed; physical performance remains open | Apple and Android Trends expose loading, timeout/failure, retry, and cached-content states; device startup, scroll, thermal, low-storage, and large-account budgets still require physical evidence |
+| P1-5: force account creation into every fresh install | Rejected as an unconditional change | Real setup is now the primary Review Sample action and configured ownership remains in onboarding; dormant/unconfigured ownership stays fail-closed instead of pretending account services are live |
+| P2-1: no account-deletion surface | Implemented | Apple and Android expose request, cooling-off status, cancellation, acknowledgements, and local-data boundaries; server lifecycle and erasure tests cover the control plane |
+| P2-2: generic offline, resend, and expired-code states | Implemented | Both clients use a 60-second monotonic cooldown and distinct offline, invalid-code, expired-session, provider-rate-limit, and local-cooldown states with payload-free diagnostics |
+| P2-3: ownership client/service and wire-contract coverage | Substantially implemented; physical UI remains open | Apple and Android parser, route, secure-store, deletion, recovery, and source-contract suites now exercise the live client boundaries; signed-device account UI and production Firebase delivery remain external |
+| P2-4: five managed-sync fault cases | Partially covered; exact residual cases remain supplier-independent work | Completion retry, cancellation-before-prune, account fencing, bounded continuation, cursor expiry, missing snapshots, conflict retention, retry scheduling, and dirty-pruned hydration are covered. Explicit outbox-capacity policy, independent clock-trust anchoring, revoked-installation-mid-transfer, and collection-disk-full injection are not falsely marked complete |
+| P2-5: no sync/provenance UI | Implemented | Today and Health expose sync status; metric and sleep surfaces retain source provenance on both mobile platforms; Data & Sync explains the local/cloud boundary |
+| UI P1-1: Recovery vocabulary and color disagree | Implemented | Shared `RecoveryBandPresentation` drives Today, Calendar, digest, and liquid surfaces on Apple and Android with focused parity tests |
+| UI P1-2: Daily Signal says `RECHECK` while rationale says within range | Implemented | The empty rationale now describes insufficient baseline-relative signals without contradicting a visible Recovery score |
+| UI P1-3: tab bars fail Dynamic Type | Implemented in source and contract tests | Apple uses scaled measurements and Large Content Viewer; Android computes bounded label fit, ellipsizes, and exposes tab semantics. Physical VoiceOver/TalkBack traversal remains open |
+| Formula F1/F2 | Rejected as stale findings | Recovery copy matches the five production inputs; Rest is already revisioned as `noop-rest-v2` with rescore gates |
+
+This table does not convert source or simulator evidence into production,
+physiological, BLE, notification-delivery, or physical accessibility proof.
 
 ## Data, privacy, and medical truth
 
@@ -282,6 +315,10 @@ explicitly gated migration work open.
 - Managed-document conflict resolution deliberately keeps the newer local
   generation and requires a later explicit retry; no automatic field merge is
   claimed.
+- The managed-sync review's exact remaining fault injections are not release
+  claims: outbox capacity, an independent trusted-time anchor, revocation during
+  a transfer, and disk-full collection still need narrow deterministic tests
+  or an explicitly approved design before cloud authority can advance.
 - The Mac viewer restore is source/simulator verified but not exercised against
   a signed production account. Large-history catch-up latency and continuation
   require staging and physical validation.
