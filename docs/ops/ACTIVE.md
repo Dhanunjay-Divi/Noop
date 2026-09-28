@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-26**
+Last updated: **2026-09-28**
 
 ## Authoritative context
 
@@ -24,6 +24,16 @@ Last updated: **2026-09-26**
   protected `main`. The slice's isolated 7.0 GiB DerivedData, bounded logs,
   status files, screenshot, and simulator runtime were removed after evidence
   became durable; Data-volume free space was about 24 GiB afterward.
+- The September 17 review is now reconciled in the active round instead of
+  being treated as current source truth. Account deletion, recovery states,
+  Trends loading, Recovery presentation, Dynamic Type navigation, sync
+  visibility, provenance, and formula revision findings are implemented or
+  covered; authority migration, application-level database encryption,
+  production cloud operations, and physical validation remain gated. The next
+  code checkpoint also clamps a caller-side future local-prune timestamp to the
+  sync run's own time on Apple and Android. Swift coordinator tests pass 22/22
+  and the focused Android Full test task passes. This does not provide a
+  server-trusted clock or enable automatic pruning.
 - The September 17 readiness closeout is active on a stacked public checkpoint
   branch. macOS fresh installs now enter the viewer/account shell rather than a
   collector-only BLE dead end. Watch snapshots carry an exact optional HR

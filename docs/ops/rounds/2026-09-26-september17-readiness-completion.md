@@ -149,6 +149,11 @@ explicitly gated migration work open.
 - The September 17 account/cloud and UI findings were re-audited against the
   current branch rather than accepted as current defects. The disposition
   matrix below is authoritative for this round.
+- Managed pruning now clamps an explicit prune timestamp to the sync run's own
+  wall-clock boundary on Apple and Android. A caller-side future timestamp can
+  no longer advance local deletion beyond the run that is uploading and
+  settling those windows. This is mismatch hardening only; it does not invent a
+  server-trusted clock, enable automatic pruning, or change the opt-in.
 - The release-blocker handoff now reflects protected `main` after PR `#16`,
   exact hosted-green PR `#17`, its outstanding non-author review, and this
   follow-on branch without confusing an intermittent checkpoint with protected
@@ -174,7 +179,7 @@ and must not override D-059 or current source.
 | P2-1: no account-deletion surface | Implemented | Apple and Android expose request, cooling-off status, cancellation, acknowledgements, and local-data boundaries; server lifecycle and erasure tests cover the control plane |
 | P2-2: generic offline, resend, and expired-code states | Implemented | Both clients use a 60-second monotonic cooldown and distinct offline, invalid-code, expired-session, provider-rate-limit, and local-cooldown states with payload-free diagnostics |
 | P2-3: ownership client/service and wire-contract coverage | Substantially implemented; physical UI remains open | Apple and Android parser, route, secure-store, deletion, recovery, and source-contract suites now exercise the live client boundaries; signed-device account UI and production Firebase delivery remain external |
-| P2-4: five managed-sync fault cases | Partially covered; exact residual cases remain supplier-independent work | Completion retry, cancellation-before-prune, account fencing, bounded continuation, cursor expiry, missing snapshots, conflict retention, retry scheduling, and dirty-pruned hydration are covered. Explicit outbox-capacity policy, independent clock-trust anchoring, revoked-installation-mid-transfer, and collection-disk-full injection are not falsely marked complete |
+| P2-4: five managed-sync fault cases | Partially covered; exact residual cases remain supplier-independent work | Completion retry, cancellation-before-prune, account fencing, bounded continuation, cursor expiry, missing snapshots, conflict retention, retry scheduling, dirty-pruned hydration, and future prune-timestamp clamping are covered. Explicit outbox-capacity policy, independent clock-trust anchoring, revoked-installation-mid-transfer, and collection-disk-full injection are not falsely marked complete |
 | P2-5: no sync/provenance UI | Implemented | Today and Health expose sync status; metric and sleep surfaces retain source provenance on both mobile platforms; Data & Sync explains the local/cloud boundary |
 | UI P1-1: Recovery vocabulary and color disagree | Implemented | Shared `RecoveryBandPresentation` drives Today, Calendar, digest, and liquid surfaces on Apple and Android with focused parity tests |
 | UI P1-2: Daily Signal says `RECHECK` while rationale says within range | Implemented | The empty rationale now describes insufficient baseline-relative signals without contradicting a visible Recovery score |
@@ -238,6 +243,7 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
 | Apple `ManagedCloudDocumentAdapterTests` and `ManagedCloudRetryContractTests` through the bounded runner | 16/16 pass; final contract recheck 14/14 pass | Local preferences are not replaced, export recovery recognizes the typed conflict, diagnostics stay categorical, and both mobile surfaces retain a visible manual retry | Production cloud races or physical UI interaction |
 | Android Full/Demo Kotlin compilation, focused `ManagedDocumentConflictContractTest`, and Full instrumentation-source compilation through the bounded runner | Pass | Both flavors carry only bounded conflict context, retain generic conflict compatibility, compile the Room conflict assertions, and expose the localized retry path | On-device Room execution or production service races |
 | `swift test --package-path Packages/NoopRemoteSync` through the bounded runner | 193/193 pass | History-only restore excludes documents and preserves all existing full-sync/document behavior | Production service availability, large-account latency, or signed clients |
+| Swift `ManagedSyncCoordinatorTests` plus Android `ManagedSyncCoordinatorTest` through parallel bounded runners | Swift 22/22 pass; Android focused task passes | A future explicit prune timestamp is clamped to the sync run's time on both clients, while retention, cancellation, retry, restore, and dirty-pruned hydration contracts remain green | A server-trusted clock, device wall-clock correctness, disk-full collection, revoked-installation transfer, or automatic pruning |
 | macOS `MacViewerRuntimeContractTests` through the bounded runner | 9/9 pass | Startup account-history restore is wired, localized, account-fenced, read-only, and remains outside BLE/mutation entitlements | Signed physical Mac behavior, live Firebase/App Check, or real account data |
 | `xcodebuild -scheme NOOPiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` through the bounded runner | Pass | iOS-only ownership code type-checks and the app embeds/validates Watch, Watch complications, and widgets | Signing, physical devices, WatchConnectivity, BLE, background execution, or delivery |
 | Apple `MoreListParityTests` and `MoreSectionPrefsTests` through the bounded runner | 24/24 pass | Account/data rows lead More, NOOP+ has one normal catalogue row, quick access is bounded, and every typed destination remains reachable | VoiceOver traversal or physical-device rendering |
@@ -316,9 +322,10 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
   generation and requires a later explicit retry; no automatic field merge is
   claimed.
 - The managed-sync review's exact remaining fault injections are not release
-  claims: outbox capacity, an independent trusted-time anchor, revocation during
-  a transfer, and disk-full collection still need narrow deterministic tests
-  or an explicitly approved design before cloud authority can advance.
+  claims: future caller-clock mismatch is now clamped, but outbox capacity, an
+  independent trusted-time anchor, revocation during a transfer, and disk-full
+  collection still need narrow deterministic tests or an explicitly approved
+  design before cloud authority can advance.
 - The Mac viewer restore is source/simulator verified but not exercised against
   a signed production account. Large-history catch-up latency and continuation
   require staging and physical validation.

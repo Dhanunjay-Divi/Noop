@@ -539,7 +539,9 @@ class ManagedSyncCoordinator(
             }
             state.saveUploadCheckpoint(checkpoint, source.sourceId, dataClass)
             val localPruneBeforeMs = localPruneNowMs?.let {
-                ManagedLocalRetentionPolicy.cutoff(it, dataClass)
+                // The explicit prune opt-in may be captured before this run starts, but it must
+                // never advance deletion beyond the run's own upload/settling clock.
+                ManagedLocalRetentionPolicy.cutoff(minOf(it, nowMs), dataClass)
             }
             if (localPruneBeforeMs != null &&
                 maxPruneWindowsPerClass > 0

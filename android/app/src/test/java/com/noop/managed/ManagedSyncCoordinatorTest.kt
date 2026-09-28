@@ -77,6 +77,28 @@ class ManagedSyncCoordinatorTest {
     }
 
     @Test
+    fun futurePruneTimestampCannotAdvanceBeyondSyncClock() = runTest {
+        val dayMs = 86_400_000L
+        val state = FakeState()
+        ManagedSyncCoordinator(
+            FakeTransport(),
+            MultiWindowExtractor(emptyList()),
+            state,
+            FakeRestore(),
+        ).sync(
+            source = source,
+            authorization = authorization,
+            nowMs = 100 * dayMs,
+            dataClasses = listOf("raw_ppg"),
+            maxChangePages = 0,
+            maxDocumentUploads = 0,
+            localPruneNowMs = 200 * dayMs,
+        )
+
+        assertEquals(mapOf("raw_ppg" to 93 * dayMs), state.pruneCutoffs)
+    }
+
+    @Test
     fun boundedForwardUploadReportsLocalContinuation() = runTest {
         val result = ManagedSyncCoordinator(
             FakeTransport(),

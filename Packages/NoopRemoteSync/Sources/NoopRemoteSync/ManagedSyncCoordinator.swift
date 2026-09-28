@@ -736,7 +736,10 @@ public actor ManagedSyncCoordinator {
             try Task.checkCancellation()
             if let localPruneNowMs,
                let localPruneBeforeMs = ManagedLocalRetentionPolicy.cutoff(
-                   nowMs: localPruneNowMs,
+                   // The explicit prune opt-in may be captured before this run
+                   // starts, but it must never advance deletion beyond the
+                   // run's own upload/settling clock.
+                   nowMs: min(localPruneNowMs, nowMs),
                    dataClass: dataClass
                ),
                maxPruneWindowsPerClass > 0 {

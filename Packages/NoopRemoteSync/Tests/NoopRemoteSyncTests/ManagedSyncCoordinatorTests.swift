@@ -280,6 +280,42 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
         )
     }
 
+    func testFuturePruneTimestampCannotAdvanceBeyondSyncClock() async throws {
+        let dayMs: Int64 = 86_400_000
+        let state = CoordinatorState()
+        let coordinator = ManagedSyncCoordinator(
+            transport: CoordinatorTransport(),
+            extractor: MultiWindowExtractor(eventTimes: []),
+            state: state,
+            restore: CoordinatorRestore()
+        )
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+
+        _ = try await coordinator.sync(
+            source: source,
+            authorization: authorization,
+            now: Date(timeIntervalSince1970: Double(100 * dayMs) / 1_000),
+            dataClasses: ["raw_ppg"],
+            maxChangePages: 0,
+            maxDocumentUploads: 0,
+            localPruneNowMs: 200 * dayMs
+        )
+
+        let recordedCutoffs = await state.recordedPruneCutoffs()
+        XCTAssertEqual(recordedCutoffs, ["raw_ppg": 93 * dayMs])
+    }
+
     func testCancellationAfterCheckpointPreventsLocalPruning() async throws {
         let dayMs: Int64 = 86_400_000
         let state = CoordinatorState(blockCheckpointSave: true)
