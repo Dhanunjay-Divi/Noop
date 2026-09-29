@@ -5,7 +5,7 @@
     "customer": 888,
     "fixture": 5973,
     "generated": 21,
-    "historical": 3395,
+    "historical": 3397,
     "import": 870,
     "persisted": 695
   },
@@ -36311,11 +36311,11 @@
       "category": "historical",
       "lineNumbers": [
         290,
-        583,
-        583,
-        584,
-        585,
-        590
+        601,
+        601,
+        602,
+        603,
+        608
       ],
       "occurrenceCount": 6,
       "path": "docs/FIRST_PRODUCTION_RELEASE_CHECKLIST.md",
@@ -36331,15 +36331,15 @@
       "category": "historical",
       "lineNumbers": [
         122,
-        181,
-        181,
-        181,
-        181,
-        181,
-        647,
-        654,
-        654,
-        655
+        185,
+        185,
+        185,
+        185,
+        185,
+        651,
+        658,
+        658,
+        659
       ],
       "occurrenceCount": 10,
       "path": "docs/FIRST_PRODUCTION_RELEASE_PLAN.md",
@@ -36951,11 +36951,11 @@
       "lineNumbers": [
         11,
         13,
-        34,
-        50,
-        215,
-        379,
-        379
+        35,
+        52,
+        217,
+        381,
+        381
       ],
       "occurrenceCount": 7,
       "path": "docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md",
@@ -37163,24 +37163,24 @@
     {
       "category": "historical",
       "lineNumbers": [
-        35,
-        187,
-        242,
-        263,
-        265,
-        320,
-        328,
-        340,
-        346,
-        401,
-        446,
-        514,
-        562,
-        583,
-        727,
-        861,
-        967,
-        971
+        41,
+        201,
+        256,
+        277,
+        279,
+        334,
+        342,
+        354,
+        360,
+        415,
+        460,
+        528,
+        576,
+        597,
+        741,
+        875,
+        981,
+        985
       ],
       "occurrenceCount": 18,
       "path": "docs/ops/ACTIVE.md",
@@ -37765,8 +37765,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        353,
-        371
+        361,
+        379
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-26-september17-readiness-completion.md",
@@ -37779,23 +37779,36 @@
     {
       "category": "historical",
       "lineNumbers": [
-        8,
-        15,
+        61,
+        165
+      ],
+      "occurrenceCount": 2,
+      "path": "docs/ops/rounds/2026-09-29-september17-protected-main-closeout.md",
+      "sha256": "61ccd7bba0f180ac53a655fe3fd29fa9fd75ea0ba5c5736e644c4a199bd38e6f",
+      "tokenCounts": {
+        "whoop": 2
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        9,
         16,
         17,
-        19,
-        19,
+        18,
+        20,
         20,
         21,
         22,
         23,
-        27,
+        24,
         28,
-        32,
-        37,
-        58,
-        94,
-        94
+        29,
+        33,
+        38,
+        59,
+        95,
+        95
       ],
       "occurrenceCount": 17,
       "path": "docs/ops/rounds/INDEX.md",
@@ -40019,7 +40032,7 @@
       }
     }
   ],
-  "occurrenceCount": 18562,
+  "occurrenceCount": 18564,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

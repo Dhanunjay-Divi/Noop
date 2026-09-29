@@ -1,5 +1,13 @@
 # Round: 2026-09-26 - September 17 readiness completion
 
+> **2026-09-29 status:** The reviewed source replacement merged normally
+> through PR `#18` as protected product commit
+> `7488283c3c21e794eaa8d6a7d08889f18b933bfa`. Candidate
+> `91e20504eb824572becfe6dcc440b5a6d5ecc8f2` has the identical tree. All ten
+> pull-request and first post-merge contexts are green. The 2026-09-29
+> protected-main closeout record supersedes this record's historical
+> pending-push and pending-merge statements.
+
 ## Status
 
 - State: `in progress`

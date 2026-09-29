@@ -291,32 +291,50 @@ position without changing its ID. This inbox intentionally starts empty.
   supplier and physical gates pass. (Evidence: reviewed SDK merge
   `b02808372b7c537f22058c7ebc75d92c750373be`,
   `ops/rounds/2026-09-21-noop-band-sdk-app-integration.md`)
-- [ ] SDK-007 [ENG] Build quarantined Apple and Android supplier adapters behind
+- [x] SDK-007 [ENG] Build quarantined Apple and Android supplier adapters behind
   neutral NOOP session/sample types; keep vendor callbacks, persistence, and
-  errors out of screens, analytics, storage, and cloud code.
+  errors out of screens, analytics, storage, and cloud code. The adapters remain
+  default-off and require approved exact artifacts plus physical evidence.
+  (Evidence: app PR `#18`, `VeepooBandAdapter.swift`,
+  `VeepooBandSource.kt`, supplier wrapper-boundary tests)
 - [ ] SDK-008 [ENG] Deny or detect unexpected vendor network egress and prove
   signed-app traffic, privacy declarations, dependency notices, and SBOM before
-  enabling the adapter.
-- [ ] SDK-009 [ENG] Enforce one active phone collector and one serialized
+  enabling the adapter. Static source/manifest denial is implemented; signed
+  physical-app traffic evidence remains open.
+- [x] SDK-009 [ENG] Enforce one active phone collector and one serialized
   per-band operation queue; implement an explicit durable collector-handoff
-  protocol before allowing another supported phone to collect.
-- [ ] SDK-010 [ENG] Complete the canonical versioned protocol and capability
-  schema. Supplier-neutral capability schema v3 is implemented; exact
-  supplier-approved protocol, firmware, command, and calibration truth remains
-  gated on the dossier and physical acceptance.
-- [ ] SDK-020 [ENG] Create synthetic golden, malformed, replay, duplicate, and
-  out-of-order protocol fixtures.
-- [ ] SDK-030 [ENG] Implement device-neutral measured sample types with units,
-  quality, calibration revision, device time, and provenance.
-- [ ] SDK-040 [ENG] Implement pure Swift framing, integrity, decoding, clock,
-  history, command, and update state machines.
-- [ ] SDK-050 [ENG] Implement equivalent pure Kotlin state machines.
+  protocol before allowing another supported phone to collect. Physical
+  collector handoff remains a separate acceptance row.
+  (Evidence: supplier-neutral session machines, source coordinators, and
+  collector-handoff conformance scenarios)
+- [x] SDK-010A [ENG] Complete the supplier-neutral versioned capability schema
+  and compatibility contract. (Evidence:
+  `contract/spec/capabilities.schema.json`, compatibility manifests)
+- [ ] SDK-010B [JOINT] Approve the exact supplier protocol, firmware, command,
+  calibration, and compatibility truth from the immutable hardware dossier and
+  physical acceptance evidence.
+- [x] SDK-020 [ENG] Create synthetic golden, malformed, replay, duplicate, and
+  out-of-order protocol fixtures. (Evidence:
+  `contract/conformance/scenarios.json`, mirrored virtual-band runners)
+- [x] SDK-030 [ENG] Implement device-neutral measured sample types with units,
+  quality, calibration revision, device time, and provenance. (Evidence:
+  `NoopBandModels.swift`, `Models.kt`)
+- [x] SDK-040 [ENG] Implement pure Swift integrity, clock, history, command,
+  operation, and update state machines. (Evidence:
+  `BandSessionMachine.swift`)
+- [x] SDK-050 [ENG] Implement equivalent pure Kotlin state machines. (Evidence:
+  `BandSessionMachine.kt`)
 - [ ] SDK-060 [ENG] Prove Swift, Kotlin, and firmware agree on every golden
-  fixture.
-- [ ] SDK-070 [ENG] Implement a deterministic virtual band and virtual clock.
-- [ ] SDK-080 [ENG] Add fault injection for packet loss, corruption,
+  fixture. Swift/Kotlin parity is implemented; firmware agreement remains open.
+- [x] SDK-060A [ENG] Prove Swift and Kotlin produce the same supplier-neutral
+  conformance outcomes. (Evidence: mirrored scenario inventory and artifact
+  tests)
+- [x] SDK-070 [ENG] Implement a deterministic virtual band and virtual clock.
+  (Evidence: `VirtualBand.swift`, `VirtualBand.kt`)
+- [x] SDK-080 [ENG] Add supplier-neutral fault injection for replay,
   duplicates, disconnects, stale callbacks, full flash, bad clock, and low
-  battery.
+  battery. Exact radio corruption and hardware limits remain physical gates.
+  (Evidence: virtual-band conformance scenarios and artifact tests)
 - [ ] SDK-090 [ENG] Add OTA interruption, verification failure, activation
   failure, and rollback simulation.
 - [ ] SDK-100 [ENG] Build a protocol/conformance CLI without production

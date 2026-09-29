@@ -29,8 +29,9 @@ prove.
   Mac presentation, SMS/voice fallback, or carrier behavior.
 - The supplier wrapper is not implemented or production-approved merely
   because the candidate SDK exposes an API or the app compiles.
-- The current working-tree candidate for app PR `#17` consumes the
-  supplier-neutral SDK at reviewed merge
+- Protected product source at app PR `#18` merge
+  `7488283c3c21e794eaa8d6a7d08889f18b933bfa` consumes the supplier-neutral
+  SDK at reviewed merge
   `b02808372b7c537f22058c7ebc75d92c750373be` while retaining WHOOP as the
   default comparison transport. The quarantined exact-model Apple and Android
   adapters are integrated only when the approved external supplier artifacts
@@ -40,7 +41,8 @@ prove.
 
 ## 1.1 Immediate device-connected continuation
 
-After app PR `#17` is merged and protected `main` is verified:
+After the documentation and release-evidence closeout is integrated and its
+protected `main` SHA is verified:
 
 1. Create a new operations round from clean protected `main`; do not continue
    from a stale SDK or adapter worktree.
@@ -62,8 +64,8 @@ After app PR `#17` is merged and protected `main` is verified:
 
 ## 1.2 Exact install starting point
 
-Use a clean checkout of protected `main`; do not install from the integration
-worktree after PR `#17` has merged:
+Use a clean checkout of protected `main`; do not install from the retired app
+integration worktree:
 
 ```bash
 git fetch origin

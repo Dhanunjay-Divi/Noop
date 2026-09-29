@@ -6,14 +6,20 @@ Last updated: **2026-09-29**
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Protected branch: `main`
-- Active worktree: dedicated NOOP Band SDK app-integration checkout
-- Active branch: `codex/sept17-readiness-closeout-20260926`
-- Branch base against protected `main`:
-  `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
-- Current round implementation started from protected `main` after PR `#16`
-  merged and mainline trust was verified.
-- Pull request `#18` is open and mergeable at remote head `eb4c33e20`; every
-  hosted job on that exact pushed head is green. Four later automated review
+- Active source: protected `main`
+- Integrated product commit:
+  `7488283c3c21e794eaa8d6a7d08889f18b933bfa`
+- Reviewed pull-request candidate:
+  `91e20504eb824572becfe6dcc440b5a6d5ecc8f2`
+- Pull request `#18` merged normally through protected branch policy on
+  2026-09-29. Its reviewed candidate and integrated product commit have the
+  identical tree `f45676caf1d4d70ef2c732d859e6bf12ea78e470`.
+- The seven review threads are resolved from matching source and test evidence.
+  Every exact-head pull-request check is green. The first protected-main run
+  completed successfully, including the exact iOS production shell, and the
+  strict verifier reports `10/10` exact-SHA checks passed for
+  `7488283c3c21e794eaa8d6a7d08889f18b933bfa`.
+- Four later automated review
   findings are corrected in the final local replacement without changing data
   authority or score formulas: macOS managed history now uses exact
   account-scoped databases and sources, stale work is generation-fenced across
@@ -45,8 +51,8 @@ Last updated: **2026-09-29**
   SDK-artifact walls remain applicable because this replacement does not alter
   their implementations. The final current policy wall passes 372 tests with
   one intentional skip plus 50 top-level tests; all-platform localization with
-  the tracked Apple baseline at 130; 18,562 classified terminology occurrences
-  across 1,634 groups with zero forbidden mappings; nine release checks; ten
+  the tracked Apple baseline at 130; 18,564 classified terminology occurrences
+  across 1,635 groups with zero forbidden mappings; nine release checks; ten
   required contexts; trusted self-verification; 12-metric calibration parity;
   legal inventory for 230 runtime components and three container inputs;
   distribution provenance; private-data and 1,312-file health-claims gates;
@@ -56,12 +62,20 @@ Last updated: **2026-09-29**
   `/private/tmp/noop-pr18-review2` tree was exact-deleted after its outcomes
   became durable; no process or open handle owned it, the path is absent, and
   Data-volume free space increased from about 15 GiB to 22 GiB. One
-  review-driven replacement commit/push, exact-head hosted checks, closure of
-  all seven reviewed threads, normal protected integration, and protected-main
-  verification remain. Physical BLE, background, battery, haptics,
+  replacement commit/push, exact-head hosted checks, review-thread closure,
+  normal protected integration, and exact-main verification are complete. This
+  documentation and release-evidence closeout finalizes the durable handoff
+  without changing product runtime code. Physical BLE, background, battery, haptics,
   accessibility, physiological accuracy, supplier firmware/rights,
   signing/store, credentials, carrier/legal, and elapsed production operations
   remain external gates.
+- The app-level encrypted working-set migration, existing-user cloud backfill,
+  selective managed restore, conflict-replacement policy, Coach evidence
+  ledger, and Automation execution ledger remain separately approved
+  D-059/design work. They are not silently treated as implemented by this
+  source-readiness closeout and do not authorize a cloud-authority flip.
+- Older pending-PR statements below are retained as chronological evidence and
+  are superseded by this authoritative block.
 - Public checkpoints `c8a986a61` and `cf7e28e4b` now simplify the mobile
   Account/Data hierarchy and reframe the shared destination as Data & Sync.
   Local backup and restore remain primary; legacy D-036 self-hosted sync is

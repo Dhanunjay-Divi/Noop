@@ -99,26 +99,21 @@ remains a separate explicit opt-in.
 
 ## Current engineering evidence
 
-The current protected `main` baseline is
-`9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`, the normal merge commit for
-pull request `#16`. Pull request `#17` is open and mergeable at exact head
-`169230a9ae38ac8b4ca4b690489cd29f5af47ee4`. All ten required contexts listed
-in [`../RELEASE_CONTROLS.md`](../RELEASE_CONTROLS.md) pass on that exact head,
-including the trusted release-control result and the complete hosted Apple,
-Android, package, server, claims, localization, operations, runtime-license,
-and release-control paths. Protected integration remains blocked by the
-requested non-author review; no administrative bypass is authorized.
+The September 17 supplier-independent product source is integrated on protected
+`main` through pull request `#18`. Reviewed candidate
+`91e20504eb824572becfe6dcc440b5a6d5ecc8f2` and protected product commit
+`7488283c3c21e794eaa8d6a7d08889f18b933bfa` share the exact tree
+`f45676caf1d4d70ef2c732d859e6bf12ea78e470`. All ten required pull-request
+contexts listed in [`../RELEASE_CONTROLS.md`](../RELEASE_CONTROLS.md) passed,
+all seven review threads were resolved from matching evidence, and the merge
+used normal protected policy without an administrative bypass.
 
-The supplier-independent September 17 follow-on is being published
-intermittently on
-`codex/sept17-readiness-closeout-20260926`. Public checkpoint
-`7b3250b9ef255a9786a8fa6be1cb519fc96dac81` adds Apple/Android account
-verification recovery and corrects the Watch publication policy after focused
-local verification. Record checkpoint
-`a9ff1cd4b94f0610c5aed15d568a9abe60fc54af` documents that evidence. Those
-branch pushes triggered no workflows because the branch has no pull request
-and push workflows are scoped to `main`; they are not yet part of PR `#17` or
-protected `main`.
+The first exact protected-main run also passed all ten contexts, including the
+exact iOS production shell. The strict exact-SHA verifier reports `10/10` for
+`7488283c3c21e794eaa8d6a7d08889f18b933bfa`. The 2026-09-29 documentation and
+release-evidence closeout finalizes this software round; simulator and source
+evidence still do not close any physical BLE, signing, store, carrier,
+clinical, supplier, or production-operations gate.
 
 Protected source publication and hosted CI prove only the reviewed source
 commit. They do not close the external gates below.
