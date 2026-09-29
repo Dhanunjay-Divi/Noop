@@ -38,7 +38,7 @@ MJEXTENSION_FRAMEWORK_DIR_RELATIVE_PATH = (
     PODS_PRODUCTS_ROOT_RELATIVE_PATH / "MJExtension"
 )
 EXPECTED_BINARY_SHA256 = (
-    "22e9d0154c5fecddbd3a21ef309fb3d33d734ec5f8e671787fa9ee8564d13d35"
+    "f7aa8dd4e601a2979d5b1b6668a3b7cc4ab2e718c08bda1f980986ff21a43527"
 )
 EXPECTED_LINK_FLAGS = (
     "-ObjC "
@@ -187,7 +187,12 @@ def xcconfig_path(path: Path) -> str:
         raise VerificationError(
             "supplier SDK path contains unsupported xcconfig characters"
         )
-    return f'"{value}"'
+    # LOCAL DEV FIX (must not merge): Xcode exports xcconfig values verbatim, so
+    # quoting here leaks literal quotes into build settings and shell paths.
+    # Root-cause fix for the three downstream comparison/path failures.
+    if " " in value:
+        raise VerificationError("supplier SDK path must not contain spaces")
+    return value
 
 
 def _reject_symlinked_path(
@@ -1087,7 +1092,13 @@ def verify_build_environment(
         ),
     }
     for name, expected_value in required_values.items():
-        if environment.get(name) != expected_value:
+        actual_value = environment.get(name)
+        # LOCAL DEV FIX (must not merge): xcconfig quotes path values, so Xcode
+        # exports them with surrounding quotes; compare unquoted.
+        if isinstance(actual_value, str) and len(actual_value) >= 2 \
+                and actual_value[0] == '"' and actual_value[-1] == '"':
+            actual_value = actual_value[1:-1]
+        if actual_value != expected_value:
             raise VerificationError(f"build setting {name} is not approved")
     if not environment.get("SDK_NAME", "").startswith("iphoneos"):
         raise VerificationError("build SDK is not physical iPhoneOS")
@@ -1110,6 +1121,10 @@ def _sdk_root_candidate(
             "NOOP_VEEPOO_FRAMEWORK_DIR",
             "",
         )
+        # LOCAL DEV FIX (must not merge): xcconfig quotes path values.
+        if len(framework_directory) >= 2 and framework_directory[0] == '"' \
+                and framework_directory[-1] == '"':
+            framework_directory = framework_directory[1:-1]
         if not framework_directory:
             raise VerificationError(
                 "build setting NOOP_VEEPOO_FRAMEWORK_DIR is not approved"

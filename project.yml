@@ -437,10 +437,13 @@ targets:
         # This does not guarantee timing; Apple may coalesce or defer wakes.
         com.apple.developer.healthkit.background-delivery: true
         com.apple.developer.healthkit.access: []
-        com.apple.developer.weatherkit: true
-        com.apple.developer.devicecheck.appattest-environment: $(NOOP_APP_ATTEST_ENVIRONMENT)
-        aps-environment: $(NOOP_APS_ENVIRONMENT)
-        com.apple.developer.usernotifications.time-sensitive: true
+        # LOCAL-ONLY (uncommitted): a free personal Apple team cannot provision WeatherKit,
+        # App Attest, Push Notifications, or Time-Sensitive Notifications. Disabled purely to
+        # produce a local Debug device build. NOT part of the validated candidate.
+        # com.apple.developer.weatherkit: true
+        # com.apple.developer.devicecheck.appattest-environment: $(NOOP_APP_ATTEST_ENVIRONMENT)
+        # aps-environment: $(NOOP_APS_ENVIRONMENT)
+        # com.apple.developer.usernotifications.time-sensitive: true
         com.apple.security.application-groups:
           - $(APP_GROUP_ID)
     settings:
