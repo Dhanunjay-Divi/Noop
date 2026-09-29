@@ -1223,6 +1223,11 @@ private fun OnboardingTopBar(
     onBack: () -> Unit,
 ) {
     val backLabel = stringResource(R.string.l10n_onboarding_screen_back_b52b36b7)
+    val progressLabel = uiString(
+        R.string.l10n_onboarding_screen_page_total_50b38f9a,
+        page,
+        total,
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1259,7 +1264,7 @@ private fun OnboardingTopBar(
         Column(
             horizontalAlignment = Alignment.End,
             modifier = Modifier.semantics(mergeDescendants = true) {
-                contentDescription = "$pageTitle, $page / $total"
+                contentDescription = listOf(pageTitle, progressLabel).joinToString()
             },
         ) {
             Text(
@@ -1269,7 +1274,7 @@ private fun OnboardingTopBar(
                 maxLines = 1,
             )
             Text(
-                uiString(R.string.l10n_onboarding_screen_page_total_50b38f9a, page, total),
+                progressLabel,
                 style = NoopType.captionNumber,
                 color = Palette.textTertiary,
             )
