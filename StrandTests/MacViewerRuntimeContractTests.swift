@@ -282,13 +282,10 @@ final class MacViewerRuntimeContractTests: XCTestCase {
         )
         XCTAssertTrue(detail.contains("!selected.isAvailableInManagedViewer"))
         XCTAssertTrue(detail.contains("MacCollectorPhoneOnlyView()"))
-        XCTAssertTrue(
-            detail.contains(
-                "model.runtimeRole.enforcesManagedViewerReadOnlyRoutes\n"
-                    + "                        && selected != .friends"
-            )
+        XCTAssertFalse(
+            detail.contains(".disabled("),
+            "Read-only viewer routes must retain navigation and selection controls."
         )
-        XCTAssertTrue(detail.contains(".disabled("))
         XCTAssertTrue(root.contains(".id(\n                        \"\\(repo.storeScopeRevision):\""))
         XCTAssertTrue(
             root.contains(
@@ -325,6 +322,124 @@ final class MacViewerRuntimeContractTests: XCTestCase {
         XCTAssertLessThan(
             readOnlyGuard.lowerBound,
             calibrationWrite.lowerBound
+        )
+
+        XCTAssertTrue(
+            root.contains(
+                "MetricExplorerView(\n"
+                    + "                allowsLocalMutations:\n"
+                    + "                    model.runtimeRole"
+                    + ".allowsLocalAnalysisAndGuidance"
+            )
+        )
+        XCTAssertTrue(
+            root.contains(
+                "HealthView(\n"
+                    + "                allowsLocalMutations:\n"
+                    + "                    model.runtimeRole"
+                    + ".allowsLocalAnalysisAndGuidance"
+            )
+        )
+        XCTAssertTrue(
+            root.contains(
+                "StressView(\n"
+                    + "                allowsLocalMutations:\n"
+                    + "                    model.runtimeRole"
+                    + ".allowsLocalAnalysisAndGuidance"
+            )
+        )
+        XCTAssertTrue(
+            root.contains(
+                "LiquidTodayView(\n"
+                    + "                allowsLocalMutations:\n"
+                    + "                    model.runtimeRole"
+                    + ".allowsLocalAnalysisAndGuidance"
+            )
+        )
+
+        let today = try text("Strand/Liquid/LiquidTodayView.swift")
+        XCTAssertTrue(today.contains("init(allowsLocalMutations: Bool = true)"))
+        XCTAssertTrue(
+            today.contains(
+                "guard allowsLocalMutations, selectedDayOffset == 0 else"
+            )
+        )
+        XCTAssertTrue(
+            today.contains(
+                "if allowsLocalMutations, selectedDayOffset == 0 {\n"
+                    + "                    Divider().overlay"
+            )
+        )
+        XCTAssertTrue(
+            today.contains(
+                "MetricDetailView(\n"
+                    + "                    metric: metric,\n"
+                    + "                    allowsLocalMutations: allowsLocalMutations"
+            )
+        )
+
+        let explore = try text("Strand/Screens/MetricExplorerView.swift")
+        XCTAssertTrue(
+            explore.components(
+                separatedBy: "init(allowsLocalMutations: Bool = true)"
+            ).count >= 2
+        )
+        XCTAssertTrue(
+            explore.contains(
+                "guard allowsLocalMutations, !refreshing else"
+            )
+        )
+
+        let health = try text("Strand/Screens/HealthView.swift")
+        XCTAssertTrue(health.contains("init(allowsLocalMutations: Bool = true)"))
+        XCTAssertTrue(
+            health.contains(
+                "guard allowsLocalMutations, !refreshing else"
+            )
+        )
+        XCTAssertTrue(
+            health.contains(
+                "onLogPeriod: allowsLocalMutations ?"
+            )
+        )
+        XCTAssertTrue(
+            health.contains(
+                "onFix: allowsLocalMutations"
+            )
+        )
+        XCTAssertTrue(
+            health.contains(
+                "HealthHubLinksSection(\n"
+                    + "                allowsLocalRecords: "
+                    + "allowsLocalMutations"
+            )
+        )
+        let hubLinks = try slice(
+            health,
+            from: "private struct HealthHubLinksSection: View {\n",
+            to: "    private func linkRow("
+        )
+        XCTAssertTrue(hubLinks.contains("if allowsLocalRecords"))
+        XCTAssertTrue(hubLinks.contains("router.openLabBook()"))
+        XCTAssertTrue(hubLinks.contains("router.openFusedRecord()"))
+
+        let stress = try text("Strand/Screens/StressView.swift")
+        XCTAssertTrue(
+            stress.contains("init(allowsLocalMutations: Bool = true)")
+        )
+        XCTAssertTrue(
+            stress.contains(
+                "if allowsLocalMutations, day.sustainedHigh"
+            )
+        )
+        XCTAssertTrue(
+            stress.contains(
+                "guard allowsLocalMutations else { return }\n"
+                    + "                    showBreathe = true"
+            )
+        )
+        XCTAssertTrue(
+            today.contains("StressView(allowsLocalMutations: false)")
         )
     }
 
@@ -634,6 +749,36 @@ final class MacViewerRuntimeContractTests: XCTestCase {
                 "MacManagedViewerService.shared.bootstrap(repo: repo)"
             )
         )
+        let root = try text("Strand/App/RootView.swift")
+        let startup = try slice(
+            root,
+            from: "        .task {\n",
+            to: "        .onChangeCompat(of: repo.refreshSeq) { _ in\n"
+        )
+        let bootstrap = try XCTUnwrap(
+            startup.range(
+                of: "await MacManagedViewerService.shared.bootstrap(repo: repo)"
+            )
+        )
+        let localWait = try XCTUnwrap(
+            startup.range(of: "if !repo.loaded")
+        )
+        XCTAssertLessThan(
+            bootstrap.lowerBound,
+            localWait.lowerBound,
+            "Managed account bootstrap must not wait on legacy local history."
+        )
+
+        let appModel = try text("Strand/App/AppModel.swift")
+        let viewerStartup = try slice(
+            appModel,
+            from: "        } else {\n"
+                + "            AppDiagnosticsRecorder.shared.record(\n"
+                + "                \"runtime.collection_role\",",
+            to: "        Task.detached { AppModel.purgeImportInbox();"
+        )
+        XCTAssertFalse(viewerStartup.contains("repo.refresh()"))
+        XCTAssertFalse(viewerStartup.contains("wireDeviceRegistry()"))
         XCTAssertTrue(mac.contains("Text(\"Account history\")"))
         XCTAssertTrue(mac.contains("await service.refresh(repo: repo)"))
         XCTAssertFalse(viewer.contains(".sync("))

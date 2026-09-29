@@ -1,6 +1,7 @@
 import Foundation
 import NoopRemoteSync
 import XCTest
+import WhoopProtocol
 import WhoopStore
 @testable import Strand
 
@@ -210,6 +211,171 @@ final class ManagedViewerStoreIsolationTests: XCTestCase {
         XCTAssertFalse(repository.loaded)
         XCTAssertTrue(repository.days.isEmpty)
         XCTAssertTrue(repository.vitalRows.isEmpty)
+    }
+
+    func testManagedViewerRawReadsUseRestoredSourceUnionNotCanonical()
+        async throws
+    {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = Repository(deviceId: Repository.whoopSource)
+        repository.setStorePathResolverForTesting { scope in
+            root.appendingPathComponent(
+                (scope ?? "local") + ".sqlite"
+            ).path
+        }
+
+        let store = try await repository.activateManagedViewerStore(
+            accountScopeHash: localScope
+        )
+        let firstSource = try await seedManagedRestore(
+            store: store,
+            sourceID: firstManagedSourceID,
+            day: "2026-09-07",
+            recovery: 47
+        )
+        let secondSource = try await seedManagedRestore(
+            store: store,
+            sourceID: secondManagedSourceID,
+            day: "2026-09-08",
+            recovery: 48
+        )
+        let base = 1_800_000_000
+        _ = try await store.insert(
+            Streams(
+                hr: [
+                    HRSample(ts: base, bpm: 61),
+                    HRSample(ts: base + 60, bpm: 63),
+                ],
+                rr: [
+                    RRInterval(ts: base, rrMs: 810),
+                    RRInterval(ts: base + 60, rrMs: 830),
+                ],
+                gravity: [
+                    GravitySample(ts: base, x: 0.1, y: 0.2, z: 0.9),
+                    GravitySample(
+                        ts: base + 60,
+                        x: 0.2,
+                        y: 0.3,
+                        z: 0.85
+                    ),
+                ]
+            ),
+            deviceId: firstSource
+        )
+        _ = try await store.insert(
+            Streams(
+                hr: [
+                    HRSample(ts: base, bpm: 81),
+                    HRSample(ts: base + 120, bpm: 72),
+                ],
+                rr: [
+                    RRInterval(ts: base, rrMs: 810),
+                    RRInterval(ts: base + 120, rrMs: 920),
+                ],
+                gravity: [
+                    GravitySample(
+                        ts: base,
+                        x: 0.3,
+                        y: 0.4,
+                        z: 0.8
+                    ),
+                    GravitySample(
+                        ts: base + 120,
+                        x: 0.4,
+                        y: 0.5,
+                        z: 0.75
+                    ),
+                ]
+            ),
+            deviceId: secondSource
+        )
+
+        // A canonical row in the account database is a decoy: managed-viewer
+        // reads must use only the exact source index restored for this account.
+        try await store.upsertDevice(
+            id: Repository.whoopSource,
+            mac: nil,
+            name: "Canonical decoy"
+        )
+        _ = try await store.insert(
+            Streams(
+                hr: [HRSample(ts: base + 600, bpm: 199)],
+                rr: [RRInterval(ts: base + 600, rrMs: 1_999)],
+                gravity: [
+                    GravitySample(ts: base + 600, x: 9, y: 9, z: 9),
+                ]
+            ),
+            deviceId: Repository.whoopSource
+        )
+
+        _ = try await repository.refreshManagedViewer()
+        XCTAssertEqual(repository.deviceId, Repository.whoopSource)
+        XCTAssertEqual(repository.importedReadIds, [secondSource, firstSource])
+
+        let hr = await repository.hrSamples(
+            from: base,
+            to: base + 900
+        )
+        XCTAssertEqual(hr, [
+            HRSample(ts: base, bpm: 81),
+            HRSample(ts: base + 60, bpm: 63),
+            HRSample(ts: base + 120, bpm: 72),
+        ])
+        let limitedHR = await repository.hrSamples(
+            from: base,
+            to: base + 900,
+            limit: 2
+        )
+        XCTAssertEqual(limitedHR, [
+            HRSample(ts: base, bpm: 81),
+            HRSample(ts: base + 60, bpm: 63),
+        ])
+
+        let buckets = await repository.hrBuckets(
+            from: base,
+            to: base + 900,
+            bucketSeconds: 300
+        )
+        XCTAssertEqual(
+            buckets,
+            [
+                HRBucket(ts: base, bpm: 72),
+            ]
+        )
+
+        let rr = await repository.rrIntervals(
+            from: base,
+            to: base + 900
+        )
+        XCTAssertEqual(rr, [
+            RRInterval(ts: base, rrMs: 810),
+            RRInterval(ts: base + 60, rrMs: 830),
+            RRInterval(ts: base + 120, rrMs: 920),
+        ])
+
+        let gravity = await repository.gravitySamples(
+            from: base,
+            to: base + 900
+        )
+        XCTAssertEqual(
+            gravity,
+            [
+                GravitySample(ts: base, x: 0.3, y: 0.4, z: 0.8),
+                GravitySample(
+                    ts: base + 60,
+                    x: 0.2,
+                    y: 0.3,
+                    z: 0.85
+                ),
+                GravitySample(
+                    ts: base + 120,
+                    x: 0.4,
+                    y: 0.5,
+                    z: 0.75
+                ),
+            ]
+        )
     }
 
     func testManagedRefreshCancellationBeforePublicationLeavesCachesUntouched()

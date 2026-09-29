@@ -605,6 +605,28 @@ final class SourceCoordinator: ObservableObject {
         releaseSupplierPairingLease(lease)
     }
 
+    /// Validate the process-wide pairing lease before publishing the replacement
+    /// source. While `activate` runs, the lease suppresses the registry
+    /// observer's supplier startup. A successful activation is then released
+    /// through the one canonical transition below; a stale lease never mutates
+    /// the durable active row.
+    @discardableResult
+    func commitSupplierPairingLease(
+        _ lease: SupplierPairingLease,
+        activate: () -> Bool
+    ) -> Bool {
+        guard supplierPairingLease == lease else {
+            VeepooSupplierLifecycleDiagnostics.record(
+                stage: .managerLease,
+                outcome: .failed,
+                failure: .staleLease
+            )
+            return false
+        }
+        guard activate() else { return false }
+        return releaseSupplierPairingLease(lease)
+    }
+
     private func releaseSupplierPairingLease(
         _ lease: SupplierPairingLease
     ) -> Bool {

@@ -50,11 +50,27 @@ final class HealthScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(row.contains("switch section"))
         XCTAssertFalse(row.contains("VStack(alignment: .leading, spacing: NoopMetrics.sectionGap)"))
 
-        let sync = try XCTUnwrap(row.range(of: "SyncStatusSection()"))
-        let heartRate = try XCTUnwrap(
-            row.range(of: "HeartRateSection(liveTrackingOptedIn: $liveTrackingOptedIn)")
+        let sync = try XCTUnwrap(
+            row.range(
+                of: "SyncStatusSection(allowsLocalMutations: allowsLocalMutations)"
+            )
         )
-        let hubLinks = try XCTUnwrap(row.range(of: "HealthHubLinksSection()"))
+        let heartRate = try XCTUnwrap(
+            row.range(
+                of: "HeartRateSection(\n"
+                    + "                liveTrackingOptedIn: "
+                    + "$liveTrackingOptedIn,\n"
+                    + "                allowsLocalMutations: "
+                    + "allowsLocalMutations"
+            )
+        )
+        let hubLinks = try XCTUnwrap(
+            row.range(
+                of: "HealthHubLinksSection(\n"
+                    + "                allowsLocalRecords: "
+                    + "allowsLocalMutations"
+            )
+        )
         XCTAssertLessThan(sync.lowerBound, heartRate.lowerBound)
         XCTAssertLessThan(heartRate.lowerBound, hubLinks.lowerBound)
     }
@@ -63,7 +79,12 @@ final class HealthScreenPerformanceContractTests: XCTestCase {
         let source = try sourceText()
 
         XCTAssertTrue(source.contains("@Environment(\\.noopInteractionInProgress)"))
-        XCTAssertTrue(source.contains("if liveTrackingOptedIn && !interactionInProgress"))
+        XCTAssertTrue(
+            source.contains(
+                "if allowsLocalMutations && liveTrackingOptedIn "
+                    + "&& !interactionInProgress"
+            )
+        )
         XCTAssertTrue(source.contains("LiveHRSamplingClock"))
         XCTAssertFalse(source.contains("private let sampleTimer"))
         XCTAssertTrue(source.contains(".onAppear { prepareLiveDisplayForMountedRow() }"))

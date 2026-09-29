@@ -295,7 +295,7 @@ extension WhoopStore {
                     SELECT localSourceId
                     FROM managedSyncSource
                     WHERE sourceKind = 'managed_restore'
-                    ORDER BY createdAtMs ASC, sourceId ASC
+                    ORDER BY createdAtMs DESC, sourceId DESC
                     """
             )
         }

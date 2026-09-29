@@ -350,16 +350,24 @@ struct RootView: View {
             .background(StrandPalette.surfaceBase.ignoresSafeArea())
         }
         .task {
-            // AppModel owns the one cold-launch repository refresh. Wait briefly for its published cache,
-            // but never start a second independent 4,000-day read from the macOS shell: on larger histories
-            // that duplicate work competes with the first Today render and scroll.
-            if !repo.loaded {
-                for _ in 0..<200 {
-                    if repo.loaded { break }
-                    try? await Task.sleep(nanoseconds: 50_000_000)
+            if model.runtimeRole.hasManagedViewerTransport {
+                // Account setup and account-scoped history are the Mac's
+                // launch-critical data path. AppModel deliberately starts no
+                // local collector-store scan for this role, so bootstrap
+                // cannot sit behind an unrelated large or unreadable database.
+                await MacManagedViewerService.shared.bootstrap(repo: repo)
+            } else {
+                // AppModel owns the collector's one cold-launch repository
+                // refresh. Wait briefly for its published cache, but never
+                // start a duplicate 4,000-day read from the shell.
+                if !repo.loaded {
+                    for _ in 0..<200 {
+                        if repo.loaded { break }
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                    }
                 }
+                await MacManagedViewerService.shared.bootstrap(repo: repo)
             }
-            await MacManagedViewerService.shared.bootstrap(repo: repo)
             guard model.runtimeRole.allowsLocalCollection,
                   !repo.isManagedViewerStoreActive else { return }
             // Backup & Sync: on-launch catch-up. Gated on the auto toggle being ON (default OFF). A
@@ -613,10 +621,6 @@ struct RootView: View {
             MacCollectorPhoneOnlyView()
         } else {
             destination(for: selected)
-                .disabled(
-                    model.runtimeRole.enforcesManagedViewerReadOnlyRoutes
-                        && selected != .friends
-                )
         }
     }
 
@@ -631,7 +635,11 @@ struct RootView: View {
         case .live: liveDetail
         case .breathe: BreathingView()
         case .intervals: IntervalTimerView()
-        case .explore: MetricExplorerView()
+        case .explore:
+            MetricExplorerView(
+                allowsLocalMutations:
+                    model.runtimeRole.allowsLocalAnalysisAndGuidance
+            )
         case .compare:
             CompareView(
                 allowsScoreRefresh:
@@ -642,8 +650,16 @@ struct RootView: View {
         case .trends: TrendsView()
         case .workouts: WorkoutsView()
         case .nutrition: NutritionLogView()
-        case .health: HealthView()
-        case .stress: StressView()
+        case .health:
+            HealthView(
+                allowsLocalMutations:
+                    model.runtimeRole.allowsLocalAnalysisAndGuidance
+            )
+        case .stress:
+            StressView(
+                allowsLocalMutations:
+                    model.runtimeRole.allowsLocalAnalysisAndGuidance
+            )
         case .labBook: LabBookView()
         case .rhythm: RhythmHost()
         case .appleHealth: AppleHealthView()
@@ -672,11 +688,17 @@ struct RootView: View {
         NavigationStack {
             // Today's root-level links push TabRoute VALUES (#198), so this stack must register
             // their destinations (once per stack — a double registration double-pushes, #38).
-            LiquidTodayView()
+            LiquidTodayView(
+                allowsLocalMutations:
+                    model.runtimeRole.allowsLocalAnalysisAndGuidance
+            )
                 .tabRouteDestinations()
         }
         #else
-        LiquidTodayView()
+        LiquidTodayView(
+            allowsLocalMutations:
+                model.runtimeRole.allowsLocalAnalysisAndGuidance
+        )
         #endif
     }
 

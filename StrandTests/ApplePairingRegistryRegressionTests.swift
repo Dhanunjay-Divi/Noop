@@ -444,6 +444,65 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testSupplierActivationOccursOnlyAfterLeaseValidation() async throws {
+        let (_, registry) = try await makeRegistry()
+        let replacement = supplierDevice(id: "supplier-lease-activation")
+        let source = FakeLiveSource(id: replacement.id)
+        let coordinator = makeCoordinator(
+            registry: registry,
+            sources: [replacement.id: source]
+        )
+        coordinator.start()
+        let lease = try XCTUnwrap(coordinator.acquireSupplierPairingLease())
+
+        var activationCalls = 0
+        XCTAssertTrue(
+            coordinator.commitSupplierPairingLease(
+                lease,
+                activate: {
+                    activationCalls += 1
+                    return registry.addAndSetActive(replacement)
+                }
+            )
+        )
+
+        XCTAssertEqual(activationCalls, 1)
+        XCTAssertEqual(registry.activeDeviceId, replacement.id)
+        XCTAssertEqual(source.connects.count, 1)
+    }
+
+    @MainActor
+    func testRejectedSupplierActivationLeavesPreviousSourceUntouched()
+        async throws
+    {
+        let (_, registry) = try await makeRegistry()
+        let replacement = supplierDevice(id: "supplier-lease-rejected")
+        let source = FakeLiveSource(id: replacement.id)
+        var whoopStarts = 0
+        var whoopStops = 0
+        let coordinator = makeCoordinator(
+            registry: registry,
+            sources: [replacement.id: source],
+            startWhoop: { whoopStarts += 1 },
+            stopWhoop: { whoopStops += 1 }
+        )
+        coordinator.start()
+        let lease = try XCTUnwrap(coordinator.acquireSupplierPairingLease())
+
+        XCTAssertFalse(
+            coordinator.commitSupplierPairingLease(
+                lease,
+                activate: { false }
+            )
+        )
+        XCTAssertEqual(registry.activeDeviceId, "my-whoop")
+        XCTAssertTrue(source.connects.isEmpty)
+        XCTAssertEqual(whoopStarts, 0)
+        XCTAssertEqual(whoopStops, 0)
+        XCTAssertTrue(coordinator.cancelSupplierPairingLease(lease))
+    }
+
+    @MainActor
     func testStalePairingLeaseCannotReleaseNewerLease() async throws {
         let (_, registry) = try await makeRegistry()
         let device = supplierDevice(id: "supplier-generation")

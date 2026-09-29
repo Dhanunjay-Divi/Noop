@@ -74,6 +74,12 @@ enum StressDaytimeAnalysis {
 // Every historical point has its own causal baseline, so later data cannot rewrite it.
 
 struct StressView: View {
+    let allowsLocalMutations: Bool
+
+    init(allowsLocalMutations: Bool = true) {
+        self.allowsLocalMutations = allowsLocalMutations
+    }
+
     @EnvironmentObject var repo: Repository
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
@@ -285,17 +291,19 @@ struct StressView: View {
         // The sustained-stress suggestion opens the existing Breathe trainer in a sheet —
         // in-app and passive (no alert / notification), inheriting the app environment.
         .sheet(isPresented: $showBreathe) {
-            NavigationStack {
-                BreathingView()
-                    .toolbar {
-                        ToolbarItem {
-                            Button("Done") { showBreathe = false }
+            if allowsLocalMutations {
+                NavigationStack {
+                    BreathingView()
+                        .toolbar {
+                            ToolbarItem {
+                                Button("Done") { showBreathe = false }
+                            }
                         }
-                    }
+                }
+                #if os(macOS)
+                .frame(width: 520, height: 760)
+                #endif
             }
-            #if os(macOS)
-            .frame(width: 520, height: 760)
-            #endif
         }
     }
 
@@ -351,7 +359,9 @@ struct StressView: View {
             }
 
             // Sustained-high suggestion — only when the recent run stays in the HIGH band.
-            if day.sustainedHigh { sustainedBreatheCard(day) }
+            if allowsLocalMutations, day.sustainedHigh {
+                sustainedBreatheCard(day)
+            }
         }
     }
 
@@ -380,6 +390,7 @@ struct StressView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 NoopButton("Start a Breathe session", systemImage: "wind",
                            kind: .primary, fullWidth: true) {
+                    guard allowsLocalMutations else { return }
                     showBreathe = true
                 }
             }

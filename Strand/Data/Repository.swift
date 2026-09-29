@@ -570,6 +570,18 @@ final class Repository: ObservableObject {
     private var canonicalDeviceId: String { Self.whoopSource }
     private var canonicalComputedId: String { Self.whoopSource + "-noop" }
 
+    /// The local single-device collector can retain its exact one-source raw-read path. A managed viewer
+    /// keeps the launch-time canonical `deviceId`, but its account history lives under restored source ids,
+    /// so it must always take the source-union path even when `deviceId == canonicalDeviceId`.
+    private var usesCanonicalRawReadFastPath: Bool {
+        #if os(macOS)
+        if case .managedViewer = storeTarget {
+            return false
+        }
+        #endif
+        return deviceId == canonicalDeviceId
+    }
+
     /// The distinct IMPORTED/MEASURED source ids to union for a dashboard read: the active strap (live raw,
     /// #814) and the canonical imported id. Active strap FIRST so per-day dedup lets the measured/live row
     /// win over the imported one. Deduped, so a single-device install (active id == canonical) reads one id.
@@ -2456,59 +2468,32 @@ final class Repository: ObservableObject {
         // UNION the active strap + canonical so the HR trend renders whether the landed day's raw sits under
         // the re-added strap (live) or the canonical history. Deduped by ts (active strap wins) so an overlap
         // never double-counts; sorted ascending. Single-device install reads one id (byte-identical).
-        guard deviceId != canonicalDeviceId else {
+        guard !usesCanonicalRawReadFastPath else {
             return (try? await store.hrSamples(deviceId: deviceId, from: from, to: to, limit: limit)) ?? []
         }
-        var byTs: [Int: HRSample] = [:]
-        for id in importedReadIds {
-            for s in (try? await store.hrSamples(deviceId: id, from: from, to: to, limit: limit)) ?? [] where byTs[s.ts] == nil {
-                byTs[s.ts] = s
-            }
-        }
-        return byTs.values.sorted { $0.ts < $1.ts }
+        return (try? await store.hrSamples(
+            deviceIds: importedReadIds,
+            from: from,
+            to: to,
+            limit: limit
+        )) ?? []
     }
 
     /// Clean R-R intervals over the active-strap/canonical union. Earlier source ids win, while a
     /// multiset merge preserves legitimate equal intervals emitted within the same whole-second stamp.
     func rrIntervals(from: Int, to: Int, limit: Int = 200_000) async -> [RRInterval] {
         guard let store = await ensureStore() else { return [] }
-        guard deviceId != canonicalDeviceId else {
+        guard !usesCanonicalRawReadFastPath else {
             return (try? await store.rrIntervals(
                 deviceId: deviceId, from: from, to: to, limit: limit)) ?? []
         }
 
-        struct Key: Hashable {
-            let ts: Int
-            let rrMs: Int
-            let source: Int?
-        }
-
-        var merged: [(order: Int, sample: RRInterval)] = []
-        var maxOccurrences: [Key: Int] = [:]
-        var order = 0
-        for id in importedReadIds {
-            let rows = (try? await store.rrIntervals(
-                deviceId: id, from: from, to: to, limit: limit)) ?? []
-            var sourceOccurrences: [Key: Int] = [:]
-            for sample in rows {
-                let key = Key(
-                    ts: sample.ts,
-                    rrMs: sample.rrMs,
-                    source: sample.srcChannel?.rawValue)
-                let occurrence = sourceOccurrences[key, default: 0] + 1
-                sourceOccurrences[key] = occurrence
-                if occurrence > maxOccurrences[key, default: 0] {
-                    merged.append((order, sample))
-                    order += 1
-                }
-            }
-            for (key, count) in sourceOccurrences {
-                maxOccurrences[key] = max(maxOccurrences[key, default: 0], count)
-            }
-        }
-        return merged
-            .sorted { ($0.sample.ts, $0.order) < ($1.sample.ts, $1.order) }
-            .map(\.sample)
+        return (try? await store.rrIntervals(
+            deviceIds: importedReadIds,
+            from: from,
+            to: to,
+            limit: limit
+        )) ?? []
     }
 
     /// Raw motion over the active-strap/canonical union, de-duplicated by timestamp with the active
@@ -2516,15 +2501,15 @@ final class Repository: ObservableObject {
     /// HR-only devices simply return an empty list and retain the conservative HR fallback.
     func gravitySamples(from: Int, to: Int, limit: Int = 200_000) async -> [GravitySample] {
         guard let store = await ensureStore() else { return [] }
-        guard deviceId != canonicalDeviceId else {
+        guard !usesCanonicalRawReadFastPath else {
             return (try? await store.gravitySamples(deviceId: deviceId, from: from, to: to, limit: limit)) ?? []
         }
-        var byTs: [Int: GravitySample] = [:]
-        for id in importedReadIds {
-            let rows = (try? await store.gravitySamples(deviceId: id, from: from, to: to, limit: limit)) ?? []
-            for row in rows where byTs[row.ts] == nil { byTs[row.ts] = row }
-        }
-        return byTs.values.sorted { $0.ts < $1.ts }
+        return (try? await store.gravitySamples(
+            deviceIds: importedReadIds,
+            from: from,
+            to: to,
+            limit: limit
+        )) ?? []
     }
 
     /// Logical day-start of the most recent day the active device has HR data for, or nil when the store is
@@ -2540,19 +2525,18 @@ final class Repository: ObservableObject {
     /// Aggregated in SQL so a full day never loads the raw ~1 Hz rows.
     func hrBuckets(from: Int, to: Int, bucketSeconds: Int = 300) async -> [HRBucket] {
         guard let store = await ensureStore() else { return [] }
-        // UNION the active strap + canonical for the trend chart. Per bucket-start the active strap wins; a
-        // raw HR window almost never overlaps between the two namespaces (different time periods), so the
-        // per-bucket mean stays faithful. Single-device install reads one id (byte-identical).
-        guard deviceId != canonicalDeviceId else {
+        // UNION the active strap + canonical before aggregating. Source
+        // precedence resolves only an overlapping second; every other sample
+        // still contributes to the shared bucket mean.
+        guard !usesCanonicalRawReadFastPath else {
             return (try? await store.hrBuckets(deviceId: deviceId, from: from, to: to, bucketSeconds: bucketSeconds)) ?? []
         }
-        var byStart: [Int: HRBucket] = [:]
-        for id in importedReadIds {
-            for b in (try? await store.hrBuckets(deviceId: id, from: from, to: to, bucketSeconds: bucketSeconds)) ?? [] where byStart[b.ts] == nil {
-                byStart[b.ts] = b
-            }
-        }
-        return byStart.values.sorted { $0.ts < $1.ts }
+        return (try? await store.hrBuckets(
+            deviceIds: importedReadIds,
+            from: from,
+            to: to,
+            bucketSeconds: bucketSeconds
+        )) ?? []
     }
 
     /// Full motion-counter series over the same active/canonical union used by HR and gravity. The
@@ -3303,23 +3287,31 @@ final class Repository: ObservableObject {
             // Both HR paths COALESCE measured + ppgHrSample (#156) , preserved by delegating to the
             // store reads rather than re-querying. Day scale → SQL-aggregated buckets; zoomed-in → raw.
             if isRaw {
-                // Read each source's raw seconds (off the WhoopStore actor), then hand the union to the
-                // pure helper on a utility task so the dedup + sort + map (up to 200k 1 Hz rows) runs OFF
-                // the main actor and can't beach-ball a dense day. Mirrors `restageFromRaw`.
-                var perId: [[HRSample]] = []
-                for id in unionIds {
-                    perId.append((try? await store.hrSamples(deviceId: id, from: from, to: to, limit: 200_000)) ?? [])
-                }
+                let rows = (try? await store.hrSamples(
+                    deviceIds: unionIds,
+                    from: from,
+                    to: to,
+                    limit: 200_000
+                )) ?? []
                 let points = await Task.detached(priority: .utility) {
-                    Self.dedupSortRawHr(perId)
+                    rows.map {
+                        TrendPoint(
+                            date: Date(
+                                timeIntervalSince1970: TimeInterval($0.ts)
+                            ),
+                            value: Double($0.bpm)
+                        )
+                    }
                 }.value
                 return TimelineSeries(points: points, isRaw: true, bucketSeconds: 1)
             }
-            var byStart: [Int: HRBucket] = [:]
-            for id in unionIds {
-                for b in (try? await store.hrBuckets(deviceId: id, from: from, to: to, bucketSeconds: bucket)) ?? [] where byStart[b.ts] == nil { byStart[b.ts] = b }
-            }
-            return TimelineSeries(points: byStart.values.sorted { $0.ts < $1.ts }.map {
+            let buckets = (try? await store.hrBuckets(
+                deviceIds: unionIds,
+                from: from,
+                to: to,
+                bucketSeconds: bucket
+            )) ?? []
+            return TimelineSeries(points: buckets.map {
                 TrendPoint(date: Date(timeIntervalSince1970: TimeInterval($0.ts)), value: $0.bpm)
             }, isRaw: false, bucketSeconds: bucket)
         }

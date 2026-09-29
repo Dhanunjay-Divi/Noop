@@ -1005,7 +1005,13 @@ final class ReferenceSurfaceContractTests: XCTestCase {
             #").filter { ["resp", "spo2", "rhr", "hrv", "skin"].contains($0.key) }"#
         ))
         XCTAssertTrue(health.contains("HealthTimelineSection()"))
-        XCTAssertTrue(health.contains("BiomarkerTrendsSection()"))
+        XCTAssertTrue(
+            health.contains(
+                "BiomarkerTrendsSection(\n"
+                    + "                allowsLocalMutations: "
+                    + "allowsLocalMutations"
+            )
+        )
         XCTAssertTrue(health.contains("Missing wear time stays blank."))
         XCTAssertTrue(vitals.contains(#"key: "sleep""#))
         XCTAssertTrue(vitals.contains("populationRange: 7...9"))

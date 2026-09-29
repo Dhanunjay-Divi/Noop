@@ -726,11 +726,10 @@ final class AppModel: ObservableObject {
                 "runtime.collection_role",
                 fields: ["outcome": "viewer_only"]
             )
-            Task(priority: .utility) { [weak self] in
-                guard let self else { return }
-                await self.repo.refresh()
-                _ = await self.wireDeviceRegistry()
-            }
+            // RootView immediately mounts the authenticated account-scoped
+            // viewer store. Do not scan the legacy local collector database
+            // first: a large or unreadable local file would delay account
+            // bootstrap and could publish unrelated local history meanwhile.
             return
         }
 

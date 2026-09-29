@@ -1530,14 +1530,13 @@ struct AddDeviceWizard: View {
         case .amazfit, .miBand:  ensureHuamiScanner().scan()
         case .oura:              ensureOuraScanner().scan()
         case .veepoo:
+            endVeepooPairing()
             guard Self.supplierPairingAvailableForCurrentBuild else {
-                endVeepooPairing()
                 veepooFailure = nil
                 self.type = nil
                 step = .type
                 return
             }
-            endVeepooPairing()
             veepooFailure = nil
             let session = veepooHandoff.begin(
                 acquireLease: {
@@ -1783,23 +1782,33 @@ struct AddDeviceWizard: View {
     }
 
     private func finishVeepooAdd() {
-        guard let session = veepooSession else { return }
+        guard let session = veepooSession else {
+            veepooFailure = .registration
+            endVeepooPairing()
+            return
+        }
+        guard let registry = model.deviceRegistry else {
+            veepooFailure = .registration
+            endVeepooPairing()
+            return
+        }
         var addedDevice: PairedDevice?
         let committed = session.commitPairedDevice(nickname: nameDraft) { device in
-            let added = model.deviceRegistry?.addAndSetActive(device) ?? false
+            let added = veepooHandoff.commitReplacement { lease in
+                model.sourceCoordinator?.commitSupplierPairingLease(
+                    lease,
+                    activate: {
+                        registry.addAndSetActive(device)
+                    }
+                ) ?? false
+            }
             if added {
                 addedDevice = device
             }
             return added
         }
-        guard committed, let addedDevice else { return }
-        guard veepooHandoff.commitReplacement(
-            commitLease: { lease in
-                model.sourceCoordinator?
-                    .commitSupplierPairingLease(lease) ?? false
-            }
-        ) else {
-            veepooFailure = .connection
+        guard committed, let addedDevice else {
+            endVeepooPairing()
             return
         }
         veepooCommitted = true

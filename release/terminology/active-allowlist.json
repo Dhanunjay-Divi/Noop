@@ -1172,12 +1172,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 107,
+      "occurrenceCount": 106,
       "owner": "project team",
       "path": "Strand/Data/Repository.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "a6e51c6f0c6fbeb2999bdcd0660c21fe3eb668a98a7d65bf26a88ebef0280bce"
+      "sha256": "de182d1af32728801c5a3e9ba9dd830ccd014159f80e2ff79f9d064119c1abfc"
     },
     {
       "category": "core",

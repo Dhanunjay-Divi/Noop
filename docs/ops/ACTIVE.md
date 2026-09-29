@@ -12,9 +12,9 @@ Last updated: **2026-09-29**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
-- Pull request `#18` is open and mergeable at remote head `036f2f8f0`; every
-  hosted job on that older exact head is green. The final local replacement
-  closes the initial and follow-up review findings without changing data
+- Pull request `#18` is open and mergeable at remote head `eb4c33e20`; every
+  hosted job on that exact pushed head is green. Four later automated review
+  findings are corrected in the final local replacement without changing data
   authority or score formulas: macOS managed history now uses exact
   account-scoped databases and sources, stale work is generation-fenced across
   account changes/sign-out, history-only capability version 3 excludes active
@@ -23,27 +23,43 @@ Last updated: **2026-09-29**
   and terminal continuation failures remove cached account data, transient
   provider failures remain retryable, strict managed sleep history paginates
   beyond one 4,000-row page, and managed history remains distinct while
-  participating in Stress selection. The viewer starts no local scoring,
-  recommendation, reminder, legacy-sync, upload, source-registration, or
-  device-control workers. Exact current evidence passes: NoopRemoteSync
-  205/205; WhoopStore 555/555; focused managed viewer/Stress 59/59; complete
-  macOS 2,391 with one intentional skip; and the exact unsigned iOS Simulator
-  graph with app, Watch, complications, and widgets under the expected four
-  bundle identifiers. The earlier complete Apple, Android, server/PostgreSQL,
-  analytics, production-shell, localization, accessibility, privacy, claims,
-  calibration, legal, required-CI, trusted-release, and SDK-artifact walls
-  remain green because this replacement does not alter their implementations.
-  The final 372-case Tools wall with one intentional skip, 50 top-level tests,
-  all-platform localization, terminology, nine release controls, ten required
-  contexts, trusted self-verification, legal/distribution, 12-metric
-  calibration, private-data, the 1,312-file claims scan, exact ten-file SDK
-  artifact, structured-file parsing, and diff hygiene pass. Exact cleanup
-  removed all 64 round-owned `/private/tmp/noop-pr18-*` paths totaling about
-  9.4 GiB; Data-volume free space increased from about 38 GiB to 46 GiB and no
-  round process survives. One consolidated replacement push, exact-head hosted
-  checks, reviewed-thread closure, normal protected integration, and
-  protected-main verification remain. Physical BLE, background, battery,
-  haptics, accessibility, physiological accuracy, supplier firmware/rights,
+  participating in Stress selection. Managed raw charts now use one globally
+  bounded ordered SQL union across restored sources; overlapping seconds are
+  resolved before HR bucket aggregation and the newest restored source has
+  precedence. Read-only Mac routes keep navigation while hiding mutation
+  controls, including the Stress breathing/haptic entry and local Lab Book;
+  account bootstrap no longer waits on an unrelated collector-store read; and
+  supplier activation becomes durable only inside a valid pairing lease. The
+  viewer starts no local scoring, recommendation, reminder, legacy-sync,
+  upload, source-registration, or device-control workers. Exact current
+  evidence passes: NoopRemoteSync 205/205; WhoopStore 556/556; the combined
+  managed-viewer/supplier focused wall 50/50; the final managed-viewer
+  follow-up 29/29; the supplier lease wall 24/24; complete macOS 2,394 with one
+  intentional skip; and the exact unsigned iOS Simulator graph with app,
+  Watch, complications, and widgets under the expected four bundle
+  identifiers. Independent follow-up review confirms all four residual
+  implementation findings are closed and identifies only the now-corrected
+  stale evidence count. The earlier complete Apple, Android,
+  server/PostgreSQL, analytics, production-shell, localization, accessibility,
+  privacy, claims, calibration, legal, required-CI, trusted-release, and
+  SDK-artifact walls remain applicable because this replacement does not alter
+  their implementations. The final current policy wall passes 372 tests with
+  one intentional skip plus 50 top-level tests; all-platform localization with
+  the tracked Apple baseline at 130; 18,562 classified terminology occurrences
+  across 1,634 groups with zero forbidden mappings; nine release checks; ten
+  required contexts; trusted self-verification; 12-metric calibration parity;
+  legal inventory for 230 runtime components and three container inputs;
+  distribution provenance; private-data and 1,312-file health-claims gates;
+  102 operations records; exact 10-file SDK artifact verification; and diff
+  hygiene. Final post-cleanup terminology regeneration and release-trust
+  repinning pass on the exact current tree. The 7.6 GiB round-owned
+  `/private/tmp/noop-pr18-review2` tree was exact-deleted after its outcomes
+  became durable; no process or open handle owned it, the path is absent, and
+  Data-volume free space increased from about 15 GiB to 22 GiB. One
+  review-driven replacement commit/push, exact-head hosted checks, closure of
+  all seven reviewed threads, normal protected integration, and protected-main
+  verification remain. Physical BLE, background, battery, haptics,
+  accessibility, physiological accuracy, supplier firmware/rights,
   signing/store, credentials, carrier/legal, and elapsed production operations
   remain external gates.
 - Public checkpoints `c8a986a61` and `cf7e28e4b` now simplify the mobile

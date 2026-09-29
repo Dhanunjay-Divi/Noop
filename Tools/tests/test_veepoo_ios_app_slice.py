@@ -286,12 +286,41 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
             wizard.index("private func ouraCapabilities")
         ]
         self.assertIn("session.commitPairedDevice(", finish)
-        self.assertIn("model.deviceRegistry?.addAndSetActive(device)", finish)
+        self.assertIn("let registry = model.deviceRegistry", finish)
+        registry_guard = finish[
+            finish.index("guard let registry = model.deviceRegistry") :
+            finish.index("var addedDevice: PairedDevice?")
+        ]
+        self.assertIn("veepooFailure = .registration", registry_guard)
+        self.assertIn("endVeepooPairing()", registry_guard)
+        self.assertIn("veepooHandoff.commitReplacement { lease in", finish)
+        self.assertIn(
+            "model.sourceCoordinator?.commitSupplierPairingLease(",
+            finish,
+        )
+        self.assertIn("activate: {", finish)
+        self.assertIn("registry.addAndSetActive(device)", finish)
+        self.assertLess(
+            finish.index("veepooHandoff.commitReplacement { lease in"),
+            finish.index("registry.addAndSetActive(device)"),
+        )
         self.assertLess(
             finish.index("guard committed, let addedDevice else"),
             finish.index("onClose()"),
         )
         self.assertNotIn("model.registerDevice", finish)
+
+        coordinator = self.read("Strand/BLE/SourceCoordinator.swift")
+        lease_commit = coordinator[
+            coordinator.index("func commitSupplierPairingLease(\n") :
+            coordinator.index(
+                "private func releaseSupplierPairingLease(",
+                coordinator.index("func commitSupplierPairingLease(\n"),
+            )
+        ]
+        self.assertIn("guard supplierPairingLease == lease else", lease_commit)
+        self.assertIn("guard activate() else { return false }", lease_commit)
+        self.assertIn("return releaseSupplierPairingLease(lease)", lease_commit)
 
     def test_only_proven_registry_capability_is_exposed(self) -> None:
         source = self.read("Strand/BLE/VeepooBandSource.swift")

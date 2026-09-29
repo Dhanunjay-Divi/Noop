@@ -13,6 +13,12 @@ import WhoopStore
 /// system: every surface is a NoopCard, every metric is a StatTile, every chart is
 /// a ChartCard — no ad-hoc card heights or paddings.
 struct HealthView: View {
+    let allowsLocalMutations: Bool
+
+    init(allowsLocalMutations: Bool = true) {
+        self.allowsLocalMutations = allowsLocalMutations
+    }
+
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var profile: ProfileStore
     /// The explicit Live HR choice belongs to the retained Health screen, not its independently lazy row.
@@ -44,7 +50,8 @@ struct HealthView: View {
                 // this leaf (which owns `live`/`model`) so a ~1 Hz HR tick re-renders only this branch,
                 // never the parent, and only while there's no history (a transient first-run state).
                 HealthFirstRunContent(
-                    liveTrackingOptedIn: $liveTrackingOptedIn
+                    liveTrackingOptedIn: $liveTrackingOptedIn,
+                    allowsLocalMutations: allowsLocalMutations
                 )
             } else {
                 // History present: `live` is irrelevant to the layout choice, so the parent renders the
@@ -52,14 +59,16 @@ struct HealthView: View {
                 ForEach(HealthMonitorSection.allCases) { section in
                     HealthMonitorSectionRow(
                         section: section,
-                        liveTrackingOptedIn: $liveTrackingOptedIn
+                        liveTrackingOptedIn: $liveTrackingOptedIn,
+                        allowsLocalMutations: allowsLocalMutations
                     )
                 }
             }
         }
         .background {
             HealthLiveTrackingLeaseLifetime(
-                liveTrackingOptedIn: $liveTrackingOptedIn
+                liveTrackingOptedIn: $liveTrackingOptedIn,
+                allowsLocalMutations: allowsLocalMutations
             )
         }
     }
@@ -88,6 +97,7 @@ enum HealthMonitorSection: CaseIterable, Identifiable {
 private struct HealthMonitorSectionRow: View {
     let section: HealthMonitorSection
     @Binding var liveTrackingOptedIn: Bool
+    let allowsLocalMutations: Bool
 
     var body: some View {
         content
@@ -99,15 +109,18 @@ private struct HealthMonitorSectionRow: View {
     @ViewBuilder private var content: some View {
         switch section {
         case .syncStatus:
-            SyncStatusSection()
+            SyncStatusSection(allowsLocalMutations: allowsLocalMutations)
         case .heartRate:
-            HeartRateSection(liveTrackingOptedIn: $liveTrackingOptedIn)
+            HeartRateSection(
+                liveTrackingOptedIn: $liveTrackingOptedIn,
+                allowsLocalMutations: allowsLocalMutations
+            )
         case .vitals:
             VitalsSection()
         case .timeline:
             HealthTimelineSection()
         case .fitnessAge:
-            FitnessAgeSection()
+            FitnessAgeSection(allowsLocalMutations: allowsLocalMutations)
         case .vitality:
             VitalitySection()
         case .recoveryContributors:
@@ -115,11 +128,15 @@ private struct HealthMonitorSectionRow: View {
         case .bodyComposition:
             BodyCompositionSection()
         case .biomarkerTrends:
-            BiomarkerTrendsSection()
+            BiomarkerTrendsSection(
+                allowsLocalMutations: allowsLocalMutations
+            )
         case .skinTemperature:
-            SkinTempSection()
+            SkinTempSection(allowsLocalMutations: allowsLocalMutations)
         case .hubLinks:
-            HealthHubLinksSection()
+            HealthHubLinksSection(
+                allowsLocalRecords: allowsLocalMutations
+            )
         }
     }
 }
@@ -133,6 +150,7 @@ private struct HealthFirstRunContent: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var profile: ProfileStore
     @Binding var liveTrackingOptedIn: Bool
+    let allowsLocalMutations: Bool
 
     /// HR to display: the spike-filtered median (model.bpm, #39) when available, else the reported
     /// value, else R-R-derived (the strap streams R-R even when its HR field reads 0).
@@ -151,14 +169,14 @@ private struct HealthFirstRunContent: View {
         if !hasLiveHR && !live.connected {
             // These remain separate children of ScreenScaffold's LazyVStack. The 4pt trailing
             // padding preserves the prior 24pt section rhythm on top of the scaffold's 20pt spacing.
-            SyncStatusSection()
+            SyncStatusSection(allowsLocalMutations: allowsLocalMutations)
                 .padding(.bottom, NoopMetrics.space1)
             ComingSoon(what: "No biometrics yet. Import your wearable export (and Apple Health if you have it) in Data Sources to fill this in.")
                 .padding(.bottom, showsCycleSetup ? NoopMetrics.space1 : 0)
             // Reproductive-health setup must not disappear just because a new user has no band rows.
             // Profile remains the primary entry point; Health also exposes the same private opt-in.
             if showsCycleSetup {
-                SkinTempSection()
+                SkinTempSection(allowsLocalMutations: allowsLocalMutations)
             }
         } else {
             // A connected first-time user must be able to reach the explicit Start Live HR control even
@@ -166,7 +184,8 @@ private struct HealthFirstRunContent: View {
             ForEach(HealthMonitorSection.allCases) { section in
                 HealthMonitorSectionRow(
                     section: section,
-                    liveTrackingOptedIn: $liveTrackingOptedIn
+                    liveTrackingOptedIn: $liveTrackingOptedIn,
+                    allowsLocalMutations: allowsLocalMutations
                 )
             }
         }
@@ -180,17 +199,19 @@ private struct HealthLiveTrackingLeaseLifetime: View {
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var model: AppModel
     @Binding var liveTrackingOptedIn: Bool
+    let allowsLocalMutations: Bool
 
     var body: some View {
         Color.clear
             .allowsHitTesting(false)
             .accessibilityHidden(true)
             .onChangeCompat(of: live.connected) { connected in
-                guard connected, liveTrackingOptedIn else { return }
+                guard allowsLocalMutations, connected,
+                      liveTrackingOptedIn else { return }
                 model.rearmRealtimeIfWanted()
             }
             .onDisappear {
-                guard liveTrackingOptedIn else { return }
+                guard allowsLocalMutations, liveTrackingOptedIn else { return }
                 liveTrackingOptedIn = false
                 model.stopRealtimeHR()
             }
@@ -206,6 +227,7 @@ private struct HealthLiveTrackingLeaseLifetime: View {
 /// the live chunk count (never a fabricated percent — total pending is unknowable from the protocol);
 /// otherwise it shows when history last synced.
 private struct SyncStatusSection: View {
+    let allowsLocalMutations: Bool
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var model: AppModel
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
@@ -227,16 +249,19 @@ private struct SyncStatusSection: View {
                     // the BLE engine's gated entry point directly (same idiom as SettingsView's
                     // `model.ble.enableWhoop5DeepData()`); BLEManager.syncNow() is the honest gate —
                     // a no-op when no strap is connected or a sync is already running.
-                    NoopButton(live.backfilling ? "Syncing…" : "Sync now",
-                               systemImage: "arrow.triangle.2.circlepath",
-                               kind: .secondary, fullWidth: true) {
-                        model.ble.syncNow()
+                    if allowsLocalMutations {
+                        NoopButton(live.backfilling ? "Syncing…" : "Sync now",
+                                   systemImage: "arrow.triangle.2.circlepath",
+                                   kind: .secondary, fullWidth: true) {
+                            guard allowsLocalMutations else { return }
+                            model.ble.syncNow()
+                        }
+                        .disabled(!canSync)
+                        .accessibilityLabel("Sync now")
+                        .accessibilityHint(canSync
+                            ? "Pulls Noop Band's stored history immediately, without waiting for the next automatic sync."
+                            : (live.backfilling ? "A sync is already in progress." : "Connect Noop Band first."))
                     }
-                    .disabled(!canSync)
-                    .accessibilityLabel("Sync now")
-                    .accessibilityHint(canSync
-                        ? "Pulls Noop Band's stored history immediately, without waiting for the next automatic sync."
-                        : (live.backfilling ? "A sync is already in progress." : "Connect Noop Band first."))
 
                     Text(helperText)
                         .font(StrandFont.footnote)
@@ -311,6 +336,7 @@ private struct HeartRateSection: View {
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
     @Binding var liveTrackingOptedIn: Bool
+    let allowsLocalMutations: Bool
 
     /// Rolling buffer of recently-streamed live HR (newest last), so the hero graph builds a real
     /// continuous time-series instead of collapsing to a 2-point flat line when the strap streams HR
@@ -396,7 +422,9 @@ private struct HeartRateSection: View {
             SectionHeader("Heart Rate", overline: liveTrackingOptedIn ? "Live" : "Paused",
                           trailing: liveTrackingOptedIn && hrIsDerived ? String(localized: "from R-R") : nil)
 
-            liveTrackingControl
+            if allowsLocalMutations {
+                liveTrackingControl
+            }
 
             // The live HR hero is a flat WHOOP card tinted rose — heart-rate's metric accent.
             // No scenic starfield / bloom: fill contrast carries the edge (Apple-flat).
@@ -423,7 +451,7 @@ private struct HeartRateSection: View {
         }
         .onAppear { prepareLiveDisplayForMountedRow() }
         .onChangeCompat(of: live.connected) { _ in
-            guard liveTrackingOptedIn else { return }
+            guard allowsLocalMutations, liveTrackingOptedIn else { return }
             // A gap invalidates the last packet immediately. The screen-lifetime owner re-arms an
             // existing lease on reconnect; this row waits for a genuinely newer packet before Live.
             liveTrackingLatestSample = nil
@@ -438,7 +466,7 @@ private struct HeartRateSection: View {
             // Do not even subscribe to a one-second clock while this explicitly opt-in display is paused.
             // During drag/deceleration the last truthful trace stays visible and the clock yields the frame
             // budget; a fresh subscription resumes automatically after the scroll settles.
-            if liveTrackingOptedIn && !interactionInProgress {
+            if allowsLocalMutations && liveTrackingOptedIn && !interactionInProgress {
                 LiveHRSamplingClock { now in
                     // Bank the CURRENT spike-filtered HR once a second, stamped with the tick's real
                     // wall-clock time. Nil/out-of-range values bank nothing, so a stale value never
@@ -510,7 +538,8 @@ private struct HeartRateSection: View {
     }
 
     private func startLiveTracking() {
-        guard live.connected, !live.backfilling, !liveTrackingOptedIn else { return }
+        guard allowsLocalMutations, live.connected, !live.backfilling,
+              !liveTrackingOptedIn else { return }
         liveTrackingStartSequence = live.heartRateSampleSequence
         liveTrackingLatestSample = nil
         liveTrackingOptedIn = true
@@ -527,7 +556,7 @@ private struct HeartRateSection: View {
     }
 
     private func stopLiveTracking() {
-        guard liveTrackingOptedIn else { return }
+        guard allowsLocalMutations, liveTrackingOptedIn else { return }
         liveTrackingOptedIn = false
         liveTrackingStartSequence = nil
         liveTrackingLatestSample = nil
@@ -865,6 +894,7 @@ private struct ContributorBar: View {
 /// (age/sex/resting-HR/activity) vs "Unlocks your VO₂max" (waist only) - never implying the body
 /// measurements sharpen the age (the body term cancels in the model).
 private struct FitnessAgeSection: View {
+    let allowsLocalMutations: Bool
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var profile: ProfileStore
     /// Drives the not-ready card's "refresh Fitness Age" button (force an immediate recompute).
@@ -952,9 +982,16 @@ private struct FitnessAgeSection: View {
             NavigationStack {
                 switch which {
                 case .trend:
-                    if let m = fitnessAgeMetric { MetricDetailView(metric: m) }
+                    if let m = fitnessAgeMetric {
+                        MetricDetailView(
+                            metric: m,
+                            allowsLocalMutations: allowsLocalMutations
+                        )
+                    }
                 case .settings:
-                    SettingsView()
+                    if allowsLocalMutations {
+                        SettingsView()
+                    }
                 }
             }
             #if os(macOS)
@@ -974,7 +1011,9 @@ private struct FitnessAgeSection: View {
             if showReadiness {
                 ReadinessChecklistCard(readiness: readiness,
                                        lead: nil,
-                                       onFix: { fitnessSheet = .settings })
+                                       onFix: allowsLocalMutations
+                                           ? { fitnessSheet = .settings }
+                                           : nil)
                     .transition(.opacity)
             }
         } else if loaded {
@@ -983,16 +1022,18 @@ private struct FitnessAgeSection: View {
             ReadinessChecklistCard(
                 readiness: readiness,
                 lead: fitnessReadyLead(),
-                onFix: { fitnessSheet = .settings },
-                onRefresh: {
-                    guard !refreshing else { return }
+                onFix: allowsLocalMutations
+                    ? { fitnessSheet = .settings }
+                    : nil,
+                onRefresh: allowsLocalMutations ? {
+                    guard allowsLocalMutations, !refreshing else { return }
                     refreshing = true
                     Task {
                         _ = await intelligence.recomputeFitnessAgeOnly()
                         await load()
                         refreshing = false
                     }
-                },
+                } : nil,
                 refreshing: refreshing)
         } else {
             // Brief read of the weekly value; honest placeholder rather than an empty gap.
@@ -1354,7 +1395,7 @@ private struct ReadinessChecklistCard: View {
     /// plain `String` rendered verbatim — not a `LocalizedStringKey` (which would re-key a resolved string).
     let lead: String?
     /// Invoked when the user taps a required-missing row's "Fix in Settings".
-    let onFix: () -> Void
+    let onFix: (() -> Void)?
     /// Optional force-recompute action (the "refresh Fitness Age" button, not-ready state only);
     /// `refreshing` swaps it for a spinner while the recompute runs. nil = no button.
     var onRefresh: (() -> Void)? = nil
@@ -1427,7 +1468,7 @@ private struct ReadinessChecklistCard: View {
         // A required/optional input that's still unsatisfied earns a "Fix in Settings" affordance, but
         // only when it's actually fixable there (age/sex/body metrics/waist) — resting-HR and activity
         // coverage come from wearing the strap, so those get no fix button.
-        let fixable = item.status != .satisfied
+        let fixable = onFix != nil && item.status != .satisfied
             && (item.key == "age" || item.key == "sex" || item.key == "waist")
         let row = HStack(alignment: .firstTextBaseline, spacing: 12) {
             Image(systemName: statusIcon(item.status))
@@ -1444,7 +1485,7 @@ private struct ReadinessChecklistCard: View {
                     .foregroundStyle(StrandPalette.textTertiary)
             }
             Spacer(minLength: 0)
-            if fixable {
+            if fixable, let onFix {
                 Button(action: onFix) {
                     Text("Fix in Settings")
                         .font(StrandFont.footnote.weight(.semibold))
@@ -2472,6 +2513,7 @@ private struct BodyCompositionSection: View {
 /// Source-aware measured markers inspired by the Biology reference. NOOP's Fitness Age and Wellness
 /// Age remain separate sections above; this list never relabels either as "biological age".
 private struct BiomarkerTrendsSection: View {
+    let allowsLocalMutations: Bool
     private struct Trend: Identifiable {
         let metric: MetricDescriptor
         let title: String
@@ -2508,7 +2550,10 @@ private struct BiomarkerTrendsSection: View {
                 VStack(spacing: 0) {
                     ForEach(Array(trends.enumerated()), id: \.element.id) { index, trend in
                         NavigationLink {
-                            MetricDetailView(metric: trend.metric)
+                            MetricDetailView(
+                                metric: trend.metric,
+                                allowsLocalMutations: allowsLocalMutations
+                            )
                         } label: {
                             biomarkerRow(trend)
                         }
@@ -2669,6 +2714,7 @@ private struct BiomarkerTrendsSection: View {
 /// shows when the engine returns a non-quiet level; cycle awareness shows the opt-in card until the user
 /// turns it on (default OFF); the body clock shows nil-state copy until it can read a rhythm.
 private struct SkinTempSection: View {
+    let allowsLocalMutations: Bool
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var repo: Repository
     // AppModel owns ProfileStore but does not republish its nested changes. Observe the profile directly
@@ -2704,14 +2750,18 @@ private struct SkinTempSection: View {
                     CycleAwarenessCard(
                         result: visibleCycleResult,
                         curve: model.cycleCurve,
-                        onLogPeriod: {
+                        onLogPeriod: allowsLocalMutations ? {
+                            guard allowsLocalMutations else { return }
                             Task {
                                 _ = await repo.logPeriodStart(day: Repository.localDayKey(Date()))
                                 await model.refreshV5Signals()
                             }
-                        },
-                        onOpenDetail: { cycleTrackerPresented = true },
-                        onTurnOff: {
+                        } : nil,
+                        onOpenDetail: allowsLocalMutations
+                            ? { cycleTrackerPresented = true }
+                            : nil,
+                        onTurnOff: allowsLocalMutations ? {
+                            guard allowsLocalMutations else { return }
                             cycleEnabled = false
                             model.cycleAwarenessEnabled = false
                             Task {
@@ -2720,10 +2770,11 @@ private struct SkinTempSection: View {
                                 #endif
                                 await model.refreshV5Signals()
                             }
-                        }
+                        } : nil
                     )
-                } else {
+                } else if allowsLocalMutations {
                     CycleAwarenessOptInCard(onEnable: {
+                        guard allowsLocalMutations else { return }
                         cycleEnabled = true
                         model.cycleAwarenessEnabled = true
                         Task {
@@ -2756,9 +2807,11 @@ private struct SkinTempSection: View {
             }
         }
         .sheet(isPresented: $cycleTrackerPresented) {
-            CycleTrackerView(result: visibleCycleResult, curve: model.cycleCurve)
-                .environmentObject(repo)
-                .environmentObject(model)
+            if allowsLocalMutations {
+                CycleTrackerView(result: visibleCycleResult, curve: model.cycleCurve)
+                    .environmentObject(repo)
+                    .environmentObject(model)
+            }
         }
     }
 }
@@ -2769,14 +2822,22 @@ private struct SkinTempSection: View {
 /// honest Health home without making either its own top-level destination — they route via `NavRouter`
 /// (the macOS sidebar selects the item; iOS presents the pillar sheet).
 private struct HealthHubLinksSection: View {
+    let allowsLocalRecords: Bool
     @EnvironmentObject var router: NavRouter
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Records & sources", overline: "On \(Platform.deviceNounPhrase)")
-            linkRow(title: String(localized: "Lab Book"),
+            if allowsLocalRecords {
+                linkRow(
+                    title: String(localized: "Lab Book"),
                     subtitle: String(localized: "Keep your bloods, BP and body numbers private, on \(Platform.deviceNounPhrase)."),
-                    symbol: "books.vertical.fill", tint: StrandPalette.metricCyan) { router.openLabBook() }
+                    symbol: "books.vertical.fill",
+                    tint: StrandPalette.metricCyan
+                ) {
+                    router.openLabBook()
+                }
+            }
             linkRow(title: String(localized: "Your Data, Fused"),
                     subtitle: String(localized: "The best-sourced number per metric across every band you use."),
                     symbol: "square.stack.3d.up.fill", tint: StrandPalette.accent) { router.openFusedRecord() }
@@ -2855,7 +2916,7 @@ private struct HealthHubLinksSection: View {
 struct FitnessAgeDemoScreen: View {
     var body: some View {
         ScreenScaffold(title: "Health Monitor", subtitle: "Fitness Age", onRefresh: {}) {
-            FitnessAgeSection()
+            FitnessAgeSection(allowsLocalMutations: true)
         }
     }
 }
