@@ -3932,7 +3932,14 @@ struct LiquidTodayView: View {
     /// pedometer count; both local strap paths are clearly labelled as motion-derived estimates.
     private var stepsSourceCaption: String {
         if importedStepsDay != nil { return String(localized: "Imported · Apple Health") }
-        if displayDay?.steps != nil { return String(localized: "Motion-derived estimate · Noop Band") }
+        if displayDay?.steps != nil {
+            // A supplier band reports its OWN pedometer total; calling that a
+            // motion-derived estimate would misstate where the number came from.
+            if repo.deviceId.hasPrefix(VeepooBandPairingSession.deviceIDPrefix) {
+                return String(localized: "Device step counter · band")
+            }
+            return String(localized: "Motion-derived estimate · Noop Band")
+        }
         if stepsEst != nil { return String(localized: "Motion-derived estimate · calibrated") }
         return String(localized: "No step source for this day")
     }
@@ -5516,6 +5523,12 @@ private struct LiquidRefreshIndicator: View {
             to: live.lastSyncedAt
         ) {
             showOutcome(.synced)
+        } else if live.displayOnlyHeartRate != nil {
+            // Supplier (display-only) transport: there is no history offload to run,
+            // so a local refresh is a success, not an "unavailable" band. Reporting
+            // a WHOOP-shaped sync failure here is misleading (AGENTS.md: the UI must
+            // not attribute unsupported behaviour to the supplier band).
+            showOutcome(.synced)
         } else if !live.connected || !live.bonded {
             showOutcome(.unavailable)
         } else {
@@ -5707,7 +5720,7 @@ private struct LiquidLiveHR: View {
     private var isLive: Bool { live.connected && samples.count >= 2 }
     private var series: [Double] { isLive ? samples : fallback }
     private var bigBpm: Int? {
-        if let hr = live.heartRate, hr > 0, live.connected { return hr }
+        if let hr = live.displayedHeartRate, hr > 0, live.connected { return hr }
         if let last = fallback.last { return Int(last.rounded()) }
         return nil
     }
@@ -5763,13 +5776,39 @@ private struct LiquidLiveHR: View {
                     .padding(.vertical, 24)
             }
         }
-        .onAppear { if samples.isEmpty, let hr = live.heartRate, hr > 0 { samples = [Double(hr)] } }
-        .onChangeCompat(of: live.heartRate) { hr in
-            guard let hr, hr > 0 else { return }
-            samples.append(Double(hr))
-            if samples.count > maxSamples { samples.removeFirst(samples.count - maxSamples) }
-            beat.toggle()
+        .onAppear {
+            NSLog(
+                "NOOP-UI card appeared connected=%d displayed=%d fallback=%d",
+                live.connected ? 1 : 0,
+                live.displayedHeartRate != nil ? 1 : 0,
+                fallback.count
+            )
+            if samples.isEmpty, let hr = live.displayedHeartRate, hr > 0 { samples = [Double(hr)] }
         }
+        // The two lanes mirror `LiveState.displayedHeartRate`: the display-only lane
+        // wins whenever it carries a value, so exactly one handler appends per sample.
+        .onChangeCompat(of: live.heartRate) { hr in
+            guard live.displayOnlyHeartRate == nil, let hr, hr > 0 else { return }
+            appendSample(hr)
+        }
+        .onChangeCompat(of: live.displayOnlyHeartRate) { hr in
+            guard let hr, hr > 0 else { return }
+            appendSample(hr)
+        }
+    }
+
+    private func appendSample(_ bpm: Int) {
+        // Gate-state only: booleans and counts, never the bpm itself.
+        NSLog(
+            "NOOP-UI sample connected=%d displayed=%d samples=%d fallback=%d",
+            live.connected ? 1 : 0,
+            live.displayedHeartRate != nil ? 1 : 0,
+            samples.count,
+            fallback.count
+        )
+        samples.append(Double(bpm))
+        if samples.count > maxSamples { samples.removeFirst(samples.count - maxSamples) }
+        beat.toggle()
     }
 
     private func stat(_ label: String, _ v: Double?) -> some View {

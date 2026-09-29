@@ -22,6 +22,10 @@ struct AnalysisTimeZoneSegment: Equatable, Sendable {
     let provenance: AnalysisTimeZoneProvenance
     let lowerTravelBoundaryTs: Int?
     let upperTravelBoundaryTs: Int?
+    /// True only for the OLDEST observed run, where no earlier observation exists to
+    /// contradict it, so the civil day containing the first observation may be scored.
+    /// A boundary created by real, recorded travel keeps the hard floor.
+    var admitsBoundaryStartDay: Bool = false
 }
 
 enum AnalysisTimeZoneResolution: Equatable, Sendable {
@@ -128,6 +132,12 @@ struct AnalysisTimeZoneTimeline: Equatable, Sendable {
                containing: first.observedAtSec,
                timeZoneIdentifier: first.timeZoneIdentifier
            ) {
+            // Deliberately covers the WHOLE first observed civil day when legacy
+            // history predates the first observation: that history cannot be
+            // re-bucketed into this zone's civil days, so the boundary day stays
+            // unscoreable. Pinned by
+            // testFirstTimeZoneObservationDoesNotRebucketLegacyHistory - narrowing
+            // this to the observation instant silently re-dates legacy data.
             let endTs = firstDay.lowerBound == Int64(first.observedAtSec)
                 ? Int64(first.observedAtSec) - 1
                 : firstDay.upperBound
@@ -255,6 +265,14 @@ struct AnalysisTimeZoneTimeline: Equatable, Sendable {
         } else {
             upperBoundary = nil
         }
+        // The OLDEST run has no earlier observation that could contradict it, so the
+        // single civil day CONTAINING the first observation is admissible even though
+        // it starts before that instant. Without this, local midnight always precedes
+        // the app's first observation, every candidate window failed the fit check,
+        // and with zero windows the analysis pass deferred forever - stranding the
+        // whole of a user's first day. The floor itself is KEPT: dropping it let the
+        // backward walk run to the 4000-day horizon instead of stopping at the
+        // boundary day.
         return .resolved(
             AnalysisTimeZoneSegment(
                 timeZoneIdentifier:
@@ -267,7 +285,8 @@ struct AnalysisTimeZoneTimeline: Equatable, Sendable {
                 ),
                 provenance: provenance,
                 lowerTravelBoundaryTs: selected.first.observedAtSec,
-                upperTravelBoundaryTs: upperBoundary
+                upperTravelBoundaryTs: upperBoundary,
+                admitsBoundaryStartDay: selectedIndex == 0
             )
         )
     }
@@ -844,6 +863,7 @@ final class IntelligenceEngine: ObservableObject {
         let timeZoneIdentifier: String?
         let timeZoneProvenance: AnalysisTimeZoneProvenance
         let lowerTravelBoundaryTs: Int?
+        let admitsBoundaryStartDay: Bool
         let upperTravelBoundaryTs: Int?
         let terminalUnknownRange: AnalysisTerminalUnknownRange?
 
@@ -861,6 +881,7 @@ final class IntelligenceEngine: ObservableObject {
             timeZoneProvenance: AnalysisTimeZoneProvenance =
                 .fixedOffsetCompatibility,
             lowerTravelBoundaryTs: Int? = nil,
+            admitsBoundaryStartDay: Bool = false,
             upperTravelBoundaryTs: Int? = nil,
             terminalUnknownRange: AnalysisTerminalUnknownRange? = nil
         ) {
@@ -878,6 +899,7 @@ final class IntelligenceEngine: ObservableObject {
             self.timeZoneIdentifier = timeZoneIdentifier
             self.timeZoneProvenance = timeZoneProvenance
             self.lowerTravelBoundaryTs = lowerTravelBoundaryTs
+            self.admitsBoundaryStartDay = admitsBoundaryStartDay
             self.upperTravelBoundaryTs = upperTravelBoundaryTs
             self.terminalUnknownRange = terminalUnknownRange
         }
@@ -897,6 +919,7 @@ final class IntelligenceEngine: ObservableObject {
         let provenance: AnalysisTimeZoneProvenance
         let lowerTravelBoundaryTs: Int?
         let upperTravelBoundaryTs: Int?
+        var admitsBoundaryStartDay: Bool = false
     }
 
     private struct ResolvableTimeZoneSegment: Equatable, Sendable {
@@ -2310,6 +2333,9 @@ final class IntelligenceEngine: ObservableObject {
                     activeZoneByDay[day] = minutes
                 }
                 guard hr.count >= 200 else {
+                    // Day key + row count only (no health values), so a skipped day
+                    // is distinguishable from a day that scored and rendered empty.
+                    NSLog("NOOP-ANALYSIS skip day=%@ hr=%d", day, hr.count)
                     skippedDayLines.append("insufficient_hr")
                     continue
                 }
@@ -2344,6 +2370,24 @@ final class IntelligenceEngine: ObservableObject {
                     optionalEvidenceFailures.insert(.respiration)
                     resp = []
                 }
+                // A supplier band writes NO @57 tick stream but does report a
+                // whole-day pedometer total on its own row. Read it for the DAY
+                // OWNER (not the engine's frozen `deviceId`, which would never see
+                // it) so the band's measured steps can feed Effort's movement term.
+                let deviceDayStepTotal: Int? = try? await store.dailyMetrics(
+                    deviceId: owner, from: day, to: day
+                ).first?.steps
+                // In-bed spans a device scored itself. Read for the DAY OWNER, never
+                // the computed id: analyzeDay writes its own sessions under
+                // `computedId`, and resolveDayOwner only ever returns a REGISTERED
+                // device, so this cannot read back its own output. `effectiveStartTs`
+                // is used so a user-corrected bedtime moves the measurement window.
+                let deviceSleepWindows: [(start: Int, end: Int)] =
+                    ((try? await store.sleepSessions(
+                        deviceId: owner, from: from, to: to, limit: 4_000
+                    )) ?? [])
+                    .filter { $0.endTs > $0.effectiveStartTs }
+                    .map { (start: $0.effectiveStartTs, end: $0.endTs) }
                 let steps: [StepSample]
                 do {
                     steps = try await store.stepSamples(
@@ -2544,6 +2588,7 @@ final class IntelligenceEngine: ObservableObject {
                 let res = AnalyticsEngine.analyzeDay(day: day, hr: hr, rr: rr, resp: resp, gravity: grav,
                                                      steps: steps, dayHr: dayHr, daySteps: daySteps,
                                                      dayGravity: dayGrav,
+                                                     deviceDayStepTotal: deviceDayStepTotal,
                                                      skinTemp: skin,
                                                      skinTempFamily: skinFamily,   // #938
                                                      skinTempAnchorRaw: skinAnchorRaw,   // #938 second capture
@@ -2556,6 +2601,7 @@ final class IntelligenceEngine: ObservableObject {
                                                      wristOff: wristOff,
                                                      habitualMidsleepSec: habitualMidsleepSec,
                                                      bandSleepState: bandSleepState,
+                                                     deviceSleepWindows: deviceSleepWindows,
                                                      // #690: thread the V2 toggle into the NORMAL staging path so
                                                      // it affects detected nights, not just the self-heal restage.
                                                      useSleepStagerV2: useSleepStagerV2,
@@ -4114,7 +4160,9 @@ final class IntelligenceEngine: ObservableObject {
                 lowerTravelBoundaryTs:
                     segment.lowerTravelBoundaryTs,
                 upperTravelBoundaryTs:
-                    segment.upperTravelBoundaryTs
+                    segment.upperTravelBoundaryTs,
+                admitsBoundaryStartDay:
+                    segment.admitsBoundaryStartDay
             )
         }
         if let timeZone {
@@ -4168,6 +4216,8 @@ final class IntelligenceEngine: ObservableObject {
             timeZoneProvenance: context.provenance,
             lowerTravelBoundaryTs:
                 context.lowerTravelBoundaryTs,
+            admitsBoundaryStartDay:
+                context.admitsBoundaryStartDay,
             upperTravelBoundaryTs:
                 context.upperTravelBoundaryTs
         )
@@ -4712,7 +4762,12 @@ final class IntelligenceEngine: ObservableObject {
     ) -> Bool {
         if let lowerTravelBoundaryTs =
                 plan.lowerTravelBoundaryTs,
-           window.startTs < lowerTravelBoundaryTs {
+           window.startTs < lowerTravelBoundaryTs,
+           // The civil day CONTAINING the first-ever observation is admissible for
+           // the oldest run; every day fully before it stays rejected, which is what
+           // stops the backward walk at the boundary instead of the 4000-day horizon.
+           !(plan.admitsBoundaryStartDay
+             && window.endTs >= lowerTravelBoundaryTs) {
             return false
         }
         if let upperTravelBoundaryTs =
@@ -4728,7 +4783,9 @@ final class IntelligenceEngine: ObservableObject {
         timezoneOffsetSeconds: Int,
         timeZone: TimeZone? = nil
     ) -> [AnalysisCivilDayWindow] {
-        guard plan.shouldAnalyze else { return [] }
+        guard plan.shouldAnalyze else {
+            return []
+        }
         let resolvedTimeZone: TimeZone?
         if let timeZoneIdentifier = plan.timeZoneIdentifier {
             guard let planTimeZone = TimeZone(
@@ -4741,10 +4798,8 @@ final class IntelligenceEngine: ObservableObject {
             resolvedTimeZone = timeZone
         }
         if let exact = plan.civilDayWindow {
-            return analysisCivilDayWindowFitsPlan(
-                exact,
-                plan: plan
-            ) ? [exact] : []
+            let fits = analysisCivilDayWindowFitsPlan(exact, plan: plan)
+            return fits ? [exact] : []
         }
         let boundedDays = max(1, plan.maxDays)
         if let resolvedTimeZone,

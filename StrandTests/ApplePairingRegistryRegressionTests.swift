@@ -27,7 +27,19 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
             onDisconnect?()
         }
         func verifyPassword(_ password: String) {}
-        func startLiveHeartRate() {}
+        private(set) var readStepsCount = 0
+
+    func readSteps() {
+        readStepsCount += 1
+    }
+
+    private(set) var readSleepCount = 0
+
+    func readSleep() {
+        readSleepCount += 1
+    }
+
+    func startLiveHeartRate() {}
         func stopLiveHeartRate() {}
 
         func emit(_ event: VeepooBandAdapterEvent) {

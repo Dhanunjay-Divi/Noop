@@ -5088,7 +5088,15 @@ struct TodayView: View {
         if appleDays.last(where: { $0.day == selectedDayKey })?.steps != nil {
             return String(localized: "Measured · Apple Health")
         }
-        if displayDay?.steps != nil { return String(localized: "Motion-derived estimate · Noop Band") }
+        if displayDay?.steps != nil {
+            // A supplier band reports its OWN pedometer total; calling that a
+            // motion-derived estimate misstates where the number came from.
+            // Mirrors the same branch in LiquidTodayView.
+            if repo.deviceId.hasPrefix(VeepooBandPairingSession.deviceIDPrefix) {
+                return String(localized: "Device step counter · band")
+            }
+            return String(localized: "Motion-derived estimate · Noop Band")
+        }
         if stepsEstByDay[selectedDayKey] != nil {
             return String(localized: "Motion-derived estimate · calibrated")
         }

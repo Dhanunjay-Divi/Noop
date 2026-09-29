@@ -452,6 +452,11 @@ public enum AnalyticsEngine {
                                   dayHr: [HRSample]? = nil,
                                   daySteps: [StepSample]? = nil,
                                   dayGravity: [GravitySample]? = nil,
+                                  // A whole-day step total reported by the DEVICE's own pedometer
+                                  // (supplier bands write no @57 tick stream at all). Already
+                                  // validated steps, so it must NOT go through the tick-scaling
+                                  // divisor below. nil keeps the historic tick path untouched.
+                                  deviceDayStepTotal: Int? = nil,
                                   // Wear-gated nightly skin-temp mean is harvested here
                                   // (baseline-independent); IntelligenceEngine seeds a personal
                                   // baseline from these means across nights and re-derives
@@ -527,6 +532,15 @@ public enum AnalyticsEngine {
                                   // pure-function callers/tests free of it; IntelligenceEngine threads the
                                   // night window's persisted band state. (#531 / H8 consume)
                                   bandSleepState: [(ts: Int, state: Int)] = [],
+                                  // In-bed spans reported by a DEVICE that scores its own
+                                  // sleep. SPAN ONLY: just the [start, end] comes from the
+                                  // device; every bpm measured inside it is NOOP's own HR.
+                                  // Sleep duration, staging and Rest are deliberately NOT
+                                  // derived from these - this exists so a band with no
+                                  // accelerometer stream can still yield a resting heart
+                                  // rate. Defaults to [] so every existing caller and
+                                  // parity fixture stays byte-identical.
+                                  deviceSleepWindows: [(start: Int, end: Int)] = [],
                                   // Opt-in experimental sleep staging (V2). When true, detected nights are
                                   // staged by `SleepStagerV2` instead of V1. Default false keeps V1 the
                                   // byte-identical default for pure-function callers/tests; IntelligenceEngine
@@ -751,7 +765,32 @@ public enum AnalyticsEngine {
         // negligible shift. The Rest/sleep-quality term is main-night; the recovery physiology is
         // day-best-resting, night-dominated. Keep these two definitions distinct on purpose.
         // Daily resting HR = lowest per-session resting HR across matched sessions.
-        let restingHRDaily = matched.compactMap { $0.restingHR }.min()
+        // Prefer NOOP's own staged sessions. Only when staging produced nothing -
+        // which is the case for a band that exposes no gravity stream - fall back to
+        // measuring the floor inside a device-reported in-bed span. The VALUE is still
+        // NOOP's: `sessionRestingHR` is pure HR over a window.
+        let restingHRDaily: Int? = matched.compactMap { $0.restingHR }.min()
+            ?? deviceSleepWindows.compactMap { window -> Int? in
+                guard window.end > window.start else { return nil }
+                // Wear evidence, not mere presence. `sessionRestingHR` guards only
+                // that its segment is non-empty, so a handful of stray beats inside a
+                // device-reported span would otherwise publish a resting heart rate -
+                // which then moves Effort's floor, the Recovery term, Calories and the
+                // stored DailyMetric. Same sample floor the day's own wear gate uses,
+                // so "worn" has one definition. O(20), not O(n).
+                let worn = hr.lazy
+                    .filter {
+                        $0.ts >= window.start && $0.ts <= window.end && $0.bpm > 0
+                    }
+                    .prefix(StrainScorer.minSparseReadings)
+                    .count == StrainScorer.minSparseReadings
+                guard worn else { return nil }
+                return SleepStager.sessionRestingHR(
+                    start: window.start,
+                    end: window.end,
+                    hr: hr
+                )
+            }.min()
         // Daily avg HRV = in-bed-weighted mean of per-session avg HRV.
         let avgHRVDaily: Double? = {
             if deepHrvWindow {
@@ -924,6 +963,10 @@ public enum AnalyticsEngine {
         // ~10M/day. Decoding the full u16 and summing wrap-aware DELTAS yields a sane ~14k. ESTIMATE
         // only — not cloud/clinical parity.
         let stepsTotal: Int? = {
+            // A device-reported day total is already validated steps, not @57 motion
+            // ticks, so it is used as-is and deliberately skips the ticks-per-step
+            // divisor below — scaling it would corrupt a correct number.
+            if let total = deviceDayStepTotal, total > 0 { return total }
             // Prefer the full-calendar-day stream for the additive total; fall back to the
             // night-window stream when the caller didn't supply one (pure-function callers/tests). The
             // day's read window may include adjacent-day samples, so filter to the LOCAL-day key first

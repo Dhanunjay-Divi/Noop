@@ -384,6 +384,32 @@ final class VeepooBandSource: LiveHRSource {
     private var permanentCredentialFailureHandled = false
     private var terminalBatteryFailureHandled = false
     private var stopped = false
+    /// Optional sink for the band's own day-cumulative activity totals.
+    private let persistSteps: ((VeepooBandStepsReading) -> Void)?
+    /// Optional sink for the night the band scored itself.
+    private let persistSleep: ((VeepooBandSleepReading) -> Void)?
+    /// One-shot per session: the sleep read triggers a full device-history sync,
+    /// which is slow and shares the radio with the live-HR stream.
+    private var sleepReadTask: Task<Void, Never>?
+    /// Delay before that sync, so live HR is established first.
+    private static let sleepReadDelayNanoseconds: UInt64 = 20_000_000_000
+    /// Repeating read of the band's step counter. The band owns the count and keeps
+    /// accumulating it on-device, so the app only chooses when to read.
+    private var stepPollTask: Task<Void, Never>?
+    /// Step poll cadence. The counter is a whole-day total, so a slow poll is enough
+    /// and keeps radio traffic off the live-HR stream.
+    private static let stepPollIntervalNanoseconds: UInt64 = 60_000_000_000
+
+    /// Pending restart of live HR after a transient wear/busy stop.
+    private var liveRearmTask: Task<Void, Never>?
+    /// Cadence for that restart. Long enough that a band still settling on the
+    /// wrist is not hammered, short enough that putting it back on resumes
+    /// streaming without waiting for a full BLE reconnect.
+    private static let liveRearmDelayNanoseconds: UInt64 = 15_000_000_000
+    /// Optional persistence sink. When supplied, accepted supplier live HR is
+    /// written to durable storage alongside the display-only readout, so the band
+    /// accumulates history like the WHOOP transport does.
+    private let persist: ((Int, Date) -> Void)?
 
     init(
         live: LiveState,
@@ -398,8 +424,14 @@ final class VeepooBandSource: LiveHRSource {
             15_000_000_000,
         ],
         reconnectDiscoveryTimeoutNanoseconds: UInt64 = 12_000_000_000,
+        persist: ((Int, Date) -> Void)? = nil,
+        persistSteps: ((VeepooBandStepsReading) -> Void)? = nil,
+        persistSleep: ((VeepooBandSleepReading) -> Void)? = nil,
         now: @escaping () -> Date = Date.init
     ) {
+        self.persist = persist
+        self.persistSteps = persistSteps
+        self.persistSleep = persistSleep
         self.live = live
         self.adapter = adapter
         self.password = password
@@ -438,8 +470,14 @@ final class VeepooBandSource: LiveHRSource {
             15_000_000_000,
         ],
         reconnectDiscoveryTimeoutNanoseconds: UInt64 = 12_000_000_000,
+        persist: ((Int, Date) -> Void)? = nil,
+        persistSteps: ((VeepooBandStepsReading) -> Void)? = nil,
+        persistSleep: ((VeepooBandSleepReading) -> Void)? = nil,
         now: @escaping () -> Date = Date.init
     ) {
+        self.persist = persist
+        self.persistSteps = persistSteps
+        self.persistSleep = persistSleep
         self.live = live
         self.adapter = adapter
         self.password = nil
@@ -492,6 +530,12 @@ final class VeepooBandSource: LiveHRSource {
         protectedDataCancellable = nil
         displayFreshnessTask?.cancel()
         displayFreshnessTask = nil
+        liveRearmTask?.cancel()
+        liveRearmTask = nil
+        stepPollTask?.cancel()
+        stepPollTask = nil
+        sleepReadTask?.cancel()
+        sleepReadTask = nil
         adapter.disconnect()
         live.connected = false
         live.batteryPct = nil
@@ -517,7 +561,22 @@ final class VeepooBandSource: LiveHRSource {
                 return
             }
             adapter.verifyPassword(password)
+        case .sleep(let reading):
+            persistSleep?(reading)
+        case .steps(let reading):
+            // Liveness is enforced upstream: the adapter core only accepts a step
+            // event while it is in .ready/.startingLive/.streaming, so a late
+            // callback from a dropped session is already rejected there. Do NOT
+            // gate on live.connected here - that flag only turns true once the
+            // first HR SAMPLE is accepted, which is strictly after the first step
+            // read, so it would silently discard the opening reading.
+            persistSteps?(reading)
         case .battery(let reading):
+            NSLog("NOOP-LIVE source battery -> requesting live HR")
+            // `.battery` is the point the adapter reaches `.ready`, which is the
+            // earliest state that accepts a step read.
+            startStepPolling()
+            scheduleSleepRead()
             if let percent = reading.percent {
                 live.setBattery(Double(percent))
             }
@@ -536,6 +595,7 @@ final class VeepooBandSource: LiveHRSource {
                 reading.bpm,
                 receivedAt: reading.receivedAt
             )
+            persist?(reading.bpm, reading.receivedAt)
             live.connected = true
             scheduleDisplayExpiry(for: reading.receivedAt)
         case .disconnected:
@@ -570,6 +630,15 @@ final class VeepooBandSource: LiveHRSource {
             }
             if stage == .live {
                 publishNonStreamingDisplayState()
+                // A band that has not yet found a pulse - or that briefly loses skin
+                // contact - reports `notWorn`/`busy`, which ends the supplier's live
+                // session and leaves the adapter in `.ready`. Nothing else re-arms it,
+                // so every later sample is rejected as stale and the session stays dead
+                // for the rest of the connection even once the band IS worn. Restart it
+                // on a bounded cadence while the transport is still up.
+                if failure == .notWorn || failure == .busy {
+                    scheduleLiveRearm()
+                }
             }
             if stage == .connection || stage == .disconnect {
                 reconnectTask?.cancel()
@@ -704,6 +773,51 @@ final class VeepooBandSource: LiveHRSource {
         onCredentialPermanentlyUnavailable()
     }
 
+    /// Restarts live HR after a transient wear/busy stop. `finishLive` leaves the
+    /// adapter in `.ready`, which is exactly the state `startLiveHeartRate()`
+    /// requires, so this simply re-issues the request once the band has had time to
+    /// settle. Superseded by the next failure and cancelled by `stop()`.
+    /// Polls the band's day-cumulative step total while the transport is up. Reads
+    /// only; the band owns the counter and nothing is written to the device.
+    /// Reads the band's own scored sleep once per session, after live HR has had
+    /// time to settle. Read-only; nothing is written to the device.
+    private func scheduleSleepRead() {
+        guard !stopped, sleepReadTask == nil else { return }
+        sleepReadTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(
+                nanoseconds: Self.sleepReadDelayNanoseconds
+            )
+            guard !Task.isCancelled, let self, !self.stopped else { return }
+            self.adapter.readSleep()
+        }
+    }
+
+    private func startStepPolling() {
+        guard !stopped, stepPollTask == nil else { return }
+        stepPollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, !self.stopped else { return }
+                self.adapter.readSteps()
+                try? await Task.sleep(
+                    nanoseconds: Self.stepPollIntervalNanoseconds
+                )
+            }
+        }
+    }
+
+    private func scheduleLiveRearm() {
+        guard !stopped else { return }
+        liveRearmTask?.cancel()
+        liveRearmTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(
+                nanoseconds: Self.liveRearmDelayNanoseconds
+            )
+            guard !Task.isCancelled, let self, !self.stopped else { return }
+            self.liveRearmTask = nil
+            self.adapter.startLiveHeartRate()
+        }
+    }
+
     private func scheduleReconnect() {
         guard !stopped,
               reconnectTask == nil,
@@ -828,7 +942,19 @@ enum VeepooBandSourceFactory {
     static func productionFactory(
         registry: DeviceRegistry,
         live: LiveState,
-        credentials: (any VeepooCredentialAccess)? = nil
+        credentials: (any VeepooCredentialAccess)? = nil,
+        /// Optional durable sink for accepted supplier live HR, keyed by device id.
+        /// nil keeps the historic display-only behaviour.
+        persistFactory: ((String) -> ((Int, Date) -> Void))? = nil,
+        /// Optional durable sink for the band's own day-cumulative activity totals,
+        /// keyed by device id. nil collects nothing, as before.
+        persistStepsFactory: (
+            (String) -> ((VeepooBandStepsReading) -> Void)
+        )? = nil,
+        /// Optional durable sink for the night the band scored itself.
+        persistSleepFactory: (
+            (String) -> ((VeepooBandSleepReading) -> Void)
+        )? = nil
     ) -> ((String) -> (any LiveHRSource)?)? {
         guard VeepooBandAdapterFactory.productionEnabled else { return nil }
         let credentials = credentials ?? VeepooCredentialStore.shared
@@ -892,7 +1018,10 @@ enum VeepooBandSourceFactory {
                     password: password,
                     onCredentialRejected:
                         reconcileAuthenticationRejection,
-                    onTerminalBatteryFailure: reconcileBatteryFailure
+                    onTerminalBatteryFailure: reconcileBatteryFailure,
+                    persist: persistFactory?(deviceID),
+                    persistSteps: persistStepsFactory?(deviceID),
+                    persistSleep: persistSleepFactory?(deviceID)
                 )
             case .unavailable:
                 return VeepooBandSource(
@@ -905,7 +1034,10 @@ enum VeepooBandSourceFactory {
                         reconcileAuthenticationRejection,
                     onCredentialPermanentlyUnavailable:
                         reconcilePermanentCredentialFailure,
-                    onTerminalBatteryFailure: reconcileBatteryFailure
+                    onTerminalBatteryFailure: reconcileBatteryFailure,
+                    persist: persistFactory?(deviceID),
+                    persistSteps: persistStepsFactory?(deviceID),
+                    persistSleep: persistSleepFactory?(deviceID)
                 )
             case .available, .missing, .malformed:
                 return nil
@@ -963,7 +1095,11 @@ final class VeepooBandPairingSession: ObservableObject {
     private let adapter: any VeepooBandAdapterControlling
     private let credentials: any VeepooCredentialAccess
     private let credentialCleanup: any VeepooCredentialCleanupAccess
-    private let deviceID = "veepoo-\(UUID().uuidString.lowercased())"
+    /// Device-id prefix for supplier-band rows. Named once so provenance copy
+    /// elsewhere cannot drift from the id format.
+    static let deviceIDPrefix = "veepoo-"
+    private let deviceID =
+        "\(VeepooBandPairingSession.deviceIDPrefix)\(UUID().uuidString.lowercased())"
     private var acceptedPassword = ""
     private var ignoringExpectedDisconnect = false
 
@@ -1187,7 +1323,7 @@ final class VeepooBandPairingSession: ObservableObject {
             if ignoringExpectedDisconnect { return }
             lastFailure = .disconnected
             if phase != .idle { phase = .failed(.disconnected) }
-        case .state, .liveStarted, .liveStopped:
+        case .state, .liveStarted, .liveStopped, .steps, .sleep:
             break
         }
     }

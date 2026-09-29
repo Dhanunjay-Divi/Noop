@@ -940,9 +940,9 @@ struct DeviceCapabilityProfile {
         if d.sourceKind == .veepoo {
             return DeviceCapabilityProfile(
                 displayModel: String(localized: "Compatible supplier band (experimental)"),
-                captures: String(localized: "Heart rate (live display) · Battery"),
-                powers: String(localized: "Powers the current live display only"),
-                footnote: String(localized: "Experimental iPhone-only transport. Live heart rate is not stored or used for Effort, Recovery, Sleep, HRV, or other health formulas."))
+                captures: String(localized: "Heart rate · Steps · Sleep (band-scored) · Battery"),
+                powers: String(localized: "Powers the live display, Effort and Calories; sleep totals come from the band"),
+                footnote: String(localized: "Experimental iPhone-only transport. Steps are the band's own counter and sleep is the band's own staging, shown as the band reported them — NOOP does not re-derive either. This band reports no HRV, blood oxygen or respiratory rate to NOOP, so those stay blank rather than estimated."))
         }
         // EXPERIMENTAL locally-adopted Oura ring (gen 3/4/5). The gen is carried on `model` ("Oura Ring
         // 3/4/5") and recovered with OuraRingGen.from(model:). NOOP reads the ring's OWN raw signals + open

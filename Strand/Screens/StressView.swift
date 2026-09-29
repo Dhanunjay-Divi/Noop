@@ -124,6 +124,15 @@ struct StressView: View {
                 ComingSoon(what: "Reading your heart-rate variability and resting heart rate…")
             } else {
                 calibrationState(StressModel.preferredAssessment(sourceRows: repo.vitalMetricRows))
+                // The intraday timeline needs NO cross-day baseline: DaytimeStress
+                // scores an hour from heart rate alone against the DAY'S OWN calm-hour
+                // quartile. `load()` already computes it on every visit; only this
+                // view gate was hiding it while the 0-3 score calibrates. A band that
+                // supplies HR but no HRV therefore gets a real timeline today instead
+                // of an empty screen for the weeks the baseline takes to seed.
+                if let daytime, !daytime.scored.isEmpty {
+                    daytimeSection(daytime)
+                }
             }
         }
         .onAppear { rebuildModelIfNeeded() }

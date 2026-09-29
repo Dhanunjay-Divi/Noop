@@ -72,7 +72,19 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             batteryReads.append(generation)
         }
 
-        func startLiveHeartRate(generation: UInt64) {
+        private(set) var readStepsGenerations: [UInt64] = []
+
+    func readSteps(generation: UInt64) {
+        readStepsGenerations.append(generation)
+    }
+
+    private(set) var readSleepGenerations: [UInt64] = []
+
+    func readSleep(generation: UInt64) {
+        readSleepGenerations.append(generation)
+    }
+
+    func startLiveHeartRate(generation: UInt64) {
             liveStarts.append(generation)
         }
 
@@ -129,7 +141,19 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             onDisconnect?()
         }
         func verifyPassword(_ password: String) {}
-        func startLiveHeartRate() { liveStartCount += 1 }
+        private(set) var readStepsCount = 0
+
+    func readSteps() {
+        readStepsCount += 1
+    }
+
+    private(set) var readSleepCount = 0
+
+    func readSleep() {
+        readSleepCount += 1
+    }
+
+    func startLiveHeartRate() { liveStartCount += 1 }
         func stopLiveHeartRate() {}
 
         func emit(_ event: VeepooBandAdapterEvent) {

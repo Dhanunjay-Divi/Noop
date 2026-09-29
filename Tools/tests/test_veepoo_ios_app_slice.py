@@ -246,15 +246,29 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
 
     def test_only_proven_registry_capability_is_exposed(self) -> None:
         source = self.read("Strand/BLE/VeepooBandSource.swift")
-        device = source[source.index("let device = PairedDevice(") :]
+        # Bound to the PairedDevice literal itself. Slicing to end-of-file also
+        # swept unrelated code (e.g. an exhaustive switch that must NAME a signal
+        # in order to ignore it), which flagged capabilities that are not declared.
+        device_start = source.index("let device = PairedDevice(")
+        device = source[
+            device_start : source.index("registrationFailed = false", device_start)
+        ]
         self.assertIn("capabilities: [.hr]", device)
         profile = self.read("Strand/Screens/DevicesView.swift")
         veepoo_profile = profile[
             profile.index("if d.sourceKind == .veepoo") :
             profile.index("if d.sourceKind == .oura")
         ]
-        self.assertIn("Heart rate (live display) · Battery", veepoo_profile)
-        self.assertIn("current live display only", veepoo_profile)
+        # The lane now persists HR, the band's own step counter and the band's own
+        # scored night, and Effort/Calories are computed from them. The previous copy
+        # ("live display only", "not stored") became false when that landed, so these
+        # pin the CURRENT truthful claim. The unsupported-claims list below is the
+        # real guard and is unchanged.
+        self.assertIn(
+            "Heart rate · Steps · Sleep (band-scored) · Battery", veepoo_profile
+        )
+        self.assertIn("sleep totals come from the band", veepoo_profile)
+        self.assertIn("NOOP does not re-derive either", veepoo_profile)
         for unsupported in (
             ".hrv",
             ".spo2",

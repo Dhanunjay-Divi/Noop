@@ -82,6 +82,14 @@ final class AppModel: ObservableObject {
     /// Timestamp formatter for the generic-HR strap-log lines routed through `straplog` into the shared
     /// log (issue #421). Mirrors `BLEManager.logTimeFormatter`'s `HH:mm:ss` so WHOOP and HR-strap lines
     /// read identically in the exported strap log.
+    /// Local-day key for supplier daily totals. `DailyMetric.day` is YYYY-MM-DD.
+    static let supplierDayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     static let logTimeFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
     }()
@@ -673,7 +681,7 @@ final class AppModel: ObservableObject {
             )
         }
         guard runtimeRole.canPresentOperationalShell else {
-            operationalWorkStarted = true
+        operationalWorkStarted = true
             AppDiagnosticsRecorder.shared.record(
                 "runtime.viewer_transport",
                 fields: ["outcome": "unavailable"]
@@ -1067,7 +1075,152 @@ final class AppModel: ObservableObject {
             },
             noopBandSourceFactory: VeepooBandSourceFactory.productionFactory(
                 registry: registry,
-                live: live
+                live: live,
+                // Persist accepted supplier live HR so the band accumulates real
+                // history instead of a display-only readout that vanishes.
+                persistFactory: { [weak self] deviceID in
+                    { bpm, receivedAt in
+                        guard let self else { return }
+                        Task { [weak self] in
+                            guard let self,
+                                  let store = await self.repo.storeHandle()
+                            else { return }
+                            _ = try? await store.insert(
+                                StandardHRMapping.samples(
+                                    fromHR: bpm,
+                                    rr: [],
+                                    at: Int(receivedAt.timeIntervalSince1970)
+                                ),
+                                deviceId: deviceID
+                            )
+                        }
+                    }
+                },
+                // Persist the band's OWN day-cumulative step total. This is a measured
+                // device counter, not an HR-derived estimate, so it is written as the
+                // day's step value for this device and arbitrated like any other
+                // source's steps.
+                persistStepsFactory: { [weak self] deviceID in
+                    { reading in
+                        guard self != nil else { return }
+                        Task { [weak self] in
+                            guard let self,
+                                  let store = await self.repo.storeHandle()
+                            else { return }
+                            let day = AppModel.supplierDayKeyFormatter.string(
+                                from: Date()
+                            )
+                            // `upsertDailyMetrics` replaces EVERY column from the
+                            // supplied row, so a steps-only row would null out any
+                            // other metric already banked for this device-day. Merge
+                            // onto the existing row instead of overwriting it.
+                            let existing = try? await store.dailyMetrics(
+                                deviceId: deviceID,
+                                from: day,
+                                to: day
+                            ).first
+                            let merged = DailyMetric(
+                                day: day,
+                                totalSleepMin: existing?.totalSleepMin,
+                                efficiency: existing?.efficiency,
+                                deepMin: existing?.deepMin,
+                                remMin: existing?.remMin,
+                                lightMin: existing?.lightMin,
+                                disturbances: existing?.disturbances,
+                                restingHr: existing?.restingHr,
+                                avgHrv: existing?.avgHrv,
+                                recovery: existing?.recovery,
+                                strain: existing?.strain,
+                                exerciseCount: existing?.exerciseCount,
+                                spo2Pct: existing?.spo2Pct,
+                                skinTempDevC: existing?.skinTempDevC,
+                                respRateBpm: existing?.respRateBpm,
+                                steps: reading.steps,
+                                activeKcalEst: existing?.activeKcalEst,
+                                spo2Red: existing?.spo2Red,
+                                spo2Ir: existing?.spo2Ir,
+                                hrvMethod: existing?.hrvMethod
+                            )
+                            _ = try? await store.upsertDailyMetrics(
+                                [merged],
+                                deviceId: deviceID
+                            )
+                        }
+                    }
+                },
+                // Persist the night the BAND scored. NOOP has no accelerometer
+                // stream from this hardware, so it cannot stage sleep itself; these
+                // are the device's own totals and are surfaced as such, never
+                // re-derived or presented as a NOOP measurement.
+                persistSleepFactory: { [weak self] deviceID in
+                    { reading in
+                        guard self != nil else { return }
+                        Task { [weak self] in
+                            guard let self,
+                                  let store = await self.repo.storeHandle()
+                            else { return }
+                            // A night is attributed to the day it ENDED on, which is
+                            // how every other sleep source in the app keys it.
+                            let day = AppModel.supplierDayKeyFormatter.string(
+                                from: Date(timeIntervalSince1970: Double(reading.endTs))
+                            )
+                            let existing = try? await store.dailyMetrics(
+                                deviceId: deviceID,
+                                from: day,
+                                to: day
+                            ).first
+                            let merged = DailyMetric(
+                                day: day,
+                                totalSleepMin: reading.totalMin,
+                                // Already a measured ratio in [0,1] from the band's
+                                // staging curve. DailyMetric.efficiency is a
+                                // FRACTION, not a percentage.
+                                efficiency: reading.efficiency ?? existing?.efficiency,
+                                deepMin: reading.deepMin,
+                                remMin: existing?.remMin,
+                                lightMin: reading.lightMin,
+                                disturbances: reading.awakenings,
+                                restingHr: existing?.restingHr,
+                                avgHrv: existing?.avgHrv,
+                                recovery: existing?.recovery,
+                                strain: existing?.strain,
+                                exerciseCount: existing?.exerciseCount,
+                                spo2Pct: existing?.spo2Pct,
+                                skinTempDevC: existing?.skinTempDevC,
+                                respRateBpm: existing?.respRateBpm,
+                                steps: existing?.steps,
+                                activeKcalEst: existing?.activeKcalEst,
+                                spo2Red: existing?.spo2Red,
+                                spo2Ir: existing?.spo2Ir,
+                                hrvMethod: existing?.hrvMethod
+                            )
+                            _ = try? await store.upsertDailyMetrics(
+                                [merged],
+                                deviceId: deviceID
+                            )
+                            // Also record the night as a SESSION. NOOP cannot stage
+                            // sleep for this band (no accelerometer stream), but the
+                            // band does report when the night began and ended, and a
+                            // window is all the analysis pass needs to measure a
+                            // resting heart rate from NOOP's own HR samples.
+                            // restingHr/avgHrv stay nil: the analysis pass is the
+                            // single writer for those, and upsertSleepSessions
+                            // assigns them unconditionally. stagesJSON stays nil
+                            // because NOOP staged nothing.
+                            _ = try? await store.upsertSleepSessions(
+                                [CachedSleepSession(
+                                    startTs: reading.startTs,
+                                    endTs: reading.endTs,
+                                    efficiency: reading.efficiency,
+                                    restingHr: nil,
+                                    avgHrv: nil,
+                                    stagesJSON: nil
+                                )],
+                                deviceId: deviceID
+                            )
+                        }
+                    }
+                }
             ))
         coordinator.start()
         self.sourceCoordinator = coordinator
