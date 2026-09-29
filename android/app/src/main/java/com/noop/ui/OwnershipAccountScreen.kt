@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -72,6 +74,13 @@ import androidx.compose.ui.platform.LocalAutofillTree
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -152,6 +161,26 @@ internal fun OwnershipAccountScreen() {
                 service.phoneVerificationResendSecondsRemaining()
         }
     }
+    val statusIsError = ownershipStatusIsError(state.status)
+    val emailError = state.status.takeIf {
+        it == stringResource(R.string.ownership_invalid_credentials)
+    }
+    val passwordError = state.status.takeIf {
+        it == stringResource(R.string.ownership_invalid_password)
+    }
+    val phoneError = state.status.takeIf {
+        it == stringResource(R.string.ownership_invalid_phone)
+    }
+    val codeErrors = setOf(
+        stringResource(R.string.ownership_invalid_code),
+        stringResource(R.string.ownership_verification_code_invalid),
+        stringResource(R.string.ownership_verification_session_expired),
+    )
+    val codeError = state.status.takeIf(codeErrors::contains)
+    val deletionPasswordError = state.status.takeIf {
+        it == stringResource(R.string.ownership_deletion_password_required) ||
+            it == stringResource(R.string.ownership_sign_in_again)
+    }
 
     LazyScreenScaffold(
         title = stringResource(R.string.ownership_screen_title),
@@ -177,6 +206,8 @@ internal fun OwnershipAccountScreen() {
                     onPasswordChange = { password = it.take(128) },
                     confirmation = confirmation,
                     onConfirmationChange = { confirmation = it.take(128) },
+                    emailError = emailError,
+                    passwordError = passwordError,
                     busy = state.busy,
                     onAuthenticate = {
                         val suppliedPassword = password
@@ -245,10 +276,14 @@ internal fun OwnershipAccountScreen() {
                 OwnershipPhase.REGISTERING -> OwnershipProgressCard(
                     title = stringResource(R.string.ownership_registering_title),
                     detail = stringResource(R.string.ownership_registering_detail),
+                    currentStep = 1,
+                    totalSteps = 3,
                 )
                 OwnershipPhase.CLAIMING -> OwnershipProgressCard(
                     title = stringResource(R.string.ownership_claiming_title),
                     detail = stringResource(R.string.ownership_claiming_detail),
+                    currentStep = 2,
+                    totalSteps = 3,
                 )
                 OwnershipPhase.REPLACEMENT_REQUIRED -> OwnershipReplacementCard(
                     possessionAvailable = service.possessionAvailable,
@@ -261,6 +296,8 @@ internal fun OwnershipAccountScreen() {
                 OwnershipPhase.AUTHORIZING_REPLACEMENT -> OwnershipProgressCard(
                     title = stringResource(R.string.ownership_replacement_working_title),
                     detail = stringResource(R.string.ownership_replacement_working_detail),
+                    currentStep = 1,
+                    totalSteps = 1,
                 )
                 OwnershipPhase.DELETION_PENDING -> OwnershipDeletionPendingCard(
                     deletion = state.accountDeletion,
@@ -268,6 +305,7 @@ internal fun OwnershipAccountScreen() {
                     onPasswordChange = {
                         pendingDeletionPassword = it.take(128)
                     },
+                    passwordError = deletionPasswordError,
                     busy = state.busy,
                     onRefresh = {
                         val suppliedPassword = pendingDeletionPassword
@@ -315,6 +353,8 @@ internal fun OwnershipAccountScreen() {
                     onPhoneChange = { phone = it.take(24) },
                     code = phoneCode,
                     onCodeChange = { phoneCode = it.filter(Char::isDigit).take(6) },
+                    phoneError = phoneError,
+                    codeError = codeError,
                     busy = state.busy,
                     resendSecondsRemaining = phoneVerificationResendSeconds,
                     activityAvailable = activity != null,
@@ -381,10 +421,9 @@ internal fun OwnershipAccountScreen() {
 
         if (state.status.isNotBlank()) {
             item {
-                Text(
-                    text = state.status,
-                    style = NoopType.caption,
-                    color = Palette.textTertiary,
+                OwnershipStatusMessage(
+                    message = state.status,
+                    isError = statusIsError,
                 )
             }
         }
@@ -671,6 +710,8 @@ private fun OwnershipAuthenticationCard(
     onPasswordChange: (String) -> Unit,
     confirmation: String,
     onConfirmationChange: (String) -> Unit,
+    emailError: String?,
+    passwordError: String?,
     busy: Boolean,
     onAuthenticate: () -> Unit,
     onPasswordReset: () -> Unit,
@@ -777,6 +818,7 @@ private fun OwnershipAuthenticationCard(
                 keyboardType = KeyboardType.Email,
                 autofillType = AutofillType.EmailAddress,
                 enabled = !busy,
+                errorMessage = emailError,
                 modifier = Modifier.testTag("noop.ownership.email"),
             )
             OwnershipTextField(
@@ -791,6 +833,7 @@ private fun OwnershipAuthenticationCard(
                     AutofillType.Password
                 },
                 enabled = !busy,
+                errorMessage = passwordError,
                 modifier = Modifier.testTag("noop.ownership.password"),
             )
             if (createMode) {
@@ -802,6 +845,7 @@ private fun OwnershipAuthenticationCard(
                     password = true,
                     autofillType = AutofillType.NewPassword,
                     enabled = !busy,
+                    errorMessage = passwordError,
                     modifier = Modifier.testTag("noop.ownership.password_confirmation"),
                 )
             }
@@ -996,13 +1040,39 @@ private fun OwnershipTermsCard(
 }
 
 @Composable
-private fun OwnershipProgressCard(title: String, detail: String) {
+private fun OwnershipProgressCard(
+    title: String,
+    detail: String,
+    currentStep: Int,
+    totalSteps: Int,
+) {
+    val ordinal = stringResource(
+        R.string.ownership_progress_step,
+        currentStep,
+        totalSteps,
+    )
     NoopCard(padding = 20.dp) {
-        OwnershipHeader(
-            icon = Icons.Filled.Refresh,
-            title = title,
-            detail = detail,
-        )
+        Column(
+            modifier = Modifier
+                .testTag("noop.ownership.progress")
+                .semantics(mergeDescendants = true) {
+                    liveRegion = LiveRegionMode.Polite
+                    progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
+                    stateDescription = "$title. $ordinal"
+                },
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OwnershipHeader(
+                icon = Icons.Filled.Refresh,
+                title = title,
+                detail = detail,
+            )
+            Text(
+                text = ordinal,
+                style = NoopType.caption,
+                color = Palette.textTertiary,
+            )
+        }
     }
 }
 
@@ -1084,6 +1154,7 @@ private fun OwnershipDeletionPendingCard(
     deletion: OwnershipAccountDeletion?,
     password: String,
     onPasswordChange: (String) -> Unit,
+    passwordError: String?,
     busy: Boolean,
     onRefresh: () -> Unit,
     onCancel: () -> Unit,
@@ -1153,6 +1224,7 @@ private fun OwnershipDeletionPendingCard(
                 autofillType = AutofillType.Password,
                 password = true,
                 enabled = !busy,
+                errorMessage = passwordError,
                 modifier = Modifier.testTag(
                     "noop.ownership.pending-deletion-password",
                 ),
@@ -1288,20 +1360,39 @@ private fun OwnershipAccountCard(
     onClaim: () -> Unit,
     onSavePlan: () -> Unit,
 ) {
+    val presentation = ownershipAccountPresentation(state.phase)
     NoopCard(padding = 20.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val claimed = state.overview?.bandState == "claimed"
             OwnershipHeader(
-                icon = if (claimed) Icons.Filled.CheckCircle else Icons.Filled.Key,
+                icon = presentation.icon,
                 title = stringResource(R.string.ownership_account_title),
-                detail = stringResource(
-                    if (claimed) {
-                        R.string.ownership_account_claimed_detail
-                    } else {
-                        R.string.ownership_account_ready_detail
-                    },
-                ),
+                detail = presentation.detail,
             )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Palette.surfaceInset)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .semantics(mergeDescendants = true) {
+                        stateDescription = presentation.label
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = presentation.icon,
+                    contentDescription = null,
+                    tint = presentation.tint,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    text = presentation.label,
+                    style = NoopType.body,
+                    color = Palette.textPrimary,
+                )
+            }
             if (!claimed && state.phase == OwnershipPhase.ACCOUNT_READY) {
                 NoopButton(
                     text = stringResource(R.string.ownership_confirm_band),
@@ -1381,6 +1472,8 @@ private fun OwnershipPhoneCard(
     onPhoneChange: (String) -> Unit,
     code: String,
     onCodeChange: (String) -> Unit,
+    phoneError: String?,
+    codeError: String?,
     busy: Boolean,
     resendSecondsRemaining: Int,
     activityAvailable: Boolean,
@@ -1418,6 +1511,7 @@ private fun OwnershipPhoneCard(
                     keyboardType = KeyboardType.Phone,
                     autofillType = AutofillType.PhoneNumber,
                     enabled = !busy,
+                    errorMessage = phoneError,
                 )
                 NoopButton(
                     text = if (resendSecondsRemaining > 0) {
@@ -1444,6 +1538,7 @@ private fun OwnershipPhoneCard(
                     keyboardType = KeyboardType.NumberPassword,
                     autofillType = AutofillType.SmsOtpCode,
                     enabled = !busy,
+                    errorMessage = codeError,
                 )
                 NoopButton(
                     text = stringResource(R.string.ownership_verify_phone),
@@ -1566,6 +1661,7 @@ private fun OwnershipTextField(
     enabled: Boolean,
     password: Boolean = false,
     autofillType: AutofillType? = null,
+    errorMessage: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val fieldModifier = if (autofillType == null) {
@@ -1581,6 +1677,16 @@ private fun OwnershipTextField(
         onValueChange = onValueChange,
         label = { Text(label) },
         enabled = enabled,
+        isError = errorMessage != null,
+        supportingText = errorMessage?.let { message ->
+            {
+                Text(
+                    text = message,
+                    style = NoopType.caption,
+                    color = Palette.statusCritical,
+                )
+            }
+        },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         visualTransformation = if (password) {
@@ -1597,8 +1703,134 @@ private fun OwnershipTextField(
             unfocusedLabelColor = Palette.textTertiary,
             cursorColor = Palette.accent,
         ),
-        modifier = fieldModifier.fillMaxWidth(),
+        modifier = fieldModifier
+            .fillMaxWidth()
+            .then(
+                if (errorMessage == null) {
+                    Modifier
+                } else {
+                    Modifier.semantics {
+                        error(errorMessage)
+                    }
+                },
+            ),
     )
+}
+
+private data class OwnershipAccountPresentation(
+    val icon: ImageVector,
+    val label: String,
+    val detail: String,
+    val tint: androidx.compose.ui.graphics.Color,
+)
+
+@Composable
+private fun ownershipAccountPresentation(
+    phase: OwnershipPhase,
+): OwnershipAccountPresentation = when (phase) {
+    OwnershipPhase.ACCOUNT_READY -> OwnershipAccountPresentation(
+        icon = Icons.Filled.Key,
+        label = stringResource(R.string.ownership_account_ready),
+        detail = stringResource(R.string.ownership_account_ready_detail),
+        tint = Palette.accent,
+    )
+    OwnershipPhase.POSSESSION_UNAVAILABLE -> OwnershipAccountPresentation(
+        icon = Icons.Filled.Lock,
+        label = stringResource(R.string.ownership_possession_sdk_pending),
+        detail = stringResource(R.string.ownership_possession_locked),
+        tint = Palette.statusWarning,
+    )
+    OwnershipPhase.CLAIMED -> OwnershipAccountPresentation(
+        icon = Icons.Filled.Security,
+        label = stringResource(R.string.ownership_band_claimed),
+        detail = stringResource(R.string.ownership_account_claimed_detail),
+        tint = Palette.statusPositive,
+    )
+    OwnershipPhase.COMPLETE -> OwnershipAccountPresentation(
+        icon = Icons.Filled.CheckCircle,
+        label = stringResource(R.string.ownership_setup_complete),
+        detail = stringResource(R.string.ownership_account_claimed_detail),
+        tint = Palette.statusPositive,
+    )
+    else -> error("Ownership account presentation requires an account phase")
+}
+
+@Composable
+private fun ownershipStatusIsError(message: String): Boolean {
+    if (message.isBlank()) return false
+    val errors = setOf(
+        stringResource(R.string.ownership_unavailable_status),
+        stringResource(R.string.ownership_invalid_credentials),
+        stringResource(R.string.ownership_invalid_password),
+        stringResource(R.string.ownership_email_verification_required),
+        stringResource(R.string.ownership_terms_reload),
+        stringResource(R.string.ownership_invalid_phone),
+        stringResource(R.string.ownership_invalid_code),
+        stringResource(R.string.ownership_verification_code_invalid),
+        stringResource(R.string.ownership_verification_session_expired),
+        stringResource(R.string.ownership_verification_rate_limited),
+        stringResource(R.string.ownership_verification_cooldown_active),
+        stringResource(R.string.ownership_deletion_confirmation_required),
+        stringResource(R.string.ownership_deletion_acknowledgements_required),
+        stringResource(R.string.ownership_deletion_password_required),
+        stringResource(R.string.ownership_sign_in_again),
+        stringResource(R.string.ownership_confirmation_inactive),
+        stringResource(R.string.ownership_confirmation_rejected),
+        stringResource(R.string.ownership_band_unavailable),
+        stringResource(R.string.ownership_network_unavailable),
+        stringResource(R.string.ownership_service_unavailable),
+        stringResource(R.string.ownership_cannot_continue),
+        stringResource(R.string.ownership_action_failed),
+    )
+    return message in errors
+}
+
+@Composable
+private fun OwnershipStatusMessage(
+    message: String,
+    isError: Boolean,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("noop.ownership.status")
+            .semantics(mergeDescendants = true) {
+                liveRegion = if (isError) {
+                    LiveRegionMode.Assertive
+                } else {
+                    LiveRegionMode.Polite
+                }
+                stateDescription = message
+                if (isError) error(message)
+            },
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = if (isError) {
+                Icons.Filled.ErrorOutline
+            } else {
+                Icons.Filled.Info
+            },
+            contentDescription = null,
+            tint = if (isError) {
+                Palette.statusCritical
+            } else {
+                Palette.textTertiary
+            },
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = message,
+            style = NoopType.caption,
+            color = if (isError) {
+                Palette.statusCritical
+            } else {
+                Palette.textTertiary
+            },
+            modifier = Modifier.weight(1f),
+        )
+    }
 }
 
 @Suppress("DEPRECATION")

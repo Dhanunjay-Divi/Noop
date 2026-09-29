@@ -4861,6 +4861,28 @@
     "zh-Hans": "可重命名、重新分组或移除项目来整理列表。重命名后，原始问题仍会在内部保留，以便继续匹配导入的参考数据。自定义项目会被删除；内置项目会被隐藏，并可在下方恢复。",
     "zh-Hant": "可重新命名、重新分組或移除項目來整理清單。重新命名後，原始問題仍會在內部保留，以便繼續比對匯入的參考資料。自訂項目會被刪除；內建項目會被隱藏，並可在下方還原。"
   },
+  "appwide.journal.attribution.title": {
+    "de": "Über Journaltage",
+    "en": "About journal days",
+    "es": "Acerca de los días del diario",
+    "fr": "À propos des jours du journal",
+    "it": "Informazioni sui giorni del diario",
+    "pt-PT": "Sobre os dias do diário",
+    "ru": "О днях дневника",
+    "zh-Hans": "关于日志日期",
+    "zh-Hant": "關於日誌日期"
+  },
+  "appwide.journal.attribution.detail": {
+    "de": "Antworten beziehen sich auf die Nacht und den Tag vor diesem Morgen, dieselbe Zuordnung wie in einem Noop Band-Export, damit erfasste und importierte Tage übereinstimmen.",
+    "en": "Answers are about the night and day leading into this morning, the same attribution a wearable export uses, so logged and imported days line up.",
+    "es": "Las respuestas se refieren a la noche y el día previos a esta mañana, la misma atribución que usa una exportación de Noop Band, para que los días registrados e importados coincidan.",
+    "fr": "Les réponses portent sur la nuit et la journée précédant ce matin, la même attribution qu'utilise un export Noop Band, afin que les jours enregistrés et importés correspondent.",
+    "it": "Le risposte riguardano la notte e il giorno che portano a questa mattina, la stessa attribuzione usata da un'esportazione Noop Band, così i giorni registrati e importati si allineano.",
+    "pt-PT": "As respostas são sobre a noite e o dia que antecedem esta manhã, a mesma atribuição que uma exportação Noop Band utiliza, portanto, os dias registados e importados alinham-se.",
+    "ru": "Ответы относятся к ночи и дню, предшествующим этому утру, так же, как в экспорте Noop Band, поэтому записанные и импортированные дни совпадают.",
+    "zh-Hans": "回答涉及的是通向今天早晨的这个夜晚和白天，与 Noop Band 导出所用的归属方式相同，因此记录的日期和导入的日期能够对齐。",
+    "zh-Hant": "回答涉及的是通向今天早晨的這個夜晚和白天，與 Noop Band 匯出所用的歸屬方式相同，因此記錄的日期和匯入的日期能夠對齊。"
+  },
   "appwide.workouts.activity_calendar.title": {
     "de": "Aktivitätskalender",
     "en": "Activity calendar",
@@ -10140,6 +10162,94 @@
     "ru": "NOOP ежедневно рассчитывает три оценки по шкале от 0 до 100. Они основаны на сигналах вашего носимого устройства, используют опубликованные и прошедшие экспертное рецензирование исследования в области спортивной науки и полностью вычисляются на вашем устройстве. Эти оценки независимы и могут не совпадать с оценками других приложений число в число. Источник и уровень достоверности остаются видимыми для прозрачного сравнения.",
     "zh-Hans": "NOOP 每天提供三个 0 到 100 分的评分。这些评分根据可穿戴设备的信号，采用已发表并经过同行评审的运动科学研究，在你的设备上完全计算得出。三项评分彼此独立，因此不一定与其他应用逐项一致。数据来源和置信度会始终显示，便于进行透明、客观的比较。",
     "zh-Hant": "NOOP 每天提供三個 0 到 100 分的評分。這些評分根據穿戴式裝置的訊號，採用已發表並經過同儕審查的運動科學研究，在你的裝置上完全計算得出。三項評分彼此獨立，因此不一定與其他應用程式逐項一致。資料來源和信賴度會持續顯示，方便進行透明且客觀的比較。"
+  },
+  "appwide.scoring_guide.method_details": {
+    "en": "Implementation details",
+    "de": "Implementierungsdetails",
+    "es": "Detalles de implementación",
+    "fr": "Détails de mise en œuvre",
+    "it": "Dettagli di implementazione",
+    "pt-PT": "Detalhes da implementação",
+    "ru": "Детали реализации",
+    "zh-Hans": "实现详情",
+    "zh-Hant": "實作詳情"
+  },
+  "appwide.scoring_guide.revision_format": {
+    "en": "Revision %1$s",
+    "de": "Revision %1$s",
+    "es": "Revisión %1$s",
+    "fr": "Révision %1$s",
+    "it": "Revisione %1$s",
+    "pt-PT": "Revisão %1$s",
+    "ru": "Версия %1$s",
+    "zh-Hans": "版本 %1$s",
+    "zh-Hant": "版本 %1$s"
+  },
+  "appwide.scoring_guide.source_on_device": {
+    "en": "Derived on this device by NOOP. It is not an imported provider score.",
+    "de": "Von NOOP auf diesem Gerät abgeleitet. Es handelt sich nicht um einen importierten Anbieterwert.",
+    "es": "Derivada por NOOP en este dispositivo. No es una puntuación importada de otro proveedor.",
+    "fr": "Calculé par NOOP sur cet appareil. Il ne s’agit pas d’un score importé d’un autre fournisseur.",
+    "it": "Derivato da NOOP su questo dispositivo. Non è un punteggio importato da un altro fornitore.",
+    "pt-PT": "Calculado pelo NOOP neste dispositivo. Não é uma pontuação importada de outro fornecedor.",
+    "ru": "Рассчитано NOOP на этом устройстве. Это не импортированная оценка другого поставщика.",
+    "zh-Hans": "由 NOOP 在此设备上计算，并非从其他提供方导入的评分。",
+    "zh-Hant": "由 NOOP 在此裝置上計算，並非從其他提供方匯入的評分。"
+  },
+  "appwide.scoring_guide.recovery_inputs": {
+    "en": "Implemented inputs: nightly HRV, resting heart rate, Sleep Score, respiratory rate, and skin-temperature deviation.",
+    "de": "Implementierte Eingaben: nächtliche HRV, Ruhepuls, Schlafwert, Atemfrequenz und Hauttemperaturabweichung.",
+    "es": "Entradas implementadas: VFC nocturna, frecuencia cardiaca en reposo, Puntuación de sueño, frecuencia respiratoria y desviación de la temperatura cutánea.",
+    "fr": "Entrées mises en œuvre : VFC nocturne, fréquence cardiaque au repos, score de sommeil, fréquence respiratoire et écart de température cutanée.",
+    "it": "Input implementati: HRV notturna, frequenza cardiaca a riposo, Punteggio del sonno, frequenza respiratoria e deviazione della temperatura cutanea.",
+    "pt-PT": "Entradas implementadas: VFC noturna, frequência cardíaca em repouso, Pontuação do sono, frequência respiratória e desvio da temperatura da pele.",
+    "ru": "Реализованные входные данные: ночная ВСР, пульс в покое, оценка сна, частота дыхания и отклонение температуры кожи.",
+    "zh-Hans": "已实现的输入：夜间 HRV、静息心率、睡眠评分、呼吸频率和皮肤温度偏差。",
+    "zh-Hant": "已實作的輸入：夜間 HRV、靜息心率、睡眠評分、呼吸頻率和皮膚溫度偏差。"
+  },
+  "appwide.scoring_guide.recovery_baseline_format": {
+    "en": "Personal baselines use %1$d-night center and %2$d-night spread half-lives. Recovery can start at %3$d valid HRV nights, remains provisional below %4$d, becomes trusted at %4$d, and becomes stale after more than %5$d missed nights.",
+    "de": "Persönliche Baselines verwenden Halbwertszeiten von %1$d Nächten für den Mittelpunkt und %2$d Nächten für die Streuung. Erholung kann nach %3$d gültigen HRV-Nächten beginnen, bleibt unter %4$d vorläufig, gilt ab %4$d als zuverlässig und wird nach mehr als %5$d fehlenden Nächten als veraltet markiert.",
+    "es": "Las referencias personales usan semividas de %1$d noches para el centro y %2$d noches para la dispersión. Recuperación puede empezar con %3$d noches de VFC válidas, sigue siendo provisional por debajo de %4$d, pasa a ser fiable en %4$d y queda desactualizada tras más de %5$d noches sin datos.",
+    "fr": "Les références personnelles utilisent des demi-vies de %1$d nuits pour le centre et de %2$d nuits pour la dispersion. La récupération peut commencer après %3$d nuits de VFC valides, reste provisoire en dessous de %4$d, devient fiable à %4$d et devient obsolète après plus de %5$d nuits manquantes.",
+    "it": "Le baseline personali usano emivite di %1$d notti per il centro e %2$d notti per la dispersione. Il Recupero può iniziare con %3$d notti HRV valide, resta provvisorio sotto %4$d, diventa affidabile a %4$d e diventa obsoleto dopo più di %5$d notti mancanti.",
+    "pt-PT": "As referências pessoais usam semividas de %1$d noites para o centro e %2$d noites para a dispersão. A Recuperação pode começar com %3$d noites de VFC válidas, permanece provisória abaixo de %4$d, torna-se fiável em %4$d e fica desatualizada após mais de %5$d noites em falta.",
+    "ru": "Личные базовые уровни используют периоды полураспада %1$d ночей для центра и %2$d ночей для разброса. Восстановление может появиться после %3$d корректных ночей ВСР, остаётся предварительным до %4$d, становится надёжным при %4$d и устаревает после более чем %5$d пропущенных ночей.",
+    "zh-Hans": "个人基线的中心半衰期为 %1$d 晚，离散度半衰期为 %2$d 晚。恢复评分可在 %3$d 个有效 HRV 夜晚后开始，少于 %4$d 晚时仍为暂定状态，达到 %4$d 晚后视为可信，缺失超过 %5$d 晚后会变为过期。",
+    "zh-Hant": "個人基線的中心半衰期為 %1$d 晚，離散度半衰期為 %2$d 晚。恢復評分可在 %3$d 個有效 HRV 夜晚後開始，少於 %4$d 晚時仍為暫定狀態，達到 %4$d 晚後視為可信，缺失超過 %5$d 晚後會變為過期。"
+  },
+  "appwide.scoring_guide.recovery_excluded": {
+    "en": "Not included in this revision: overnight Recovery Index and previous-day activity balance. They remain outside production scoring until separately approved and revisioned.",
+    "de": "In dieser Revision nicht enthalten: nächtlicher Erholungsindex und Aktivitätsbilanz des Vortags. Sie bleiben von der Produktionsbewertung ausgeschlossen, bis sie separat genehmigt und versioniert wurden.",
+    "es": "No incluidos en esta revisión: Índice de recuperación nocturno y equilibrio de actividad del día anterior. Permanecen fuera de la puntuación de producción hasta que se aprueben y versionen por separado.",
+    "fr": "Non inclus dans cette révision : indice de récupération nocturne et équilibre d’activité de la veille. Ils restent exclus du calcul en production jusqu’à une approbation et une révision distinctes.",
+    "it": "Non inclusi in questa revisione: Indice di recupero notturno e bilanciamento dell’attività del giorno precedente. Restano esclusi dal punteggio di produzione finché non saranno approvati e revisionati separatamente.",
+    "pt-PT": "Não incluídos nesta revisão: Índice de recuperação noturno e equilíbrio de atividade do dia anterior. Permanecem fora da pontuação de produção até serem aprovados e versionados separadamente.",
+    "ru": "В эту версию не входят: ночной индекс восстановления и баланс активности предыдущего дня. Они не участвуют в рабочем расчёте до отдельного утверждения и выпуска новой версии.",
+    "zh-Hans": "此版本未包含：夜间恢复指数和前一日活动平衡。在单独获批并更新版本前，它们不会进入生产评分。",
+    "zh-Hant": "此版本未包含：夜間恢復指數和前一日活動平衡。在單獨獲批並更新版本前，它們不會進入正式評分。"
+  },
+  "appwide.scoring_guide.effort_implemented": {
+    "en": "Implemented window: available heart-rate samples from the local calendar day, using heart-rate-reserve zones. Steps or active energy can supply only the existing low-cardio floor.",
+    "de": "Implementiertes Fenster: verfügbare Herzfrequenzwerte des lokalen Kalendertags mit Herzfrequenzreserve-Zonen. Schritte oder aktive Energie können nur die bestehende Untergrenze für geringe Herz-Kreislauf-Belastung liefern.",
+    "es": "Ventana implementada: muestras de frecuencia cardiaca disponibles del día natural local, usando zonas de reserva de frecuencia cardiaca. Los pasos o la energía activa solo pueden aportar el umbral mínimo existente para baja carga cardiovascular.",
+    "fr": "Fenêtre mise en œuvre : échantillons de fréquence cardiaque disponibles pour le jour civil local, avec des zones de réserve de fréquence cardiaque. Les pas ou l’énergie active ne peuvent fournir que le seuil minimal existant pour une faible charge cardio.",
+    "it": "Finestra implementata: campioni di frequenza cardiaca disponibili nel giorno di calendario locale, usando le zone di riserva della frequenza cardiaca. I passi o l’energia attiva possono fornire solo la soglia minima esistente per un basso carico cardio.",
+    "pt-PT": "Janela implementada: amostras de frequência cardíaca disponíveis do dia de calendário local, usando zonas de reserva de frequência cardíaca. Os passos ou a energia ativa só podem fornecer o limite mínimo existente para baixa carga cardiovascular.",
+    "ru": "Реализованное окно: доступные измерения пульса за локальный календарный день с использованием зон резерва ЧСС. Шаги или активная энергия могут задать только существующий нижний порог низкой кардионагрузки.",
+    "zh-Hans": "已实现的窗口：本地日历日内可用的心率样本，并采用心率储备区间。步数或活动能量只能提供现有的低心肺负荷下限。",
+    "zh-Hant": "已實作的視窗：本地日曆日內可用的心率樣本，並採用心率儲備區間。步數或活動能量只能提供現有的低心肺負荷下限。"
+  },
+  "appwide.scoring_guide.sleep_implemented": {
+    "en": "Implemented window: the selected main sleep period, using duration versus personal need, efficiency, deep-plus-REM share, and sleep/wake timing consistency.",
+    "de": "Implementiertes Fenster: der ausgewählte Hauptschlafzeitraum mit Dauer im Verhältnis zum persönlichen Bedarf, Effizienz, Tiefschlaf-plus-REM-Anteil und Konsistenz der Schlaf- und Aufwachzeiten.",
+    "es": "Ventana implementada: el periodo principal de sueño seleccionado, usando duración frente a necesidad personal, eficiencia, proporción de sueño profundo más REM y regularidad de las horas de dormir y despertar.",
+    "fr": "Fenêtre mise en œuvre : la période de sommeil principale sélectionnée, avec la durée par rapport au besoin personnel, l’efficacité, la part de sommeil profond plus paradoxal et la régularité des heures de coucher et de réveil.",
+    "it": "Finestra implementata: il periodo di sonno principale selezionato, usando durata rispetto al bisogno personale, efficienza, quota di sonno profondo più REM e regolarità degli orari di sonno e risveglio.",
+    "pt-PT": "Janela implementada: o período principal de sono selecionado, usando duração face à necessidade pessoal, eficiência, proporção de sono profundo mais REM e consistência dos horários de dormir e acordar.",
+    "ru": "Реализованное окно: выбранный основной период сна с учётом длительности относительно личной потребности, эффективности, доли глубокого и REM-сна и стабильности времени засыпания и пробуждения.",
+    "zh-Hans": "已实现的窗口：选定的主要睡眠时段，使用相对个人需求的时长、睡眠效率、深睡加 REM 占比以及入睡和醒来时间的一致性。",
+    "zh-Hant": "已實作的視窗：選定的主要睡眠時段，使用相對個人需求的時長、睡眠效率、深睡加 REM 佔比以及入睡和醒來時間的一致性。"
   },
   "appwide.ui_audit.today.score_building": {
     "en": "Live heart rate is working from Noop Band. Recovery, Effort, and Sleep Score build over the next few nights as NOOP learns your baseline. To add older history, import a wearable export in Data Sources.",

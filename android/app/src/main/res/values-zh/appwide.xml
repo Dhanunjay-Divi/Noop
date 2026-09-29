@@ -471,6 +471,8 @@
     <string name="appwide_intelligence_explainer_format">当相关输入可用时，恢复会综合 HRV 相对个人基线的变化（约百分之 55）、静息心率（约百分之 20）、睡眠评分（约百分之 15）、呼吸频率（约百分之 5）和皮肤温度偏差（约百分之 5）。消耗是根据各心率区间内的时间计算出的 0–%1$s 心血管负荷评分。睡眠评分结合可用的时长、效率、阶段和规律性。部分显示日期可能来自本地导入。NOOP 衍生评分仅根据上述可用输入在本地计算；这些评分并非临床测量，缺失输入仍保持缺失。</string>
     <string name="appwide_intelligence_no_scored_nights">还没有已评分的夜晚。请在 NOOP 保持连接时整晚佩戴手环。消耗和睡眠评分可在一晚后出现；恢复大约需要四个有效夜晚来学习你的基线。</string>
     <string name="appwide_intelligence_subtitle">NOOP 在你的设备上计算恢复、消耗和睡眠评分，无需云端计算。</string>
+    <string name="appwide_journal_attribution_detail">回答涉及的是通向今天早晨的这个夜晚和白天，与 Noop Band 导出所用的归属方式相同，因此记录的日期和导入的日期能够对齐。</string>
+    <string name="appwide_journal_attribution_title">关于日志日期</string>
     <string name="appwide_journal_editing_help">可重命名、重新分组或移除项目来整理列表。重命名后，原始问题仍会在内部保留，以便继续匹配导入的参考数据。自定义项目会被删除；内置项目会被隐藏，并可在下方恢复。</string>
     <string name="appwide_legal_summary">项目条款和源代码许可。可离线查看。</string>
     <string name="appwide_live_session_band_required">开始前，请连接并佩戴已配对的受支持手环。</string>
@@ -692,6 +694,14 @@
     <string name="appwide_readiness_strained_headline">一项变化</string>
     <string name="appwide_readiness_strained_summary">一项测量信号偏离了近期范围。单日变化只提示需要复查，并非诊断或训练指示。</string>
     <string name="appwide_rhythm_methodology">NOOP 仅分析已记录锻炼之外的安静夜间时段。检测到动作、运动、非静息状态下的心率升高或信号噪声时，会跳过该时段，不作解读。它将心搏间期绘制为庞加莱散点图，并计算已发表的描述性统计量。“节律”是可选的时间间隔视图，不是诊断，也绝不会发送警报。</string>
+    <string name="appwide_scoring_guide_effort_implemented">已实现的窗口：本地日历日内可用的心率样本，并采用心率储备区间。步数或活动能量只能提供现有的低心肺负荷下限。</string>
+    <string name="appwide_scoring_guide_method_details">实现详情</string>
+    <string name="appwide_scoring_guide_recovery_baseline_format">个人基线的中心半衰期为 %1$d 晚，离散度半衰期为 %2$d 晚。恢复评分可在 %3$d 个有效 HRV 夜晚后开始，少于 %4$d 晚时仍为暂定状态，达到 %4$d 晚后视为可信，缺失超过 %5$d 晚后会变为过期。</string>
+    <string name="appwide_scoring_guide_recovery_excluded">此版本未包含：夜间恢复指数和前一日活动平衡。在单独获批并更新版本前，它们不会进入生产评分。</string>
+    <string name="appwide_scoring_guide_recovery_inputs">已实现的输入：夜间 HRV、静息心率、睡眠评分、呼吸频率和皮肤温度偏差。</string>
+    <string name="appwide_scoring_guide_revision_format">版本 %1$s</string>
+    <string name="appwide_scoring_guide_sleep_implemented">已实现的窗口：选定的主要睡眠时段，使用相对个人需求的时长、睡眠效率、深睡加 REM 占比以及入睡和醒来时间的一致性。</string>
+    <string name="appwide_scoring_guide_source_on_device">由 NOOP 在此设备上计算，并非从其他提供方导入的评分。</string>
     <string name="appwide_shell_updates_unread_format">更新，%1$d 条未读</string>
     <string name="appwide_sleep_edit_conflict">编辑保存前，这一晚的数据已发生变化。已恢复最新数据。</string>
     <string name="appwide_sleep_empty_history_help">这里还没有夜间记录。请在「数据来源」中导入可穿戴设备导出文件，即可立即查看每一晚、睡眠阶段和趋势。或者在佩戴手环入睡后，打开「智能」查看根据手环计算出的昨晚数据。</string>

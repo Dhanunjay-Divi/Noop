@@ -2,7 +2,6 @@ package com.noop.ui
 
 import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.ui.test.assertIsDisplayed
@@ -10,11 +9,11 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
-import androidx.core.content.ContextCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.noop.R
@@ -40,8 +39,6 @@ class OnboardingFlowInstrumentedTest {
     private var onboardedWasPresent = false
     private var originalProgressV2: String? = null
     private var originalProgressV1: String? = null
-    private var bluetoothScanWasGranted = false
-    private var bluetoothConnectWasGranted = false
 
     @Before
     fun launchFreshInstall() {
@@ -59,20 +56,14 @@ class OnboardingFlowInstrumentedTest {
             "settings put global animator_duration_scale 0",
         ).close()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            bluetoothScanWasGranted = permissionGranted(Manifest.permission.BLUETOOTH_SCAN)
-            bluetoothConnectWasGranted = permissionGranted(Manifest.permission.BLUETOOTH_CONNECT)
-            if (!bluetoothScanWasGranted) {
-                instrumentation.uiAutomation.grantRuntimePermission(
-                    context.packageName,
-                    Manifest.permission.BLUETOOTH_SCAN,
-                )
-            }
-            if (!bluetoothConnectWasGranted) {
-                instrumentation.uiAutomation.grantRuntimePermission(
-                    context.packageName,
-                    Manifest.permission.BLUETOOTH_CONNECT,
-                )
-            }
+            instrumentation.uiAutomation.grantRuntimePermission(
+                context.packageName,
+                Manifest.permission.BLUETOOTH_SCAN,
+            )
+            instrumentation.uiAutomation.grantRuntimePermission(
+                context.packageName,
+                Manifest.permission.BLUETOOTH_CONNECT,
+            )
         }
 
         // Terms acceptance is a separate contract. This test starts immediately after that boundary so
@@ -124,22 +115,6 @@ class OnboardingFlowInstrumentedTest {
                 .uiAutomation
                 .executeShellCommand(restoreAnimator)
                 .close()
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-                if (!bluetoothScanWasGranted) {
-                    automation.revokeRuntimePermission(
-                        context.packageName,
-                        Manifest.permission.BLUETOOTH_SCAN,
-                    )
-                }
-                if (!bluetoothConnectWasGranted) {
-                    automation.revokeRuntimePermission(
-                        context.packageName,
-                        Manifest.permission.BLUETOOTH_CONNECT,
-                    )
-                }
-            }
         }
     }
 
@@ -189,20 +164,17 @@ class OnboardingFlowInstrumentedTest {
         compose.onNodeWithText("Oura Ring").assertDoesNotExist()
     }
 
-    private fun permissionGranted(permission: String): Boolean =
-        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-
     private fun waitForTag(tag: String) {
         compose.waitUntil(timeoutMillis = 20_000) {
-            compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
+            runCatching {
+                compose.onNodeWithTag(tag).assertIsDisplayed()
+            }.isSuccess
         }
     }
 
     private fun waitForTextDisplayed(text: String) {
         compose.waitUntil(timeoutMillis = 20_000) {
-            runCatching {
-                compose.onNodeWithText(text).assertIsDisplayed()
-            }.isSuccess
+            compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
         }
     }
 

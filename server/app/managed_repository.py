@@ -476,6 +476,26 @@ class PostgresManagedRepository:
         ):
             raise ManagedForbiddenError("managed account is not active")
 
+    @staticmethod
+    async def _lock_active_installation_mutation(
+        connection: Any,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+    ) -> None:
+        installation_status = await connection.fetchval(
+            """
+            SELECT status
+            FROM managed_account_installations
+            WHERE account_id = $1 AND installation_id = $2
+            FOR SHARE
+            """,
+            principal.account_id,
+            installation_id,
+        )
+        if installation_status not in {"active", "limited"}:
+            raise ManagedForbiddenError("managed installation is not active")
+
     async def coordination_now(self) -> datetime:
         return await self._pool().fetchval("SELECT clock_timestamp()")
 
@@ -1886,6 +1906,11 @@ class PostgresManagedRepository:
                     connection,
                     principal=principal,
                 )
+                await self._lock_active_installation_mutation(
+                    connection,
+                    principal=principal,
+                    installation_id=installation_id,
+                )
                 await connection.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                     f"noop-managed-account-quota:{principal.account_id}",
@@ -2449,6 +2474,11 @@ class PostgresManagedRepository:
                     connection,
                     principal=principal,
                 )
+                await self._lock_active_installation_mutation(
+                    connection,
+                    principal=principal,
+                    installation_id=installation_id,
+                )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 chunk = await connection.fetchrow(
                     """
@@ -2524,18 +2554,25 @@ class PostgresManagedRepository:
         chunk_id: UUID,
     ) -> dict[str, Any]:
         self._require_active(principal)
-        row = await self._pool().fetchrow(
-            """
-            SELECT *
-            FROM managed_chunks
-            WHERE account_id = $1
-              AND chunk_id = $2
-              AND installation_id = $3
-            """,
-            principal.account_id,
-            chunk_id,
-            installation_id,
-        )
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                await self._lock_active_installation_mutation(
+                    connection,
+                    principal=principal,
+                    installation_id=installation_id,
+                )
+                row = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_chunks
+                    WHERE account_id = $1
+                      AND chunk_id = $2
+                      AND installation_id = $3
+                    """,
+                    principal.account_id,
+                    chunk_id,
+                    installation_id,
+                )
         if row is None:
             raise ManagedNotFoundError("managed chunk was not found")
         return dict(row)
@@ -2554,6 +2591,11 @@ class PostgresManagedRepository:
                 await self._lock_active_account_mutation(
                     connection,
                     principal=principal,
+                )
+                await self._lock_active_installation_mutation(
+                    connection,
+                    principal=principal,
+                    installation_id=installation_id,
                 )
                 chunk = await connection.fetchrow(
                     """

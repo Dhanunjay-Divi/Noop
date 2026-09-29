@@ -458,7 +458,16 @@ final class MoreListParityTests: XCTestCase {
                        "Profile belongs once in the complete Body index.")
         XCTAssertTrue(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "friends" }),
                       "Friends must remain one tap away after Workouts moves into primary navigation.")
-        XCTAssertTrue(shell.contains("MoreQuickAccessLabel(item: item)"),
+        XCTAssertTrue(shell.contains(
+            "let columns = dynamicTypeSize.isAccessibilitySize"
+        ), "Accessibility Dynamic Type must switch shortcut tiles to one column.")
+        XCTAssertTrue(shell.contains(
+            "usesAccessibilityLayout: dynamicTypeSize.isAccessibilitySize"
+        ), "The tile must receive the same accessibility layout decision as its grid.")
+        XCTAssertTrue(shell.contains(
+            ".lineLimit(usesAccessibilityLayout ? 2 : 1)"
+        ), "Accessibility shortcuts must wrap the full localized command instead of truncating it.")
+        XCTAssertTrue(shell.contains("MoreQuickAccessLabel("),
                       "Keep the tile view split out so RootTabView remains cheap to type-check.")
         XCTAssertTrue(shell.contains("MoreRow(\"Profile\", \"person.crop.circle.fill\", .profile)"),
                       "Profile must stay visible in the Body index instead of being buried in Settings.")

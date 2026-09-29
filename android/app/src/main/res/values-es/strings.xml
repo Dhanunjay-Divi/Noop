@@ -2974,4 +2974,6 @@
     <string name="managed_friends_delete_account_title">¿Eliminar la cuenta de NOOP?</string>
     <string name="managed_friends_delete_account_detail">Friends, los datos gestionados en la nube y la cuenta de NOOP se programarán para eliminarse tras un periodo de espera de 24 horas. Los datos de salud locales de este teléfono no se eliminarán.</string>
     <string name="managed_friends_deletion_scheduled_detail">Friends y los servicios de la cuenta están en pausa durante el periodo de espera de 24 horas. Los datos de salud locales permanecen en este teléfono.</string>
+    <string name="ownership_progress_step">Paso %1$d de %2$d</string>
+    <string name="ownership_setup_complete">Configuración de propiedad completada.</string>
 </resources>

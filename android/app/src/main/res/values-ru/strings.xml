@@ -553,4 +553,6 @@
     <string name="ownership_verification_cooldown_active">Дождитесь окончания обратного отсчёта, прежде чем запрашивать новое сообщение для подтверждения.</string>
     <string name="ownership_network_unavailable">Восстановите подключение к Интернету и повторите попытку.</string>
     <string name="managed_cloud_error_document_conflict">NOOP сохранил текущие данные. Проверьте последние изменения, затем нажмите «Синхронизировать сейчас», чтобы повторить попытку.</string>
+    <string name="ownership_progress_step">Шаг %1$d из %2$d</string>
+    <string name="ownership_setup_complete">Настройка владения завершена.</string>
 </resources>

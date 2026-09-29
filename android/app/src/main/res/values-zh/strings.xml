@@ -2964,4 +2964,6 @@
     <string name="managed_friends_delete_account_title">删除 NOOP 账户？</string>
     <string name="managed_friends_delete_account_detail">Friends、托管云端数据和 NOOP 账户将在 24 小时冷静期后安排删除。此手机上的本地健康数据不会被删除。</string>
     <string name="managed_friends_deletion_scheduled_detail">Friends 和账户服务将在 24 小时冷静期内暂停。本地健康数据仍保留在此手机上。</string>
+    <string name="ownership_progress_step">第 %1$d 步，共 %2$d 步</string>
+    <string name="ownership_setup_complete">所有权设置已完成。</string>
 </resources>

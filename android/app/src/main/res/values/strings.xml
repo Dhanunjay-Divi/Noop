@@ -3004,4 +3004,6 @@
     <string name="app_report_cancel_progress_label">Feedback cancellation in progress</string>
     <string name="app_report_queued_progress_label">Feedback is queued</string>
     <string name="app_report_delivery_in_progress">Feedback delivery is in progress.</string>
+    <string name="ownership_progress_step">Step %1$d of %2$d</string>
+    <string name="ownership_setup_complete">Ownership setup complete.</string>
 </resources>

@@ -91,6 +91,26 @@ final class OwnershipVerificationRecoveryContractTests: XCTestCase {
         XCTAssertFalse(mapping.contains("String(describing: error)"))
     }
 
+    func testAppleAccountScreenExposesNativeProgressAndErrorSemantics() throws {
+        let source = try source("StrandiOS/System/OwnershipViews.swift")
+
+        for expected in [
+            "import UIKit",
+            "currentStep: 1,\n                    totalSteps: 3",
+            "currentStep: 2,\n                    totalSteps: 3",
+            #"localized: "Step \(currentStep) of \(totalSteps)""#,
+            ".accessibilityValue(Text(ordinal))",
+            #".accessibilityIdentifier("noop.ownership.progress")"#,
+            "UIAccessibility.post(notification: .announcement",
+            #".accessibilityIdentifier("noop.ownership.status")"#,
+            ".accessibilityHint(\n                        Text(authenticationEmailAccessibilityError ?? \"\")",
+            ".accessibilityHint(\n                            Text(phoneCodeAccessibilityError ?? \"\")",
+            #"localized: "Error: \(error)""#,
+        ] {
+            XCTAssertTrue(source.contains(expected), expected)
+        }
+    }
+
     func testAppleVerificationRecoveryCopyIsLocalizedAcrossSupportedLocales()
         throws
     {
@@ -112,6 +132,8 @@ final class OwnershipVerificationRecoveryContractTests: XCTestCase {
             "That code expired. Request a new one.",
             "Too many attempts. Wait before requesting another code.",
             "Wait for the resend timer before requesting another code.",
+            "Error: %@",
+            "Step %lld of %lld",
         ]
 
         for key in keys {

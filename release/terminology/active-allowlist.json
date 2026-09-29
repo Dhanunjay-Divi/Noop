@@ -1946,6 +1946,15 @@
     },
     {
       "category": "core",
+      "occurrenceCount": 3,
+      "owner": "project team",
+      "path": "Strand/System/MacManagedViewerService.swift",
+      "reason": "Existing active symbol retained behind the additive compatibility migration.",
+      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
+      "sha256": "3c63da1618dcd0fafc511e8b1a8404e0eb2fbb03e3ab29a638fbdeff91d42eab"
+    },
+    {
+      "category": "core",
       "occurrenceCount": 6,
       "owner": "project team",
       "path": "Strand/System/ManagedCloudDocumentAdapter.swift",

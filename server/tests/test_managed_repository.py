@@ -98,6 +98,17 @@ def test_chunk_upload_mutations_use_account_erasure_fence() -> None:
         chunk_access = source.index("managed_chunks", account_fence)
         assert account_fence < chunk_access
 
+    for method in (
+        PostgresManagedRepository.reserve_chunk,
+        PostgresManagedRepository.record_upload_grant,
+        PostgresManagedRepository.chunk_for_upload_completion,
+        PostgresManagedRepository.complete_chunk_upload,
+    ):
+        source = inspect.getsource(method)
+        installation_fence = source.index("_lock_active_installation_mutation")
+        chunk_access = source.index("managed_chunks", installation_fence)
+        assert installation_fence < chunk_access
+
     claim_source = inspect.getsource(PostgresManagedRepository.claim_erasure_deletions)
     revoke = claim_source.index("UPDATE managed_upload_grants")
     chunk_alias = claim_source.index("FROM managed_chunks chunk", revoke)
@@ -567,6 +578,144 @@ async def test_account_erasure_fences_chunk_mutations_and_waits_for_upload_grant
             )
             == "delete_pending"
         )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_revoked_installation_cannot_continue_chunk_transfer() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=2,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        repository = _managed(primary)
+        now = datetime.now(UTC)
+        claims = _claims(f"chunk-revocation-{uuid4()}", now)
+        collector_installation = str(uuid4())
+        revoker_installation = str(uuid4())
+        await repository.enroll(
+            claims=claims,
+            enrollment=_enrollment(collector_installation, uuid4()),
+        )
+        await repository.enroll(
+            claims=claims,
+            enrollment=_enrollment(revoker_installation, uuid4()),
+        )
+        principal = await repository.principal_for_identity(claims)
+        source_id = uuid4()
+        await repository.register_source(
+            principal=principal,
+            installation_id=collector_installation,
+            registration=ManagedSourceRegistration(
+                source_id=source_id,
+                source_kind="band",
+                platform="ios",
+                logical_source_hash="b" * 64,
+            ),
+        )
+        reservation = ManagedChunkReservation(
+            chunk_id=uuid4(),
+            request_id=uuid4(),
+            source_id=source_id,
+            data_class="essential_timeseries",
+            schema_version=1,
+            content_mode="server_readable",
+            event_start=now - timedelta(hours=1),
+            event_end=now,
+            compression="gzip",
+            content_type="application/vnd.noop.chunk+json",
+            expected_sha256="c" * 64,
+            expected_compressed_bytes=4_096,
+            expected_uncompressed_bytes=16_384,
+            streams=_essential_streams(
+                event_at=now,
+                heart_rate_samples=1,
+            ),
+        )
+        reserved = await repository.reserve_chunk(
+            principal=principal,
+            installation_id=collector_installation,
+            reservation=reservation,
+        )
+        initial_capability_hash = hashlib.sha256(
+            f"initial:{reservation.chunk_id}".encode("utf-8")
+        ).hexdigest()
+        await repository.record_upload_grant(
+            principal=principal,
+            installation_id=collector_installation,
+            chunk_id=reservation.chunk_id,
+            capability_hash=initial_capability_hash,
+            expires_at=(await repository.coordination_now()) + timedelta(minutes=10),
+        )
+        await repository.revoke_installation(
+            principal=principal,
+            requesting_installation_id=revoker_installation,
+            installation_id=collector_installation,
+        )
+
+        with pytest.raises(ManagedForbiddenError, match="installation is not active"):
+            await repository.reserve_chunk(
+                principal=principal,
+                installation_id=collector_installation,
+                reservation=reservation,
+            )
+        with pytest.raises(ManagedForbiddenError, match="installation is not active"):
+            replacement_capability_hash = hashlib.sha256(
+                f"replacement:{reservation.chunk_id}".encode("utf-8")
+            ).hexdigest()
+            await repository.record_upload_grant(
+                principal=principal,
+                installation_id=collector_installation,
+                chunk_id=reservation.chunk_id,
+                capability_hash=replacement_capability_hash,
+                expires_at=(await repository.coordination_now())
+                + timedelta(minutes=10),
+            )
+        with pytest.raises(ManagedForbiddenError, match="installation is not active"):
+            await repository.chunk_for_upload_completion(
+                principal=principal,
+                installation_id=collector_installation,
+                chunk_id=reservation.chunk_id,
+            )
+        with pytest.raises(ManagedForbiddenError, match="installation is not active"):
+            await repository.complete_chunk_upload(
+                principal=principal,
+                installation_id=collector_installation,
+                chunk_id=reservation.chunk_id,
+                metadata=ManagedObjectMetadata(
+                    object_key=reserved["object_key"],
+                    generation=1,
+                    metageneration=1,
+                    crc32c="AAAAAA==",
+                    size=4_096,
+                    content_type="application/vnd.noop.chunk+json",
+                    metadata={"noop-sha256": "c" * 64},
+                ),
+            )
+
+        persisted = await primary._require_pool().fetchrow(
+            """
+            SELECT state, object_generation, uploaded_at
+            FROM managed_chunks
+            WHERE account_id = $1 AND chunk_id = $2
+            """,
+            principal.account_id,
+            reservation.chunk_id,
+        )
+        assert dict(persisted) == {
+            "state": "uploading",
+            "object_generation": None,
+            "uploaded_at": None,
+        }
     finally:
         await primary.shutdown()
 

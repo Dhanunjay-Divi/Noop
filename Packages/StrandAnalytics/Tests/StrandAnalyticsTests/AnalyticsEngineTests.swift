@@ -273,6 +273,80 @@ final class AnalyticsEngineTests: XCTestCase {
         XCTAssertLessThanOrEqual(result.recovery!, 100)
     }
 
+    func testProductionRecoveryWiringOmitsOptionalIndexAndActivityBalanceTerms() throws {
+        let day = "2021-06-17"
+        let n = night(endDay: day, hours: 7)
+        let hrvBase = Baselines.foldHistory(
+            Array(repeating: 10.0, count: Baselines.minNightsTrust),
+            cfg: Baselines.hrvCfg
+        )
+        let rhrBase = Baselines.foldHistory(
+            Array(repeating: 50.0, count: Baselines.minNightsTrust),
+            cfg: Baselines.restingHRCfg
+        )
+        let result = AnalyticsEngine.analyzeDay(
+            day: day,
+            hr: n.hr,
+            rr: n.rr,
+            gravity: n.gravity,
+            profile: UserProfile(age: 30),
+            baselines: AnalyticsEngine.ProfileBaselines(
+                hrv: hrvBase,
+                restingHR: rhrBase
+            )
+        )
+
+        let hrv = try XCTUnwrap(result.daily.avgHrv)
+        let rhr = Double(try XCTUnwrap(result.daily.restingHr))
+        let production = try XCTUnwrap(result.recovery)
+        let expectedWithoutUnapprovedTerms = try XCTUnwrap(
+            RecoveryScorer.recovery(
+                hrv: hrv,
+                rhr: rhr,
+                resp: result.daily.respRateBpm,
+                hrvBaseline: hrvBase,
+                rhrBaseline: rhrBase,
+                respBaseline: nil,
+                sleepPerf: result.restScore.map { $0 / 100.0 },
+                restQualityBaseline: nil,
+                skinTempDev: result.daily.skinTempDevC,
+                recoveryIndexSlope: nil,
+                effortBaseline: nil,
+                priorDayEffort: nil
+            )
+        )
+        XCTAssertEqual(production, expectedWithoutUnapprovedTerms, accuracy: 1e-12)
+
+        let effortBase = BaselineState(
+            baseline: 50,
+            spread: 5,
+            nValid: Baselines.minNightsTrust,
+            nightsSinceUpdate: 0,
+            status: .trusted
+        )
+        let scoreIfOptionalTermsWereWired = try XCTUnwrap(
+            RecoveryScorer.recovery(
+                hrv: hrv,
+                rhr: rhr,
+                resp: result.daily.respRateBpm,
+                hrvBaseline: hrvBase,
+                rhrBaseline: rhrBase,
+                respBaseline: nil,
+                sleepPerf: result.restScore.map { $0 / 100.0 },
+                restQualityBaseline: nil,
+                skinTempDev: result.daily.skinTempDevC,
+                recoveryIndexSlope: -10,
+                effortBaseline: effortBase,
+                priorDayEffort: 0
+            )
+        )
+        XCTAssertGreaterThan(
+            abs(scoreIfOptionalTermsWereWired - production),
+            1,
+            "the fixture must detect either optional term being admitted to production"
+        )
+    }
+
     func testAnalyzeDayNoMatchingNight() {
         // A night ending on a different day → no sleep attributed to `day`.
         let n = night(endDay: "2021-06-18", hours: 7)

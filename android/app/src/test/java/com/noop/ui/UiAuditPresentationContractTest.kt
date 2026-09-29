@@ -326,6 +326,19 @@ class UiAuditPresentationContractTest {
         assertFalse(scoring.contains("your strap's raw signals"))
         assertTrue(scoring.contains("appwide_ui_audit_scoring_guide_overline"))
         assertTrue(scoring.contains("appwide_ui_audit_scoring_guide_intro"))
+        assertTrue(scoring.contains("NoopScoreAlgorithmRevision.CHARGE"))
+        assertTrue(scoring.contains("NoopScoreAlgorithmRevision.EFFORT"))
+        assertTrue(scoring.contains("NoopScoreAlgorithmRevision.REST"))
+        assertTrue(scoring.contains("Baselines.hrvCfg"))
+        assertTrue(scoring.contains("Baselines.minNightsSeed"))
+        assertTrue(scoring.contains("Baselines.minNightsTrust"))
+        assertTrue(scoring.contains("Baselines.staleDays"))
+        assertTrue(scoring.contains("appwide_scoring_guide_recovery_inputs"))
+        assertTrue(scoring.contains("appwide_scoring_guide_recovery_excluded"))
+        assertTrue(scoring.contains("appwide_scoring_guide_source_on_device"))
+        assertFalse(scoring.contains("\"noop-charge-v2\""))
+        assertFalse(scoring.contains("\"noop-effort-v2\""))
+        assertFalse(scoring.contains("\"noop-rest-v2\""))
 
         val devices = source("src/main/java/com/noop/ui/DevicesScreen.kt")
         assertFalse(devices.contains("watch BOTH the strap log and the strap itself"))
@@ -529,9 +542,17 @@ class UiAuditPresentationContractTest {
         assertTrue(today.contains("appwide_charge_confidence_calibrating"))
         assertTrue(today.contains("chargeDriverPointLabel(driver.deltaPoints)"))
 
+        val journal = source("src/main/java/com/noop/ui/JournalLog.kt")
         assertTrue(
-            source("src/main/java/com/noop/ui/JournalLog.kt")
-                .contains("contentPadding = PaddingValues(horizontal = Metrics.space16)"),
+            journal.contains("contentPadding = PaddingValues(horizontal = Metrics.space16)"),
+        )
+        assertTrue(journal.contains("R.string.appwide_journal_attribution_title"))
+        assertTrue(journal.contains("R.string.appwide_journal_attribution_detail"))
+        assertTrue(journal.contains("showingAttributionInfo"))
+        assertFalse(
+            journal.contains(
+                "Answers are about the night and day leading into this morning",
+            ),
         )
         val health = source("src/main/java/com/noop/ui/HealthScreen.kt")
         assertTrue(health.contains("appwide_health_live_hr_disconnected"))

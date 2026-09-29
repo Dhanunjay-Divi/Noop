@@ -9,7 +9,7 @@
   `169230a9ae38ac8b4ca4b690489cd29f5af47ee4`
 - End implementation commit: pending
 - Record checkpoint:
-  `cf7e28e4b69d7304551ac126e74833db77011d10`
+  `db07e2c68afd55709d81241b580258938328947e`; final closeout commit pending
 
 ## Objective
 
@@ -154,6 +154,46 @@ explicitly gated migration work open.
   no longer advance local deletion beyond the run that is uploading and
   settling those windows. This is mismatch hardening only; it does not invent a
   server-trusted clock, enable automatic pruning, or change the opt-in.
+- Apple and Android history backfill now classify decoded-row, raw-row, and
+  cursor persistence failures with fixed categories. A failed store write or
+  cursor commit cannot advance the durable cursor or acknowledge the band.
+  Android's preferences cursor uses synchronous `commit()` and fails closed
+  when persistence is rejected; injected storage-full/private-message tests
+  prove the diagnostic path remains payload-free.
+- Managed upload batching now reads one bounded lookahead item beyond the
+  100-item transfer cap, reports whether backlog remains, rejects an oversized
+  adapter response, and coalesces repeated offline edits by profile, table, and
+  local key while incrementing the generation. The implementation does not
+  introduce a destructive count cap that could discard the latest unacknowledged
+  user state.
+- PostgreSQL chunk reservation, grant lookup, and completion now take a shared
+  lock on the active installation before mutating or accepting completion.
+  Revocation therefore cannot race a transfer into committing an acknowledgement
+  or advancing a client checkpoint after the installation becomes inactive.
+- The macOS sidebar footer now reflects the actual managed-viewer state:
+  unconfigured, signed out, verification required, enrollment required,
+  syncing, current, stale/pending, or a fixed safe failure. It exposes an
+  accessibility label/value and never presents arbitrary backend errors.
+- Ownership/account setup on Apple and Android now exposes named progress,
+  distinct verification phases, screen-reader grouping, supporting/error text,
+  and live status announcements. The added strings are complete across the
+  supported application locales.
+- Recovery, Rest, Sleep, and Fitness Age scoring guides now show the production
+  algorithm revision, on-device provenance, implemented inputs, baseline or
+  lookback window, and exclusions. Mirrored tests prove that Recovery does not
+  silently use the optional Recovery Index or prior-day activity-balance terms.
+  No score formula changed.
+- Repeated Journal attribution explanation moved behind an information
+  affordance on Apple and Android while the actionable editing and
+  tomorrow-attribution guidance remains visible.
+- iPhone Quick Access becomes a one-column list at accessibility text sizes,
+  retains two-line labels, and preserves stable tab-bar dimensions. Fresh
+  iPhone 17e captures of More and Daily Plan were inspected without clipping or
+  incoherent overlap in the tested accessibility state.
+- The legacy terminology inventory was regenerated only after reviewing the
+  current delta: no forbidden mapping or new customer-facing occurrence was
+  admitted. The final source-control digest is repinned by the required-CI
+  gate.
 - The release-blocker handoff now reflects protected `main` after PR `#16`,
   exact hosted-green PR `#17`, its outstanding non-author review, and this
   follow-on branch without confusing an intermittent checkpoint with protected
@@ -179,12 +219,15 @@ and must not override D-059 or current source.
 | P2-1: no account-deletion surface | Implemented | Apple and Android expose request, cooling-off status, cancellation, acknowledgements, and local-data boundaries; server lifecycle and erasure tests cover the control plane |
 | P2-2: generic offline, resend, and expired-code states | Implemented | Both clients use a 60-second monotonic cooldown and distinct offline, invalid-code, expired-session, provider-rate-limit, and local-cooldown states with payload-free diagnostics |
 | P2-3: ownership client/service and wire-contract coverage | Substantially implemented; physical UI remains open | Apple and Android parser, route, secure-store, deletion, recovery, and source-contract suites now exercise the live client boundaries; signed-device account UI and production Firebase delivery remain external |
-| P2-4: five managed-sync fault cases | Partially covered; exact residual cases remain supplier-independent work | Completion retry, cancellation-before-prune, account fencing, bounded continuation, cursor expiry, missing snapshots, conflict retention, retry scheduling, dirty-pruned hydration, and future prune-timestamp clamping are covered. Explicit outbox-capacity policy, independent clock-trust anchoring, revoked-installation-mid-transfer, and collection-disk-full injection are not falsely marked complete |
+| P2-4: five managed-sync fault cases | Supplier-independent deterministic cases closed; trusted time remains gated | Bounded 100-item upload with one-item lookahead/backlog reporting, oversized-response rejection, repeated-edit coalescing, revoked-installation transfer serialization, storage-full cursor/ack stalling, completion retry, cancellation-before-prune, account fencing, cursor expiry, conflict retention, dirty-pruned hydration, and caller-clock clamping are covered. An independent trusted-time anchor still requires server authority and a D-059 migration gate |
 | P2-5: no sync/provenance UI | Implemented | Today and Health expose sync status; metric and sleep surfaces retain source provenance on both mobile platforms; Data & Sync explains the local/cloud boundary |
 | UI P1-1: Recovery vocabulary and color disagree | Implemented | Shared `RecoveryBandPresentation` drives Today, Calendar, digest, and liquid surfaces on Apple and Android with focused parity tests |
 | UI P1-2: Daily Signal says `RECHECK` while rationale says within range | Implemented | The empty rationale now describes insufficient baseline-relative signals without contradicting a visible Recovery score |
 | UI P1-3: tab bars fail Dynamic Type | Implemented in source and contract tests | Apple uses scaled measurements and Large Content Viewer; Android computes bounded label fit, ellipsizes, and exposes tab semantics. Physical VoiceOver/TalkBack traversal remains open |
 | Formula F1/F2 | Rejected as stale findings | Recovery copy matches the five production inputs; Rest is already revisioned as `noop-rest-v2` with rescore gates |
+| Coach evidence chips and Automations last-fired state | Gated rather than fabricated | The current models do not retain one truthful cross-platform evidence/automation execution ledger. UI was not added until a bounded data contract exists |
+| Conflict UI should offer `keep other` | Gated by authority and payload design | The current retry path preserves the newer local generation; the remote conflicting payload is not retained locally, so offering `keep other` would be misleading without an approved API and authority contract |
+| Restore chooser with exact dataset sizes | History-only restore retained; chooser gated | The service does not yet expose a trustworthy restore manifest with estimated sizes, and large-account continuation lacks staging/physical proof |
 
 This table does not convert source or simulator evidence into production,
 physiological, BLE, notification-delivery, or physical accessibility proof.
@@ -193,7 +236,9 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
 
 - Schema or migration impact: none.
 - Existing-data retention impact: none.
-- Source/provenance or formula impact: none.
+- Source/provenance or formula impact: no score output or provenance owner
+  changed. Scoring guides now disclose the current production revision and
+  actual wired inputs, and tests ratchet those explanations to the formula.
 - Permissions/network disclosure impact: none. Existing Firebase identity
   requests are unchanged; this slice only bounds retries and maps failures.
 - Health/medical claim impact and limitations: no formula or medical claim
@@ -204,8 +249,12 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
 - Evidence that diagnoses success, stall/rejection, and failure: existing
   ownership operation spans now emit fixed `network`,
   `verification_code_invalid`, `verification_expired`, `rate_limit`, and
-  `resend_cooldown` categories. UI-only macOS and Watch changes use
-  deterministic state tests rather than new logs.
+  `resend_cooldown` categories. Backfill emits only fixed
+  `decoded_store_write`, `raw_store_write`, or `cursor_store_write` failure
+  kinds and cannot acknowledge unpersisted progress. Managed sync exposes
+  bounded item counts, continuation/backlog state, and fixed conflict/failure
+  kinds. UI-only macOS, account accessibility, scoring-guide, Journal, and
+  Watch changes use deterministic state tests rather than high-frequency logs.
 - Why existing evidence is sufficient, or why new evidence is required:
   ownership resend/cooldown behavior changes a failure-prone network boundary,
   so tests must prove accepted, rejected, offline, expired, and cooldown states
@@ -219,14 +268,19 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
   count, continuation state, and fixed failure kind. Existing managed-sync
   spans distinguish the fixed `document_conflict` category from generic
   `conflict`; the typed error retains only an allowlisted document kind and
-  numeric remote revision for local recovery logic.
+  numeric remote revision for local recovery logic. No new event was needed for
+  the PostgreSQL installation lock because the API operation already has
+  request correlation and fixed outcomes; direct database race tests provide
+  the missing correctness evidence.
 - Redaction, retention, and high-frequency controls: no email, phone, OTP,
   account, device, health value, provider message, or URL may enter diagnostics.
 - Cross-platform/backend correlation: Apple and Android user-visible account
   states must agree; provider error mapping remains local and payload-free.
 - Remaining blind spots: real provider throttling, mail delivery,
   WatchConnectivity, physical complications, production identity services,
-  VoiceOver/TalkBack traversal, and physical-device visual fit.
+  independent trusted time, a restore-size manifest, a shared automation
+  execution ledger, VoiceOver/TalkBack traversal, and physical-device visual
+  fit.
 
 ## Evidence
 
@@ -256,6 +310,18 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
 | `python3 Tools/i18n_audit.py --platform all --full` | Pass; tracked Apple baseline remains 129 | No localization regression; all existing focus-locale catalog keys and Android locale resources are complete | Native-speaker review or visual fit |
 | Private-data guard, 1,312-file health-claims scan, nine source release controls, operations validation, JSON/XML parsing, and diff hygiene | Pass | The change adds no tracked private filename, unsafe health claim, release-control regression, malformed catalog/resource, or operations-record error | External credentials, legal approval, hosted production state, or physical behavior |
 | Live `gh pr view 16`, `gh pr view 17`, and remote-ref queries | PR 16 merged at `9c5141754`; PR 17 exact head `169230a9a` is open, mergeable, and 10/10 required contexts pass | The release-blocker handoff is refreshed from current protected repository state | Approval, integration of this follow-on branch, or physical behavior |
+| Complete `Packages/NoopRemoteSync` wall through the bounded runner | 197/197 pass | Upload lookahead/backlog bounds, oversized-response rejection, repeated-edit coalescing, conflict behavior, history-only restore, retention, and cancellation contracts remain green | Production latency, trusted server time, or physical network transitions |
+| Complete `Packages/StrandAnalytics` wall through the bounded runner | 1,514 executed, 7 intentional skips, 0 failures | Production analytics remain green and Recovery wiring excludes optional Recovery Index and prior-day activity-balance terms | Physiological accuracy or a formula-authority migration |
+| Apple focused closeout suite through the bounded runner | 75/75 pass | Backfill persistence/ack stalling, macOS sync footer states, ownership accessibility, tab accessibility, scoring copy, and Journal information hierarchy are covered | Physical VoiceOver, BLE, notification delivery, or device rendering |
+| Complete unsigned macOS wall through the bounded runner | 2,377 executed, 1 intentional Xiaomi fixture skip, 0 failures | The complete shared/macOS source graph and all app tests remain green with the new viewer state machine | Signed macOS operation, live account service, or physical-band behavior |
+| Exact current `NOOPiOS` generic Simulator build | Pass | The complete iPhone graph compiles and embeds Watch, Watch complications, and widgets | Signing, physical WatchConnectivity, BLE, background execution, or notification delivery |
+| Exact iOS production-shell suite on the current candidate | 39 executed, 1 intentional private-pilot skip, 0 failures | First-run, navigation, loading/retry, accessibility-size, and current production-shell regressions remain green in Simulator | Physical accessibility, battery, thermal, background, or band behavior |
+| Complete Android Full and Demo app wall through the bounded runner | Full 5,232/7 skipped; Demo 5,225/7 skipped; 0 failures; both compile, lint, assemble, and Full instrumentation source compile pass | Both shipped source graphs, localization, account accessibility, sync/backfill, analytics, and UI contracts remain green | OEM behavior, physical TalkBack, BLE, battery, or background execution |
+| Android API 35 production-shell and Review Sample suites | Production shell 123 executed/2 skipped/0 failures; Review Sample 1/1 pass | Current first-run and production-shell paths execute on an emulator at API 35 | Physical-device rendering, permissions, BLE, provider delivery, or OEM background rules |
+| Complete server suite against isolated PostgreSQL plus focused revocation race | Pass | Active-installation locking prevents reserve/grant/completion from crossing a concurrent revocation and the complete backend regression wall remains green | Production IAM, live traffic, load, backup/restore operations, or elapsed monitoring |
+| Complete current repository tool walls | 372 tests with 1 intentional skip plus 50 root tests, 0 failures | Operations validation, bounded runner, release policy, localization tooling, and source-control tests remain green | Hosted exact-SHA execution |
+| Direct release/policy controls on the final pre-documentation source | Pass: 9 release checks, 10 required contexts, trusted protected-main self-check, 12-metric calibration parity, terminology, legal/distribution, private-data, 1,312-file claims, full localization, exact 10-file SDK artifact | The source candidate preserves the project release-control contracts and supplier artifacts remain absent | Hosted review, signed distribution, supplier rights, firmware, or physical-device behavior |
+| Fresh iPhone 17e accessibility captures for More and Daily Plan | Inspected; no clipping or incoherent overlap in the tested states | The revised one-column Quick Access and stable tab shell render coherently at the tested accessibility size | Other devices, physical VoiceOver order, every locale, or every appearance |
 
 ## Physical device and deployment
 
@@ -266,6 +332,14 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
 - Data-preservation result: no data mutation at round start.
 - BLE/background/haptic/battery scenarios exercised: not run.
 - Unrun hardware gates: all physical Apple/Android/Watch and band scenarios.
+- Final closeout cleanup stopped the isolated PostgreSQL 14 cluster on loopback
+  port 55432, then exact-deleted
+  `/private/tmp/noop-sept17-final-20260928`, `android/app/build`, and
+  `android/build`. This reclaimed about 14 GiB. The paths are absent; no
+  PostgreSQL, Gradle, Xcode, simulator, or emulator process from the round
+  survives; and Data-volume free space increased from about 57 GiB to 70 GiB.
+  Shared caches, source, simulators, sessions, private inputs, credentials, and
+  user data were not removed.
 - Round-owned resource cleanup: exact-deleted
   `/tmp/noop-mac-history-derived` and
   `/tmp/noop-mac-history-ios-derived` after their bounded build processes
@@ -285,8 +359,10 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
 ## Git and release state
 
 - Changed paths: macOS runtime entry, Watch snapshot/publication/complication
-  behavior, Apple and Android ownership recovery UI/services/tests/locales, and
-  this operations record.
+  behavior, Apple and Android ownership recovery/accessibility UI,
+  backfill/sync durability, scoring and Journal presentation, server
+  installation locking, localization/tests, terminology controls, and
+  operations records.
 - Commits: macOS/Watch checkpoint `50d41e5c8` and `6b36f035e`;
   account-recovery and Watch-policy correction checkpoint `7b3250b9e`;
   first-run hierarchy and named-progress checkpoint `c71dde298`; Daily Signal
@@ -298,9 +374,10 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
   `cf7e28e4b`.
 - Branch and remote state:
   `codex/sept17-readiness-closeout-20260926` tracks its public remote.
-  Product checkpoint `cf7e28e4b` and its subsequent evidence/cleanup records
-  are pushed and triggered zero workflows because the branch has no pull
-  request and push workflows are scoped to `main`.
+  Remote checkpoint `db07e2c68` is unchanged while the final locally green
+  closeout remains dirty. The branch has no pull request; the older hosted-green
+  PR `#17` targets a different branch and exact head. One consolidated push and
+  a new protected pull request remain pending.
 - Repository visibility verified: public.
 - Version/build impact: none planned.
 - Release or distribution impact: no deployment or signed artifact.
@@ -315,17 +392,19 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
 
 ## Open risks and honest limitations
 
-- PR 17 still requires non-author approval and protected integration.
+- The current follow-on branch has not yet been pushed at its final SHA or
+  exercised by hosted checks. PR `#17` is an older branch and is not evidence
+  for this dirty candidate.
 - The localization baseline is not zero; native-speaker and visual-fit review
   remain unproved.
 - Managed-document conflict resolution deliberately keeps the newer local
   generation and requires a later explicit retry; no automatic field merge is
   claimed.
-- The managed-sync review's exact remaining fault injections are not release
-  claims: future caller-clock mismatch is now clamped, but outbox capacity, an
-  independent trusted-time anchor, revocation during a transfer, and disk-full
-  collection still need narrow deterministic tests or an explicitly approved
-  design before cloud authority can advance.
+- Managed upload lookahead, oversized responses, repeated offline edits,
+  installation revocation during transfer, and storage-full cursor/ack
+  stalling are now deterministic regressions. A unique-key capacity policy and
+  independent trusted-time anchor remain authority/design gates; dropping
+  unacknowledged user state merely to cap a row count is not approved.
 - The Mac viewer restore is source/simulator verified but not exercised against
   a signed production account. Large-history catch-up latency and continuation
   require staging and physical validation.
@@ -335,17 +414,27 @@ physiological, BLE, notification-delivery, or physical accessibility proof.
   expanded Advanced state remain outside this simulator/source evidence.
 - App-level database encryption and existing-user authority migration require
   separate approved designs and evidence before activation.
+- Coach evidence chips, Automations last-fired state, remote-wins conflict
+  replacement, and a sized selective-restore chooser remain gated on truthful
+  shared data contracts rather than placeholder UI.
 
 ## Next round
 
-1. Run the applicable complete Apple/Android/repository-control walls.
-2. Open or update the normal protected review only after the consolidated
-   candidate is locally green, then require exact-head hosted checks,
-   non-author approval, protected integration, and protected-main verification.
+1. Regenerate the terminology ratchet after final operations-record edits,
+   repin its source digest, and rerun operations, tooling, localization,
+   claims, privacy, legal, calibration, required-CI, trusted-release, SDK, and
+   diff gates.
+2. Commit once, push once, open a new pull request for this branch, require all
+   ten exact-head protected contexts, and merge normally only while they remain
+   green.
+3. Verify protected `main`, then hand the signed physical iPhone/Android round
+   to the device-connected agent using the existing physical-validation
+   handoff.
 
 ## Privacy check
 
 - [x] No credentials, emails, raw biometric exports, personal names, device
       identifiers, signing identities, or absolute personal paths are present.
-- [x] Round-owned isolated DerivedData, bounded logs, status files, and release
-      report were removed after their outcomes were recorded.
+- [x] Round-owned isolated DerivedData, Android generated output, synthetic
+      PostgreSQL data/socket state, bounded logs, status files, and captures
+      were removed after their outcomes were recorded.

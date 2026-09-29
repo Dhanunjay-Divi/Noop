@@ -1124,6 +1124,13 @@ struct RootTabView: View {
     /// this is a shortcut grid, not another navigation hierarchy. The pure titles/icons/order live in
     /// `MoreSectionPrefs.quickAccess`, while this shell owns only the typed navigation destinations.
     private var moreQuickAccess: some View {
+        let columns = dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.flexible())]
+            : [
+                GridItem(.flexible(), spacing: 10),
+                GridItem(.flexible(), spacing: 10),
+            ]
+
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Quick Access")
@@ -1137,11 +1144,13 @@ struct RootTabView: View {
                     .foregroundStyle(StrandPalette.textTertiary)
             }
 
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
-                                GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(MoreSectionPrefs.quickAccess, id: \.id) { item in
                     NavigationLink(value: quickAccessRoute(for: item.id)) {
-                        MoreQuickAccessLabel(item: item)
+                        MoreQuickAccessLabel(
+                            item: item,
+                            usesAccessibilityLayout: dynamicTypeSize.isAccessibilitySize
+                        )
                     }
                     .buttonStyle(LiquidPressStyle())
                     .accessibilityLabel(Text(LocalizedStringKey(item.title)))
@@ -1541,6 +1550,7 @@ private struct UpdateHistoryDestination: View {
 /// the already-large RootTabView body. Navigation and scroll state remain owned by the parent stack.
 private struct MoreQuickAccessLabel: View {
     let item: MoreQuickAccessItem
+    let usesAccessibilityLayout: Bool
 
     var body: some View {
         HStack(spacing: 11) {
@@ -1559,12 +1569,17 @@ private struct MoreQuickAccessLabel: View {
             Text(LocalizedStringKey(item.title))
                 .font(StrandFont.subhead)
                 .foregroundStyle(StrandPalette.textPrimary)
-                .lineLimit(1)
+                .lineLimit(usesAccessibilityLayout ? 2 : 1)
                 .minimumScaleFactor(0.86)
+                .fixedSize(horizontal: false, vertical: usesAccessibilityLayout)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 13)
-        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: usesAccessibilityLayout ? 72 : 58,
+            alignment: .leading
+        )
         .background(StrandPalette.surfaceRaised.opacity(0.92),
                     in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)

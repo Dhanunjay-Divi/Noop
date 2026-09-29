@@ -152,6 +152,97 @@ class ManagedSyncCoordinatorTest {
     }
 
     @Test
+    fun maximumDocumentBatchUsesOneLookAheadAndReportsBacklog() = runTest {
+        val outbox = FakeDocumentOutbox(pendingDocuments(102))
+        val transport = FakeTransport()
+        val result = ManagedSyncCoordinator(
+            transport,
+            FakeExtractor(),
+            FakeState(),
+            FakeRestore(),
+            outbox,
+        ).sync(
+            source = source,
+            authorization = authorization,
+            nowMs = 0,
+            dataClasses = emptyList(),
+            maxChangePages = 0,
+            maxDocumentUploads = 100,
+        )
+
+        assertEquals(listOf(101), outbox.requestedLimits)
+        assertEquals(100, result.uploadedDocuments)
+        assertTrue(result.hasMoreLocalWork)
+        assertEquals(100, outbox.acknowledgements)
+        assertEquals(100, transport.documentPuts)
+        assertEquals(2, outbox.remainingCount)
+    }
+
+    @Test
+    fun documentOutboxResponseBeyondBoundedReadFailsClosed() = runTest {
+        val documents = pendingDocuments(102)
+        val outbox = FakeDocumentOutbox(documents, honorsLimit = false)
+        val transport = FakeTransport()
+
+        try {
+            ManagedSyncCoordinator(
+                transport,
+                FakeExtractor(),
+                FakeState(),
+                FakeRestore(),
+                outbox,
+            ).sync(
+                source = source,
+                authorization = authorization,
+                nowMs = 0,
+                dataClasses = emptyList(),
+                maxChangePages = 0,
+                maxDocumentUploads = 100,
+            )
+            throw AssertionError("Expected the oversized outbox response to fail closed")
+        } catch (_: ManagedStorageException.InvalidResponse) {
+            // Expected.
+        }
+
+        assertEquals(listOf(101), outbox.requestedLimits)
+        assertEquals(0, outbox.acknowledgements)
+        assertEquals(0, transport.documentPuts)
+    }
+
+    @Test
+    fun revokedInstallationDuringChunkCompletionFailsClosed() = runTest {
+        val state = FakeState()
+        val transport = FakeTransport(rejectCompletionAsForbidden = true)
+
+        try {
+            ManagedSyncCoordinator(
+                transport,
+                FakeExtractor(),
+                state,
+                FakeRestore(),
+            ).sync(
+                source = source,
+                authorization = authorization,
+                nowMs = WINDOW_MS + SETTLE_MS,
+                dataClasses = listOf("essential_timeseries"),
+                maxChangePages = 0,
+                maxDocumentUploads = 0,
+                localPruneNowMs = WINDOW_MS + SETTLE_MS,
+            )
+            throw AssertionError("Expected the revoked installation to stop completion")
+        } catch (_: ManagedStorageException.Forbidden) {
+            // Expected.
+        }
+
+        assertEquals(1, transport.uploads)
+        assertEquals(1, transport.completions)
+        assertEquals(ManagedWindowUploadPhase.PENDING_COMPLETION, state.window?.phase)
+        assertTrue(state.window?.receipt != null)
+        assertNull(state.checkpoint.nextWindowStartMs)
+        assertTrue(state.pruneCutoffs.isEmpty())
+    }
+
+    @Test
     fun completionFailurePersistsReceiptAndRetryDoesNotUploadAgain() = runTest {
         val extractor = FakeExtractor()
         val state = FakeState()
@@ -1294,6 +1385,7 @@ class ManagedSyncCoordinatorTest {
 
     private class FakeTransport(
         private val failFirstCompletion: Boolean = false,
+        private val rejectCompletionAsForbidden: Boolean = false,
         private val changes: List<ManagedChange> = emptyList(),
         private val snapshotChunks: List<ManagedAvailableChunk> = emptyList(),
         private val snapshotDocuments: List<ManagedDocument> = emptyList(),
@@ -1351,6 +1443,9 @@ class ManagedSyncCoordinatorTest {
             receipt: ManagedObjectUploadReceipt,
         ) {
             completions += 1
+            if (rejectCompletionAsForbidden) {
+                throw ManagedStorageException.Forbidden()
+            }
             if (failFirstCompletion && completions == 1) {
                 throw ManagedStorageException.Network()
             }
@@ -1542,20 +1637,31 @@ class ManagedSyncCoordinatorTest {
     }
 
     private class FakeDocumentOutbox(
-        private val documents: List<ManagedPendingDocument>,
+        documents: List<ManagedPendingDocument>,
+        private val honorsLimit: Boolean = true,
     ) : ManagedDocumentOutbox {
+        private val documents = documents.toMutableList()
         var pendingRequests = 0
         var acknowledgements = 0
+        val requestedLimits = mutableListOf<Int>()
+        val remainingCount: Int get() = documents.size
 
         override suspend fun pendingDocuments(limit: Int): List<ManagedPendingDocument> {
             pendingRequests += 1
-            return documents.take(limit)
+            requestedLimits += limit
+            return if (honorsLimit) documents.take(limit) else documents
         }
 
         override suspend fun acknowledge(
             pending: ManagedPendingDocument,
             remote: ManagedDocument,
         ) {
+            val index = documents.indexOfFirst {
+                it.localIdentifier == pending.localIdentifier &&
+                    it.mutation.documentId == remote.documentId
+            }
+            if (index < 0) throw ManagedStorageException.InvalidResponse()
+            documents.removeAt(index)
             acknowledgements += 1
         }
     }
@@ -1612,6 +1718,19 @@ class ManagedSyncCoordinatorTest {
                     updatedAt = "2026-09-04T12:00:00Z",
                 ),
             )
+        }
+
+        private fun pendingDocuments(count: Int): List<ManagedPendingDocument> {
+            val first = pendingDocument()
+            return (0 until count).map { index ->
+                first.copy(
+                    localIdentifier = "local-journal-$index",
+                    mutation = first.mutation.copy(
+                        requestId = UUID.randomUUID(),
+                        documentId = UUID.randomUUID(),
+                    ),
+                )
+            }
         }
 
         private fun snapshotDocument(): ManagedDocument {

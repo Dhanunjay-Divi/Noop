@@ -2248,6 +2248,61 @@ def test_managed_chunk_reservation_issues_one_bounded_upload_contract() -> None:
     assert len(repository.upload_grants) == 1
 
 
+def test_managed_chunk_routes_reauthorize_revoked_installation_between_steps() -> None:
+    client, repository = _managed_client(object_store=UploadObjectStore())
+    now = datetime.now(UTC).replace(microsecond=0)
+    chunk_id = uuid4()
+    reservation = {
+        "chunk_id": str(chunk_id),
+        "request_id": str(uuid4()),
+        "source_id": str(uuid4()),
+        "data_class": "essential_timeseries",
+        "schema_version": 1,
+        "content_mode": "server_readable",
+        "event_start": (now - timedelta(minutes=5)).isoformat(),
+        "event_end": now.isoformat(),
+        "compression": "gzip",
+        "content_type": "application/vnd.noop.chunk+json",
+        "expected_sha256": "a" * 64,
+        "expected_compressed_bytes": 128,
+        "expected_uncompressed_bytes": 256,
+        "streams": [],
+    }
+    with client:
+        reserved = client.post(
+            "/v1/managed/chunks:reserve",
+            headers=_managed_headers(),
+            json=reservation,
+        )
+        repository.installations[0]["status"] = "revoked"
+        repeated_reserve = client.post(
+            "/v1/managed/chunks:reserve",
+            headers=_managed_headers(),
+            json=reservation,
+        )
+        completion = client.post(
+            f"/v1/managed/chunks/{chunk_id}/complete",
+            headers=_managed_headers(),
+            json={
+                "object_generation": 42,
+                "object_metageneration": 1,
+                "object_crc32c": "AAAAAA==",
+            },
+        )
+
+    assert reserved.status_code == 201
+    assert repeated_reserve.status_code == 403
+    assert completion.status_code == 403
+    assert repeated_reserve.json()["detail"] == (
+        "managed installation credential was rejected"
+    )
+    assert completion.json()["detail"] == (
+        "managed installation credential was rejected"
+    )
+    assert len(repository.chunk_reservations) == 1
+    assert len(repository.upload_grants) == 1
+
+
 def test_download_capability_includes_bounded_uncompressed_size() -> None:
     client, repository = _managed_client(object_store=DownloadObjectStore())
     chunk_id = uuid4()

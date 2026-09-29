@@ -2990,4 +2990,6 @@
     <string name="managed_friends_delete_account_title">NOOP-Konto löschen?</string>
     <string name="managed_friends_delete_account_detail">Friends, verwaltete Cloud-Daten und das NOOP-Konto werden nach einer 24-stündigen Bedenkzeit zur Löschung vorgemerkt. Lokale Gesundheitsdaten auf diesem Smartphone werden nicht gelöscht.</string>
     <string name="managed_friends_deletion_scheduled_detail">Friends und Kontodienste sind während der 24-stündigen Bedenkzeit pausiert. Lokale Gesundheitsdaten bleiben auf diesem Smartphone.</string>
+    <string name="ownership_progress_step">Schritt %1$d von %2$d</string>
+    <string name="ownership_setup_complete">Besitzeinrichtung abgeschlossen.</string>
 </resources>

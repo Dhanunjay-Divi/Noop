@@ -1,6 +1,8 @@
 package com.noop.ui
 
 import com.noop.R
+import com.noop.analytics.Baselines
+import com.noop.analytics.NoopScoreAlgorithmRevision
 import androidx.compose.ui.res.stringResource
 import android.content.Context
 import androidx.compose.animation.animateColorAsState
@@ -96,6 +98,14 @@ enum class ScoreSection {
             CHARGE -> "Recovery"
             EFFORT -> "Effort"
             REST -> "Sleep"
+        }
+
+    /** Exact published algorithm revision already stamped on derived score values. */
+    val algorithmRevision: String
+        get() = when (this) {
+            CHARGE -> NoopScoreAlgorithmRevision.CHARGE
+            EFFORT -> NoopScoreAlgorithmRevision.EFFORT
+            REST -> NoopScoreAlgorithmRevision.REST
         }
 
     /** A representative sample fraction (0–1) for the section's illustrative gauge — a
@@ -196,6 +206,7 @@ fun ScoringGuideScreen(
                         "to learn your baseline first. Until then you'll see “Calibrating”.",
                     methodNote = "NOOP uses an HRV-led recovery model with its own openly documented " +
                         "weighting and personal-baseline math.",
+                    methodDetails = scoreMethodDetails(ScoreSection.CHARGE),
                     highlighted = highlighted == ScoreSection.CHARGE,
                     onPositioned = { if (ScoreSection.CHARGE !in anchors) anchors[ScoreSection.CHARGE] = it },
                 )
@@ -210,6 +221,7 @@ fun ScoringGuideScreen(
                         "through a steps / active-energy floor.",
                     methodNote = "NOOP uses a cardiovascular-load model and presents all three scores " +
                         "on one 0-100 scale. A 100 is reserved for an exceptionally hard day.",
+                    methodDetails = scoreMethodDetails(ScoreSection.EFFORT),
                     highlighted = highlighted == ScoreSection.EFFORT,
                     onPositioned = { if (ScoreSection.EFFORT !in anchors) anchors[ScoreSection.EFFORT] = it },
                 )
@@ -221,6 +233,7 @@ fun ScoringGuideScreen(
                         "(deep + REM sleep), and how consistent your sleep and wake timing is.",
                     methodNote = "NOOP combines duration, efficiency, restorative sleep and consistency " +
                         "in its own composite.",
+                    methodDetails = scoreMethodDetails(ScoreSection.REST),
                     highlighted = highlighted == ScoreSection.REST,
                     onPositioned = { if (ScoreSection.REST !in anchors) anchors[ScoreSection.REST] = it },
                 )
@@ -313,6 +326,7 @@ private fun ScoreCard(
     headline: String,
     body: String,
     methodNote: String,
+    methodDetails: List<String>,
     highlighted: Boolean,
     onPositioned: (Int) -> Unit,
 ) {
@@ -381,7 +395,72 @@ private fun ScoreCard(
                     color = Palette.textTertiary,
                 )
             }
+            Hairline()
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Overline(
+                    uiString(R.string.appwide_scoring_guide_method_details),
+                    color = section.accent,
+                )
+                methodDetails.forEach { detail ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 7.dp)
+                                .size(4.dp)
+                                .clip(CircleShape)
+                                .background(section.accent),
+                        )
+                        Text(
+                            detail,
+                            style = NoopType.footnote,
+                            color = Palette.textSecondary,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun scoreMethodDetails(section: ScoreSection): List<String> {
+    val revision = uiString(
+        R.string.appwide_scoring_guide_revision_format,
+        section.algorithmRevision,
+    )
+    val source = uiString(R.string.appwide_scoring_guide_source_on_device)
+    return when (section) {
+        ScoreSection.CHARGE -> {
+            val hrv = Baselines.hrvCfg
+            listOf(
+                revision,
+                source,
+                uiString(R.string.appwide_scoring_guide_recovery_inputs),
+                uiString(
+                    R.string.appwide_scoring_guide_recovery_baseline_format,
+                    hrv.halfLifeB.roundToInt(),
+                    hrv.halfLifeS.roundToInt(),
+                    Baselines.minNightsSeed,
+                    Baselines.minNightsTrust,
+                    Baselines.staleDays,
+                ),
+                uiString(R.string.appwide_scoring_guide_recovery_excluded),
+            )
+        }
+        ScoreSection.EFFORT -> listOf(
+            revision,
+            source,
+            uiString(R.string.appwide_scoring_guide_effort_implemented),
+        )
+        ScoreSection.REST -> listOf(
+            revision,
+            source,
+            uiString(R.string.appwide_scoring_guide_sleep_implemented),
+        )
     }
 }
 

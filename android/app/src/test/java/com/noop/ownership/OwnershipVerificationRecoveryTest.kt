@@ -208,6 +208,32 @@ class OwnershipVerificationRecoveryTest {
     }
 
     @Test
+    fun accountScreenExposesNativeProgressErrorAndDistinctPhaseSemantics() {
+        val source = source(
+            "android/app/src/main/java/com/noop/ui/OwnershipAccountScreen.kt",
+        )
+
+        listOf(
+            "LiveRegionMode.Assertive",
+            "LiveRegionMode.Polite",
+            "progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate",
+            "stateDescription = \"\$title. \$ordinal\"",
+            "error(errorMessage)",
+            "isError = errorMessage != null",
+            "supportingText = errorMessage?.let",
+            "OwnershipPhase.ACCOUNT_READY -> OwnershipAccountPresentation(",
+            "OwnershipPhase.POSSESSION_UNAVAILABLE -> OwnershipAccountPresentation(",
+            "OwnershipPhase.CLAIMED -> OwnershipAccountPresentation(",
+            "OwnershipPhase.COMPLETE -> OwnershipAccountPresentation(",
+            "R.string.ownership_setup_complete",
+            ".testTag(\"noop.ownership.status\")",
+            ".testTag(\"noop.ownership.progress\")",
+        ).forEach { expected ->
+            assertTrue(expected, source.contains(expected))
+        }
+    }
+
+    @Test
     fun everySupportedLocaleProvidesTheRecoveryStringsAndCountdownFormat() {
         val expectedKeys = setOf(
             "ownership_resend_verification_countdown",
@@ -217,6 +243,8 @@ class OwnershipVerificationRecoveryTest {
             "ownership_verification_rate_limited",
             "ownership_verification_cooldown_active",
             "ownership_network_unavailable",
+            "ownership_progress_step",
+            "ownership_setup_complete",
         )
         val resourceRoot = resourceRoot()
         val localeFiles = resourceRoot.listFiles()
@@ -260,6 +288,16 @@ class OwnershipVerificationRecoveryTest {
                 "${directory.name} phone countdown placeholder",
                 values.getValue("ownership_send_code_countdown")
                     .contains("%1\$d"),
+            )
+            assertTrue(
+                "${directory.name} progress first placeholder",
+                values.getValue("ownership_progress_step")
+                    .contains("%1\$d"),
+            )
+            assertTrue(
+                "${directory.name} progress second placeholder",
+                values.getValue("ownership_progress_step")
+                    .contains("%2\$d"),
             )
         }
     }

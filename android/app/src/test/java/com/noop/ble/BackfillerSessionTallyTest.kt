@@ -1,11 +1,17 @@
 package com.noop.ble
 
 import com.noop.data.InsertCounts
+import com.noop.data.WhoopDao
+import com.noop.data.WhoopRepository
+import com.noop.protocol.DeviceFamily
+import com.noop.testing.FakeSharedPreferences
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.lang.reflect.Proxy
 
 /**
  * Pins the success-side observability the log forensics flagged as the blind spot (#150): NOOP logged
@@ -15,6 +21,46 @@ import org.junit.Test
  * BackfillerSessionTallyTests.
  */
 class BackfillerSessionTallyTest {
+
+    private class SimulatedStorageFull :
+        RuntimeException("private-user-content-must-not-reach-diagnostics")
+
+    private class RecordingCursorStore : TrimCursorStore {
+        val writes = mutableListOf<Pair<String, Long>>()
+
+        override suspend fun set(name: String, value: Long) {
+            writes += name to value
+        }
+
+        override suspend fun get(name: String): Long? = null
+    }
+
+    private fun storageFullRepository(): WhoopRepository {
+        val dao = Proxy.newProxyInstance(
+            WhoopDao::class.java.classLoader,
+            arrayOf(WhoopDao::class.java),
+        ) { _, _, _ -> throw SimulatedStorageFull() } as WhoopDao
+        return WhoopRepository(dao)
+    }
+
+    private fun bytes(hex: String): ByteArray =
+        ByteArray(hex.length / 2) {
+            ((hex[it * 2].digitToInt(16) shl 4) or hex[it * 2 + 1].digitToInt(16)).toByte()
+        }
+
+    private val v25RecordFrame: ByteArray
+        get() = bytes(
+            "aa50000c2f190013390000140d2b6a4075010068a2010032fdbcfd98fdd3fdccfd47ffb00366064f073e06" +
+                "c103d3016cffa2fc87fa2ffae5fdbe03140675060c0510012dff1bfec0018f3c500500010068dc8f44",
+        )
+
+    private val historyEndFrame: ByteArray
+        get() = byteArrayOf(
+            0xaa.toByte(), 0x15, 0x00, 0x16, 0x31, 0x00, 0x02, 0xff.toByte(),
+            0xf0.toByte(), 0x53, 0x65, 0x05, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x40, 0xe2.toByte(), 0x01, 0x00, 0x5a, 0x85.toByte(),
+            0x0d, 0x5e,
+        )
 
     // Rows include every score-bearing stream and durable physiological history. Battery is housekeeping;
     // motion remains the gravity subset.
@@ -184,5 +230,70 @@ class BackfillerSessionTallyTest {
         assertTrue("a truly-empty no-cursor session must still warn the strap has no banked history",
             line.contains("no banked history to offload"))
         assertTrue(line.contains("fully charge"))
+    }
+
+    @Test fun storageFullDuringDecodedInsertHoldsCursorAndLaterAcknowledgements() = runBlocking {
+        val cursorStore = RecordingCursorStore()
+        val requestedTrims = mutableListOf<Long>()
+        val logs = mutableListOf<String>()
+        val backfiller = Backfiller(
+            repository = storageFullRepository(),
+            deviceId = "test",
+            cursorStore = cursorStore,
+            log = logs::add,
+            ackTrim = { _, trim, _ ->
+                requestedTrims += trim
+                true
+            },
+        )
+        backfiller.begin(DeviceFamily.WHOOP4)
+
+        backfiller.ingest(v25RecordFrame)
+        backfiller.ingest(historyEndFrame)
+
+        assertTrue(backfiller.persistStalled)
+        assertTrue(cursorStore.writes.isEmpty())
+        assertTrue(requestedTrims.isEmpty())
+        assertEquals(0, backfiller.pendingHistoricalAckCount)
+        assertNull(backfiller.lastAckedTrim)
+        assertTrue(logs.any { it.contains("failure=decoded_store_write") })
+        assertTrue(logs.none { it.contains("private-user-content") })
+        assertTrue(logs.none { it.contains("SimulatedStorageFull") })
+
+        // An empty end after the failed records-bearing chunk must not trim past it.
+        backfiller.ingest(historyEndFrame)
+
+        assertTrue(cursorStore.writes.isEmpty())
+        assertTrue(requestedTrims.isEmpty())
+        assertEquals(0, backfiller.pendingHistoricalAckCount)
+        assertNull(backfiller.lastAckedTrim)
+    }
+
+    @Test fun failedCursorCommitHoldsAcknowledgementAndUsesFixedFailureCategory() = runBlocking {
+        val requestedTrims = mutableListOf<Long>()
+        val logs = mutableListOf<String>()
+        val backfiller = Backfiller(
+            repository = storageFullRepository(),
+            deviceId = "test",
+            cursorStore = PrefsTrimCursorStore(
+                FakeSharedPreferences(commitResult = false),
+            ),
+            log = logs::add,
+            ackTrim = { _, trim, _ ->
+                requestedTrims += trim
+                true
+            },
+        )
+        backfiller.begin(DeviceFamily.WHOOP4)
+
+        backfiller.ingest(historyEndFrame)
+
+        assertTrue(backfiller.persistStalled)
+        assertTrue(requestedTrims.isEmpty())
+        assertEquals(0, backfiller.pendingHistoricalAckCount)
+        assertNull(backfiller.lastAckedTrim)
+        assertTrue(logs.any { it.contains("failure=cursor_store_write") })
+        assertTrue(logs.none { it.contains("TrimCursorPersistenceException") })
+        assertTrue(logs.none { it.contains("trim cursor commit failed") })
     }
 }

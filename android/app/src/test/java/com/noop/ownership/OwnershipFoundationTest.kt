@@ -1174,12 +1174,23 @@ class OwnershipFoundationTest {
             "checkpoint(user).captureAcceptedTerms(",
         )
         val delivery = createSource.indexOf(
+            "requestEmailVerification(user, enforceCooldown = false)",
+        )
+        val verificationSource = source
+            .substringAfter("    private suspend fun requestEmailVerification(")
+            .substringBefore("    private fun ensureEmailVerificationResendAvailable()")
+        val providerDelivery = verificationSource.indexOf(
             "user.sendEmailVerification().awaitManaged()",
+        )
+        val cooldown = verificationSource.indexOf(
+            "startEmailVerificationResendCooldown()",
         )
 
         assertTrue(phase >= 0)
         assertTrue(checkpoint > phase)
         assertTrue(delivery > checkpoint)
+        assertTrue(providerDelivery >= 0)
+        assertTrue(cooldown > providerDelivery)
         assertTrue(createSource.contains("\"identity_created\""))
         assertTrue(source.contains("reportedError == OwnershipException.TermsChanged"))
         assertFalse(source.contains("error == OwnershipException.TermsChanged"))

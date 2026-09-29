@@ -471,6 +471,8 @@
     <string name="appwide_intelligence_explainer_format">Recovery weighs HRV against your personal baseline (about 55 percent), resting heart rate (about 20 percent), Sleep Score (about 15 percent), breathing rate (about 5 percent), and skin-temperature deviation (about 5 percent) when those inputs are available. Effort is a 0–%1$s cardiovascular-load score from time in heart-rate zones. Sleep Score combines available duration, efficiency, stages, and consistency. Some displayed days may come from local imports. NOOP-derived scores are calculated locally from the listed available inputs; they are not clinical measures, and missing inputs stay missing.</string>
     <string name="appwide_intelligence_no_scored_nights">No scored nights yet. Wear your band overnight with NOOP connected. Effort and Sleep Score can appear after one night; Recovery needs about four valid nights to learn your baseline.</string>
     <string name="appwide_intelligence_subtitle">NOOP calculates Recovery, Effort, and Sleep Score on your device, without a cloud calculation.</string>
+    <string name="appwide_journal_attribution_detail">Answers are about the night and day leading into this morning, the same attribution a wearable export uses, so logged and imported days line up.</string>
+    <string name="appwide_journal_attribution_title">About journal days</string>
     <string name="appwide_journal_editing_help">Rename, regroup, or remove an item to tidy your list. Renaming keeps the original question behind the scenes, so imported references still line up. Custom items are deleted; built-in ones are hidden and can be restored below.</string>
     <string name="appwide_legal_summary">Project terms and source license. Available offline.</string>
     <string name="appwide_live_session_band_required">Connect and wear a bonded supported band before starting.</string>
@@ -692,6 +694,14 @@
     <string name="appwide_readiness_strained_headline">One shift</string>
     <string name="appwide_readiness_strained_summary">One measured signal shifted from your recent range. A single day is a cue to recheck, not a diagnosis or training instruction.</string>
     <string name="appwide_rhythm_methodology">NOOP reads only quiet overnight windows outside recorded workouts. Movement, exercise, elevated non-resting heart rate, and noisy windows are skipped rather than interpreted. It draws the timing between heartbeats as a Poincaré scatter and computes published descriptive statistics. Rhythm is an opt-in picture of timing, never a diagnosis, and it never sends alerts.</string>
+    <string name="appwide_scoring_guide_effort_implemented">Implemented window: available heart-rate samples from the local calendar day, using heart-rate-reserve zones. Steps or active energy can supply only the existing low-cardio floor.</string>
+    <string name="appwide_scoring_guide_method_details">Implementation details</string>
+    <string name="appwide_scoring_guide_recovery_baseline_format">Personal baselines use %1$d-night center and %2$d-night spread half-lives. Recovery can start at %3$d valid HRV nights, remains provisional below %4$d, becomes trusted at %4$d, and becomes stale after more than %5$d missed nights.</string>
+    <string name="appwide_scoring_guide_recovery_excluded">Not included in this revision: overnight Recovery Index and previous-day activity balance. They remain outside production scoring until separately approved and revisioned.</string>
+    <string name="appwide_scoring_guide_recovery_inputs">Implemented inputs: nightly HRV, resting heart rate, Sleep Score, respiratory rate, and skin-temperature deviation.</string>
+    <string name="appwide_scoring_guide_revision_format">Revision %1$s</string>
+    <string name="appwide_scoring_guide_sleep_implemented">Implemented window: the selected main sleep period, using duration versus personal need, efficiency, deep-plus-REM share, and sleep/wake timing consistency.</string>
+    <string name="appwide_scoring_guide_source_on_device">Derived on this device by NOOP. It is not an imported provider score.</string>
     <string name="appwide_shell_updates_unread_format">Updates, %1$d unread</string>
     <string name="appwide_sleep_edit_conflict">This night changed before the edit could be saved. Latest data restored.</string>
     <string name="appwide_sleep_empty_history_help">No nights here yet. Import a wearable export in Data Sources to see every night, your sleep stages and trends straight away. Or open Intelligence to see last night computed from the band after you wear it to bed.</string>

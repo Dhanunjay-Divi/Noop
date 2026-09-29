@@ -243,6 +243,176 @@ final class MacViewerRuntimeContractTests: XCTestCase {
         }
     }
 
+    func testMacSidebarFooterReflectsManagedViewerSyncState() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+
+        XCTAssertEqual(
+            MacSidebarSyncPresentation.resolve(
+                phase: .unavailable,
+                isBusy: false,
+                status: "",
+                historyLastUpdatedAt: nil,
+                historyHasMore: false,
+                now: now
+            ),
+            MacSidebarSyncPresentation(
+                title: String(localized: "History sync"),
+                detail: String(
+                    localized: "appwide.mac.viewer.synced_detail"
+                ),
+                tone: .critical
+            )
+        )
+        XCTAssertEqual(
+            MacSidebarSyncPresentation.resolve(
+                phase: .signedOut,
+                isBusy: false,
+                status: "",
+                historyLastUpdatedAt: nil,
+                historyHasMore: false,
+                now: now
+            ).title,
+            String(localized: "Sign in to NOOP")
+        )
+        XCTAssertEqual(
+            MacSidebarSyncPresentation.resolve(
+                phase: .emailVerificationRequired,
+                isBusy: false,
+                status: "",
+                historyLastUpdatedAt: nil,
+                historyHasMore: false,
+                now: now
+            ).tone,
+            .warning
+        )
+        XCTAssertEqual(
+            MacSidebarSyncPresentation.resolve(
+                phase: .enrollmentRequired,
+                isBusy: false,
+                status: "",
+                historyLastUpdatedAt: nil,
+                historyHasMore: false,
+                now: now
+            ).title,
+            String(localized: "Connect this Mac")
+        )
+        XCTAssertEqual(
+            MacSidebarSyncPresentation.resolve(
+                phase: .signedOut,
+                isBusy: true,
+                status: "",
+                historyLastUpdatedAt: nil,
+                historyHasMore: false,
+                now: now
+            ).tone,
+            .active
+        )
+
+        let fresh = MacSidebarSyncPresentation.resolve(
+            phase: .ready,
+            isBusy: false,
+            status: String(localized: "History synced"),
+            historyLastUpdatedAt: now.addingTimeInterval(-5 * 60),
+            historyHasMore: false,
+            now: now
+        )
+        XCTAssertEqual(fresh.title, String(localized: "History synced"))
+        XCTAssertEqual(fresh.detail, String(localized: "5 min ago"))
+        XCTAssertEqual(fresh.tone, .positive)
+
+        let stale = MacSidebarSyncPresentation.resolve(
+            phase: .ready,
+            isBusy: false,
+            status: String(localized: "History synced"),
+            historyLastUpdatedAt: now.addingTimeInterval(
+                -MacSidebarSyncPresentation.staleAfter
+            ),
+            historyHasMore: false,
+            now: now
+        )
+        XCTAssertEqual(stale.title, String(localized: "Sync now"))
+        XCTAssertEqual(stale.tone, .warning)
+        XCTAssertTrue(stale.detail.contains(String(localized: "1 d ago")))
+
+        for historyHasMore in [false, true] {
+            let pending = MacSidebarSyncPresentation.resolve(
+                phase: .ready,
+                isBusy: false,
+                status: historyHasMore
+                    ? String(localized: "History sync")
+                    : "",
+                historyLastUpdatedAt: nil,
+                historyHasMore: historyHasMore,
+                now: now
+            )
+            XCTAssertEqual(pending.title, String(localized: "History sync"))
+            XCTAssertEqual(pending.detail, String(localized: "Sync now"))
+            XCTAssertEqual(pending.tone, .warning)
+        }
+    }
+
+    func testMacSidebarFooterMapsFailuresToFixedSafeCopy() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let network = String(
+            localized:
+                "NOOP could not reach the managed service. Check the connection and retry."
+        )
+        let networkFailure = MacSidebarSyncPresentation.resolve(
+            phase: .ready,
+            isBusy: false,
+            status: network,
+            historyLastUpdatedAt: now.addingTimeInterval(-60),
+            historyHasMore: false,
+            now: now
+        )
+        XCTAssertEqual(networkFailure.title, String(localized: "Try again"))
+        XCTAssertEqual(networkFailure.detail, network)
+        XCTAssertEqual(networkFailure.tone, .critical)
+
+        let arbitraryMarker = "private-provider-error-marker"
+        let fallback = MacSidebarSyncPresentation.resolve(
+            phase: .ready,
+            isBusy: false,
+            status: arbitraryMarker,
+            historyLastUpdatedAt: now.addingTimeInterval(-60),
+            historyHasMore: false,
+            now: now
+        )
+        XCTAssertEqual(
+            fallback.detail,
+            String(localized: "NOOP could not update this Mac.")
+        )
+        XCTAssertFalse(fallback.detail.contains(arbitraryMarker))
+        XCTAssertEqual(fallback.tone, .critical)
+    }
+
+    func testMacSidebarFooterHasExplicitAccessibleStatus() throws {
+        let root = try text("Strand/App/RootView.swift")
+
+        XCTAssertTrue(
+            root.contains(
+                "MacSidebarSyncStatus(\n"
+                    + "                    service: "
+                    + "MacManagedViewerService.shared"
+            )
+        )
+        XCTAssertTrue(
+            root.contains("@ObservedObject var service: MacManagedViewerService")
+        )
+        XCTAssertTrue(
+            root.contains(".accessibilityElement(children: .ignore)")
+        )
+        XCTAssertTrue(
+            root.contains(".accessibilityLabel(Text(presentation.title))")
+        )
+        XCTAssertTrue(
+            root.contains(".accessibilityValue(Text(presentation.detail))")
+        )
+        XCTAssertFalse(
+            root.contains("SidebarStatus(viewerOnly: true)")
+        )
+    }
+
     func testManagedFriendsCopyIsLocalizedAcrossSupportedAppleLocales() throws {
         let catalogURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

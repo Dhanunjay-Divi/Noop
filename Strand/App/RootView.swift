@@ -304,7 +304,9 @@ struct RootView: View {
                 .searchable(text: $searchQuery, placement: .sidebar, prompt: "Search")
 
                 Divider().overlay(StrandPalette.hairline)
-                SidebarStatus(viewerOnly: true)
+                MacSidebarSyncStatus(
+                    service: MacManagedViewerService.shared
+                )
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
             }
@@ -738,50 +740,210 @@ private struct MacLighterWorkoutOptionsSheet: View {
     }
 }
 
-/// Isolated live-status pill — owns the LiveState observation so the rest of RootView (sidebar
-/// list + detail) does not re-render on the ~1 Hz HR / frame stream.
-private struct SidebarStatus: View {
-    @EnvironmentObject var live: LiveState
-    let viewerOnly: Bool
+struct MacSidebarSyncPresentation: Equatable {
+    enum Tone: Equatable {
+        case active
+        case positive
+        case warning
+        case critical
+    }
+
+    static let staleAfter: TimeInterval = 24 * 60 * 60
+
+    let title: String
+    let detail: String
+    let tone: Tone
+
+    static func resolve(
+        phase: MacManagedViewerService.Phase,
+        isBusy: Bool,
+        status: String,
+        historyLastUpdatedAt: Date?,
+        historyHasMore: Bool,
+        now: Date
+    ) -> Self {
+        if phase == .unavailable {
+            return Self(
+                title: String(localized: "History sync"),
+                detail: String(
+                    localized: "appwide.mac.viewer.synced_detail"
+                ),
+                tone: .critical
+            )
+        }
+
+        if isBusy {
+            return Self(
+                title: String(localized: "Syncing…"),
+                detail: String(localized: "History sync"),
+                tone: .active
+            )
+        }
+
+        switch phase {
+        case .unavailable:
+            preconditionFailure("Handled above")
+        case .signedOut:
+            return Self(
+                title: String(localized: "Sign in to NOOP"),
+                detail: String(localized: "Account history"),
+                tone: .warning
+            )
+        case .emailVerificationRequired:
+            return Self(
+                title: String(localized: "Sign in to NOOP"),
+                detail: String(
+                    localized:
+                        "Finish email verification from the account message, then return here. This Mac cannot activate or claim a band."
+                ),
+                tone: .warning
+            )
+        case .enrollmentRequired:
+            return Self(
+                title: String(localized: "Connect this Mac"),
+                detail: String(localized: "Read-only"),
+                tone: .warning
+            )
+        case .ready:
+            break
+        }
+
+        if let failureDetail = failureDetail(for: status) {
+            return Self(
+                title: String(localized: "Try again"),
+                detail: failureDetail,
+                tone: .critical
+            )
+        }
+
+        if historyHasMore {
+            return Self(
+                title: String(localized: "History sync"),
+                detail: String(localized: "Sync now"),
+                tone: .warning
+            )
+        }
+
+        guard let historyLastUpdatedAt else {
+            return Self(
+                title: String(localized: "History sync"),
+                detail: String(localized: "Sync now"),
+                tone: .warning
+            )
+        }
+
+        let relative = relativeAgo(
+            historyLastUpdatedAt.timeIntervalSince1970,
+            now: now.timeIntervalSince1970
+        )
+        if now.timeIntervalSince(historyLastUpdatedAt) >= staleAfter {
+            return Self(
+                title: String(localized: "Sync now"),
+                detail: String.localizedStringWithFormat(
+                    String(localized: "History synced %@"),
+                    relative
+                ),
+                tone: .warning
+            )
+        }
+        return Self(
+            title: String(localized: "History synced"),
+            detail: relative,
+            tone: .positive
+        )
+    }
+
+    private static func failureDetail(for status: String) -> String? {
+        guard !status.isEmpty else { return nil }
+        let healthyStatuses = [
+            String(localized: "History sync"),
+            String(localized: "History synced"),
+        ]
+        guard !healthyStatuses.contains(status) else { return nil }
+
+        let network = String(
+            localized:
+                "NOOP could not reach the managed service. Check the connection and retry."
+        )
+        if status == network {
+            return network
+        }
+
+        let localStore = String(
+            localized:
+                "NOOP could not open its local history on this Mac."
+        )
+        if status == localStore {
+            return localStore
+        }
+
+        return String(localized: "NOOP could not update this Mac.")
+    }
+}
+
+/// Observes only the managed viewer state. Relative last-success copy refreshes
+/// once per minute without waking the full sidebar or exposing account data.
+private struct MacSidebarSyncStatus: View {
+    @ObservedObject var service: MacManagedViewerService
 
     var body: some View {
-        HStack(spacing: 9) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 9, height: 9)
-                .shadow(color: statusColor.opacity(0.6), radius: live.connected ? 4 : 0)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(statusText)
-                    .font(StrandFont.rounded(12, weight: .medium))
-                    .foregroundStyle(StrandPalette.textPrimary)
-                Text(detailText)
-                    .font(StrandFont.rounded(11))
-                    .foregroundStyle(StrandPalette.textTertiary)
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let presentation = MacSidebarSyncPresentation.resolve(
+                phase: service.phase,
+                isBusy: service.isBusy,
+                status: service.status,
+                historyLastUpdatedAt: service.historyLastUpdatedAt,
+                historyHasMore: service.historyHasMore,
+                now: context.date
+            )
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(statusColor(for: presentation.tone))
+                    .frame(width: 9, height: 9)
+                    .shadow(
+                        color: statusColor(for: presentation.tone)
+                            .opacity(0.6),
+                        radius: presentation.tone == .active ? 4 : 0
+                    )
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(presentation.title)
+                        .font(StrandFont.rounded(12, weight: .medium))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .lineLimit(1)
+                    Text(presentation.detail)
+                        .font(StrandFont.rounded(11))
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
             }
-            Spacer()
+            .padding(10)
+            .background(
+                StrandPalette.surfaceRaised,
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(presentation.title))
+            .accessibilityValue(Text(presentation.detail))
+            .help(presentation.detail)
         }
-        .padding(10)
-        .background(StrandPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    // Shares LiveState.connectionStatus* with the Settings strap card so the two never disagree (#266):
-    // a connected-but-unbonded 5/MG now reads "Connected" here too, not a misleading "Connecting…".
-    private var statusColor: Color {
-        if viewerOnly { return StrandPalette.statusWarning }
-        return live.connectionStatusIsActive ? StrandPalette.statusPositive
-            : live.connectionStatusIsIdle ? StrandPalette.statusWarning
-            : StrandPalette.statusCritical
-    }
-    private var statusText: String {
-        viewerOnly ? String(localized: "appwide.mac.viewer.title") : live.connectionStatusLabel
-    }
-
-    private var detailText: String {
-        if viewerOnly {
-            return String(localized: "appwide.mac.viewer.synced_detail")
+    private func statusColor(
+        for tone: MacSidebarSyncPresentation.Tone
+    ) -> Color {
+        switch tone {
+        case .active:
+            return StrandPalette.accent
+        case .positive:
+            return StrandPalette.statusPositive
+        case .warning:
+            return StrandPalette.statusWarning
+        case .critical:
+            return StrandPalette.statusCritical
         }
-        return live.batteryPct.map { String(localized: "Battery \(Int($0))%") }
-            ?? String(localized: "Noop Band not connected")
     }
 }
 

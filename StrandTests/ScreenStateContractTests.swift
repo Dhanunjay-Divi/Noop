@@ -251,6 +251,12 @@ final class ScreenStateContractTests: XCTestCase {
         let journal = try sourceText("Strand/Screens/JournalLogCard.swift")
         XCTAssertTrue(journal.contains("placeholder: StrandFormat.missing"))
         XCTAssertFalse(journal.contains(#"placeholder: "-""#))
+        XCTAssertTrue(journal.contains("appwide.journal.attribution.title"))
+        XCTAssertTrue(journal.contains("appwide.journal.attribution.detail"))
+        XCTAssertTrue(journal.contains("showingAttributionInfo"))
+        XCTAssertFalse(journal.contains(
+            "Answers are about the night and day leading into this morning"
+        ))
     }
 
     func testAuditedSocialAndBandCopyUsesCurrentVocabulary() throws {
@@ -459,6 +465,24 @@ final class ScreenStateContractTests: XCTestCase {
         XCTAssertTrue(liquidToday.contains("dailySignalPillPresentation("))
         XCTAssertTrue(liquidToday.contains("appwide.readiness.balanced.headline"))
         XCTAssertTrue(liquidToday.contains("appwide.readiness.rundown.headline"))
+    }
+
+    func testScoringGuideUsesAuthoritativeFormulaMetadataWithoutChangingMath() throws {
+        let scoring = try sourceText("Strand/Screens/ScoringGuideView.swift")
+
+        XCTAssertTrue(scoring.contains("NoopScoreAlgorithmRevision.charge"))
+        XCTAssertTrue(scoring.contains("NoopScoreAlgorithmRevision.effort"))
+        XCTAssertTrue(scoring.contains("NoopScoreAlgorithmRevision.rest"))
+        XCTAssertTrue(scoring.contains("Baselines.hrvCfg"))
+        XCTAssertTrue(scoring.contains("Baselines.minNightsSeed"))
+        XCTAssertTrue(scoring.contains("Baselines.minNightsTrust"))
+        XCTAssertTrue(scoring.contains("Baselines.staleDays"))
+        XCTAssertTrue(scoring.contains("appwide.scoring_guide.recovery_inputs"))
+        XCTAssertTrue(scoring.contains("appwide.scoring_guide.recovery_excluded"))
+        XCTAssertTrue(scoring.contains("appwide.scoring_guide.source_on_device"))
+        XCTAssertFalse(scoring.contains(#""noop-charge-v2""#))
+        XCTAssertFalse(scoring.contains(#""noop-effort-v2""#))
+        XCTAssertFalse(scoring.contains(#""noop-rest-v2""#))
     }
 
     func testDailySignalPillMatchesReadinessVocabularyAndPolarity() {

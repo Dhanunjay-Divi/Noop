@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-28**
+Last updated: **2026-09-29**
 
 ## Authoritative context
 
@@ -12,6 +12,29 @@ Last updated: **2026-09-28**
   `9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`
 - Current round implementation started from protected `main` after PR `#16`
   merged and mainline trust was verified.
+- The final supplier-independent September 17 closeout candidate is locally
+  green on `codex/sept17-readiness-closeout-20260926` above remote checkpoint
+  `db07e2c68`. It closes storage-full cursor/ack advancement, bounded managed
+  upload lookahead/backlog and edit coalescing, installation-revocation races,
+  macOS sync-state visibility, ownership accessibility, scoring-guide
+  provenance/revision copy, Journal information hierarchy, iPhone
+  accessibility-size Quick Access, and the reviewed terminology delta without
+  changing data authority or score formulas. Exact current walls pass:
+  NoopRemoteSync 197/197; StrandAnalytics 1,514 with seven skips; macOS 2,377
+  with one skip; Apple focused 75/75; iOS production shell 39 with one skip;
+  Android Full 5,232 with seven skips and Demo 5,225 with seven skips plus
+  compile/lint/APK/instrumentation-source gates; API 35 production shell
+  123 with two skips; Review Sample 1/1; complete server/PostgreSQL; Tools
+  372 with one skip plus 50 root tests; and all direct release, privacy,
+  localization, claims, calibration, legal, required-CI, trusted-main, and
+  exact SDK-artifact controls. The isolated PostgreSQL/build/log root and
+  generated Android output are removed, no round process survives, and free
+  space is about 70 GiB. The final terminology snapshot after documentation
+  edits, one consolidated push, exact-head hosted checks, normal protected
+  integration, and protected-main verification remain. Physical
+  BLE/background/battery/haptics/accessibility/accuracy, supplier firmware and
+  rights, signing/store, credentials, carrier/legal, and elapsed production
+  operations remain external gates.
 - Public checkpoints `c8a986a61` and `cf7e28e4b` now simplify the mobile
   Account/Data hierarchy and reframe the shared destination as Data & Sync.
   Local backup and restore remain primary; legacy D-036 self-hosted sync is
@@ -827,21 +850,17 @@ Resume from:
 
 ## Immediate next actions
 
-1. Finish the September 17 Claude/source reconciliation, including the two
-   formula-documentation findings, without enabling the gated D-059 authority
-   flip.
-2. Publish each coherent locally green checkpoint to
-   `codex/sept17-readiness-closeout-20260926` without opening a pull request;
-   these branch pushes do not run the repository's `main`/pull-request-scoped
-   workflows.
-3. Run the applicable complete Apple, Android, package, server, and repository
-   control walls on the consolidated follow-on candidate.
-4. Integrate the follow-on through normal protected review only after local
-   evidence is green. Require exact-head hosted contexts, non-author approval,
-   protected integration, and protected-main verification without bypass.
-5. Execute the physical step-validation matrix with synchronized manual counts
-   and exact band/firmware classification.
-6. Keep both repositories public under D-056 while excluding supplier
+1. Regenerate the terminology snapshot after the final operations edits, repin
+   the required-CI digest, and rerun the complete repository-control wall plus
+   diff hygiene.
+2. Commit once, push once, open a new protected pull request for
+   `codex/sept17-readiness-closeout-20260926`, and require all ten exact-head
+   contexts before a normal linear-history merge.
+3. Verify protected `main`, then execute the signed physical-device handoff for
+   iPhone and Android. A simulator cannot prove BLE discovery, pairing,
+   history, battery, reconnect, background collection, haptics, notification
+   delivery, TalkBack/VoiceOver traversal, or physiological accuracy.
+4. Keep both repositories public under D-056 while excluding supplier
    binaries, firmware, credentials, signing material, private inputs, and user
    or health data. Begin signed physical validation only after the exact
    supplier rights/SBOM/security inputs and representative devices are

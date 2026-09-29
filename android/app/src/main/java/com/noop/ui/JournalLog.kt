@@ -21,9 +21,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -205,6 +210,7 @@ fun JournalLogCard(
 ) {
     var editing by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<JournalCatalogItem?>(null) }
+    var showingAttributionInfo by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         // Header: title/overline on the left, the Tomorrow/Today/Yesterday toggle (or Edit/Done) on the right.
@@ -218,6 +224,15 @@ fun JournalLogCard(
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = { showingAttributionInfo = true }) {
+                Icon(
+                    Icons.Filled.Info,
+                    contentDescription = stringResource(
+                        R.string.appwide_journal_attribution_title,
+                    ),
+                    tint = Palette.textTertiary,
                 )
             }
             if (editing) {
@@ -251,24 +266,21 @@ fun JournalLogCard(
         }
         NoopCard {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    when {
-                        editing ->
+                if (editing || dayOffset == -1L) {
+                    Text(
+                        if (editing) {
                             "Rename, regroup, or remove an item to tidy your list. Renaming keeps the " +
                                 "original question behind the scenes, so a wearable import still lines up. " +
                                 "Custom items are deleted; built-in ones are hidden and can be restored below."
-                        dayOffset == -1L ->
+                        } else {
                             "Logging ahead for tomorrow: today's activities inform tomorrow's " +
                                 "recovery, just as yesterday's are reflected in today's. Tomorrow's " +
                                 "answers line up with tomorrow's morning."
-                        else ->
-                            "Answers are about the night and day leading into this morning, the " +
-                                "same attribution a wearable export uses, so logged and imported days " +
-                                "line up."
-                    },
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                )
+                        },
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
                 // Grouped, collapsible blocks in the fixed display order. Empty groups hide outside edit.
                 JournalGroup.displayOrder.forEach { group ->
                     val groupItems = items.filter { it.group == group }
@@ -295,6 +307,27 @@ fun JournalLogCard(
                 JournalAddRow(onAddCustom = onAddCustom)
             }
         }
+    }
+
+    if (showingAttributionInfo) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showingAttributionInfo = false },
+            title = {
+                Text(stringResource(R.string.appwide_journal_attribution_title))
+            },
+            text = {
+                Text(
+                    stringResource(R.string.appwide_journal_attribution_detail),
+                    style = NoopType.body,
+                    color = Palette.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showingAttributionInfo = false }) {
+                    Text(stringResource(R.string.appwide_action_done))
+                }
+            },
+        )
     }
 
     renaming?.let { item ->
