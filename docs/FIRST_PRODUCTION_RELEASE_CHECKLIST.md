@@ -301,7 +301,7 @@ position without changing its ID. This inbox intentionally starts empty.
   signed-app traffic, privacy declarations, dependency notices, and SBOM before
   enabling the adapter. Static source/manifest denial is implemented; signed
   physical-app traffic evidence remains open.
-- [x] SDK-009A [ENG] Enforce one active supplier source per app process and one
+- [x] SDK-009 [ENG] Enforce one active supplier source per app process and one
   serialized per-band operation queue; stale callbacks cannot reactivate a
   retired source. (Evidence: supplier-neutral session machines, source
   coordinators, and lifecycle tests)
@@ -309,7 +309,7 @@ position without changing its ID. This inbox intentionally starts empty.
   durable cross-phone collector handoff: checkpoint, disconnect, lease, resume,
   duplicate-collector rejection, and data continuity. The supplier-neutral
   `collector_handoff` conformance row remains an external gate.
-- [x] SDK-010A [ENG] Complete the supplier-neutral versioned capability schema
+- [x] SDK-010 [ENG] Complete the supplier-neutral versioned capability schema
   and compatibility contract. (Evidence:
   `contract/spec/capabilities.schema.json`, compatibility manifests)
 - [ ] SDK-010B [JOINT] Approve the exact supplier protocol, firmware, command,
@@ -324,23 +324,27 @@ position without changing its ID. This inbox intentionally starts empty.
 - [x] SDK-040 [ENG] Implement pure Swift integrity, clock, history, command,
   operation, and update state machines. (Evidence:
   `BandSessionMachine.swift`)
+- [ ] SDK-040B [ENG] Implement and parity-test the approved supplier Swift
+  framing and decoding codec once exact protocol truth is available.
 - [x] SDK-050 [ENG] Implement equivalent pure Kotlin state machines. (Evidence:
   `BandSessionMachine.kt`)
+- [ ] SDK-050B [ENG] Implement and parity-test the approved supplier Kotlin
+  framing and decoding codec once exact protocol truth is available.
 - [ ] SDK-060 [ENG] Prove Swift, Kotlin, and firmware agree on every golden
   fixture. Swift/Kotlin parity is implemented; firmware agreement remains open.
 - [x] SDK-060A [ENG] Prove Swift and Kotlin produce the same supplier-neutral
   conformance outcomes. (Evidence: mirrored scenario inventory and artifact
   tests)
-- [x] SDK-070A [ENG] Implement deterministic virtual-band fixtures and mirrored
+- [x] SDK-070 [ENG] Implement deterministic virtual-band fixtures and mirrored
   Swift/Kotlin runners. (Evidence: `VirtualBand.swift`, `VirtualBand.kt`)
 - [ ] SDK-070B [ENG] Implement a deterministic virtual clock with explicit
   advance/control APIs for progression, drift, correction, and timeout cases.
-- [x] SDK-080A [ENG] Add supplier-neutral fault injection for replay,
+- [x] SDK-080 [ENG] Add supplier-neutral fault injection for replay,
   duplicates, disconnects, stale callbacks, and invalid device time.
   (Evidence: mirrored automated virtual-band scenarios and artifact tests)
-- [ ] SDK-080B [JOINT] Add deterministic full-flash/storage-exhaustion and
-  low-battery injection, then validate exact radio and hardware-limit behavior
-  on approved physical bands.
+- [ ] SDK-080B [JOINT] Add deterministic packet-loss, corruption,
+  full-flash/storage-exhaustion, and low-battery injection, then validate exact
+  radio and hardware-limit behavior on approved physical bands.
 - [ ] SDK-090 [ENG] Add OTA interruption, verification failure, activation
   failure, and rollback simulation.
 - [ ] SDK-100 [ENG] Build a protocol/conformance CLI without production

@@ -69,8 +69,11 @@ acceptance, and leave no product runtime change in the closeout.
   handoff, virtual-clock control, full-flash/low-battery injection, firmware,
   exact protocol, signed-egress, and physical acceptance.
 - Corrected four first-head review findings without changing runtime source:
-  three composite SDK checklist rows no longer claim unimplemented coverage,
-  and the authoritative operations-record count includes this 103rd record.
+  composite SDK checklist rows no longer claim unimplemented coverage, and the
+  authoritative operations-record count includes this 103rd record.
+- Corrected three replacement-head review findings by retaining stable SDK IDs,
+  keeping Swift/Kotlin supplier framing and decoding explicit, and preserving
+  packet-loss/corruption fault injection as unchecked work.
 - Preserved application-level encrypted-cache migration, existing-user cloud
   backfill, selective restore, conflict replacement, Coach evidence, and
   Automation execution state as separately decision-gated roadmap work rather
@@ -114,6 +117,7 @@ acceptance, and leave no product runtime change in the closeout.
 | Terminology inventory and reviewed digest | 18,564 occurrences across 1,635 groups; zero forbidden mappings; required-CI and trusted-self checks passed | Changed records are classified and the exact generated evidence is pinned | Product or physical behavior |
 | Direct policy wall | Nine release checks, distribution provenance, 12-metric calibration parity, private-data, 1,312-file health-claims, full localization, exact SDK artifact, and diff hygiene passed | Repository-controlled release contracts remain intact | Signing, store, supplier, legal, carrier, or production approval |
 | PR `#19` first-head review | Four P2 tracking findings confirmed: durable cross-phone handoff, virtual-clock control, full-flash/low-battery injection, and the operations-record count | The replacement checklist preserves unfinished engineering and physical work as open gates | Runtime behavior |
+| PR `#19` replacement-head review | Three P2 ledger findings confirmed: stable IDs, supplier frame codecs, and packet-loss/corruption injection | Durable checklist references and omitted transport work remain explicit | Runtime behavior |
 | Independent read-only completion audit | No additional in-scope implementation blocker; stale docs and checklist split identified | Fresh review covered the stated closeout scope | Hardware or legal approval |
 
 ## Physical device and deployment
@@ -159,6 +163,8 @@ acceptance, and leave no product runtime change in the closeout.
 - Durable cross-phone collector handoff, explicit virtual-clock control, and
   full-flash/low-battery fault injection remain open engineering/physical
   gates rather than checked supplier-neutral capabilities.
+- Approved supplier Swift/Kotlin framing and decoding plus packet-loss and
+  corruption injection remain explicit open engineering gates.
 - Signing, stores, credentials, production infrastructure, legal/carrier
   approval, native-language review, and elapsed production operations remain
   external gates.
