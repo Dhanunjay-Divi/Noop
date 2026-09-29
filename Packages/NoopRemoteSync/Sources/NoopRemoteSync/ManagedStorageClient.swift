@@ -1327,6 +1327,25 @@ public actor ManagedStorageClient {
         includeDeletedDocuments: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
+        try await createRestore(
+            requestID: requestID,
+            dataClasses: dataClasses,
+            includeDocuments: true,
+            includeDeletedDocuments: includeDeletedDocuments,
+            authorization: authorization
+        )
+    }
+
+    public func createRestore(
+        requestID: UUID,
+        dataClasses: [String],
+        includeDocuments: Bool,
+        includeDeletedDocuments: Bool,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedRestoreJob {
+        guard includeDocuments || !includeDeletedDocuments else {
+            throw ManagedStorageError.invalidConfiguration
+        }
         let classes = dataClasses.sorted()
         guard !classes.isEmpty,
               Set(classes).count == classes.count,
@@ -1345,8 +1364,8 @@ public actor ManagedStorageClient {
                 requestID: requestID,
                 dataClasses: classes,
                 chunkContentMode: "server_readable",
-                documentKinds: [.dayOwnership],
-                includeDocuments: true,
+                documentKinds: includeDocuments ? [.dayOwnership] : [],
+                includeDocuments: includeDocuments,
                 includeDeletedDocuments: includeDeletedDocuments
             ),
             authorization: authorization

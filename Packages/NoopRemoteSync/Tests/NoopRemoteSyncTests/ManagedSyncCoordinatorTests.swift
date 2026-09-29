@@ -242,6 +242,8 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
         XCTAssertFalse(result.hasMoreChanges)
         let restoreIncludeDeleted =
             await transport.restoreIncludeDeletedValues()
+        let restoreIncludeDocuments =
+            await transport.restoreIncludeDocumentValues()
         let snapshotIncludeDeleted =
             await transport.snapshotIncludeDeletedValues()
         let documentReads = await transport.documentReadCount()
@@ -249,10 +251,203 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
             await restore.appliedDocumentOperations()
         let currentSequence = await state.currentSequence()
         XCTAssertEqual(restoreIncludeDeleted, [false])
+        XCTAssertEqual(restoreIncludeDocuments, [false])
         XCTAssertEqual(snapshotIncludeDeleted, [])
         XCTAssertEqual(documentReads, 0)
         XCTAssertEqual(documentOperations, [])
         XCTAssertEqual(currentSequence, 43)
+    }
+
+    func testHistoryOnlyRestoreReplacesDocumentInclusiveV2Checkpoint() async throws {
+        let staleRequestID = UUID()
+        let document = ManagedDocument(
+            documentKind: .journal,
+            documentID: UUID(),
+            revision: 1,
+            originInstallationID: "remote-installation",
+            contentMode: "server_readable",
+            clientKeyID: nil,
+            contentSHA256: String(repeating: "b", count: 64),
+            payloadJSON: ["answered": .boolean(true)],
+            payloadCiphertextBase64: nil,
+            updatedAt: "2026-09-26T12:00:00.000Z",
+            deletedAt: nil,
+            duplicate: false
+        )
+        let state = CoordinatorState(
+            snapshotCheckpoint: ManagedSnapshotRestoreCheckpoint(
+                requestID: staleRequestID,
+                dataClasses: ["essential_timeseries"],
+                changeFeedCapabilityVersion:
+                    ManagedSyncCoordinator.changeFeedCapabilityVersion,
+                restoreJobID: UUID(),
+                snapshotAt: "2026-09-26T12:00:00.000Z",
+                changeSequence: 41,
+                selectedObjects: 1,
+                selectedBytes: 0,
+                dataClassIndex: 1,
+                documentCursor: document.pageCursor,
+                documentsComplete: false,
+                deliveredObjects: 0,
+                deliveredBytes: 0
+            ),
+            changeFeedCapabilityVersion:
+                ManagedSyncCoordinator.changeFeedCapabilityVersion
+        )
+        let transport = CoordinatorTransport(snapshotDocuments: [document])
+        let restore = CoordinatorRestore()
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "macos-viewer",
+            installationToken: installationToken
+        )
+
+        let result = try await ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: restore
+        ).restoreOnly(
+            authorization: authorization,
+            dataClasses: ["essential_timeseries"],
+            restoreDocuments: false
+        )
+
+        let restoreRequestIDs = await transport.restoreRequestIDValues()
+        let documentReads = await transport.documentReadCount()
+        let snapshotDocumentReads =
+            await transport.snapshotIncludeDeletedValues()
+        let documentOperations = await restore.appliedDocumentOperations()
+        let capabilityVersion = await state.currentChangeFeedCapabilityVersion()
+        let checkpoint = await state.currentSnapshotCheckpoint()
+        let clearCount = await state.snapshotClearCount()
+        XCTAssertEqual(result.appliedChanges, 0)
+        XCTAssertFalse(result.hasMoreChanges)
+        XCTAssertEqual(clearCount, 1)
+        XCTAssertEqual(restoreRequestIDs.count, 1)
+        XCTAssertNotEqual(try XCTUnwrap(restoreRequestIDs.first), staleRequestID)
+        XCTAssertEqual(
+            capabilityVersion,
+            ManagedSyncCoordinator.historyOnlyChangeFeedCapabilityVersion
+        )
+        XCTAssertNil(checkpoint)
+        XCTAssertEqual(documentReads, 0)
+        XCTAssertEqual(snapshotDocumentReads, [])
+        XCTAssertEqual(documentOperations, [])
+    }
+
+    func testHistoryOnlyCursorExpiryLeavesReloadablePreJobCheckpoint()
+        async throws
+    {
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "macos-viewer",
+            installationToken: installationToken
+        )
+        let state = CoordinatorState(
+            changeFeedCapabilityVersion:
+                ManagedSyncCoordinator.historyOnlyChangeFeedCapabilityVersion
+        )
+        let interruptedTransport = CoordinatorTransport(
+            expireFirstChangeCursor: true,
+            failSnapshotNotFound: true
+        )
+
+        let interrupted = try await ManagedSyncCoordinator(
+            transport: interruptedTransport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: CoordinatorRestore()
+        ).restoreOnly(
+            authorization: authorization,
+            dataClasses: ["essential_timeseries"],
+            restoreDocuments: false,
+            maxChangePages: 1
+        )
+
+        let pendingState = await state.currentSnapshotCheckpoint()
+        let pending = try XCTUnwrap(pendingState)
+        XCTAssertEqual(interrupted.appliedChanges, 0)
+        XCTAssertTrue(interrupted.hasMoreChanges)
+        XCTAssertNil(pending.restoreJobID)
+        XCTAssertFalse(pending.documentsComplete)
+        XCTAssertEqual(
+            pending.changeFeedCapabilityVersion,
+            ManagedSyncCoordinator.historyOnlyChangeFeedCapabilityVersion
+        )
+
+        // Simulate a fresh process loading the persisted pre-job checkpoint.
+        let resumedTransport = CoordinatorTransport()
+        let resumed = try await ManagedSyncCoordinator(
+            transport: resumedTransport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: CoordinatorRestore()
+        ).restoreOnly(
+            authorization: authorization,
+            dataClasses: ["essential_timeseries"],
+            restoreDocuments: false,
+            maxChangePages: 1
+        )
+        let finalCheckpoint = await state.currentSnapshotCheckpoint()
+        let finalCapabilityVersion =
+            await state.currentChangeFeedCapabilityVersion()
+        let includeDocuments =
+            await resumedTransport.restoreIncludeDocumentValues()
+        let includeDeleted =
+            await resumedTransport.restoreIncludeDeletedValues()
+
+        XCTAssertEqual(resumed.appliedChanges, 0)
+        XCTAssertFalse(resumed.hasMoreChanges)
+        XCTAssertNil(finalCheckpoint)
+        XCTAssertEqual(
+            finalCapabilityVersion,
+            ManagedSyncCoordinator.historyOnlyChangeFeedCapabilityVersion
+        )
+        XCTAssertEqual(includeDocuments, [false])
+        XCTAssertEqual(includeDeleted, [false])
+    }
+
+    func testHistoryOnlyRestoreRejectsInflatedSelectionWithoutDocumentRead()
+        async throws
+    {
+        let transport = CoordinatorTransport(selectedObjectDelta: 1)
+        let restore = CoordinatorRestore()
+        let coordinator = ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: CoordinatorState(changeFeedCapabilityVersion: 0),
+            restore: restore
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "macos-viewer",
+            installationToken: installationToken
+        )
+
+        do {
+            _ = try await coordinator.restoreOnly(
+                authorization: authorization,
+                dataClasses: ["essential_timeseries"],
+                restoreDocuments: false
+            )
+            XCTFail("Expected inflated history-only selection to fail")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let documentReads = await transport.documentReadCount()
+        let snapshotDocumentReads =
+            await transport.snapshotIncludeDeletedValues()
+        let restoreCompletions = await transport.restoreCompletionCount()
+        let documentOperations = await restore.appliedDocumentOperations()
+        XCTAssertEqual(documentReads, 0)
+        XCTAssertEqual(snapshotDocumentReads, [])
+        XCTAssertEqual(restoreCompletions, 0)
+        XCTAssertEqual(documentOperations, [])
     }
 
     func testLocalRetentionAppliesPerDataClassCutoffs() async throws {
@@ -2395,6 +2590,7 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     private let failSnapshotNotFound: Bool
     private let feedHighWatermark: Int64?
     private let downloadableChunks: [UUID: CoordinatorDownloadFixture]
+    private let selectedObjectDelta: Int
     private let restoreJobID = UUID()
     private var uploads = 0
     private var completions = 0
@@ -2408,7 +2604,9 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     private var documentReads = 0
     private var snapshotCursors: [ManagedChunkPage.Cursor?] = []
     private var snapshotIncludeDeleted: [Bool] = []
+    private var restoreIncludeDocuments: [Bool] = []
     private var restoreIncludeDeleted: [Bool] = []
+    private var restoreRequestIDs: [UUID] = []
     private let onDownload: (@Sendable () async -> Void)?
 
     init(
@@ -2422,6 +2620,7 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         failSnapshotNotFound: Bool = false,
         feedHighWatermark: Int64? = nil,
         downloadableChunks: [UUID: CoordinatorDownloadFixture] = [:],
+        selectedObjectDelta: Int = 0,
         onDownload: (@Sendable () async -> Void)? = nil
     ) {
         self.failFirstCompletion = failFirstCompletion
@@ -2434,6 +2633,7 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         self.failSnapshotNotFound = failSnapshotNotFound
         self.feedHighWatermark = feedHighWatermark
         self.downloadableChunks = downloadableChunks
+        self.selectedObjectDelta = selectedObjectDelta
         self.onDownload = onDownload
     }
 
@@ -2450,7 +2650,11 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         snapshotCursors.map { $0?.afterChunkID }
     }
     func snapshotIncludeDeletedValues() -> [Bool] { snapshotIncludeDeleted }
+    func restoreIncludeDocumentValues() -> [Bool] {
+        restoreIncludeDocuments
+    }
     func restoreIncludeDeletedValues() -> [Bool] { restoreIncludeDeleted }
+    func restoreRequestIDValues() -> [UUID] { restoreRequestIDs }
 
     func registerSource(
         _ source: ManagedSourceRegistration,
@@ -2546,20 +2750,26 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     func createRestore(
         requestID: UUID,
         dataClasses: [String],
+        includeDocuments: Bool,
         includeDeletedDocuments: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
+        restoreRequestIDs.append(requestID)
+        restoreIncludeDocuments.append(includeDocuments)
         restoreIncludeDeleted.append(includeDeletedDocuments)
         restoreCreations += 1
-        let selectedDocuments = includeDeletedDocuments
-            ? snapshotDocuments.count
+        let selectedDocuments = includeDocuments
+            ? snapshotDocuments.filter {
+                includeDeletedDocuments || $0.deletedAt == nil
+            }.count
             : 0
         return ManagedRestoreJob(
             restoreJobID: restoreJobID,
             status: "running",
             snapshotAt: "2026-09-01T02:00:00Z",
             changeSequence: 42,
-            selectedObjects: snapshotChunks.count + selectedDocuments,
+            selectedObjects:
+                snapshotChunks.count + selectedDocuments + selectedObjectDelta,
             selectedBytes: Int64(
                 snapshotChunks.reduce(0) { $0 + $1.expectedCompressedBytes }
             ),
@@ -2609,15 +2819,18 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
         restoreCompletions += 1
-        let selectedDocuments = restoreIncludeDeleted.last == true
-            ? snapshotDocuments.count
+        let selectedDocuments = restoreIncludeDocuments.last == true
+            ? snapshotDocuments.filter {
+                restoreIncludeDeleted.last == true || $0.deletedAt == nil
+            }.count
             : 0
         return ManagedRestoreJob(
             restoreJobID: restoreJobID,
             status: "completed",
             snapshotAt: "2026-09-01T02:00:00Z",
             changeSequence: 42,
-            selectedObjects: snapshotChunks.count + selectedDocuments,
+            selectedObjects:
+                snapshotChunks.count + selectedDocuments + selectedObjectDelta,
             selectedBytes: Int64(
                 snapshotChunks.reduce(0) { $0 + $1.expectedCompressedBytes }
             ),

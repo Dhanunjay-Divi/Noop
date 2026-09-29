@@ -6,6 +6,55 @@ import FirebaseCore
 import Foundation
 import NoopRemoteSync
 import Security
+import WhoopStore
+
+struct MacManagedHistoryContinuationSummary: Equatable {
+    let batches: Int
+    let appliedChanges: Int
+    let hasMoreChanges: Bool
+    let reachedLimit: Bool
+}
+
+@MainActor
+enum MacManagedHistoryContinuationRunner {
+    static func run(
+        initialHasMoreChanges: Bool,
+        maxBatches: Int,
+        delayNanoseconds: UInt64,
+        validate: () async throws -> Void,
+        restoreNext: () async throws -> ManagedRestoreOnlyRunResult
+    ) async throws -> MacManagedHistoryContinuationSummary {
+        guard (1...512).contains(maxBatches) else {
+            throw ManagedStorageError.invalidConfiguration
+        }
+
+        var batches = 0
+        var appliedChanges = 0
+        var hasMoreChanges = initialHasMoreChanges
+        while hasMoreChanges, batches < maxBatches {
+            try Task.checkCancellation()
+            if delayNanoseconds > 0 {
+                try await Task.sleep(nanoseconds: delayNanoseconds)
+            }
+            try await validate()
+            let result = try await restoreNext()
+            batches += 1
+            appliedChanges = min(
+                10_000,
+                appliedChanges + max(0, result.appliedChanges)
+            )
+            hasMoreChanges = result.hasMoreChanges
+        }
+
+        return MacManagedHistoryContinuationSummary(
+            batches: batches,
+            appliedChanges: appliedChanges,
+            hasMoreChanges: hasMoreChanges,
+            reachedLimit:
+                hasMoreChanges && batches == maxBatches
+        )
+    }
+}
 
 @MainActor
 final class MacManagedViewerService: ObservableObject {
@@ -29,8 +78,10 @@ final class MacManagedViewerService: ObservableObject {
     @Published private(set) var lastUpdatedAt: Date?
     @Published private(set) var historyLastUpdatedAt: Date?
     @Published private(set) var historyHasMore = false
+    @Published private(set) var isHistorySyncing = false
 
     var isAvailable: Bool { configuration != nil }
+    var isWorking: Bool { isBusy || isHistorySyncing }
 
     var maskedEmail: String {
         guard let email = firebaseRuntime?.auth.currentUser?.email,
@@ -53,6 +104,12 @@ final class MacManagedViewerService: ObservableObject {
     private let credentials: MacManagedViewerCredentialStore
     private var firebaseRuntime: MacManagedFirebaseRuntime?
     private var managedClient: ManagedStorageClient?
+    private var historyContinuationTask: Task<Void, Never>?
+    private var historyContinuationGeneration: UInt64 = 0
+
+    private static let historyContinuationDelayNanoseconds: UInt64 =
+        250_000_000
+    private static let maximumAutomaticHistoryContinuationBatches = 256
 
     init(
         bundle: Bundle = .main,
@@ -67,7 +124,7 @@ final class MacManagedViewerService: ObservableObject {
     }
 
     func bootstrap(repo: Repository) async {
-        guard !isBusy else { return }
+        guard !isBusy, !isHistorySyncing else { return }
         guard configuration != nil else {
             phase = .unavailable
             status = String(
@@ -85,6 +142,7 @@ final class MacManagedViewerService: ObservableObject {
             let runtime = try runtime()
             guard let user = runtime.auth.currentUser else {
                 clearPresentation()
+                await repo.deactivateManagedViewerStore()
                 phase = .signedOut
                 status = ""
                 AppDiagnosticsRecorder.shared.endOperation(
@@ -106,6 +164,9 @@ final class MacManagedViewerService: ObservableObject {
                 fields: ["state": diagnosticState]
             )
         } catch {
+            if Self.shouldHideManagedHistory(for: error) {
+                await hideManagedHistory(repo: repo)
+            }
             applyFailure(error)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -122,7 +183,7 @@ final class MacManagedViewerService: ObservableObject {
         password: String,
         repo: Repository
     ) async {
-        guard !isBusy else { return }
+        guard !isBusy, !isHistorySyncing else { return }
         isBusy = true
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
             "managed_macos.sign_in"
@@ -149,6 +210,9 @@ final class MacManagedViewerService: ObservableObject {
                 fields: ["state": diagnosticState]
             )
         } catch {
+            if Self.shouldHideManagedHistory(for: error) {
+                await hideManagedHistory(repo: repo)
+            }
             applyFailure(error)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -161,7 +225,7 @@ final class MacManagedViewerService: ObservableObject {
     }
 
     func checkEmailVerification(repo: Repository) async {
-        guard !isBusy else { return }
+        guard !isBusy, !isHistorySyncing else { return }
         isBusy = true
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
             "managed_macos.email_verification"
@@ -181,6 +245,9 @@ final class MacManagedViewerService: ObservableObject {
                 fields: ["state": diagnosticState]
             )
         } catch {
+            if Self.shouldHideManagedHistory(for: error) {
+                await hideManagedHistory(repo: repo)
+            }
             applyFailure(error)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -226,7 +293,9 @@ final class MacManagedViewerService: ObservableObject {
     }
 
     func enroll(repo: Repository) async {
-        guard !isBusy, phase == .enrollmentRequired else { return }
+        guard !isBusy,
+              !isHistorySyncing,
+              phase == .enrollmentRequired else { return }
         isBusy = true
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
             "managed_macos.enrollment"
@@ -265,6 +334,9 @@ final class MacManagedViewerService: ObservableObject {
                 outcome: "completed"
             )
         } catch {
+            if Self.shouldHideManagedHistory(for: error) {
+                await hideManagedHistory(repo: repo)
+            }
             applyFailure(error, enrollmentFailure: true)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -277,7 +349,9 @@ final class MacManagedViewerService: ObservableObject {
     }
 
     func refresh(repo: Repository) async {
-        guard !isBusy, phase == .ready else { return }
+        guard !isBusy,
+              !isHistorySyncing,
+              phase == .ready else { return }
         isBusy = true
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
             "managed_macos.viewer_refresh"
@@ -301,6 +375,9 @@ final class MacManagedViewerService: ObservableObject {
                 ]
             )
         } catch {
+            if Self.shouldHideManagedHistory(for: error) {
+                await hideManagedHistory(repo: repo)
+            }
             applyFailure(error)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -312,13 +389,17 @@ final class MacManagedViewerService: ObservableObject {
         }
     }
 
-    func signOut() {
+    func signOut(repo: Repository) async {
         guard !isBusy else { return }
+        isBusy = true
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
             "managed_macos.sign_out"
         )
+        defer { isBusy = false }
+        cancelHistoryContinuation()
         do {
             try runtime().auth.signOut()
+            await repo.deactivateManagedViewerStore()
             clearPresentation()
             phase = configuration == nil ? .unavailable : .signedOut
             status = String(localized: "Signed out of NOOP on this Mac.")
@@ -327,6 +408,8 @@ final class MacManagedViewerService: ObservableObject {
                 outcome: "completed"
             )
         } catch {
+            await repo.deactivateManagedViewerStore()
+            clearPresentation()
             status = Self.userMessage(for: error)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -345,6 +428,7 @@ final class MacManagedViewerService: ObservableObject {
     ) async throws {
         clearPresentation()
         guard user.isEmailVerified else {
+            await repo.deactivateManagedViewerStore()
             phase = .emailVerificationRequired
             status = String(
                 localized:
@@ -354,6 +438,7 @@ final class MacManagedViewerService: ObservableObject {
         }
         let scope = try accountScope(for: user)
         guard hasAccountAccess(scope: scope) else {
+            await repo.deactivateManagedViewerStore()
             phase = .enrollmentRequired
             status = String(localized: "Connect this Mac")
             return
@@ -364,6 +449,7 @@ final class MacManagedViewerService: ObservableObject {
                 try await loadManagedViewer(user: user, repo: repo)
             } catch ManagedStorageError.authentication,
                     ManagedStorageError.forbidden {
+                await hideManagedHistory(repo: repo)
                 phase = .enrollmentRequired
                 status = String(
                     localized:
@@ -377,23 +463,45 @@ final class MacManagedViewerService: ObservableObject {
         user: User,
         repo: Repository
     ) async throws {
+        let scope = try accountScope(for: user)
         let result = try await restoreManagedHistory(
             user: user,
             repo: repo
         )
-        _ = try await loadManagedFriends(user: user)
         phase = .ready
-        lastUpdatedAt = Date()
         status = String(
             localized: result.hasMoreChanges
                 ? "History sync"
                 : "History synced"
         )
+        if result.hasMoreChanges {
+            scheduleHistoryContinuation(
+                scope: scope,
+                repo: repo
+            )
+        }
+        do {
+            _ = try await loadManagedFriends(user: user)
+            lastUpdatedAt = Date()
+        } catch {
+            guard !Self.shouldHideManagedHistory(for: error) else {
+                throw error
+            }
+            AppDiagnosticsRecorder.shared.record(
+                "managed_macos.friends_refresh",
+                fields: [
+                    "outcome": "failed",
+                    "failure_kind":
+                        Self.diagnosticFailureKind(error),
+                ]
+            )
+        }
     }
 
     private func restoreManagedHistory(
         user: User,
-        repo: Repository
+        repo: Repository,
+        continuationGeneration: UInt64? = nil
     ) async throws -> ManagedRestoreOnlyRunResult {
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
             "managed_macos.history_restore"
@@ -403,7 +511,12 @@ final class MacManagedViewerService: ObservableObject {
             guard hasAccountAccess(scope: scope) else {
                 throw ManagedStorageError.invalidAuthorization
             }
-            guard let store = await repo.storeHandle() else {
+            let store: WhoopStore
+            do {
+                store = try await repo.activateManagedViewerStore(
+                    accountScopeHash: scope
+                )
+            } catch {
                 throw MacManagedViewerError.storeUnavailable
             }
             let authorization = try await authorization(
@@ -412,7 +525,10 @@ final class MacManagedViewerService: ObservableObject {
             )
             let operationValidator:
                 @Sendable () async throws -> Void = { [self] in
-                    try await validateAccountOperation(scope: scope)
+                    try await validateHistoryOperation(
+                        scope: scope,
+                        continuationGeneration: continuationGeneration
+                    )
                 }
             let coordinator = ManagedSyncCoordinator(
                 transport: try client(),
@@ -429,9 +545,13 @@ final class MacManagedViewerService: ObservableObject {
                 restoreDocuments: false
             )
             try await operationValidator()
-            if result.appliedChanges > 0 {
-                await repo.refresh()
-            }
+            // Mounting an already-populated account can legitimately produce a
+            // zero-delta restore. Always repopulate presentation caches, then
+            // revalidate after the suspension before publishing account state.
+            try await repo.refreshManagedViewer(
+                validateBeforePublication: operationValidator
+            )
+            try await operationValidator()
             historyLastUpdatedAt = Date()
             historyHasMore = result.hasMoreChanges
             AppDiagnosticsRecorder.shared.endOperation(
@@ -455,6 +575,133 @@ final class MacManagedViewerService: ObservableObject {
             )
             throw error
         }
+    }
+
+    private func scheduleHistoryContinuation(
+        scope: String,
+        repo: Repository
+    ) {
+        guard historyHasMore,
+              phase == .ready,
+              historyContinuationTask == nil else { return }
+
+        historyContinuationGeneration &+= 1
+        let generation = historyContinuationGeneration
+        isHistorySyncing = true
+        historyContinuationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await runHistoryContinuation(
+                scope: scope,
+                repo: repo,
+                generation: generation
+            )
+        }
+    }
+
+    private func runHistoryContinuation(
+        scope: String,
+        repo: Repository,
+        generation: UInt64
+    ) async {
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_macos.history_restore_continuation"
+        )
+        var outcome = "completed"
+        var fields: [String: String] = [:]
+        defer {
+            if historyContinuationGeneration == generation {
+                historyContinuationTask = nil
+                isHistorySyncing = false
+            }
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: outcome,
+                fields: fields
+            )
+        }
+
+        do {
+            guard historyContinuationGeneration == generation else {
+                outcome = "canceled"
+                fields = ["reason": "superseded"]
+                return
+            }
+            let summary = try await MacManagedHistoryContinuationRunner.run(
+                initialHasMoreChanges: true,
+                maxBatches:
+                    Self.maximumAutomaticHistoryContinuationBatches,
+                delayNanoseconds:
+                    Self.historyContinuationDelayNanoseconds,
+                validate: { [self] in
+                    guard historyContinuationGeneration == generation else {
+                        throw CancellationError()
+                    }
+                    try validateAccountOperation(scope: scope)
+                    guard phase == .ready else {
+                        throw ManagedStorageError.invalidAuthorization
+                    }
+                },
+                restoreNext: { [self] in
+                    try await restoreManagedHistory(
+                        user: currentUser(),
+                        repo: repo,
+                        continuationGeneration: generation
+                    )
+                }
+            )
+            guard historyContinuationGeneration == generation else {
+                outcome = "canceled"
+                fields = ["reason": "superseded"]
+                return
+            }
+            fields = [
+                "batches":
+                    String(
+                        min(
+                            summary.batches,
+                            Self.maximumAutomaticHistoryContinuationBatches
+                        )
+                    ),
+                "applied_changes":
+                    String(min(summary.appliedChanges, 10_000)),
+                "continuation":
+                    summary.hasMoreChanges
+                        ? (
+                            summary.reachedLimit
+                                ? "limit_reached"
+                                : "pending"
+                        )
+                        : "complete",
+            ]
+            status = String(
+                localized: summary.hasMoreChanges
+                    ? "History sync"
+                    : "History synced"
+            )
+        } catch is CancellationError {
+            outcome = "canceled"
+        } catch {
+            guard historyContinuationGeneration == generation else {
+                outcome = "canceled"
+                fields = ["reason": "superseded"]
+                return
+            }
+            outcome = Self.diagnosticOutcome(error)
+            fields = [
+                "failure_kind": Self.diagnosticFailureKind(error),
+            ]
+            if Self.shouldHideManagedHistory(for: error) {
+                await hideManagedHistory(repo: repo)
+            }
+            applyFailure(error)
+        }
+    }
+
+    private func cancelHistoryContinuation() {
+        historyContinuationGeneration &+= 1
+        historyContinuationTask?.cancel()
+        historyContinuationTask = nil
+        isHistorySyncing = false
     }
 
     private func loadManagedFriends(user: User) async throws -> Bool {
@@ -645,6 +892,20 @@ final class MacManagedViewerService: ObservableObject {
         }
     }
 
+    private func validateHistoryOperation(
+        scope: String,
+        continuationGeneration: UInt64?
+    ) throws {
+        try Task.checkCancellation()
+        if let continuationGeneration {
+            guard historyContinuationGeneration == continuationGeneration,
+                  phase == .ready else {
+                throw CancellationError()
+            }
+        }
+        try validateAccountOperation(scope: scope)
+    }
+
     private func enrollmentRequestID(
         scope: String,
         installationID: String
@@ -661,10 +922,66 @@ final class MacManagedViewerService: ObservableObject {
     }
 
     private func clearPresentation() {
+        cancelHistoryContinuation()
         clearSocialPresentation()
         historyLastUpdatedAt = nil
         historyHasMore = false
         lastUpdatedAt = nil
+    }
+
+    /// Invalidate continuation work before the store switch suspends. Otherwise
+    /// an already-running continuation can remount the account store while
+    /// deactivation is refreshing the local store.
+    private func hideManagedHistory(repo: Repository) async {
+        let wasBusy = isBusy
+        isBusy = true
+        defer { isBusy = wasBusy }
+        clearPresentation()
+        await repo.deactivateManagedViewerStore()
+    }
+
+    static func shouldHideManagedHistory(
+        for error: Error
+    ) -> Bool {
+        if let viewer = error as? MacManagedViewerError {
+            switch viewer {
+            case .unavailable, .emailVerificationRequired, .notSignedIn,
+                    .secureStorage, .firebaseProjectConflict:
+                return true
+            case .invalidCredentials, .storeUnavailable:
+                return false
+            }
+        }
+        if let storage = error as? ManagedStorageError {
+            switch storage {
+            case .invalidConfiguration, .invalidAuthorization,
+                    .authentication, .forbidden, .policyChanged:
+                return true
+            default:
+                return false
+            }
+        }
+        if terminalFirebaseAuthenticationLoss(error) {
+            return true
+        }
+        return false
+    }
+
+    static func terminalFirebaseAuthenticationLoss(
+        _ error: Error
+    ) -> Bool {
+        let value = error as NSError
+        guard value.domain == AuthErrors.domain,
+              let code = AuthErrorCode(rawValue: value.code) else {
+            return false
+        }
+        switch code {
+        case .invalidUserToken, .userTokenExpired, .userDisabled,
+                .userNotFound:
+            return true
+        default:
+            return false
+        }
     }
 
     private func clearSocialPresentation() {
@@ -678,6 +995,9 @@ final class MacManagedViewerService: ObservableObject {
         _ error: Error,
         enrollmentFailure: Bool = false
     ) {
+        if Self.shouldHideManagedHistory(for: error) {
+            clearPresentation()
+        }
         if let viewerError = error as? MacManagedViewerError {
             switch viewerError {
             case .emailVerificationRequired:
@@ -699,6 +1019,9 @@ final class MacManagedViewerService: ObservableObject {
             default:
                 break
             }
+        } else if Self.terminalFirebaseAuthenticationLoss(error) {
+            try? firebaseRuntime?.auth.signOut()
+            phase = .signedOut
         }
         if enrollmentFailure, phase == .ready {
             phase = .enrollmentRequired
@@ -828,6 +1151,9 @@ final class MacManagedViewerService: ObservableObject {
             )
         }
         if nsError.domain == AuthErrors.domain {
+            if terminalFirebaseAuthenticationLoss(error) {
+                return String(localized: "Sign in to NOOP again.")
+            }
             return String(
                 localized:
                     "NOOP could not sign in. Check the account details and retry."
@@ -838,6 +1164,16 @@ final class MacManagedViewerService: ObservableObject {
 
     private static func diagnosticOutcome(_ error: Error) -> String {
         if error is CancellationError { return "canceled" }
+        if let refresh = error as? RepositoryRefreshError {
+            switch refresh {
+            case .managedViewerInactive:
+                return "rejected"
+            case .superseded, .storeChanged:
+                return "canceled"
+            case .storeUnavailable, .sourceIndexUnavailable, .readFailed:
+                return "failed"
+            }
+        }
         if let value = error as? MacManagedViewerError {
             switch value {
             case .storeUnavailable:
@@ -855,11 +1191,24 @@ final class MacManagedViewerService: ObservableObject {
                 return "failed"
             }
         }
+        if terminalFirebaseAuthenticationLoss(error) {
+            return "rejected"
+        }
         return "failed"
     }
 
     private static func diagnosticFailureKind(_ error: Error) -> String {
         if error is CancellationError { return "canceled" }
+        if let refresh = error as? RepositoryRefreshError {
+            switch refresh {
+            case .managedViewerInactive: return "viewer_inactive"
+            case .storeUnavailable: return "store"
+            case .storeChanged: return "store_changed"
+            case .sourceIndexUnavailable: return "source_index"
+            case .readFailed: return "store_read"
+            case .superseded: return "superseded"
+            }
+        }
         if let value = error as? MacManagedViewerError {
             switch value {
             case .unavailable: return "configuration"
@@ -896,6 +1245,8 @@ final class MacManagedViewerService: ObservableObject {
             switch AuthErrorCode(rawValue: nsError.code) {
             case .networkError: return "network"
             case .tooManyRequests: return "rate_limit"
+            case .invalidUserToken, .userTokenExpired:
+                return "authentication"
             case .userDisabled: return "identity_disabled"
             case .invalidEmail, .wrongPassword, .userNotFound,
                     .invalidCredential:

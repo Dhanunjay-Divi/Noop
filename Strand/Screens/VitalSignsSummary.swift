@@ -98,6 +98,8 @@ struct BodyVitalReading: Identifiable {
     private static func sourceLabel(_ source: DailyMetricSource?, key: String) -> String? {
         guard let source else { return nil }
         switch source {
+        case .managedHistory:
+            return String(localized: "Account history")
         case .whoopImport:
             return String(localized: "Imported")
         case .noopComputed:
@@ -458,7 +460,8 @@ private struct VitalPoint: Equatable {
 
 private extension DailyMetricSource {
     static let editedSleepPrecedence: [DailyMetricSource] = [
-        .noopComputed, .whoopImport, .appleHealth, .localCache,
+        .noopComputed, .managedHistory, .whoopImport, .appleHealth,
+        .localCache,
     ]
 
     /// Source precedence for a vital, highest first. Skin temp deliberately omits Apple Health — it
@@ -467,9 +470,14 @@ private extension DailyMetricSource {
     static func vitalPrecedence(for key: String) -> [DailyMetricSource] {
         switch key {
         case "skin":
-            return [.whoopImport, .noopComputed, .localCache]
+            return [
+                .managedHistory, .whoopImport, .noopComputed, .localCache,
+            ]
         default:
-            return [.whoopImport, .noopComputed, .appleHealth, .localCache]
+            return [
+                .managedHistory, .whoopImport, .noopComputed, .appleHealth,
+                .localCache,
+            ]
         }
     }
 }

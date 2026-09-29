@@ -770,7 +770,7 @@ enum WindDownNudge {
             guard let minutes = row.metric.totalSleepMin else { return nil }
             let source: ReminderSleepSource
             switch row.source {
-            case .whoopImport, .noopComputed:
+            case .managedHistory, .whoopImport, .noopComputed:
                 source = .wearable
             case .appleHealth:
                 source = .appleHealth

@@ -35,6 +35,14 @@ public protocol ManagedStorageTransport: Sendable {
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob
 
+    func createRestore(
+        requestID: UUID,
+        dataClasses: [String],
+        includeDocuments: Bool,
+        includeDeletedDocuments: Bool,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedRestoreJob
+
     func availableChunks(
         dataClass: String,
         snapshotAt: String,
@@ -87,6 +95,24 @@ public extension ManagedStorageTransport {
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
         throw ManagedStorageError.invalidResponse
+    }
+
+    func createRestore(
+        requestID: UUID,
+        dataClasses: [String],
+        includeDocuments: Bool,
+        includeDeletedDocuments: Bool,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedRestoreJob {
+        guard includeDocuments else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return try await createRestore(
+            requestID: requestID,
+            dataClasses: dataClasses,
+            includeDeletedDocuments: includeDeletedDocuments,
+            authorization: authorization
+        )
     }
 
     func availableChunks(

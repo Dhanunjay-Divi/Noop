@@ -1010,12 +1010,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 14,
+      "occurrenceCount": 16,
       "owner": "project team",
       "path": "Strand/Collect/StorePaths.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "6d4144a9e8faa0723dd87539befd14835ecd006567edd7fa0ec8c0dae9e65a53"
+      "sha256": "c98c8c1f21fa6d835088fdc9513dd8b44a4e2689fc3ce909c953ac51d2419c94"
     },
     {
       "category": "core",
@@ -1172,12 +1172,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 100,
+      "occurrenceCount": 107,
       "owner": "project team",
       "path": "Strand/Data/Repository.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "b1ed616a076bccfeb77dc54ea655b34095dd19582ae093685b41aa3cd3c1f1c5"
+      "sha256": "a6e51c6f0c6fbeb2999bdcd0660c21fe3eb668a98a7d65bf26a88ebef0280bce"
     },
     {
       "category": "core",
@@ -1834,7 +1834,7 @@
       "path": "Strand/Screens/VitalSignsSummary.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "3030413c191b22f86f9f53af56c5f43dcbdc65a53197638dac517d353d09054a"
+      "sha256": "fa97c8357826aaaaa763e9fc9c88afebd2f3159bc407a5ddb45953e574168b32"
     },
     {
       "category": "core",
@@ -1946,12 +1946,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 3,
+      "occurrenceCount": 5,
       "owner": "project team",
       "path": "Strand/System/MacManagedViewerService.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "3c63da1618dcd0fafc511e8b1a8404e0eb2fbb03e3ab29a638fbdeff91d42eab"
+      "sha256": "ea24cabca73796c3fe72036afdedfed736d94ffa407a9a7d5cbfee302f9c3a40"
     },
     {
       "category": "core",
@@ -2041,7 +2041,7 @@
       "path": "Strand/System/WindDownNudge.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "14db8524909c0617704e87ae6d3a61948413a25c20f8c2240852c03c348cc8e0"
+      "sha256": "91d59fa7e8202364c513aa855594b28b139f374fb5e0f3f3acf34fa84b7a086f"
     },
     {
       "category": "core",

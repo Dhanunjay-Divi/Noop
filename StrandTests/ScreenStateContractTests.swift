@@ -81,7 +81,14 @@ final class ScreenStateContractTests: XCTestCase {
             root.contains("showStrengthTrainer = true")
         )
         XCTAssertTrue(
-            root.contains("selection = .workouts")
+            root.contains("select(.workouts)")
+        )
+        XCTAssertTrue(
+            root.contains(
+                "request.presentation == .lighterWorkoutOptions,\n"
+                    + "           !model.runtimeRole"
+                    + ".enforcesManagedViewerReadOnlyRoutes"
+            )
         )
         XCTAssertTrue(
             root.contains(

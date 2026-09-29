@@ -1,4 +1,9 @@
 import Foundation
+
+enum StorePathError: Error, Equatable {
+    case invalidManagedViewerAccountScope
+}
+
 enum StorePaths {
     /// `<AppSupport>/OpenWhoop/whoop.sqlite`, creating the directory if needed.
     static func defaultDatabasePath() throws -> String {
@@ -48,6 +53,50 @@ enum StorePaths {
         #endif
 
         return dbURL.path
+    }
+
+    /// A macOS managed viewer keeps every account's restored history in a
+    /// separate database. The path uses only the one-way account scope hash and
+    /// rejects anything that could escape the dedicated directory.
+    static func managedViewerDatabasePath(
+        accountScopeHash rawScope: String,
+        applicationSupportDirectory: URL? = nil
+    ) throws -> String {
+        let scope = try normalizedManagedViewerAccountScopeHash(rawScope)
+
+        let fm = FileManager.default
+        let appSupport = try applicationSupportDirectory
+            ?? fm.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+        let containerAppSupport = macOSProductionContainerAppSupport(
+            defaultingTo: appSupport
+        )
+        let base = containerAppSupport
+            .appendingPathComponent("OpenWhoop", isDirectory: true)
+            .appendingPathComponent("ManagedViewer", isDirectory: true)
+            .appendingPathComponent(scope, isDirectory: true)
+        try fm.createDirectory(
+            at: base,
+            withIntermediateDirectories: true
+        )
+        return base.appendingPathComponent("whoop.sqlite").path
+    }
+
+    static func normalizedManagedViewerAccountScopeHash(
+        _ rawScope: String
+    ) throws -> String {
+        let scope = rawScope.lowercased()
+        guard scope.range(
+            of: #"^[0-9a-f]{64}$"#,
+            options: .regularExpression
+        ) != nil else {
+            throw StorePathError.invalidManagedViewerAccountScope
+        }
+        return scope
     }
 
     /// On signed/production macOS builds the app runs sandboxed, so the real

@@ -10,6 +10,20 @@ enum RepositoryReadError: Error {
     case incompleteSleepSnapshot
 }
 
+enum RepositoryRefreshError: Error, Equatable {
+    case managedViewerInactive
+    case storeUnavailable
+    case storeChanged
+    case sourceIndexUnavailable
+    case readFailed
+    case superseded
+}
+
+enum RepositoryRefreshResult: Equatable {
+    case published
+    case unchanged
+}
+
 /// Runs dense auto-workout CPU work off the main actor while linking parent cancellation to the worker.
 /// Callers add checks between expensive phases so a dismissed/superseded scan cannot continue into the
 /// step query or classifier after its screen task has been canceled.
@@ -396,6 +410,7 @@ struct MetricSeriesResolution: Equatable, Sendable {
 /// Source provenance for daily rows before product surfaces merge them. The UI uses this to say
 /// where a vital came from without changing the stored data.
 enum DailyMetricSource: Equatable {
+    case managedHistory
     case whoopImport
     case noopComputed
     case appleHealth
@@ -403,6 +418,7 @@ enum DailyMetricSource: Equatable {
 
     var vitalPriority: Int {
         switch self {
+        case .managedHistory: return 0
         case .whoopImport:  return 0
         case .noopComputed: return 1
         case .appleHealth:  return 2
@@ -489,9 +505,11 @@ struct SleepWritebackRepositorySnapshot: Equatable, Sendable {
 /// A compact snapshot of how much history each source holds, fed to the Data Sources "Freshness
 /// Pipeline" card and the Android equivalent. Counts only , no per-day rows leave the refresh.
 struct RepositoryFreshness: Equatable, Sendable {
+    var managedDays: Int = 0
     var importedDays: Int = 0
     var computedDays: Int = 0
     var appleDays: Int = 0
+    var managedSleeps: Int = 0
     var importedSleeps: Int = 0
     var computedSleeps: Int = 0
     var earliestDay: String?
@@ -499,7 +517,10 @@ struct RepositoryFreshness: Equatable, Sendable {
 
     static let empty = RepositoryFreshness()
 
-    var hasAnyHistory: Bool { importedDays > 0 || computedDays > 0 || appleDays > 0 }
+    var hasAnyHistory: Bool {
+        managedDays > 0 || importedDays > 0 || computedDays > 0
+            || appleDays > 0
+    }
 }
 
 /// What `deleteSleepSession` hands back so a transient UNDO can restore the night (#65). Carries the
@@ -553,14 +574,53 @@ final class Repository: ObservableObject {
     /// #814) and the canonical imported id. Active strap FIRST so per-day dedup lets the measured/live row
     /// win over the imported one. Deduped, so a single-device install (active id == canonical) reads one id.
     var importedReadIds: [String] {
-        deviceId == canonicalDeviceId ? [deviceId] : [deviceId, canonicalDeviceId]
+        #if os(macOS)
+        if case .managedViewer = storeTarget {
+            return managedViewerReadIds
+        }
+        #endif
+        return deviceId == canonicalDeviceId
+            ? [deviceId]
+            : [deviceId, canonicalDeviceId]
     }
     /// The distinct COMPUTED ("-noop") source ids to union: the active strap's computed sibling and the
     /// canonical computed sibling. Same dedup rule as `importedReadIds`.
     var computedReadIds: [String] {
-        computedDeviceId == canonicalComputedId ? [computedDeviceId] : [computedDeviceId, canonicalComputedId]
+        #if os(macOS)
+        if case .managedViewer = storeTarget {
+            return []
+        }
+        #endif
+        return computedDeviceId == canonicalComputedId
+            ? [computedDeviceId]
+            : [computedDeviceId, canonicalComputedId]
     }
+
+    private enum StoreTarget: Equatable {
+        case local
+        #if os(macOS)
+        case managedViewer(accountScopeHash: String)
+        #endif
+    }
+
     private var store: WhoopStore?
+    private var storeTarget: StoreTarget = .local
+    private var storeGeneration: UInt64 = 0
+    #if os(macOS)
+    private var managedViewerReadIds: [String] = []
+    var isManagedViewerStoreActive: Bool {
+        if case .managedViewer = storeTarget { return true }
+        return false
+    }
+    #endif
+    #if DEBUG
+    private var storePathResolverForTesting:
+        ((String?) throws -> String)?
+    #if os(macOS)
+    private var managedViewerSourceIDsReaderForTesting:
+        ((WhoopStore) async throws -> [String])?
+    #endif
+    #endif
 
     /// Daily metrics (recovery/strain/sleep/HRV/RHR…) over the recent window, oldest→newest.
     @Published var days: [DailyMetric] = []
@@ -582,6 +642,10 @@ final class Repository: ObservableObject {
     /// data load on this so they reload when fresh strap data lands , `today?.day` alone is a stable
     /// date string within a day and would freeze e.g. the Today HR trend until the date rolls over.
     @Published private(set) var refreshSeq = 0
+    /// Rebuilds screen-local state when account switching replaces the complete
+    /// backing store. This prevents an in-flight direct read from repainting a
+    /// newly selected account with values returned by the previous store.
+    @Published private(set) var storeScopeRevision = 0
 
     /// Low-frequency write boundary mirrored from LiveState. Query-heavy screens read this directly so a
     /// cold mount during an already-running history offload cannot race a leaf view's first onAppear.
@@ -736,6 +800,121 @@ final class Repository: ObservableObject {
 
     init(deviceId: String) { self.deviceId = deviceId }
 
+    #if os(macOS)
+    /// Selects the isolated store for one authenticated managed-viewer account.
+    /// Existing local Mac history remains in the default store and is restored
+    /// when the account signs out.
+    func activateManagedViewerStore(
+        accountScopeHash: String
+    ) async throws -> WhoopStore {
+        let normalized = try StorePaths
+            .normalizedManagedViewerAccountScopeHash(
+                accountScopeHash
+            )
+        let target = StoreTarget.managedViewer(
+            accountScopeHash: normalized
+        )
+        if storeTarget != target {
+            switchStore(to: target)
+        }
+        guard let opened = await ensureStore(),
+              storeTarget == target else {
+            throw RepositoryReadError.storeUnavailable
+        }
+        return opened
+    }
+
+    /// Leaves the account-specific viewer database and returns the app to the
+    /// pre-existing local Mac store. Clearing happens before the asynchronous
+    /// open so account data cannot remain visible while the local store loads.
+    func deactivateManagedViewerStore() async {
+        guard storeTarget != .local else { return }
+        switchStore(to: .local)
+        await refresh()
+    }
+    #endif
+
+    private func switchStore(to target: StoreTarget) {
+        guard target != storeTarget else { return }
+        storeGeneration &+= 1
+        storeTarget = target
+        storeOpenTask?.cancel()
+        storeOpenTask = nil
+        storeOpenGeneration = nil
+        store = nil
+        #if os(macOS)
+        managedViewerReadIds = []
+        #endif
+        storeScopeRevision &+= 1
+        resetStoreBackedPresentation()
+    }
+
+    private func resetStoreBackedPresentation() {
+        // Invalidate any refresh already merging values from the previous
+        // store before clearing every long-lived screen cache.
+        refreshGen &+= 1
+        days = []
+        sleeps = []
+        editedSleepDays = []
+        importedSleep = [:]
+        freshness = .empty
+        vitalRows = []
+        loaded = false
+        refreshSeq &+= 1
+        historyWritesActive = false
+        hydrationSeq &+= 1
+        cycleTrackingSeq &+= 1
+        ageMetricsSeq &+= 1
+        workoutsSeq &+= 1
+        widgetAnchorMemo = WidgetAnchorMemo()
+        todayHistoryWideLoadedSeq = -1
+        todayHistoryWideCache = nil
+        insightsLoadedSeq = -1
+        insightsLoadedDayKey = ""
+        insightsCache = nil
+        appleHealthLoadedSeq = -1
+        appleHealthLoadedDayKey = ""
+        appleHealthCache = nil
+        todayDayScopedLoadedSeq = -1
+        todayDayScopedLoadedDayKey = ""
+        todayDayScopedCache = nil
+        liquidTodayLoadCache = nil
+        autoDetectCandidateCache = nil
+        autoDetectScanGeneration &+= 1
+        autoDetectScanTask?.cancel()
+        autoDetectScanTask = nil
+        autoDetectScanTaskKey = nil
+        #if DEBUG
+        loadFireCounts.removeAll()
+        #endif
+    }
+
+    private func databasePath(for target: StoreTarget) throws -> String {
+        #if DEBUG
+        if let storePathResolverForTesting {
+            switch target {
+            case .local:
+                return try storePathResolverForTesting(nil)
+            #if os(macOS)
+            case .managedViewer(let accountScopeHash):
+                return try storePathResolverForTesting(accountScopeHash)
+            #endif
+            }
+        }
+        #endif
+
+        switch target {
+        case .local:
+            return try StorePaths.defaultDatabasePath()
+        #if os(macOS)
+        case .managedViewer(let accountScopeHash):
+            return try StorePaths.managedViewerDatabasePath(
+                accountScopeHash: accountScopeHash
+            )
+        #endif
+        }
+    }
+
     /// Re-point the read model's ACTIVE-strap id at the device registry's active device, so a re-added
     /// strap's LIVE raw (written under its fresh "whoop-<uuid>" id) surfaces on the dashboard (#814).
     /// Called by AppModel on every registry active-id change. Idempotent + best-effort: an empty/unchanged
@@ -767,7 +946,39 @@ final class Repository: ObservableObject {
     #if DEBUG
     /// Inject a pre-opened store so unit tests can exercise the read facades (e.g. `timelineSeries`)
     /// against an in-memory `WhoopStore` without touching the on-disk path. DEBUG-only test seam.
-    func setStoreForTesting(_ s: WhoopStore) { self.store = s }
+    func setStoreForTesting(_ s: WhoopStore) {
+        storeGeneration &+= 1
+        storeOpenTask?.cancel()
+        storeOpenTask = nil
+        storeOpenGeneration = nil
+        store = s
+    }
+    #if os(macOS)
+    func setStorePathResolverForTesting(
+        _ resolver: @escaping (String?) throws -> String
+    ) {
+        storePathResolverForTesting = resolver
+        storeGeneration &+= 1
+        storeOpenTask?.cancel()
+        storeOpenTask = nil
+        storeOpenGeneration = nil
+        store = nil
+        resetStoreBackedPresentation()
+    }
+
+    func setManagedViewerSourceIDsReaderForTesting(
+        _ reader: ((WhoopStore) async throws -> [String])?
+    ) {
+        managedViewerSourceIDsReaderForTesting = reader
+    }
+
+    var managedViewerAccountScopeForTesting: String? {
+        guard case .managedViewer(let scope) = storeTarget else {
+            return nil
+        }
+        return scope
+    }
+    #endif
     /// Inject a deterministic success/failure into the strict age-metric history read. The production
     /// path remains the real active/canonical store union.
     var reconciliationDailyMetricsReaderForTesting:
@@ -801,10 +1012,13 @@ final class Repository: ObservableObject {
     /// Strict union read for durable reconciliation jobs. Dashboard reads remain best-effort, but a
     /// watermark must never interpret a failed source query as valid missing history.
     private func unionDailyMetricsStrict(
-        store: WhoopStore, from: String, to: String
+        store: WhoopStore,
+        ids: [String]? = nil,
+        from: String,
+        to: String
     ) async throws -> [DailyMetric] {
         var byDay: [String: DailyMetric] = [:]
-        for id in importedReadIds {
+        for id in ids ?? importedReadIds {
             for metric in try await store.dailyMetrics(deviceId: id, from: from, to: to) {
                 byDay[metric.day] = byDay[metric.day].map {
                     Self.coalesceDay($0, metric)
@@ -854,6 +1068,27 @@ final class Repository: ObservableObject {
         for id in importedReadIds {
             for p in (try? await store.metricSeries(deviceId: id, key: key, from: from, to: to)) ?? [] where byDay[p.day] == nil {
                 byDay[p.day] = p
+            }
+        }
+        return byDay.values.sorted { $0.day < $1.day }
+    }
+
+    private func unionMetricSeriesStrict(
+        store: WhoopStore,
+        ids: [String],
+        key: String,
+        from: String,
+        to: String
+    ) async throws -> [MetricPoint] {
+        var byDay: [String: MetricPoint] = [:]
+        for id in ids {
+            for point in try await store.metricSeries(
+                deviceId: id,
+                key: key,
+                from: from,
+                to: to
+            ) where byDay[point.day] == nil {
+                byDay[point.day] = point
             }
         }
         return byDay.values.sorted { $0.day < $1.day }
@@ -911,6 +1146,75 @@ final class Repository: ObservableObject {
         return rows
     }
 
+    private func sleepSessionsBySourceStrict(
+        store: WhoopStore,
+        ids: [String],
+        from: Int,
+        to: Int,
+        pageSize: Int = 4000
+    ) async throws -> [String: [CachedSleepSession]] {
+        guard pageSize > 0 else {
+            throw RepositoryReadError.incompleteSleepSnapshot
+        }
+        let maximumPagesPerSource = 64
+        var bySource: [String: [CachedSleepSession]] = [:]
+        for id in ids {
+            var rows: [CachedSleepSession] = []
+            var cursor = from
+            var pages = 0
+            while cursor <= to {
+                try Task.checkCancellation()
+                guard pages < maximumPagesPerSource else {
+                    throw RepositoryReadError.incompleteSleepSnapshot
+                }
+                let page: [CachedSleepSession]
+                #if DEBUG
+                if let reader = strictSleepSessionReaderForTesting {
+                    page = try await reader(id, cursor, to, pageSize)
+                } else {
+                    page = try await store.sleepSessions(
+                        deviceId: id,
+                        from: cursor,
+                        to: to,
+                        limit: pageSize
+                    )
+                }
+                #else
+                page = try await store.sleepSessions(
+                    deviceId: id,
+                    from: cursor,
+                    to: to,
+                    limit: pageSize
+                )
+                #endif
+                try Task.checkCancellation()
+                guard page.count <= pageSize else {
+                    throw RepositoryReadError.incompleteSleepSnapshot
+                }
+                guard !page.isEmpty else { break }
+                var previousStart: Int?
+                for session in page {
+                    guard session.startTs >= cursor,
+                          session.startTs <= to,
+                          previousStart.map({
+                              session.startTs > $0
+                          }) ?? true else {
+                        throw RepositoryReadError.incompleteSleepSnapshot
+                    }
+                    previousStart = session.startTs
+                }
+                rows.append(contentsOf: page)
+                pages += 1
+                guard page.count == pageSize else { break }
+                guard let lastStart = page.last?.startTs else { break }
+                guard lastStart < to, lastStart < Int.max else { break }
+                cursor = lastStart + 1
+            }
+            bySource[id] = rows
+        }
+        return bySource
+    }
+
     /// Best-effort source-preserving daily read. Local detailed-stage columns are replaced from the
     /// matching session payload before active/canonical coalescing.
     private func dailyMetricsBySource(
@@ -923,6 +1227,23 @@ final class Repository: ObservableObject {
         for id in ids {
             rows[id] = (try? await store.dailyMetrics(
                 deviceId: id, from: from, to: to)) ?? []
+        }
+        return rows
+    }
+
+    private func dailyMetricsBySourceStrict(
+        store: WhoopStore,
+        ids: [String],
+        from: String,
+        to: String
+    ) async throws -> [String: [DailyMetric]] {
+        var rows: [String: [DailyMetric]] = [:]
+        for id in ids {
+            rows[id] = try await store.dailyMetrics(
+                deviceId: id,
+                from: from,
+                to: to
+            )
         }
         return rows
     }
@@ -1233,6 +1554,7 @@ final class Repository: ObservableObject {
 
     /// In-flight open, so concurrent first-callers share ONE open instead of each opening their own.
     private var storeOpenTask: Task<WhoopStore?, Never>?
+    private var storeOpenGeneration: UInt64?
 
     private func ensureStore() async -> WhoopStore? {
         if let store { return store }
@@ -1242,9 +1564,39 @@ final class Repository: ObservableObject {
         // races past the `if let store` check while the others are awaiting the open, and they ALL open a
         // fresh connection and re-run quarantineIncompatibleDatabase (a thundering herd of DB opens on a
         // large library at the worst moment). Cache the in-flight open Task so concurrent callers join it.
-        if let storeOpenTask { return await storeOpenTask.value }
+        let generation = storeGeneration
+        if let storeOpenTask,
+           storeOpenGeneration == generation {
+            let opened = await storeOpenTask.value
+            guard generation == storeGeneration else {
+                return await ensureStore()
+            }
+            if let opened {
+                store = opened
+            }
+            if storeOpenGeneration == generation {
+                self.storeOpenTask = nil
+                storeOpenGeneration = nil
+            }
+            return opened
+        }
         let openTrace = AppDiagnosticsRecorder.shared.beginOperation("database.open")
-        let task = Task { [deviceId, openTrace] () -> WhoopStore? in
+        let path: String
+        do {
+            path = try databasePath(for: storeTarget)
+        } catch {
+            AppDiagnosticsRecorder.shared.endOperation(
+                openTrace,
+                outcome: "path_failed",
+                fields: [
+                    "failure_kind":
+                        AppDiagnosticsRecorder.failureKind(error),
+                ],
+                includeResourceSnapshot: true
+            )
+            return nil
+        }
+        let task = Task { [deviceId, openTrace, path] () -> WhoopStore? in
             var outcome = "failed"
             var failureKind: String?
             defer {
@@ -1258,12 +1610,8 @@ final class Repository: ObservableObject {
             // Don't swallow the open failure with `try?` (#222): an import-time open failure (e.g. the iOS
             // data-protected store while the device is locked) was previously invisible, surfacing only as
             // a generic "Couldn't open the local store." Log the real error so the cause is diagnosable.
-            let path: String
-            do {
-                path = try StorePaths.defaultDatabasePath()
-            } catch {
-                outcome = "path_failed"
-                failureKind = AppDiagnosticsRecorder.failureKind(error)
+            guard !Task.isCancelled else {
+                outcome = "canceled"
                 return nil
             }
             let s: WhoopStore
@@ -1274,19 +1622,50 @@ final class Repository: ObservableObject {
                 failureKind = AppDiagnosticsRecorder.failureKind(error)
                 return nil
             }
+            guard !Task.isCancelled else {
+                outcome = "canceled"
+                return nil
+            }
             try? await s.upsertDevice(id: deviceId, mac: nil, name: "Compatible band")
             outcome = "opened"
             return s
         }
         storeOpenTask = task
+        storeOpenGeneration = generation
         let opened = await task.value
-        if let opened { store = opened }
-        storeOpenTask = nil
+        guard generation == storeGeneration else {
+            return await ensureStore()
+        }
+        if let opened {
+            store = opened
+        }
+        if storeOpenGeneration == generation {
+            storeOpenTask = nil
+            storeOpenGeneration = nil
+        }
         return opened
     }
 
     /// Expose the shared store handle (used by the importer to persist mapped rows).
     func storeHandle() async -> WhoopStore? { await ensureStore() }
+
+    /// The legacy self-hosted uploader may use only the local store. Returning
+    /// the exact handle after a generation check prevents an account switch
+    /// during open from redirecting an old upload task into managed history.
+    func legacyRemoteSyncStoreHandle() async -> WhoopStore? {
+        #if os(macOS)
+        let generation = storeGeneration
+        guard storeTarget == .local,
+              let opened = await ensureStore(),
+              generation == storeGeneration,
+              storeTarget == .local else {
+            return nil
+        }
+        return opened
+        #else
+        return await ensureStore()
+        #endif
+    }
 
     /// CAPTURE-D (#797): the on-device DATA VOLUME read FRESH from the STORE (never the `@Published`
     /// dashboard caches), for the Display & Performance test mode's `dataVolume` line. dbRows is the raw
@@ -1325,6 +1704,9 @@ final class Repository: ObservableObject {
     /// backup captures everything. No-op (returns false) if no handle exists yet , the caller
     /// then copies the on-disk files as-is, which still includes the -wal sidecar.
     func checkpointForBackup() async -> Bool {
+        #if os(macOS)
+        guard storeTarget == .local else { return false }
+        #endif
         guard let store else { return false }
         do { try await store.checkpointWAL(); return true } catch { return false }
     }
@@ -1432,9 +1814,48 @@ final class Repository: ObservableObject {
     #endif
 
     func refresh(days nDays: Int = 4000) async {
+        do {
+            _ = try await performRefresh(
+                days: nDays,
+                strictReads: false,
+                validateBeforePublication: nil
+            )
+        } catch {
+            // The dashboard refresh remains best-effort for existing phone and
+            // local-Mac callers. Managed viewers use the throwing boundary below.
+        }
+    }
+
+    #if os(macOS)
+    @discardableResult
+    func refreshManagedViewer(
+        days nDays: Int = 4000,
+        validateBeforePublication:
+            @escaping @Sendable () async throws -> Void = {}
+    ) async throws -> RepositoryRefreshResult {
+        guard isManagedViewerStoreActive else {
+            throw RepositoryRefreshError.managedViewerInactive
+        }
+        return try await performRefresh(
+            days: nDays,
+            strictReads: true,
+            validateBeforePublication: validateBeforePublication
+        )
+    }
+    #endif
+
+    private func performRefresh(
+        days nDays: Int,
+        strictReads: Bool,
+        validateBeforePublication:
+            (@Sendable () async throws -> Void)?
+    ) async throws -> RepositoryRefreshResult {
         let refreshTrace = AppDiagnosticsRecorder.shared.beginOperation(
             "repository.refresh",
-            fields: ["requested_days": String(nDays)]
+            fields: [
+                "requested_days": String(nDays),
+                "mode": strictReads ? "managed_strict" : "best_effort",
+            ]
         )
         var diagnosticOutcome = "store_unavailable"
         var diagnosticFields: [String: String] = [:]
@@ -1446,7 +1867,54 @@ final class Repository: ObservableObject {
                 includeResourceSnapshot: true
             )
         }
-        guard let store = await ensureStore() else { return }
+        let refreshStoreGeneration = storeGeneration
+        guard let store = await ensureStore() else {
+            throw RepositoryRefreshError.storeUnavailable
+        }
+        guard refreshStoreGeneration == storeGeneration else {
+            diagnosticOutcome = "store_changed"
+            throw RepositoryRefreshError.storeChanged
+        }
+        var managedViewerRefresh = false
+        #if os(macOS)
+        if case .managedViewer = storeTarget {
+            managedViewerRefresh = true
+            do {
+                let sourceIDs: [String]
+                #if DEBUG
+                if let managedViewerSourceIDsReaderForTesting {
+                    sourceIDs = try await managedViewerSourceIDsReaderForTesting(
+                        store
+                    )
+                } else {
+                    sourceIDs = try await store.managedRestoreLocalSourceIDs()
+                }
+                #else
+                sourceIDs = try await store.managedRestoreLocalSourceIDs()
+                #endif
+                guard refreshStoreGeneration == storeGeneration else {
+                    diagnosticOutcome = "store_changed"
+                    throw RepositoryRefreshError.storeChanged
+                }
+                managedViewerReadIds = sourceIDs
+            } catch let error as RepositoryRefreshError {
+                throw error
+            } catch is CancellationError {
+                diagnosticOutcome = "canceled"
+                throw CancellationError()
+            } catch {
+                diagnosticOutcome = "source_index_failed"
+                diagnosticFields = [
+                    "failure_kind":
+                        AppDiagnosticsRecorder.failureKind(error),
+                ]
+                throw RepositoryRefreshError.sourceIndexUnavailable
+            }
+        } else if strictReads {
+            diagnosticOutcome = "store_changed"
+            throw RepositoryRefreshError.managedViewerInactive
+        }
+        #endif
         diagnosticOutcome = "reading"
         refreshGen &+= 1
         let myGen = refreshGen
@@ -1455,15 +1923,165 @@ final class Repository: ObservableObject {
         let toDay = Self.dayString(now.addingTimeInterval(86_400))
         let nowTs = Int(now.timeIntervalSince1970)
         let lo = nowTs - nDays * 86_400, hi = nowTs + 86_400
+        let importedSourceOrder = importedReadIds
+        let computedSourceOrder = computedReadIds
 
         // UNION the active strap (live raw, #814) with the canonical "my-whoop" import so a re-added strap's
         // live data AND the canonical history both surface, deduped per day (active strap wins). Collapses to
         // a single id on a single-device install (byte-identical to before).
-        let imported = await unionDailyMetrics(store: store, from: fromDay, to: toDay)
-        let computedDailyBySource = await dailyMetricsBySource(
-            store: store, ids: computedReadIds, from: fromDay, to: toDay)
-        let apple = (try? await store.dailyMetrics(deviceId: Self.appleHealthSource, from: fromDay, to: toDay)) ?? []
-        let activityFile = (try? await store.dailyMetrics(deviceId: Self.activityFileSource, from: fromDay, to: toDay)) ?? []
+        let imported: [DailyMetric]
+        let computedDailyBySource: [String: [DailyMetric]]
+        let apple: [DailyMetric]
+        let activityFile: [DailyMetric]
+        let importedSleepBySource: [String: [CachedSleepSession]]
+        let computedSleepBySource: [String: [CachedSleepSession]]
+        let perf: [MetricPoint]
+        let cons: [MetricPoint]
+        let need: [MetricPoint]
+        let debt: [MetricPoint]
+        do {
+            if strictReads {
+                imported = try await unionDailyMetricsStrict(
+                    store: store,
+                    ids: importedSourceOrder,
+                    from: fromDay,
+                    to: toDay
+                )
+                computedDailyBySource = try await dailyMetricsBySourceStrict(
+                    store: store,
+                    ids: computedSourceOrder,
+                    from: fromDay,
+                    to: toDay
+                )
+                apple = try await store.dailyMetrics(
+                    deviceId: Self.appleHealthSource,
+                    from: fromDay,
+                    to: toDay
+                )
+                activityFile = try await store.dailyMetrics(
+                    deviceId: Self.activityFileSource,
+                    from: fromDay,
+                    to: toDay
+                )
+                importedSleepBySource =
+                    try await sleepSessionsBySourceStrict(
+                        store: store,
+                        ids: importedSourceOrder,
+                        from: lo,
+                        to: hi
+                    )
+                computedSleepBySource =
+                    try await sleepSessionsBySourceStrict(
+                        store: store,
+                        ids: computedSourceOrder,
+                        from: lo,
+                        to: hi
+                    )
+                perf = try await unionMetricSeriesStrict(
+                    store: store,
+                    ids: importedSourceOrder,
+                    key: "sleep_performance",
+                    from: fromDay,
+                    to: toDay
+                )
+                cons = try await unionMetricSeriesStrict(
+                    store: store,
+                    ids: importedSourceOrder,
+                    key: "sleep_consistency",
+                    from: fromDay,
+                    to: toDay
+                )
+                need = try await unionMetricSeriesStrict(
+                    store: store,
+                    ids: importedSourceOrder,
+                    key: "sleep_need_min",
+                    from: fromDay,
+                    to: toDay
+                )
+                debt = try await unionMetricSeriesStrict(
+                    store: store,
+                    ids: importedSourceOrder,
+                    key: "sleep_debt_min",
+                    from: fromDay,
+                    to: toDay
+                )
+            } else {
+                imported = await unionDailyMetrics(
+                    store: store,
+                    from: fromDay,
+                    to: toDay
+                )
+                computedDailyBySource = await dailyMetricsBySource(
+                    store: store,
+                    ids: computedSourceOrder,
+                    from: fromDay,
+                    to: toDay
+                )
+                apple = (
+                    try? await store.dailyMetrics(
+                        deviceId: Self.appleHealthSource,
+                        from: fromDay,
+                        to: toDay
+                    )
+                ) ?? []
+                activityFile = (
+                    try? await store.dailyMetrics(
+                        deviceId: Self.activityFileSource,
+                        from: fromDay,
+                        to: toDay
+                    )
+                ) ?? []
+                importedSleepBySource = await sleepSessionsBySource(
+                    store: store,
+                    ids: importedSourceOrder,
+                    from: lo,
+                    to: hi
+                )
+                computedSleepBySource = await sleepSessionsBySource(
+                    store: store,
+                    ids: computedSourceOrder,
+                    from: lo,
+                    to: hi
+                )
+                perf = await unionMetricSeries(
+                    store: store,
+                    key: "sleep_performance",
+                    from: fromDay,
+                    to: toDay
+                )
+                cons = await unionMetricSeries(
+                    store: store,
+                    key: "sleep_consistency",
+                    from: fromDay,
+                    to: toDay
+                )
+                need = await unionMetricSeries(
+                    store: store,
+                    key: "sleep_need_min",
+                    from: fromDay,
+                    to: toDay
+                )
+                debt = await unionMetricSeries(
+                    store: store,
+                    key: "sleep_debt_min",
+                    from: fromDay,
+                    to: toDay
+                )
+            }
+        } catch is CancellationError {
+            diagnosticOutcome = "canceled"
+            throw CancellationError()
+        } catch {
+            diagnosticOutcome = "read_failed"
+            diagnosticFields = [
+                "failure_kind": AppDiagnosticsRecorder.failureKind(error),
+            ]
+            throw RepositoryRefreshError.readFailed
+        }
+        guard refreshStoreGeneration == storeGeneration else {
+            diagnosticOutcome = "store_changed"
+            throw RepositoryRefreshError.storeChanged
+        }
         AppDiagnosticsRecorder.shared.record(
             "repository.refresh.checkpoint",
             fields: [
@@ -1474,12 +2092,6 @@ final class Repository: ObservableObject {
                 "activity_rows": String(activityFile.count),
             ]
         )
-        let importedSleepBySource = await sleepSessionsBySource(
-            store: store, ids: importedReadIds, from: lo, to: hi)
-        let computedSleepBySource = await sleepSessionsBySource(
-            store: store, ids: computedReadIds, from: lo, to: hi)
-        let importedSourceOrder = importedReadIds
-        let computedSourceOrder = computedReadIds
         let impSleep = Self.dedupBlocks(
             importedSourceOrder.flatMap { importedSleepBySource[$0] ?? [] })
         let compSleep = Self.dedupBlocks(
@@ -1493,12 +2105,6 @@ final class Repository: ObservableObject {
             ]
         )
 
-        // Export-verbatim sleep figures (long-format metricSeries rows from WhoopImporter).
-        // SleepView prefers these per day over its APPROXIMATE recomputations.
-        let perf = await unionMetricSeries(store: store, key: "sleep_performance", from: fromDay, to: toDay)
-        let cons = await unionMetricSeries(store: store, key: "sleep_consistency", from: fromDay, to: toDay)
-        let need = await unionMetricSeries(store: store, key: "sleep_need_min", from: fromDay, to: toDay)
-        let debt = await unionMetricSeries(store: store, key: "sleep_debt_min", from: fromDay, to: toDay)
         AppDiagnosticsRecorder.shared.record(
             "repository.refresh.checkpoint",
             fields: [
@@ -1552,9 +2158,18 @@ final class Repository: ObservableObject {
                 ),
                 sleeps: Self.mergeSleep(imported: impSleep, computed: compSleep),
                 editedSleepDays: editedDays,
-                vitalRows: Self.sourceRows(imported: imported, computed: computed, apple: apple),
+                vitalRows: Self.sourceRows(
+                    imported: imported,
+                    computed: computed,
+                    apple: apple,
+                    importedSource:
+                        managedViewerRefresh
+                            ? .managedHistory
+                            : .whoopImport
+                ),
                 freshness: Self.computeFreshness(imported: imported, computed: computed, apple: apple,
-                                                 importedSleeps: impSleep, computedSleeps: compSleep))
+                                                 importedSleeps: impSleep, computedSleeps: compSleep,
+                                                 managedHistory: managedViewerRefresh))
         }.value
         AppDiagnosticsRecorder.shared.record(
             "repository.refresh.checkpoint",
@@ -1565,11 +2180,38 @@ final class Repository: ObservableObject {
             ]
         )
 
+        guard refreshStoreGeneration == storeGeneration else {
+            diagnosticOutcome = "store_changed"
+            throw RepositoryRefreshError.storeChanged
+        }
         // Generation guard (#review): if a newer refresh() started while this one merged off-actor, drop
         // this now-stale result so it can't clobber the newer caches or re-fire loadAll out of order.
         guard myGen == refreshGen else {
             diagnosticOutcome = "superseded"
-            return
+            throw RepositoryRefreshError.superseded
+        }
+        if let validateBeforePublication {
+            do {
+                try await validateBeforePublication()
+            } catch is CancellationError {
+                diagnosticOutcome = "canceled"
+                throw CancellationError()
+            } catch {
+                diagnosticOutcome = "validation_failed"
+                diagnosticFields = [
+                    "failure_kind":
+                        AppDiagnosticsRecorder.failureKind(error),
+                ]
+                throw error
+            }
+            guard refreshStoreGeneration == storeGeneration else {
+                diagnosticOutcome = "store_changed"
+                throw RepositoryRefreshError.storeChanged
+            }
+            guard myGen == refreshGen else {
+                diagnosticOutcome = "superseded"
+                throw RepositoryRefreshError.superseded
+            }
         }
 
         // DIFF before publishing (FIX 3): if this refresh produced byte-identical caches AND we've already
@@ -1589,7 +2231,7 @@ final class Repository: ObservableObject {
                 "days": String(merged.days.count),
                 "sleeps": String(merged.sleeps.count),
             ]
-            return
+            return .unchanged
         }
 
         // One consistent publish per refresh: assign every cache, flip `loaded`, then bump `refreshSeq` so
@@ -1608,19 +2250,27 @@ final class Repository: ObservableObject {
             "sleeps": String(merged.sleeps.count),
             "vital_rows": String(merged.vitalRows.count),
         ]
+        return .published
     }
 
     /// Per-source coverage counts for the Freshness Pipeline card. Pure over the rows already read.
     /// `nonisolated` (FIX 3) so `refresh()`'s detached merge task can call it off the main actor.
-    nonisolated private static func computeFreshness(imported: [DailyMetric], computed: [DailyMetric],
-                                         apple: [DailyMetric], importedSleeps: [CachedSleepSession],
-                                         computedSleeps: [CachedSleepSession]) -> RepositoryFreshness {
+    nonisolated private static func computeFreshness(
+        imported: [DailyMetric],
+        computed: [DailyMetric],
+        apple: [DailyMetric],
+        importedSleeps: [CachedSleepSession],
+        computedSleeps: [CachedSleepSession],
+        managedHistory: Bool
+    ) -> RepositoryFreshness {
         let days = (imported + computed + apple).map(\.day)
         return RepositoryFreshness(
-            importedDays: imported.count,
+            managedDays: managedHistory ? imported.count : 0,
+            importedDays: managedHistory ? 0 : imported.count,
             computedDays: computed.count,
             appleDays: apple.count,
-            importedSleeps: importedSleeps.count,
+            managedSleeps: managedHistory ? importedSleeps.count : 0,
+            importedSleeps: managedHistory ? 0 : importedSleeps.count,
             computedSleeps: computedSleeps.count,
             earliestDay: days.min(),
             latestDay: days.max()
@@ -1722,9 +2372,13 @@ final class Repository: ObservableObject {
     /// One entry per (source, day) , the consumer resolves precedence per metric (imported > computed
     /// > Apple); ordered by day, then source priority, so a stable list reaches the UI.
     /// `nonisolated` (FIX 3) so `refresh()`'s detached merge task can call it off the main actor.
-    nonisolated private static func sourceRows(imported: [DailyMetric], computed: [DailyMetric],
-                                   apple: [DailyMetric]) -> [SourcedDailyMetric] {
-        (imported.map { SourcedDailyMetric(metric: $0, source: .whoopImport) }
+    nonisolated private static func sourceRows(
+        imported: [DailyMetric],
+        computed: [DailyMetric],
+        apple: [DailyMetric],
+        importedSource: DailyMetricSource = .whoopImport
+    ) -> [SourcedDailyMetric] {
+        (imported.map { SourcedDailyMetric(metric: $0, source: importedSource) }
             + computed.map { SourcedDailyMetric(metric: $0, source: .noopComputed) }
             + apple.map { SourcedDailyMetric(metric: $0, source: .appleHealth) })
             .sorted { lhs, rhs in

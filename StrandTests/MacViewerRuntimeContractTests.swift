@@ -1,3 +1,4 @@
+import FirebaseAuth
 import XCTest
 @testable import Strand
 
@@ -6,12 +7,20 @@ final class MacViewerRuntimeContractTests: XCTestCase {
         XCTAssertEqual(AppRuntimeRole.currentPlatform, .managedViewer)
         XCTAssertFalse(AppRuntimeRole.currentPlatform.allowsLocalCollection)
         XCTAssertFalse(AppRuntimeRole.currentPlatform.requiresCollectorOnboarding)
-        XCTAssertTrue(AppRuntimeRole.currentPlatform.allowsLocalAnalysisAndGuidance)
+        XCTAssertFalse(AppRuntimeRole.currentPlatform.allowsLocalAnalysisAndGuidance)
+        XCTAssertTrue(
+            AppRuntimeRole.currentPlatform
+                .enforcesManagedViewerReadOnlyRoutes
+        )
         XCTAssertTrue(AppRuntimeRole.currentPlatform.hasManagedViewerTransport)
         XCTAssertTrue(AppRuntimeRole.currentPlatform.canPresentOperationalShell)
         XCTAssertTrue(AppRuntimeRole.phoneCollector.allowsLocalCollection)
         XCTAssertTrue(AppRuntimeRole.phoneCollector.requiresCollectorOnboarding)
         XCTAssertTrue(AppRuntimeRole.phoneCollector.allowsLocalAnalysisAndGuidance)
+        XCTAssertFalse(
+            AppRuntimeRole.phoneCollector
+                .enforcesManagedViewerReadOnlyRoutes
+        )
         XCTAssertFalse(AppRuntimeRole.phoneCollector.hasManagedViewerTransport)
         XCTAssertTrue(AppRuntimeRole.phoneCollector.canPresentOperationalShell)
     }
@@ -136,6 +145,414 @@ final class MacViewerRuntimeContractTests: XCTestCase {
         )
     }
 
+    func testManagedViewerStartupSkipsLegacyBackupSyncAndGuidanceWorkers()
+        throws
+    {
+        let root = try text("Strand/App/RootView.swift")
+        let startup = try slice(
+            root,
+            from: "        .task {\n",
+            to: "        .onChangeCompat(of: repo.refreshSeq) { _ in\n"
+        )
+        XCTAssertTrue(
+            startup.contains(
+                "guard model.runtimeRole.allowsLocalCollection,"
+            )
+        )
+        XCTAssertTrue(
+            startup.contains(
+                "!repo.isManagedViewerStoreActive else { return }"
+            )
+        )
+        XCTAssertTrue(startup.contains("FolderBackup.catchUpIfDue("))
+        XCTAssertTrue(startup.contains("RemoteSyncService.catchUpIfDue("))
+
+        let startupRange = try XCTUnwrap(root.range(of: startup))
+        let refreshHookStart = try XCTUnwrap(
+            root.range(
+                of: "        .onChangeCompat(of: repo.refreshSeq) { _ in\n",
+                range: startupRange.upperBound..<root.endIndex
+            )
+        ).lowerBound
+        let refreshHookEnd = try XCTUnwrap(
+            root.range(
+                of: "        // Honour a cross-screen request",
+                range: refreshHookStart..<root.endIndex
+            )
+        ).lowerBound
+        let refreshHook = String(root[refreshHookStart..<refreshHookEnd])
+        XCTAssertTrue(
+            refreshHook.contains(
+                "guard model.runtimeRole.allowsLocalCollection,"
+            )
+        )
+        XCTAssertTrue(
+            refreshHook.contains(
+                "!repo.isManagedViewerStoreActive else { return }"
+            )
+        )
+        XCTAssertTrue(
+            refreshHook.contains("RemoteSyncService.catchUpIfDue(")
+        )
+
+        let onAppear = try slice(
+            root,
+            from: "        .onAppear {\n",
+            to: "        .onReceive("
+        )
+        XCTAssertTrue(
+            onAppear.contains(
+                "if model.runtimeRole.allowsLocalAnalysisAndGuidance,"
+            )
+        )
+        XCTAssertTrue(
+            onAppear.contains(
+                "!repo.isManagedViewerStoreActive {"
+            )
+        )
+        XCTAssertTrue(
+            onAppear.contains(
+                "DailyReviewNotifications.restoreScheduleIfAuthorized()"
+            )
+        )
+        XCTAssertTrue(
+            onAppear.contains(
+                "await repo.reconcileDailyReviewJournalReminders()"
+            )
+        )
+    }
+
+    func testManagedViewerRoutesAreReadOnlyAndMutationRoutesAreUnavailable()
+        throws
+    {
+        let allowed = Set(
+            NavItem.allCases.filter(\.isAvailableInManagedViewer)
+        )
+        XCTAssertEqual(
+            allowed,
+            Set([
+                .today, .friends, .explore, .compare, .trends, .health,
+                .stress, .fusedRecord,
+            ])
+        )
+        XCTAssertTrue(
+            [
+                NavItem.intelligence, .insightsHub, .coach, .live, .breathe,
+                .intervals, .insights, .sleep, .workouts, .nutrition,
+                .labBook, .rhythm, .appleHealth, .xiaomi, .dataSources,
+                .backupSync, .devices, .notifications, .automation,
+                .smartAlarm, .safety, .settings, .testCentre,
+            ].allSatisfy { !$0.isAvailableInManagedViewer }
+        )
+
+        let root = try text("Strand/App/RootView.swift")
+        let selection = try slice(
+            root,
+            from: "    private func select(_ item: NavItem) {\n",
+            to: "    /// The filter text that actually applies"
+        )
+        XCTAssertTrue(
+            selection.contains(
+                "model.runtimeRole.enforcesManagedViewerReadOnlyRoutes"
+            )
+        )
+        XCTAssertFalse(selection.contains("repo.isManagedViewerStoreActive"))
+        XCTAssertTrue(selection.contains("!item.isAvailableInManagedViewer"))
+        XCTAssertTrue(selection.contains("selection = .today"))
+
+        let visibility = try slice(
+            root,
+            from: "    private func visibleItems(in group: NavGroup)",
+            to: "    /// One selectable destination row"
+        )
+        XCTAssertTrue(
+            visibility.contains(
+                "model.runtimeRole.enforcesManagedViewerReadOnlyRoutes"
+            )
+        )
+        XCTAssertFalse(visibility.contains("repo.isManagedViewerStoreActive"))
+        XCTAssertTrue(
+            visibility.contains("roleItems.filter(\\.isAvailableInManagedViewer)")
+        )
+
+        let detail = try slice(
+            root,
+            from: "    @ViewBuilder private var detail: some View {\n",
+            to: "    @ViewBuilder\n    private func destination("
+        )
+        XCTAssertTrue(detail.contains("!selected.isAvailableInManagedViewer"))
+        XCTAssertTrue(detail.contains("MacCollectorPhoneOnlyView()"))
+        XCTAssertTrue(
+            detail.contains(
+                "model.runtimeRole.enforcesManagedViewerReadOnlyRoutes\n"
+                    + "                        && selected != .friends"
+            )
+        )
+        XCTAssertTrue(detail.contains(".disabled("))
+        XCTAssertTrue(root.contains(".id(\n                        \"\\(repo.storeScopeRevision):\""))
+        XCTAssertTrue(
+            root.contains(
+                ".onChangeCompat(of: repo.storeScopeRevision)"
+            )
+        )
+
+        let compare = try text("Strand/Screens/CompareView.swift")
+        XCTAssertTrue(
+            root.contains(
+                "CompareView(\n"
+                    + "                allowsScoreRefresh:\n"
+                    + "                    model.runtimeRole"
+                    + ".allowsLocalAnalysisAndGuidance"
+            )
+        )
+        let writeBoundary = try slice(
+            compare,
+            from: "    private func loadOfficialReference() async {\n",
+            to: "    private var officialReferenceSection: some View {\n"
+        )
+        let readOnlyGuard = try XCTUnwrap(
+            writeBoundary.range(of: "guard allowsScoreRefresh else")
+        )
+        let rescore = try XCTUnwrap(
+            writeBoundary.range(of: "intelligence.analyzeRecent(")
+        )
+        let calibrationWrite = try XCTUnwrap(
+            writeBoundary.range(
+                of: "personalCalibrationStore.saveValidated("
+            )
+        )
+        XCTAssertLessThan(readOnlyGuard.lowerBound, rescore.lowerBound)
+        XCTAssertLessThan(
+            readOnlyGuard.lowerBound,
+            calibrationWrite.lowerBound
+        )
+    }
+
+    func testManagedHistoryRefreshesZeroDeltaStoreAndRefencesPublication()
+        throws
+    {
+        let viewer = try text(
+            "Strand/System/MacManagedViewerService.swift"
+        )
+        let restore = try slice(
+            viewer,
+            from: "    private func restoreManagedHistory(\n",
+            to: "    private func scheduleHistoryContinuation(\n"
+        )
+        XCTAssertFalse(
+            restore.contains("if result.appliedChanges > 0"),
+            "An already-populated account store must refresh after a zero-delta restore."
+        )
+        let refresh = try XCTUnwrap(
+            restore.range(
+                of: "            try await repo.refreshManagedViewer(\n"
+            )
+        )
+        XCTAssertTrue(
+            restore.contains(
+                "validateBeforePublication: operationValidator"
+            )
+        )
+        let postRefreshValidation = try XCTUnwrap(
+            restore.range(
+                of: "            try await operationValidator()\n",
+                range: refresh.upperBound..<restore.endIndex
+            )
+        )
+        let historyPublication = try XCTUnwrap(
+            restore.range(of: "            historyLastUpdatedAt = Date()\n")
+        )
+        XCTAssertLessThan(
+            refresh.lowerBound,
+            postRefreshValidation.lowerBound
+        )
+        XCTAssertLessThan(
+            postRefreshValidation.lowerBound,
+            historyPublication.lowerBound
+        )
+    }
+
+    func testStaleHistoryContinuationCannotPublishOrDeactivateNewerAccount()
+        throws
+    {
+        let viewer = try text(
+            "Strand/System/MacManagedViewerService.swift"
+        )
+        let run = try slice(
+            viewer,
+            from: "    private func runHistoryContinuation(\n",
+            to: "    private func cancelHistoryContinuation()"
+        )
+        let generationFence =
+            "guard historyContinuationGeneration == generation else"
+        XCTAssertGreaterThanOrEqual(
+            run.components(separatedBy: generationFence).count - 1,
+            3,
+            "Continuation start, success publication, and failure side effects "
+                + "must each reject a stale generation."
+        )
+        XCTAssertTrue(
+            run.contains("continuationGeneration: generation"),
+            "The inner restore must carry the same continuation generation "
+                + "through its repository publication validator."
+        )
+
+        let success = try slice(
+            run,
+            from: "            let summary = try await ",
+            to: "        } catch is CancellationError"
+        )
+        let successFence = try XCTUnwrap(success.range(of: generationFence))
+        let statusPublish = try XCTUnwrap(success.range(of: "            status = "))
+        XCTAssertLessThan(
+            successFence.lowerBound,
+            statusPublish.lowerBound,
+            "A stale continuation must not publish status into a newer account."
+        )
+
+        let failureStart = try XCTUnwrap(
+            run.range(of: "        } catch {\n", options: .backwards)
+        ).upperBound
+        let failure = String(run[failureStart...])
+        let failureFence = try XCTUnwrap(failure.range(of: generationFence))
+        let hideHistory = try XCTUnwrap(
+            failure.range(of: "await hideManagedHistory(repo: repo)")
+        )
+        let failurePublish = try XCTUnwrap(
+            failure.range(of: "applyFailure(error)")
+        )
+        XCTAssertLessThan(
+            failureFence.lowerBound,
+            hideHistory.lowerBound,
+            "A stale continuation must not deactivate the newer account store."
+        )
+        XCTAssertLessThan(
+            failureFence.lowerBound,
+            failurePublish.lowerBound,
+            "A stale continuation must not publish failure into a newer account."
+        )
+
+        let cancel = try slice(
+            viewer,
+            from: "    private func cancelHistoryContinuation() {\n",
+            to: "    private func loadManagedFriends("
+        )
+        let generationAdvance = try XCTUnwrap(
+            cancel.range(of: "historyContinuationGeneration &+= 1")
+        )
+        let taskCancel = try XCTUnwrap(
+            cancel.range(of: "historyContinuationTask?.cancel()")
+        )
+        XCTAssertLessThan(
+            generationAdvance.lowerBound,
+            taskCancel.lowerBound,
+            "Cancellation must invalidate the generation before the task can "
+                + "resume from suspension."
+        )
+
+        let hide = try slice(
+            viewer,
+            from: "    private func hideManagedHistory(repo: Repository) async {\n",
+            to: "    static func shouldHideManagedHistory("
+        )
+        let busyBarrier = try XCTUnwrap(
+            hide.range(of: "isBusy = true")
+        )
+        let clear = try XCTUnwrap(
+            hide.range(of: "clearPresentation()")
+        )
+        let deactivation = try XCTUnwrap(
+            hide.range(of: "await repo.deactivateManagedViewerStore()")
+        )
+        XCTAssertLessThan(
+            busyBarrier.lowerBound,
+            clear.lowerBound,
+            "Terminal history handling must close service entry guards before "
+                + "clearing continuation state."
+        )
+        XCTAssertLessThan(
+            clear.lowerBound,
+            deactivation.lowerBound,
+            "Terminal history handling must invalidate continuation work before "
+                + "the suspending store switch."
+        )
+        XCTAssertTrue(
+            hide.contains("defer { isBusy = wasBusy }"),
+            "The entry barrier must remain active across the suspending store "
+                + "switch and restore its caller-owned busy state afterward."
+        )
+        XCTAssertEqual(
+            viewer.components(
+                separatedBy: "await hideManagedHistory(repo: repo)"
+            ).count - 1,
+            7,
+            "Every terminal catch path must share the cancel-before-deactivate helper."
+        )
+        let reconcile = try slice(
+            viewer,
+            from: "    private func reconcile(\n",
+            to: "    private func loadManagedViewer("
+        )
+        XCTAssertTrue(
+            reconcile.contains(
+                "            } catch ManagedStorageError.authentication,\n"
+                    + "                    ManagedStorageError.forbidden {\n"
+                    + "                await hideManagedHistory(repo: repo)\n"
+            ),
+            "The post-load authentication catch must invalidate continuation "
+                + "work before deactivating the account store."
+        )
+    }
+
+    @MainActor
+    func testTerminalFirebaseAuthHidesHistoryButTransientFailuresDoNot() {
+        let terminalCodes: [AuthErrorCode] = [
+            .invalidUserToken,
+            .userTokenExpired,
+            .userDisabled,
+            .userNotFound,
+        ]
+        for code in terminalCodes {
+            let error = NSError(
+                domain: AuthErrors.domain,
+                code: code.rawValue
+            )
+            XCTAssertTrue(
+                MacManagedViewerService
+                    .terminalFirebaseAuthenticationLoss(error),
+                "\(code) should require a fresh sign-in"
+            )
+            XCTAssertTrue(
+                MacManagedViewerService.shouldHideManagedHistory(for: error),
+                "\(code) must hide the prior account's cached history"
+            )
+        }
+
+        for code in [AuthErrorCode.networkError, .tooManyRequests] {
+            let error = NSError(
+                domain: AuthErrors.domain,
+                code: code.rawValue
+            )
+            XCTAssertFalse(
+                MacManagedViewerService
+                    .terminalFirebaseAuthenticationLoss(error),
+                "\(code) is transient and must retain cached history"
+            )
+            XCTAssertFalse(
+                MacManagedViewerService.shouldHideManagedHistory(for: error),
+                "\(code) must not hide a valid account's cached history"
+            )
+        }
+
+        let offline = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorNotConnectedToInternet
+        )
+        XCTAssertFalse(
+            MacManagedViewerService.shouldHideManagedHistory(for: offline)
+        )
+    }
+
     func testMacEntitlementDoesNotGrantBluetoothCollectorAccess() throws {
         let project = try text("project.yml")
         let entitlements = try text("Strand/Resources/Strand.entitlements")
@@ -211,7 +628,7 @@ final class MacViewerRuntimeContractTests: XCTestCase {
         XCTAssertTrue(viewer.contains("WhoopManagedSyncStateStore("))
         XCTAssertTrue(viewer.contains("WhoopManagedRestoreApplier(store: store)"))
         XCTAssertTrue(viewer.contains(#""managed_macos.history_restore""#))
-        XCTAssertTrue(viewer.contains("await repo.refresh()"))
+        XCTAssertTrue(viewer.contains("try await repo.refreshManagedViewer("))
         XCTAssertTrue(
             try text("Strand/App/RootView.swift").contains(
                 "MacManagedViewerService.shared.bootstrap(repo: repo)"

@@ -105,6 +105,21 @@ final class StressModelCarryTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(model?.baselineDays ?? 0, 7)
     }
 
+    func testSourceAwareModelUsesManagedAccountHistory() {
+        let managed = variedDays(startDay: 1, count: 12, month: 7).map {
+            SourcedDailyMetric(metric: $0, source: .managedHistory)
+        }
+        let apple = variedDays(startDay: 1, count: 20, month: 6).map {
+            SourcedDailyMetric(metric: $0, source: .appleHealth)
+        }
+
+        let model = StressModel(sourceRows: apple + managed)
+
+        XCTAssertEqual(model?.sourceTitle, "Account history")
+        XCTAssertNil(model?.sourceNote)
+        XCTAssertGreaterThanOrEqual(model?.baselineDays ?? 0, 7)
+    }
+
     func testSourceAwareModelNeverCombinesShortSourcesIntoBaseline() {
         let direct = variedDays(startDay: 1, count: 4, month: 7).map {
             SourcedDailyMetric(metric: $0, source: .noopComputed)

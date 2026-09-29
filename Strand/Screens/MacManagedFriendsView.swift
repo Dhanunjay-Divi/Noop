@@ -245,7 +245,7 @@ struct MacManagedFriendsView: View {
                 }
                 Spacer(minLength: 12)
                 NoopButton(
-                    service.isBusy ? "Syncing…" : "Sync now",
+                    service.isWorking ? "Syncing…" : "Sync now",
                     systemImage: "arrow.triangle.2.circlepath",
                     kind: .secondary
                 ) {
@@ -253,7 +253,7 @@ struct MacManagedFriendsView: View {
                         await service.refresh(repo: repo)
                     }
                 }
-                .disabled(service.isBusy)
+                .disabled(service.isWorking)
             }
         }
     }
@@ -294,7 +294,9 @@ struct MacManagedFriendsView: View {
                 }
                 Spacer(minLength: 12)
                 Button {
-                    service.signOut()
+                    Task {
+                        await service.signOut(repo: repo)
+                    }
                 } label: {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
                         .frame(
@@ -458,7 +460,9 @@ struct MacManagedFriendsView: View {
 
     private var signOutButton: some View {
         Button("Sign out on this Mac") {
-            service.signOut()
+            Task {
+                await service.signOut(repo: repo)
+            }
         }
         .buttonStyle(.plain)
         .font(StrandFont.caption)

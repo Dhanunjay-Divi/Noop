@@ -85,6 +85,8 @@ final class ManagedHistoryExportTests: XCTestCase {
             await transport.documentIncludeDeletedValues()
         let restoreIncludeDeletedValues =
             await transport.restoreIncludeDeletedValues()
+        let restoreIncludeDocumentValues =
+            await transport.restoreIncludeDocumentValues()
         let refreshRequests = await authorizations.refreshRequests()
         let reportedProgress = await progress.values()
         XCTAssertEqual(recordedEntries.count, 4)
@@ -93,12 +95,56 @@ final class ManagedHistoryExportTests: XCTestCase {
         XCTAssertEqual(documentPageStarts, [nil, firstDocument.documentID])
         XCTAssertEqual(documentIncludeDeletedValues, [false, false])
         XCTAssertEqual(restoreIncludeDeletedValues, [false])
+        XCTAssertEqual(restoreIncludeDocumentValues, [true])
         XCTAssertEqual(
             refreshRequests,
             [false, false, true, false, false, false, false, false, false]
         )
         XCTAssertEqual(reportedProgress.last?.phase, .finalizing)
         XCTAssertEqual(reportedProgress.last?.completedObjects, 4)
+    }
+
+    func testExportExcludesDeletedDocumentsFromSelectionAndArchive() async throws {
+        let active = makeDocument(
+            id: UUID(uuidString: "41000000-0000-5000-8000-000000000001")!,
+            updatedAt: "2026-09-04T10:00:00Z"
+        )
+        let deleted = makeDocument(
+            id: UUID(uuidString: "41000000-0000-5000-8000-000000000002")!,
+            updatedAt: "2026-09-04T11:00:00Z",
+            deletedAt: "2026-09-04T11:00:00Z"
+        )
+        let transport = ExportTransport(
+            chunks: [],
+            chunkData: [:],
+            documents: [active, deleted]
+        )
+        let entries = ExportEntryRecorder()
+
+        let manifest = try await ManagedHistoryExporter(
+            transport: transport
+        ).export(
+            dataClasses: ["essential_timeseries"],
+            authorization: { _ in try Self.authorization() },
+            consume: { entry in await entries.append(entry) }
+        )
+
+        XCTAssertEqual(manifest.selectedObjects, 1)
+        XCTAssertEqual(manifest.exportedObjects, 1)
+        XCTAssertEqual(manifest.documents.map(\.documentID), [active.documentID])
+        let recordedEntries = await entries.values()
+        let completion = await transport.completedValues()
+        let includeDocuments =
+            await transport.restoreIncludeDocumentValues()
+        let includeDeletedDocuments =
+            await transport.restoreIncludeDeletedValues()
+        let documentPageIncludesDeleted =
+            await transport.documentIncludeDeletedValues()
+        XCTAssertEqual(recordedEntries.count, 1)
+        XCTAssertEqual(completion, .init(objects: 1, bytes: 0))
+        XCTAssertEqual(includeDocuments, [true])
+        XCTAssertEqual(includeDeletedDocuments, [false])
+        XCTAssertEqual(documentPageIncludesDeleted, [false])
     }
 
     func testInterruptedExportResumesSameSnapshotWithoutReplayingCommittedEntry() async throws {
@@ -696,7 +742,11 @@ final class ManagedHistoryExportTests: XCTestCase {
         )
     }
 
-    private func makeDocument(id: UUID, updatedAt: String) -> ManagedDocument {
+    private func makeDocument(
+        id: UUID,
+        updatedAt: String,
+        deletedAt: String? = nil
+    ) -> ManagedDocument {
         ManagedDocument(
             documentKind: .journal,
             documentID: id,
@@ -704,14 +754,22 @@ final class ManagedHistoryExportTests: XCTestCase {
             originInstallationID: "ios-installation",
             contentMode: "server_readable",
             clientKeyID: nil,
-            contentSHA256: String(repeating: "b", count: 64),
-            payloadJSON: [
-                "day": .string("2026-09-04"),
-                "answered": .boolean(true),
-            ],
+            contentSHA256: deletedAt == nil
+                ? String(repeating: "b", count: 64)
+                : ManagedDigest.sha256(
+                    Data(
+                        "deleted:journal:\(id.uuidString.lowercased()):1".utf8
+                    )
+                ),
+            payloadJSON: deletedAt == nil
+                ? [
+                    "day": .string("2026-09-04"),
+                    "answered": .boolean(true),
+                ]
+                : nil,
             payloadCiphertextBase64: nil,
             updatedAt: updatedAt,
-            deletedAt: nil,
+            deletedAt: deletedAt,
             duplicate: false
         )
     }
@@ -805,6 +863,7 @@ private actor ExportTransport: ManagedStorageTransport {
     private var chunkStarts: [UUID?] = []
     private var documentStarts: [UUID?] = []
     private var documentDeletionSelections: [Bool] = []
+    private var restoreDocumentSelections: [Bool] = []
     private var restoreDeletionSelections: [Bool] = []
     private var completion: Completion?
     private var restoreCreations = 0
@@ -867,10 +926,12 @@ private actor ExportTransport: ManagedStorageTransport {
     func createRestore(
         requestID: UUID,
         dataClasses: [String],
+        includeDocuments: Bool,
         includeDeletedDocuments: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
         restoreCreations += 1
+        restoreDocumentSelections.append(includeDocuments)
         restoreDeletionSelections.append(includeDeletedDocuments)
         return restore(
             status: "running",
@@ -976,13 +1037,21 @@ private actor ExportTransport: ManagedStorageTransport {
     ) async throws -> ManagedDocumentPage {
         documentDeletionSelections.append(includeDeleted)
         documentStarts.append(cursor?.afterDocumentID)
+        let selectedDocuments = documentValues.filter {
+            includeDeleted || $0.deletedAt == nil
+        }
         let start = cursor.flatMap { cursor in
-            documentValues.firstIndex { $0.documentID == cursor.afterDocumentID }
+            selectedDocuments.firstIndex {
+                $0.documentID == cursor.afterDocumentID
+            }
                 .map { $0 + 1 }
         } ?? 0
-        let count = min(forcePageSize ?? limit, max(0, documentValues.count - start))
-        let page = Array(documentValues.dropFirst(start).prefix(count))
-        let hasMore = start + page.count < documentValues.count
+        let count = min(
+            forcePageSize ?? limit,
+            max(0, selectedDocuments.count - start)
+        )
+        let page = Array(selectedDocuments.dropFirst(start).prefix(count))
+        let hasMore = start + page.count < selectedDocuments.count
         return ManagedDocumentPage(
             documents: page,
             nextCursor: hasMore ? page.last?.pageCursor : nil
@@ -1009,6 +1078,10 @@ private actor ExportTransport: ManagedStorageTransport {
         restoreDeletionSelections
     }
 
+    func restoreIncludeDocumentValues() -> [Bool] {
+        restoreDocumentSelections
+    }
+
     func restoreCreationCount() -> Int {
         restoreCreations
     }
@@ -1018,12 +1091,18 @@ private actor ExportTransport: ManagedStorageTransport {
         deliveredObjects: Int,
         deliveredBytes: Int64
     ) -> ManagedRestoreJob {
-        ManagedRestoreJob(
+        let selectedDocuments = restoreDocumentSelections.last == true
+            ? documentValues.filter {
+                restoreDeletionSelections.last == true || $0.deletedAt == nil
+            }.count
+            : 0
+        return ManagedRestoreJob(
             restoreJobID: restoreID,
             status: status,
             snapshotAt: snapshot,
             changeSequence: 42,
-            selectedObjects: chunks.count + documentValues.count + selectedObjectDelta,
+            selectedObjects:
+                chunks.count + selectedDocuments + selectedObjectDelta,
             selectedBytes: Int64(chunks.reduce(0) { $0 + $1.expectedCompressedBytes }),
             deliveredObjects: deliveredObjects,
             deliveredBytes: deliveredBytes,

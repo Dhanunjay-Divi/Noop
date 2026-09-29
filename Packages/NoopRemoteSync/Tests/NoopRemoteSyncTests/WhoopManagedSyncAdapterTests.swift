@@ -8,6 +8,28 @@ final class WhoopManagedSyncAdapterTests: XCTestCase {
     private let eventMs: Int64 = 1_788_393_600_000
     private let accountScopeHash = String(repeating: "d", count: 64)
 
+    func testHistoryOnlyPreJobCheckpointRoundTripsThroughStore()
+        async throws
+    {
+        let store = try await managedStore()
+        let state = try WhoopManagedSyncStateStore(
+            store: store,
+            accountScopeHash: accountScopeHash
+        )
+        let checkpoint = ManagedSnapshotRestoreCheckpoint(
+            requestID: UUID(),
+            dataClasses: ["essential_timeseries"],
+            changeFeedCapabilityVersion:
+                ManagedSyncCoordinator.historyOnlyChangeFeedCapabilityVersion,
+            documentsComplete: false
+        )
+
+        try await state.saveSnapshotRestoreCheckpoint(checkpoint)
+        let restored = try await state.snapshotRestoreCheckpoint()
+
+        XCTAssertEqual(restored, checkpoint)
+    }
+
     func testCanonicalChunkAppliesToIsolatedCloudSource() async throws {
         let store = try await managedStore()
         let prepared = try XCTUnwrap(try makePreparedChunk(bpm: 68))

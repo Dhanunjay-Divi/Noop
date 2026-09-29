@@ -50,6 +50,19 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// Account-backed macOS history is intentionally read-only. Keep only
+    /// metric inspection and the managed Friends account surface reachable
+    /// while the account-scoped replica is mounted.
+    var isAvailableInManagedViewer: Bool {
+        switch self {
+        case .today, .friends, .explore, .compare, .trends, .health,
+                .stress, .fusedRecord:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Localized sidebar label. Each case maps to a string literal so Xcode extracts
     /// it into the String Catalog as an English (US) base entry.
     var titleKey: LocalizedStringKey {
@@ -326,7 +339,10 @@ struct RootView: View {
             // (0.22,1,0.36,1)) fires unchanged: it inserts/removes the id'd child on each change.
             ZStack {
                 detail
-                    .id(selection ?? .today)
+                    .id(
+                        "\(repo.storeScopeRevision):"
+                            + (selection ?? .today).rawValue
+                    )
                     .transition(.opacity)
             }
             .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24), value: selection)
@@ -344,6 +360,8 @@ struct RootView: View {
                 }
             }
             await MacManagedViewerService.shared.bootstrap(repo: repo)
+            guard model.runtimeRole.allowsLocalCollection,
+                  !repo.isManagedViewerStoreActive else { return }
             // Backup & Sync: on-launch catch-up. Gated on the auto toggle being ON (default OFF). A
             // whole-DB ZIP can be 100MB+, so it must never block startup: fire it in a DETACHED,
             // utility-priority task AFTER the launch-critical refresh, fully off the main actor (the
@@ -358,30 +376,32 @@ struct RootView: View {
             await RemoteSyncService.catchUpIfDue(repo: repo)
         }
         .onChangeCompat(of: repo.refreshSeq) { _ in
+            guard model.runtimeRole.allowsLocalCollection,
+                  !repo.isManagedViewerStoreActive else { return }
             Task { await RemoteSyncService.catchUpIfDue(repo: repo) }
         }
         // Honour a cross-screen request to open a top-level destination (e.g. Live's "Manage devices"),
         // then clear it so the same tap can fire again later. Devices maps to the `.devices` sidebar item.
         .onChangeCompat(of: router.requestedDestination) { dest in
             switch dest {
-            case .today: selection = .today
-            case .devices: selection = .devices
-            case .friends: selection = .friends
-            case .insightsHub: selection = .insightsHub
-            case .labBook: selection = .labBook
-            case .fusedRecord: selection = .fusedRecord
-            case .rhythm: selection = .rhythm
-            case .trends: selection = .trends
-            case .sleep: selection = .sleep
-            case .live: selection = .live
+            case .today: select(.today)
+            case .devices: select(.devices)
+            case .friends: select(.friends)
+            case .insightsHub: select(.insightsHub)
+            case .labBook: select(.labBook)
+            case .fusedRecord: select(.fusedRecord)
+            case .rhythm: select(.rhythm)
+            case .trends: select(.trends)
+            case .sleep: select(.sleep)
+            case .live: select(.live)
             // The Today active-workout indicator routes to the Live surface; LiveView then consumes the
             // one-shot `presentActiveWorkout` flag on appear to open the in-exercise screen.
-            case .activeWorkout: selection = .live
+            case .activeWorkout: select(.live)
             // Live Sessions is presented from Today's own Start entry (a cover, not a sidebar item), so a
             // deep-link lands the user on Today where that entry lives.
-            case .liveSession: selection = .today
+            case .liveSession: select(.today)
             // The #627 Today journal widget routes to the Insights sidebar row (which hosts the journal card).
-            case .journal: selection = .insights
+            case .journal: select(.insights)
             case nil: break
             }
             if dest != nil { router.requestedDestination = nil }
@@ -393,6 +413,12 @@ struct RootView: View {
             if let sel, let g = NavGroup.group(containing: sel) {
                 expandedGroups.insert(g.id)
             }
+        }
+        .onChangeCompat(of: repo.storeScopeRevision) { _ in
+            selection = .today
+            expandedGroups = Self.initialExpandedGroups(for: .today)
+            showLighterWorkoutOptions = false
+            showStrengthTrainer = false
         }
         // Sidebar filter transitions (#915). Entering a search (trimmed query going empty to
         // non-empty) snapshots the user's expand/collapse state ONCE, then every keystroke
@@ -421,12 +447,17 @@ struct RootView: View {
             }
         }
         .onAppear {
-            WindDownNudge.refreshPersonalization(from: repo.vitalRows)
-            DailyReviewNotifications.restoreScheduleIfAuthorized()
-            HydrationReminders.restoreScheduleIfAuthorized()
-            MetricReviewReminders.retireLegacySchedule()
-            WindDownNudge.restoreScheduleIfAuthorized()
-            Task { await repo.reconcileDailyReviewJournalReminders() }
+            if model.runtimeRole.allowsLocalAnalysisAndGuidance,
+               !repo.isManagedViewerStoreActive {
+                WindDownNudge.refreshPersonalization(from: repo.vitalRows)
+                DailyReviewNotifications.restoreScheduleIfAuthorized()
+                HydrationReminders.restoreScheduleIfAuthorized()
+                MetricReviewReminders.retireLegacySchedule()
+                WindDownNudge.restoreScheduleIfAuthorized()
+                Task {
+                    await repo.reconcileDailyReviewJournalReminders()
+                }
+            }
             // Defer one turn so NavigationSplitView has installed its initial selection before a
             // cold-launch reminder replaces it.
             Task { @MainActor in
@@ -438,19 +469,31 @@ struct RootView: View {
             consumePendingNotificationRoute()
         }
         .onChangeCompat(of: repo.refreshSeq) { _ in
+            guard model.runtimeRole.allowsLocalAnalysisAndGuidance,
+                  !repo.isManagedViewerStoreActive else { return }
             WindDownNudge.refreshPersonalization(from: repo.vitalRows)
         }
         .sheet(isPresented: $showLighterWorkoutOptions) {
             MacLighterWorkoutOptionsSheet(
                 onOpenWorkouts: {
+                    guard !model.runtimeRole
+                        .enforcesManagedViewerReadOnlyRoutes else {
+                        showLighterWorkoutOptions = false
+                        return
+                    }
                     showLighterWorkoutOptions = false
                     AppDiagnosticsRecorder.shared.record(
                         "adaptive_day.lighter_options_action",
                         fields: ["destination": "workouts"]
                     )
-                    selection = .workouts
+                    select(.workouts)
                 },
                 onOpenStrength: {
+                    guard !model.runtimeRole
+                        .enforcesManagedViewerReadOnlyRoutes else {
+                        showLighterWorkoutOptions = false
+                        return
+                    }
                     showLighterWorkoutOptions = false
                     AppDiagnosticsRecorder.shared.record(
                         "adaptive_day.lighter_options_action",
@@ -476,25 +519,36 @@ struct RootView: View {
         guard let request = NotificationRouteBridge.consumePendingRequest() else {
             return
         }
-        if request.route == .journal {
+        if request.route == .journal,
+           !model.runtimeRole.enforcesManagedViewerReadOnlyRoutes {
             router.pendingJournalDayOffset =
                 NotificationRouteBridge.journalDayOffset(for: request)
         }
         switch request.route {
-        case .sleep: selection = .sleep
-        case .journal: selection = .insights
-        case .hydration: selection = .today
-        case .breathe: selection = .breathe
-        case .today: selection = .today
-        case .trends: selection = .trends
-        case .workouts: selection = .workouts
-        case .devices: selection = .devices
-        case .friends: selection = .friends
-        case .safety: selection = .safety
-        case .coach: selection = .coach
+        case .sleep: select(.sleep)
+        case .journal: select(.insights)
+        case .hydration: select(.today)
+        case .breathe: select(.breathe)
+        case .today: select(.today)
+        case .trends: select(.trends)
+        case .workouts: select(.workouts)
+        case .devices: select(.devices)
+        case .friends: select(.friends)
+        case .safety: select(.safety)
+        case .coach: select(.coach)
         }
-        if request.presentation == .lighterWorkoutOptions {
+        if request.presentation == .lighterWorkoutOptions,
+           !model.runtimeRole.enforcesManagedViewerReadOnlyRoutes {
             showLighterWorkoutOptions = true
+        }
+    }
+
+    private func select(_ item: NavItem) {
+        if model.runtimeRole.enforcesManagedViewerReadOnlyRoutes,
+           !item.isAvailableInManagedViewer {
+            selection = .today
+        } else {
+            selection = item
         }
     }
 
@@ -508,7 +562,10 @@ struct RootView: View {
     /// user-search semantics (case-insensitive, diacritic-insensitive, locale-aware) in one call.
     /// ALL groups filter, including single-item Today/Sleep; a group with no hits disappears entirely.
     private func visibleItems(in group: NavGroup) -> [NavItem] {
-        let viewerItems = group.items.filter { !$0.requiresCollectorRole }
+        let roleItems = group.items.filter { !$0.requiresCollectorRole }
+        let viewerItems = model.runtimeRole.enforcesManagedViewerReadOnlyRoutes
+            ? roleItems.filter(\.isAvailableInManagedViewer)
+            : roleItems
         let query = trimmedQuery
         guard !query.isEmpty else { return viewerItems }
         return viewerItems.filter { $0.localizedTitle.localizedStandardContains(query) }
@@ -549,42 +606,58 @@ struct RootView: View {
 
     @ViewBuilder private var detail: some View {
         let selected = selection ?? .today
-        if selected.requiresCollectorRole {
+        if model.runtimeRole.enforcesManagedViewerReadOnlyRoutes,
+           !selected.isAvailableInManagedViewer {
+            MacCollectorPhoneOnlyView()
+        } else if selected.requiresCollectorRole {
             MacCollectorPhoneOnlyView()
         } else {
-            switch selected {
-            case .today: todayDetail
-            case .friends: FriendsView()
-            case .intelligence: IntelligenceView()
-            case .insightsHub: InsightsHubView()
-            case .coach: CoachView()
-            case .live: liveDetail
-            case .breathe: BreathingView()
-            case .intervals: IntervalTimerView()
-            case .explore: MetricExplorerView()
-            case .compare: CompareView()
-            case .insights: InsightsView()
-            case .sleep: SleepView()
-            case .trends: TrendsView()
-            case .workouts: WorkoutsView()
-            case .nutrition: NutritionLogView()
-            case .health: HealthView()
-            case .stress: StressView()
-            case .labBook: LabBookView()
-            case .rhythm: RhythmHost()
-            case .appleHealth: AppleHealthView()
-            case .xiaomi: XiaomiBandView()
-            case .dataSources: DataSourcesView()
-            case .backupSync: BackupSyncView()
-            case .fusedRecord: FusedRecordHost()
-            case .devices: DevicesView()
-            case .notifications: NotificationSettingsView()
-            case .automation: AutomationsView()
-            case .smartAlarm: SmartAlarmView()
-            case .safety: SafetyCenterView()
-            case .settings: settingsDetail
-            case .testCentre: TestCentreView()
-            }
+            destination(for: selected)
+                .disabled(
+                    model.runtimeRole.enforcesManagedViewerReadOnlyRoutes
+                        && selected != .friends
+                )
+        }
+    }
+
+    @ViewBuilder
+    private func destination(for selected: NavItem) -> some View {
+        switch selected {
+        case .today: todayDetail
+        case .friends: FriendsView()
+        case .intelligence: IntelligenceView()
+        case .insightsHub: InsightsHubView()
+        case .coach: CoachView()
+        case .live: liveDetail
+        case .breathe: BreathingView()
+        case .intervals: IntervalTimerView()
+        case .explore: MetricExplorerView()
+        case .compare:
+            CompareView(
+                allowsScoreRefresh:
+                    model.runtimeRole.allowsLocalAnalysisAndGuidance
+            )
+        case .insights: InsightsView()
+        case .sleep: SleepView()
+        case .trends: TrendsView()
+        case .workouts: WorkoutsView()
+        case .nutrition: NutritionLogView()
+        case .health: HealthView()
+        case .stress: StressView()
+        case .labBook: LabBookView()
+        case .rhythm: RhythmHost()
+        case .appleHealth: AppleHealthView()
+        case .xiaomi: XiaomiBandView()
+        case .dataSources: DataSourcesView()
+        case .backupSync: BackupSyncView()
+        case .fusedRecord: FusedRecordHost()
+        case .devices: DevicesView()
+        case .notifications: NotificationSettingsView()
+        case .automation: AutomationsView()
+        case .smartAlarm: SmartAlarmView()
+        case .safety: SafetyCenterView()
+        case .settings: settingsDetail
+        case .testCentre: TestCentreView()
         }
     }
 
@@ -890,7 +963,7 @@ private struct MacSidebarSyncStatus: View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let presentation = MacSidebarSyncPresentation.resolve(
                 phase: service.phase,
-                isBusy: service.isBusy,
+                isBusy: service.isWorking,
                 status: service.status,
                 historyLastUpdatedAt: service.historyLastUpdatedAt,
                 historyHasMore: service.historyHasMore,

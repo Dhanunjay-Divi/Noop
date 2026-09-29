@@ -29,7 +29,13 @@ enum AppRuntimeRole: Equatable {
     }
 
     var allowsLocalAnalysisAndGuidance: Bool {
-        true
+        self == .phoneCollector
+    }
+
+    /// Read-only navigation is a process-role invariant, not a property of
+    /// whether an account database happens to be mounted at this instant.
+    var enforcesManagedViewerReadOnlyRoutes: Bool {
+        self == .managedViewer
     }
 
     /// The macOS target has a signed-in, read-only managed transport. Runtime
@@ -39,9 +45,8 @@ enum AppRuntimeRole: Equatable {
         self == .managedViewer
     }
 
-    /// Preserve the existing local macOS history, export, and analysis shell.
-    /// Collector-only actions remain gated by `allowsLocalCollection`, so
-    /// macOS cannot compete with the phone for live-source ownership.
+    /// Preserve the macOS read-only history shell without starting local
+    /// scoring, recommendation, reminder, or collection workers.
     var canPresentOperationalShell: Bool {
         allowsLocalAnalysisAndGuidance || hasManagedViewerTransport
     }
