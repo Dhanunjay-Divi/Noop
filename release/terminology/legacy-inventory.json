@@ -36311,11 +36311,11 @@
       "category": "historical",
       "lineNumbers": [
         290,
-        601,
-        601,
-        602,
-        603,
-        608
+        607,
+        607,
+        608,
+        609,
+        614
       ],
       "occurrenceCount": 6,
       "path": "docs/FIRST_PRODUCTION_RELEASE_CHECKLIST.md",
@@ -37780,7 +37780,7 @@
       "category": "historical",
       "lineNumbers": [
         61,
-        165
+        173
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-29-september17-protected-main-closeout.md",

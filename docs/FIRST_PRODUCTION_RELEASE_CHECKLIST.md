@@ -301,12 +301,14 @@ position without changing its ID. This inbox intentionally starts empty.
   signed-app traffic, privacy declarations, dependency notices, and SBOM before
   enabling the adapter. Static source/manifest denial is implemented; signed
   physical-app traffic evidence remains open.
-- [x] SDK-009 [ENG] Enforce one active phone collector and one serialized
-  per-band operation queue; implement an explicit durable collector-handoff
-  protocol before allowing another supported phone to collect. Physical
-  collector handoff remains a separate acceptance row.
-  (Evidence: supplier-neutral session machines, source coordinators, and
-  collector-handoff conformance scenarios)
+- [x] SDK-009A [ENG] Enforce one active supplier source per app process and one
+  serialized per-band operation queue; stale callbacks cannot reactivate a
+  retired source. (Evidence: supplier-neutral session machines, source
+  coordinators, and lifecycle tests)
+- [ ] SDK-009B [JOINT] Implement and physically validate account-authorized
+  durable cross-phone collector handoff: checkpoint, disconnect, lease, resume,
+  duplicate-collector rejection, and data continuity. The supplier-neutral
+  `collector_handoff` conformance row remains an external gate.
 - [x] SDK-010A [ENG] Complete the supplier-neutral versioned capability schema
   and compatibility contract. (Evidence:
   `contract/spec/capabilities.schema.json`, compatibility manifests)
@@ -329,12 +331,16 @@ position without changing its ID. This inbox intentionally starts empty.
 - [x] SDK-060A [ENG] Prove Swift and Kotlin produce the same supplier-neutral
   conformance outcomes. (Evidence: mirrored scenario inventory and artifact
   tests)
-- [x] SDK-070 [ENG] Implement a deterministic virtual band and virtual clock.
-  (Evidence: `VirtualBand.swift`, `VirtualBand.kt`)
-- [x] SDK-080 [ENG] Add supplier-neutral fault injection for replay,
-  duplicates, disconnects, stale callbacks, full flash, bad clock, and low
-  battery. Exact radio corruption and hardware limits remain physical gates.
-  (Evidence: virtual-band conformance scenarios and artifact tests)
+- [x] SDK-070A [ENG] Implement deterministic virtual-band fixtures and mirrored
+  Swift/Kotlin runners. (Evidence: `VirtualBand.swift`, `VirtualBand.kt`)
+- [ ] SDK-070B [ENG] Implement a deterministic virtual clock with explicit
+  advance/control APIs for progression, drift, correction, and timeout cases.
+- [x] SDK-080A [ENG] Add supplier-neutral fault injection for replay,
+  duplicates, disconnects, stale callbacks, and invalid device time.
+  (Evidence: mirrored automated virtual-band scenarios and artifact tests)
+- [ ] SDK-080B [JOINT] Add deterministic full-flash/storage-exhaustion and
+  low-battery injection, then validate exact radio and hardware-limit behavior
+  on approved physical bands.
 - [ ] SDK-090 [ENG] Add OTA interruption, verification failure, activation
   failure, and rollback simulation.
 - [ ] SDK-100 [ENG] Build a protocol/conformance CLI without production
