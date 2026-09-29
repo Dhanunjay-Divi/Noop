@@ -121,6 +121,7 @@ struct MedicationSettingsView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(StrandPalette.accent)
+                    .foregroundStyle(StrandPalette.accentInk)
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     if editingID != nil {

@@ -69,12 +69,35 @@ enum class DeviceStatus { active, paired, archived }
  *  scoring, and surfaces an honest "needs pairing" state when the install key is absent (never Oura's
  *  encrypted readiness/sleep scores). Carried on string rawValue "oura"; no DB migration (the column is
  *  free-text and existing rows never carry it).
+ *  [veepoo] = an optional supplier bridge, default-off unless a reviewed build supplies the reflected
+ *  provider. Its live HR uses phone receipt time for display only and never enters durable samples or
+ *  formulas; battery is read before continuous HR.
  *  Additive: existing rows never carry [ftms]/[huami]/[oura]; only the respective wizard paths write them. */
 // `activityFile` (#137): a GPX/TCX/FIT activity file under the `activity-file` device. Distinct from
 // `fileImport` (a whole-day WHOOP CSV export) so the day-owner resolver ranks it BELOW day-spanning
 // imports — a 90-minute ride must never displace a full-day source with HR for the same day. It owns a
 // day only when nothing else has data (a strap-less day). Additive: only the activity-file importer writes it.
-enum class SourceKind { liveBLE, historyBLE, cloudImport, fileImport, ftms, huami, oura, activityFile }
+enum class SourceKind { liveBLE, historyBLE, cloudImport, fileImport, ftms, huami, oura, veepoo, activityFile }
+
+val SourceKind.isActivatableLiveTransport: Boolean
+    get() = when (this) {
+        SourceKind.liveBLE,
+        SourceKind.historyBLE,
+        SourceKind.ftms,
+        SourceKind.huami,
+        SourceKind.oura,
+        SourceKind.veepoo,
+        -> true
+        SourceKind.cloudImport,
+        SourceKind.fileImport,
+        SourceKind.activityFile,
+        -> false
+    }
+
+val PairedDeviceRow.isActivatableLiveTransport: Boolean
+    get() = SourceKind.entries
+        .firstOrNull { it.name == sourceKind }
+        ?.isActivatableLiveTransport == true
 
 /** A canonical metric a source can provide — drives capability-aware UI + the day-owner resolver.
  *  Stored as the enum name (Swift `Metric` rawValue) inside the comma-joined `capabilities` string. */

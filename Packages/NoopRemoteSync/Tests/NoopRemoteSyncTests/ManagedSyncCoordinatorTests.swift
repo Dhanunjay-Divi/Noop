@@ -7,6 +7,25 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
     private let settleMs: Int64 = 5 * 60 * 1_000
     private let installationToken = "noopm_" + String(repeating: "a", count: 43)
 
+    private func pendingDocuments(count: Int) -> [ManagedPendingDocument] {
+        (0..<count).map { index in
+            ManagedPendingDocument(
+                localIdentifier: "document-\(index)",
+                generation: 1,
+                mutation: ManagedDocumentMutation(
+                    requestID: UUID(),
+                    documentKind: .journal,
+                    documentID: UUID(),
+                    baseRevision: 0,
+                    contentMode: "server_readable",
+                    payloadJSON: ["value": .integer(Int64(index))],
+                    contentSHA256: String(repeating: "f", count: 64),
+                    updatedAt: "2026-09-04T10:00:00Z"
+                )
+            )
+        }
+    }
+
     func testLocalRetentionPolicyKeepsRawHotAndEssentialDetail() {
         let dayMs: Int64 = 86_400_000
         XCTAssertEqual(ManagedLocalRetentionPolicy.rawHistoryDays, 7)
@@ -164,6 +183,273 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(pruneCutoffs, [:])
     }
 
+    func testRestoreOnlyCanExcludeDocumentsForHistoryViewer() async throws {
+        let ciphertext = Data(repeating: 0x2a, count: 32)
+        let document = ManagedDocument(
+            documentKind: .journal,
+            documentID: UUID(),
+            revision: 1,
+            originInstallationID: "remote-installation",
+            contentMode: "client_encrypted",
+            clientKeyID: UUID(),
+            contentSHA256: ManagedDigest.sha256(ciphertext),
+            payloadJSON: nil,
+            payloadCiphertextBase64: ciphertext.base64EncodedString(),
+            updatedAt: "2026-09-26T12:00:00.000Z",
+            deletedAt: nil,
+            duplicate: false
+        )
+        let metadata = document.changeMetadata
+        let change = ManagedChangeFeed.Change(
+            sequence: 43,
+            resourceKind: metadata.resourceKind,
+            resourceID: metadata.resourceID,
+            operation: metadata.operation,
+            contentSHA256: metadata.contentSHA256,
+            dataClass: metadata.dataClass,
+            eventStart: metadata.eventStart,
+            eventEnd: metadata.eventEnd,
+            chunk: metadata.chunk,
+            document: metadata.document
+        )
+        let transport = CoordinatorTransport(
+            changes: [change],
+            snapshotDocuments: [document],
+            remoteDocuments: [document.documentID: document]
+        )
+        let state = CoordinatorState(changeFeedCapabilityVersion: 0)
+        let restore = CoordinatorRestore()
+        let coordinator = ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: restore
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "macos-viewer",
+            installationToken: installationToken
+        )
+
+        let result = try await coordinator.restoreOnly(
+            authorization: authorization,
+            dataClasses: ["essential_timeseries"],
+            restoreDocuments: false
+        )
+
+        XCTAssertEqual(result.appliedChanges, 1)
+        XCTAssertFalse(result.hasMoreChanges)
+        let restoreIncludeDeleted =
+            await transport.restoreIncludeDeletedValues()
+        let restoreIncludeDocuments =
+            await transport.restoreIncludeDocumentValues()
+        let snapshotIncludeDeleted =
+            await transport.snapshotIncludeDeletedValues()
+        let documentReads = await transport.documentReadCount()
+        let documentOperations =
+            await restore.appliedDocumentOperations()
+        let currentSequence = await state.currentSequence()
+        XCTAssertEqual(restoreIncludeDeleted, [false])
+        XCTAssertEqual(restoreIncludeDocuments, [false])
+        XCTAssertEqual(snapshotIncludeDeleted, [])
+        XCTAssertEqual(documentReads, 0)
+        XCTAssertEqual(documentOperations, [])
+        XCTAssertEqual(currentSequence, 43)
+    }
+
+    func testHistoryOnlyRestoreReplacesDocumentInclusiveV2Checkpoint() async throws {
+        let staleRequestID = UUID()
+        let document = ManagedDocument(
+            documentKind: .journal,
+            documentID: UUID(),
+            revision: 1,
+            originInstallationID: "remote-installation",
+            contentMode: "server_readable",
+            clientKeyID: nil,
+            contentSHA256: String(repeating: "b", count: 64),
+            payloadJSON: ["answered": .boolean(true)],
+            payloadCiphertextBase64: nil,
+            updatedAt: "2026-09-26T12:00:00.000Z",
+            deletedAt: nil,
+            duplicate: false
+        )
+        let state = CoordinatorState(
+            snapshotCheckpoint: ManagedSnapshotRestoreCheckpoint(
+                requestID: staleRequestID,
+                dataClasses: ["essential_timeseries"],
+                changeFeedCapabilityVersion:
+                    ManagedSyncCoordinator.changeFeedCapabilityVersion,
+                restoreJobID: UUID(),
+                snapshotAt: "2026-09-26T12:00:00.000Z",
+                changeSequence: 41,
+                selectedObjects: 1,
+                selectedBytes: 0,
+                dataClassIndex: 1,
+                documentCursor: document.pageCursor,
+                documentsComplete: false,
+                deliveredObjects: 0,
+                deliveredBytes: 0
+            ),
+            changeFeedCapabilityVersion:
+                ManagedSyncCoordinator.changeFeedCapabilityVersion
+        )
+        let transport = CoordinatorTransport(snapshotDocuments: [document])
+        let restore = CoordinatorRestore()
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "macos-viewer",
+            installationToken: installationToken
+        )
+
+        let result = try await ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: restore
+        ).restoreOnly(
+            authorization: authorization,
+            dataClasses: ["essential_timeseries"],
+            restoreDocuments: false
+        )
+
+        let restoreRequestIDs = await transport.restoreRequestIDValues()
+        let documentReads = await transport.documentReadCount()
+        let snapshotDocumentReads =
+            await transport.snapshotIncludeDeletedValues()
+        let documentOperations = await restore.appliedDocumentOperations()
+        let capabilityVersion = await state.currentChangeFeedCapabilityVersion()
+        let checkpoint = await state.currentSnapshotCheckpoint()
+        let clearCount = await state.snapshotClearCount()
+        XCTAssertEqual(result.appliedChanges, 0)
+        XCTAssertFalse(result.hasMoreChanges)
+        XCTAssertEqual(clearCount, 1)
+        XCTAssertEqual(restoreRequestIDs.count, 1)
+        XCTAssertNotEqual(try XCTUnwrap(restoreRequestIDs.first), staleRequestID)
+        XCTAssertEqual(
+            capabilityVersion,
+            ManagedSyncCoordinator.historyOnlyChangeFeedCapabilityVersion
+        )
+        XCTAssertNil(checkpoint)
+        XCTAssertEqual(documentReads, 0)
+        XCTAssertEqual(snapshotDocumentReads, [])
+        XCTAssertEqual(documentOperations, [])
+    }
+
+    func testHistoryOnlyCursorExpiryLeavesReloadablePreJobCheckpoint()
+        async throws
+    {
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "macos-viewer",
+            installationToken: installationToken
+        )
+        let state = CoordinatorState(
+            changeFeedCapabilityVersion:
+                ManagedSyncCoordinator.historyOnlyChangeFeedCapabilityVersion
+        )
+        let interruptedTransport = CoordinatorTransport(
+            expireFirstChangeCursor: true,
+            failSnapshotNotFound: true
+        )
+
+        let interrupted = try await ManagedSyncCoordinator(
+            transport: interruptedTransport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: CoordinatorRestore()
+        ).restoreOnly(
+            authorization: authorization,
+            dataClasses: ["essential_timeseries"],
+            restoreDocuments: false,
+            maxChangePages: 1
+        )
+
+        let pendingState = await state.currentSnapshotCheckpoint()
+        let pending = try XCTUnwrap(pendingState)
+        XCTAssertEqual(interrupted.appliedChanges, 0)
+        XCTAssertTrue(interrupted.hasMoreChanges)
+        XCTAssertNil(pending.restoreJobID)
+        XCTAssertFalse(pending.documentsComplete)
+        XCTAssertEqual(
+            pending.changeFeedCapabilityVersion,
+            ManagedSyncCoordinator.historyOnlyChangeFeedCapabilityVersion
+        )
+
+        // Simulate a fresh process loading the persisted pre-job checkpoint.
+        let resumedTransport = CoordinatorTransport()
+        let resumed = try await ManagedSyncCoordinator(
+            transport: resumedTransport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: CoordinatorRestore()
+        ).restoreOnly(
+            authorization: authorization,
+            dataClasses: ["essential_timeseries"],
+            restoreDocuments: false,
+            maxChangePages: 1
+        )
+        let finalCheckpoint = await state.currentSnapshotCheckpoint()
+        let finalCapabilityVersion =
+            await state.currentChangeFeedCapabilityVersion()
+        let includeDocuments =
+            await resumedTransport.restoreIncludeDocumentValues()
+        let includeDeleted =
+            await resumedTransport.restoreIncludeDeletedValues()
+
+        XCTAssertEqual(resumed.appliedChanges, 0)
+        XCTAssertFalse(resumed.hasMoreChanges)
+        XCTAssertNil(finalCheckpoint)
+        XCTAssertEqual(
+            finalCapabilityVersion,
+            ManagedSyncCoordinator.historyOnlyChangeFeedCapabilityVersion
+        )
+        XCTAssertEqual(includeDocuments, [false])
+        XCTAssertEqual(includeDeleted, [false])
+    }
+
+    func testHistoryOnlyRestoreRejectsInflatedSelectionWithoutDocumentRead()
+        async throws
+    {
+        let transport = CoordinatorTransport(selectedObjectDelta: 1)
+        let restore = CoordinatorRestore()
+        let coordinator = ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: CoordinatorState(changeFeedCapabilityVersion: 0),
+            restore: restore
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "macos-viewer",
+            installationToken: installationToken
+        )
+
+        do {
+            _ = try await coordinator.restoreOnly(
+                authorization: authorization,
+                dataClasses: ["essential_timeseries"],
+                restoreDocuments: false
+            )
+            XCTFail("Expected inflated history-only selection to fail")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let documentReads = await transport.documentReadCount()
+        let snapshotDocumentReads =
+            await transport.snapshotIncludeDeletedValues()
+        let restoreCompletions = await transport.restoreCompletionCount()
+        let documentOperations = await restore.appliedDocumentOperations()
+        XCTAssertEqual(documentReads, 0)
+        XCTAssertEqual(snapshotDocumentReads, [])
+        XCTAssertEqual(restoreCompletions, 0)
+        XCTAssertEqual(documentOperations, [])
+    }
+
     func testLocalRetentionAppliesPerDataClassCutoffs() async throws {
         let dayMs: Int64 = 86_400_000
         let state = CoordinatorState()
@@ -206,6 +492,42 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
                 "raw_motion": 93 * dayMs,
             ]
         )
+    }
+
+    func testFuturePruneTimestampCannotAdvanceBeyondSyncClock() async throws {
+        let dayMs: Int64 = 86_400_000
+        let state = CoordinatorState()
+        let coordinator = ManagedSyncCoordinator(
+            transport: CoordinatorTransport(),
+            extractor: MultiWindowExtractor(eventTimes: []),
+            state: state,
+            restore: CoordinatorRestore()
+        )
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+
+        _ = try await coordinator.sync(
+            source: source,
+            authorization: authorization,
+            now: Date(timeIntervalSince1970: Double(100 * dayMs) / 1_000),
+            dataClasses: ["raw_ppg"],
+            maxChangePages: 0,
+            maxDocumentUploads: 0,
+            localPruneNowMs: 200 * dayMs
+        )
+
+        let recordedCutoffs = await state.recordedPruneCutoffs()
+        XCTAssertEqual(recordedCutoffs, ["raw_ppg": 93 * dayMs])
     }
 
     func testCancellationAfterCheckpointPreventsLocalPruning() async throws {
@@ -468,6 +790,149 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
         XCTAssertTrue(result.hasMoreLocalWork)
         let remaining = await outbox.remainingCount()
         XCTAssertEqual(remaining, 1)
+    }
+
+    func testMaximumDocumentBatchUsesOneLookAheadAndReportsBacklog() async throws {
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+        let outbox = QueuedDocumentOutbox(pending: pendingDocuments(count: 102))
+        let transport = CoordinatorTransport()
+        let result = try await ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: CoordinatorState(),
+            restore: CoordinatorRestore(),
+            documents: outbox
+        ).sync(
+            source: source,
+            authorization: authorization,
+            now: Date(timeIntervalSince1970: 0),
+            dataClasses: [],
+            maxChangePages: 0,
+            maxDocumentUploads: 100
+        )
+
+        let requestedLimits = await outbox.requestedLimits()
+        let remaining = await outbox.remainingCount()
+        let uploads = await transport.documentUploadCount()
+        XCTAssertEqual(requestedLimits, [101])
+        XCTAssertEqual(result.uploadedDocuments, 100)
+        XCTAssertTrue(result.hasMoreLocalWork)
+        XCTAssertEqual(uploads, 100)
+        XCTAssertEqual(remaining, 2)
+    }
+
+    func testDocumentOutboxResponseBeyondBoundedReadFailsClosed() async throws {
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+        let outbox = QueuedDocumentOutbox(
+            pending: pendingDocuments(count: 102),
+            honorsLimit: false
+        )
+        let transport = CoordinatorTransport()
+        let coordinator = ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: CoordinatorState(),
+            restore: CoordinatorRestore(),
+            documents: outbox
+        )
+
+        do {
+            _ = try await coordinator.sync(
+                source: source,
+                authorization: authorization,
+                now: Date(timeIntervalSince1970: 0),
+                dataClasses: [],
+                maxChangePages: 0,
+                maxDocumentUploads: 100
+            )
+            XCTFail("Expected the oversized outbox response to fail closed")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+
+        let requestedLimits = await outbox.requestedLimits()
+        let remaining = await outbox.remainingCount()
+        let uploads = await transport.documentUploadCount()
+        XCTAssertEqual(requestedLimits, [101])
+        XCTAssertEqual(remaining, 102)
+        XCTAssertEqual(uploads, 0)
+    }
+
+    func testRevokedInstallationDuringChunkCompletionFailsClosed() async throws {
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+        let state = CoordinatorState()
+        let transport = CoordinatorTransport(
+            rejectCompletionAsForbidden: true
+        )
+        let coordinator = ManagedSyncCoordinator(
+            transport: transport,
+            extractor: CoordinatorExtractor(),
+            state: state,
+            restore: CoordinatorRestore()
+        )
+        let now = Date(
+            timeIntervalSince1970: Double(windowMs + settleMs) / 1_000
+        )
+
+        do {
+            _ = try await coordinator.sync(
+                source: source,
+                authorization: authorization,
+                now: now,
+                dataClasses: ["essential_timeseries"],
+                maxChangePages: 0,
+                maxDocumentUploads: 0,
+                localPruneNowMs: windowMs + settleMs
+            )
+            XCTFail("Expected the revoked installation to stop completion")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .forbidden)
+        }
+
+        let uploads = await transport.uploadCount()
+        let completions = await transport.completionCount()
+        let pending = await state.currentWindow()
+        let checkpoint = await state.currentCheckpoint()
+        let pruneCutoffs = await state.recordedPruneCutoffs()
+        XCTAssertEqual(uploads, 1)
+        XCTAssertEqual(completions, 1)
+        XCTAssertEqual(pending?.phase, .pendingCompletion)
+        XCTAssertNotNil(pending?.receipt)
+        XCTAssertNil(checkpoint.nextWindowStartMs)
+        XCTAssertEqual(pruneCutoffs, [:])
     }
 
     func testCompletionFailurePersistsReceiptAndRetryDoesNotUploadAgain() async throws {
@@ -2077,15 +2542,23 @@ private actor CoordinatorDocumentOutbox: ManagedDocumentOutbox {
 
 private actor QueuedDocumentOutbox: ManagedDocumentOutbox {
     private var pending: [ManagedPendingDocument]
+    private let honorsLimit: Bool
+    private var limits: [Int] = []
 
-    init(pending: [ManagedPendingDocument]) {
+    init(
+        pending: [ManagedPendingDocument],
+        honorsLimit: Bool = true
+    ) {
         self.pending = pending
+        self.honorsLimit = honorsLimit
     }
 
     func remainingCount() -> Int { pending.count }
+    func requestedLimits() -> [Int] { limits }
 
     func pendingDocuments(limit: Int) async throws -> [ManagedPendingDocument] {
-        Array(pending.prefix(limit))
+        limits.append(limit)
+        return honorsLimit ? Array(pending.prefix(limit)) : pending
     }
 
     func acknowledge(
@@ -2108,6 +2581,7 @@ private struct CoordinatorDownloadFixture: Sendable {
 
 private actor CoordinatorTransport: ManagedStorageTransport {
     private let failFirstCompletion: Bool
+    private let rejectCompletionAsForbidden: Bool
     private let feedChanges: [ManagedChangeFeed.Change]
     private let snapshotChunks: [ManagedAvailableChunk]
     private let snapshotDocuments: [ManagedDocument]
@@ -2116,6 +2590,7 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     private let failSnapshotNotFound: Bool
     private let feedHighWatermark: Int64?
     private let downloadableChunks: [UUID: CoordinatorDownloadFixture]
+    private let selectedObjectDelta: Int
     private let restoreJobID = UUID()
     private var uploads = 0
     private var completions = 0
@@ -2126,13 +2601,17 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     private var sourceRegistrations = 0
     private var chunkReservations = 0
     private var downloads = 0
+    private var documentReads = 0
     private var snapshotCursors: [ManagedChunkPage.Cursor?] = []
     private var snapshotIncludeDeleted: [Bool] = []
+    private var restoreIncludeDocuments: [Bool] = []
     private var restoreIncludeDeleted: [Bool] = []
+    private var restoreRequestIDs: [UUID] = []
     private let onDownload: (@Sendable () async -> Void)?
 
     init(
         failFirstCompletion: Bool = false,
+        rejectCompletionAsForbidden: Bool = false,
         changes: [ManagedChangeFeed.Change] = [],
         snapshotChunks: [ManagedAvailableChunk] = [],
         snapshotDocuments: [ManagedDocument] = [],
@@ -2141,9 +2620,11 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         failSnapshotNotFound: Bool = false,
         feedHighWatermark: Int64? = nil,
         downloadableChunks: [UUID: CoordinatorDownloadFixture] = [:],
+        selectedObjectDelta: Int = 0,
         onDownload: (@Sendable () async -> Void)? = nil
     ) {
         self.failFirstCompletion = failFirstCompletion
+        self.rejectCompletionAsForbidden = rejectCompletionAsForbidden
         feedChanges = changes
         self.snapshotChunks = snapshotChunks
         self.snapshotDocuments = snapshotDocuments
@@ -2152,6 +2633,7 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         self.failSnapshotNotFound = failSnapshotNotFound
         self.feedHighWatermark = feedHighWatermark
         self.downloadableChunks = downloadableChunks
+        self.selectedObjectDelta = selectedObjectDelta
         self.onDownload = onDownload
     }
 
@@ -2163,11 +2645,16 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     func sourceRegistrationCount() -> Int { sourceRegistrations }
     func chunkReservationCount() -> Int { chunkReservations }
     func downloadCount() -> Int { downloads }
+    func documentReadCount() -> Int { documentReads }
     func snapshotCursorChunkIDs() -> [UUID?] {
         snapshotCursors.map { $0?.afterChunkID }
     }
     func snapshotIncludeDeletedValues() -> [Bool] { snapshotIncludeDeleted }
+    func restoreIncludeDocumentValues() -> [Bool] {
+        restoreIncludeDocuments
+    }
     func restoreIncludeDeletedValues() -> [Bool] { restoreIncludeDeleted }
+    func restoreRequestIDValues() -> [UUID] { restoreRequestIDs }
 
     func registerSource(
         _ source: ManagedSourceRegistration,
@@ -2222,6 +2709,9 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         authorization: ManagedAuthorization
     ) async throws {
         completions += 1
+        if rejectCompletionAsForbidden {
+            throw ManagedStorageError.forbidden
+        }
         if failFirstCompletion, completions == 1 {
             throw ManagedStorageError.transport
         }
@@ -2260,17 +2750,26 @@ private actor CoordinatorTransport: ManagedStorageTransport {
     func createRestore(
         requestID: UUID,
         dataClasses: [String],
+        includeDocuments: Bool,
         includeDeletedDocuments: Bool,
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
+        restoreRequestIDs.append(requestID)
+        restoreIncludeDocuments.append(includeDocuments)
         restoreIncludeDeleted.append(includeDeletedDocuments)
         restoreCreations += 1
+        let selectedDocuments = includeDocuments
+            ? snapshotDocuments.filter {
+                includeDeletedDocuments || $0.deletedAt == nil
+            }.count
+            : 0
         return ManagedRestoreJob(
             restoreJobID: restoreJobID,
             status: "running",
             snapshotAt: "2026-09-01T02:00:00Z",
             changeSequence: 42,
-            selectedObjects: snapshotChunks.count + snapshotDocuments.count,
+            selectedObjects:
+                snapshotChunks.count + selectedDocuments + selectedObjectDelta,
             selectedBytes: Int64(
                 snapshotChunks.reduce(0) { $0 + $1.expectedCompressedBytes }
             ),
@@ -2320,12 +2819,18 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         authorization: ManagedAuthorization
     ) async throws -> ManagedRestoreJob {
         restoreCompletions += 1
+        let selectedDocuments = restoreIncludeDocuments.last == true
+            ? snapshotDocuments.filter {
+                restoreIncludeDeleted.last == true || $0.deletedAt == nil
+            }.count
+            : 0
         return ManagedRestoreJob(
             restoreJobID: restoreJobID,
             status: "completed",
             snapshotAt: "2026-09-01T02:00:00Z",
             changeSequence: 42,
-            selectedObjects: snapshotChunks.count + snapshotDocuments.count,
+            selectedObjects:
+                snapshotChunks.count + selectedDocuments + selectedObjectDelta,
             selectedBytes: Int64(
                 snapshotChunks.reduce(0) { $0 + $1.expectedCompressedBytes }
             ),
@@ -2375,6 +2880,7 @@ private actor CoordinatorTransport: ManagedStorageTransport {
         revision: Int64?,
         authorization: ManagedAuthorization
     ) async throws -> ManagedDocument {
+        documentReads += 1
         guard let document = remoteDocuments[id],
               document.documentKind == kind,
               revision.map({ document.revision == $0 }) ?? true else {

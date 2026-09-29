@@ -52,7 +52,36 @@ struct LiveView: View {
     private var ringStreaming: Bool { live.connected && live.streamingLiveHR }
     /// Standard HR, FTMS, and Huami transports do not expose Oura's streaming flag. Their first accepted
     /// packet is the honest proof of a live stream; `connected` prevents cached HR from surviving a drop.
-    private var genericHRStreaming: Bool { live.connected && !live.bonded && live.heartRate != nil }
+    private var genericHRStreaming: Bool {
+        live.connected && !live.bonded && live.heartRate != nil
+    }
+    private var activeSourceKind: SourceKind? {
+        guard let registry = model.deviceRegistry,
+              let activeID = registry.activeDeviceId else { return nil }
+        return registry.devices.first(where: { $0.id == activeID })?.sourceKind
+    }
+    private var hasActiveDevice: Bool {
+        guard let registry = model.deviceRegistry else { return true }
+        return registry.activeDeviceId != nil
+    }
+    static func shouldShowWhoopControls(
+        activeSourceKind: SourceKind?
+    ) -> Bool {
+        guard let activeSourceKind else { return false }
+        return activeSourceKind != .veepoo
+    }
+    private var showsWhoopControls: Bool {
+        guard model.deviceRegistry != nil else { return true }
+        return Self.shouldShowWhoopControls(
+            activeSourceKind: activeSourceKind
+        )
+    }
+    private var supplierSourceActive: Bool { activeSourceKind == .veepoo }
+    private var supplierDisplayStreaming: Bool {
+        supplierSourceActive
+            && live.connected
+            && live.displayOnlyHeartRate != nil
+    }
     /// Any source that can honestly drive foreground live HR and manual workout capture. WHOOP-only
     /// commands remain gated by `activeConnection` so a generic strap never exposes unsupported controls.
     private var liveHRConnection: Bool { activeConnection || ringStreaming || genericHRStreaming }
@@ -61,7 +90,8 @@ struct LiveView: View {
     /// the registry opens. Transport-generation names never leak into the customer-facing Live screen.
     private var activeDeviceName: String {
         guard let registry = model.deviceRegistry,
-              let active = registry.devices.first(where: { $0.id == registry.activeDeviceId })
+              let activeID = registry.activeDeviceId,
+              let active = registry.devices.first(where: { $0.id == activeID })
         else { return WhoopModel.customerName }
         return CustomerFacingBrand.text(active.displayName)
     }
@@ -88,44 +118,62 @@ struct LiveView: View {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 if live.connected {
                     consoleHeader
-                    if live.backfilling {
-                        SyncingHistoryNote(
-                            chunks: live.syncChunksThisSession,
-                            rows: live.historySyncProgress.rowsPersisted,
-                            newestDataUnix: live.historySyncProgress.newestDataUnix,
-                            startedAt: live.historySyncStartedAt,
-                            lastDurableProgressAt: live.historySyncLastDurableProgressAt
-                        )
-                    } else if let syncError = live.lastSyncError {
-                        Text(syncError)
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.statusWarning)
-                            .fixedSize(horizontal: false, vertical: true)
+                    if showsWhoopControls {
+                        if live.backfilling {
+                            SyncingHistoryNote(
+                                chunks: live.syncChunksThisSession,
+                                rows: live.historySyncProgress.rowsPersisted,
+                                newestDataUnix: live.historySyncProgress.newestDataUnix,
+                                startedAt: live.historySyncStartedAt,
+                                lastDurableProgressAt: live.historySyncLastDurableProgressAt
+                            )
+                        } else if let syncError = live.lastSyncError {
+                            Text(syncError)
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.statusWarning)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        liveTrackingCard
+                        // Can't-connect-at-all guidance: the strap wiped its bond (firmware update / WHOOP app
+                        // re-bond), so connects loop on "Peer removed pairing information". Show the re-pair steps
+                        // right here instead of silently retrying. (5/MG firmware reset, 2026-06)
+                        if let guide = live.reconnectGuide { reconnectGuideBanner(guide) }
+                        // Bond-refused guidance, shown right here on Live where people actually connect (it
+                        // also appears in Settings). A 5/MG strap still bonded to the WHOOP app refuses pairing
+                        // with "Encryption is insufficient" - this tells the user to free it and re-pair.
+                        if let hint = live.pairingHint { pairingHintBanner(hint) }
                     }
-                    liveTrackingCard
-                    // Can't-connect-at-all guidance: the strap wiped its bond (firmware update / WHOOP app
-                    // re-bond), so connects loop on "Peer removed pairing information". Show the re-pair steps
-                    // right here instead of silently retrying. (5/MG firmware reset, 2026-06)
-                    if let guide = live.reconnectGuide { reconnectGuideBanner(guide) }
-                    // Bond-refused guidance, shown right here on Live where people actually connect (it
-                    // also appears in Settings). A 5/MG strap still bonded to the WHOOP app refuses pairing
-                    // with "Encryption is insufficient" - this tells the user to free it and re-pair.
-                    if let hint = live.pairingHint { pairingHintBanner(hint) }
-                    if liveTrackingOptedIn {
+                    if liveTrackingOptedIn || supplierDisplayStreaming {
                         bodyConsole
                         // Low-bandwidth fallback note (#80): the radio couldn't sustain the WHOOP 4 R10/R11 raw
                         // realtime burst, so live HR is riding the standard BLE Heart-Rate profile instead.
-                        if Self.shouldShowStandardHRNote(live.standardHRMode) {
+                        if showsWhoopControls,
+                           Self.shouldShowStandardHRNote(live.standardHRMode) {
                             standardHRNote(live.standardHRMode ?? "")
                         }
                         signalTrustRail
                     }
-                    sessionConsole
-                    if !activeConnection { modelPicker }
-                    controls
+                    if showsWhoopControls {
+                        sessionConsole
+                        if !activeConnection { modelPicker }
+                        controls
+                    }
                     manageDevicesRow
                     // Diagnostics remain available while a stream exists, but no longer dominate the
                     // disconnected first impression. Test Centre remains the durable diagnostics home.
+                    LiveLogCard()
+                } else if !hasActiveDevice {
+                    Label("No active stream", systemImage: "waveform.slash")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    manageDevicesRow
+                    LiveLogCard()
+                } else if supplierSourceActive {
+                    // Supplier transport is owned by SourceCoordinator, not BLEManager. Keep the
+                    // disconnected surface read-only and route reconnect/switch/remove work through
+                    // Devices instead of exposing WHOOP scan or disconnect commands.
+                    consoleHeader
+                    manageDevicesRow
                     LiveLogCard()
                 } else {
                     // Offline is a device state, not an empty diagnostics console. Give the band room to
@@ -825,7 +873,10 @@ struct LiveView: View {
     /// One-line subtitle for the Manage-devices row — names the active band and reads correctly whether
     /// it's the live link ("Connected to …") or just the band Scan would target ("… is your active band").
     private var manageDevicesDetail: String {
-        activeConnection
+        guard hasActiveDevice else {
+            return String(localized: "No active stream")
+        }
+        return activeConnection
             ? String(localized: "Connected to \(activeDeviceName). Pair or switch bands in Devices.")
             : String(localized: "\(activeDeviceName) is your active band. Pair or switch bands in Devices.")
     }
@@ -1133,8 +1184,9 @@ private struct LiveHeartReadout: View {
     @EnvironmentObject private var live: LiveState
     let hrMax: Int
 
-    /// Smoothed, spike-filtered live HR from AppModel (median over a short window).
-    private var displayHR: Int? { model.bpm }
+    /// Supplier HR owns the focal value while its display-only lane is fresh. Falling
+    /// back to the accepted source's smoothed value preserves existing formula inputs.
+    private var displayHR: Int? { live.displayOnlyHeartRate ?? model.bpm }
     private var activeConnection: Bool { live.connected && live.bonded }
 
     /// The live HR zone for the focal readout's colour world (presentation only). 0 = below Zone 1.
@@ -1354,7 +1406,7 @@ private struct LiveSignalTrustRail: View {
     @EnvironmentObject private var live: LiveState
     let activeConnection: Bool
 
-    private var displayHR: Int? { model.bpm }
+    private var displayHR: Int? { live.displayOnlyHeartRate ?? model.bpm }
     /// Oura ring actively streaming live HR — trusted stream without a WHOOP bond (see LiveView.ringStreaming).
     private var ringStreaming: Bool { live.connected && live.streamingLiveHR }
     /// #218: a live link for the wear stat = a WHOOP bond OR an Oura HR stream. Oura streams only while worn

@@ -107,7 +107,7 @@ class FeedbackOutboxTest {
             includesScreenshot = false,
         )
 
-        val recovered = FeedbackOutbox(filesDir).recover().single()
+        val recovered = deterministicOutbox(filesDir).recover().single()
 
         assertEquals("8.4.1", staged.appVersion)
         assertEquals("8.4.1", recovered.appVersion)
@@ -140,7 +140,7 @@ class FeedbackOutboxTest {
                 .toString(),
         )
 
-        val recovered = FeedbackOutbox(filesDir).recover().single()
+        val recovered = deterministicOutbox(filesDir).recover().single()
 
         assertEquals("8.4.1", recovered.appVersion)
         val persisted = JSONObject(state.readText())
@@ -452,7 +452,7 @@ class FeedbackOutboxTest {
         assertEquals(0, canceling.cancellationAttempt)
         assertFalse(outbox.archive(canceling).exists())
 
-        val recovered = FeedbackOutbox(filesDir).recover().single()
+        val recovered = deterministicOutbox(filesDir).recover().single()
         assertEquals(FeedbackState.CANCELING, recovered.state)
         assertEquals("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", recovered.serverReportId)
         assertEquals(reportToken, recovered.serverReportToken)
@@ -681,7 +681,7 @@ class FeedbackOutboxTest {
 
         assertTrue(state.isFile)
         assertTrue(archive.isFile)
-        assertEquals(staged.localId, FeedbackOutbox(filesDir).recover().single().localId)
+        assertEquals(staged.localId, deterministicOutbox(filesDir).recover().single().localId)
     }
 
     @Test
@@ -712,7 +712,7 @@ class FeedbackOutboxTest {
 
         assertTrue(state.isFile)
         assertTrue(archive.isFile)
-        assertEquals(staged.localId, FeedbackOutbox(filesDir).recover().single().localId)
+        assertEquals(staged.localId, deterministicOutbox(filesDir).recover().single().localId)
     }
 
     @Test
@@ -871,7 +871,7 @@ class FeedbackOutboxTest {
 
         assertTrue(state.isFile)
         assertTrue(archive.isFile)
-        assertEquals(staged.localId, FeedbackOutbox(filesDir).recover().single().localId)
+        assertEquals(staged.localId, deterministicOutbox(filesDir).recover().single().localId)
     }
 
     @Test

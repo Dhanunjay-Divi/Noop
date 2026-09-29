@@ -87,6 +87,10 @@ product test:
   in-repository head whose exact `opened` or `synchronize` actor is the
   repository owner. Other changes are checked against the protected base's
   required-CI structure.
+- The source-only NOOP Band SDK verifier and its tamper-test module are
+  enumerated release-authority paths. A candidate may update the vendored
+  source and manifest, but cannot also weaken their digest, layout, symlink, or
+  supplier-binary checks without the same owner-bound trust-root review.
 - The workflow publishes one custom `trusted-release-controls` result to the
   exact pull-request head. A failed, skipped, or canceled validation fails the
   context. The independent `release-controls` context still validates the
@@ -105,12 +109,27 @@ supplier and physical-device evidence, legal/certification approvals, store
 records, production operations, and final go/no-go approval remain separate
 open gates.
 
-For the active September 17 branch, record these only after they exist:
+For the active SDK app-integration branch, the recorded inputs and current
+local evidence are:
 
-- candidate commit: `<pending exact 40-character SHA>`
-- pull request: `#16` currently points to superseded head `9d859d9a` and is
-  blocked; it is not evidence for the dirty replacement candidate
-- required contexts: `<pending 10/10 on the candidate SHA>`
+- upstream SDK source: `NoopBandSDK` PR `#33` reviewed merge
+  `b02808372b7c537f22058c7ebc75d92c750373be`
+- application candidate: the consolidated SDK PR `#33` source and evidence
+  replacement carried by this branch
+- pull request: `#17`; only its final exact candidate head can authorize merge
+- exact current local verification: upstream Swift 106/106, Kotlin/JVM
+  114/114 plus `installDist`, 50/50 conformance, and the 74-file SDK repository gate
+  pass. The app artifact verifier and its 9-test adversarial suite, vendored
+  Swift package 16/16, real macOS app boundary 10/10, Android Full and Demo
+  integration 15/15 each, both Android instrumentation source graphs, and the
+  unsigned Release iPhone/Watch/complication/widget graph pass. The exact
+  focused iOS profile clear-and-retype regression passes 1/1. Repository
+  release, trust, terminology, privacy, claims, localization, operations,
+  artifact, shell, and diff gates pass in the final 318-test wall with one
+  intentional skip before the branch push.
+- required contexts: prior exact heads do not authorize this replacement. The
+  final PR `#32` source and documentation candidate must pass all ten exact-SHA
+  hosted contexts before protected integration.
 - merged protected-main commit: `<pending exact 40-character SHA>`
 - protected-main trusted result: `<pending>`
 

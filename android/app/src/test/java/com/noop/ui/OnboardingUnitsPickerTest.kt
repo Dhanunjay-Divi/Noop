@@ -119,7 +119,9 @@ class OnboardingUnitsPickerTest {
                     "postClaimOwnershipReady",
             ),
         )
-        assertTrue(source.contains("requiresCurrentOwnershipClaim"))
+        assertTrue(source.contains("resolvedOnboardingDestination("))
+        assertTrue(source.contains("accountStepCanContinue("))
+        assertTrue(source.contains("claimStepCanContinue("))
         assertTrue(source.contains("Column(verticalArrangement = Arrangement.spacedBy(1.dp))"))
         assertTrue(source.contains("remove(ONBOARDING_PROGRESS_KEY)"))
     }

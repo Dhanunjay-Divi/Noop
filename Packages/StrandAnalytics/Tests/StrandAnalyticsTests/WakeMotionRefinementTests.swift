@@ -62,7 +62,9 @@ final class WakeMotionRefinementTests: XCTestCase {
         let seg = wakeSegment(minutes: 180)
         let (grav, steps) = buildNight(totalMinutes: 180, burstMinutes: [45, 135])
 
-        let result = WakeMotionRefinement.refine([seg], grav: grav, steps: steps)
+        let result = WakeMotionRefinement.refine(
+            [seg], grav: grav, steps: steps, allowLegacyActivityClassForResearch: true
+        )
 
         let expected: [StageSegment] = [
             StageSegment(start: start, end: start + 44 * 60, stage: "light"),
@@ -87,7 +89,9 @@ final class WakeMotionRefinementTests: XCTestCase {
         let seg = wakeSegment(minutes: 30)
         let (grav, steps) = buildNight(totalMinutes: 30, walkMinutes: [10, 11, 12], ticksPerWalkMinute: 25)
 
-        let result = WakeMotionRefinement.refine([seg], grav: grav, steps: steps)
+        let result = WakeMotionRefinement.refine(
+            [seg], grav: grav, steps: steps, allowLegacyActivityClassForResearch: true
+        )
 
         XCTAssertEqual(result, [seg],
             "3 consecutive minutes at 25 ticks/min clears the sustained-walk locomotion gate (>=2 "
@@ -102,7 +106,9 @@ final class WakeMotionRefinementTests: XCTestCase {
         // is density -- proving the decline is the gate, not the burst pattern being ineligible.
         let (grav, steps) = buildNight(totalMinutes: 180, burstMinutes: [45, 135], sparse: true)
 
-        let result = WakeMotionRefinement.refine([seg], grav: grav, steps: steps)
+        let result = WakeMotionRefinement.refine(
+            [seg], grav: grav, steps: steps, allowLegacyActivityClassForResearch: true
+        )
 
         XCTAssertEqual(result, [seg],
             "a WHOOP-4.0-shaped stream (sparse gravity, no step samples) must fail the density self-gate "
@@ -118,9 +124,9 @@ final class WakeMotionRefinementTests: XCTestCase {
         let off = WakeMotionRefinement.apply([seg], grav: grav, steps: steps, enabled: false)
         XCTAssertEqual(off, [seg], "enabled=false must be a guaranteed byte-identical passthrough")
 
-        // Sanity: the SAME fixture actually changes when enabled, so the assertion above isn't vacuous.
+        // Enabling the product toggle cannot re-authorize an unvalidated legacy activity byte.
         let on = WakeMotionRefinement.apply([seg], grav: grav, steps: steps, enabled: true)
-        XCTAssertNotEqual(on, [seg], "fixture sanity check: this fixture must be live when enabled")
+        XCTAssertEqual(on, [seg], "the unvalidated source must remain a byte-identical passthrough")
     }
 
     // MARK: (e) tracks VARYING inputs -- multiple patterns, each with a different injected reclaim
@@ -140,7 +146,9 @@ final class WakeMotionRefinementTests: XCTestCase {
         for s in scenarios {
             let seg = wakeSegment(minutes: s.totalMinutes)
             let (grav, steps) = buildNight(totalMinutes: s.totalMinutes, burstMinutes: s.burstMinutes)
-            let result = WakeMotionRefinement.refine([seg], grav: grav, steps: steps)
+            let result = WakeMotionRefinement.refine(
+                [seg], grav: grav, steps: steps, allowLegacyActivityClassForResearch: true
+            )
 
             // Expected kept-as-wake minutes = union of each burst minute +/-1, clamped to the segment.
             var expectedKept: Set<Int> = []
@@ -182,7 +190,12 @@ final class WakeMotionRefinementTests: XCTestCase {
                                    stages: [wakeSegment(minutes: 180)], restingHR: 52, avgHRV: 40.0)
         let (grav, steps) = buildNight(totalMinutes: 180, burstMinutes: [45, 135])
 
-        let refined = WakeMotionRefinement.refine(session, grav: grav, steps: steps)
+        let refined = WakeMotionRefinement.refine(
+            session,
+            grav: grav,
+            steps: steps,
+            allowLegacyActivityClassForResearch: true
+        )
 
         XCTAssertGreaterThan(refined.efficiency, session.efficiency,
             "reclassifying 174 of 180 wake minutes to light must raise efficiency")

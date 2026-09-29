@@ -202,6 +202,27 @@ final class BackfillerSessionTallyTests: XCTestCase {
         func cursor(_ name: String) async throws -> Int? { nil }
     }
 
+    private final class StorageFullStore: BackfillStoreWriting {
+        struct StorageFull: Error, CustomStringConvertible {
+            var description: String {
+                "private-user-content-must-not-reach-diagnostics"
+            }
+        }
+        private(set) var cursorWrites: [(String, Int)] = []
+
+        func insert(_ streams: Streams, deviceId: String) async throws -> StreamInsertCounts {
+            throw StorageFull()
+        }
+
+        func enqueueRawBatch(_ meta: RawBatchMeta, frames: [[UInt8]]) async throws {}
+
+        func setCursor(_ name: String, _ value: Int) async throws {
+            cursorWrites.append((name, value))
+        }
+
+        func cursor(_ name: String) async throws -> Int? { nil }
+    }
+
     @MainActor
     private final class DelayedInsertStore: BackfillStoreWriting {
         var insertStarted: (() -> Void)?
@@ -315,6 +336,37 @@ final class BackfillerSessionTallyTests: XCTestCase {
 
         backfiller.confirmAck(trim: 1234)
         XCTAssertEqual(backfiller.lastAckedTrim, 1234)
+    }
+
+    @MainActor func testStorageFullDuringDecodedInsertHoldsCursorAndLaterAcknowledgements() async {
+        let store = StorageFullStore()
+        var requestedTrims: [UInt32] = []
+        var logs: [String] = []
+        let backfiller = Backfiller(
+            store: store,
+            deviceId: "test",
+            ackTrim: { trim, _ in requestedTrims.append(trim) },
+            log: { logs.append($0) }
+        )
+        backfiller.begin(family: .whoop4)
+
+        await backfiller.ingest(v25RecordFrames[0])
+        await backfiller.ingest(historyEndFrame(trim: 1234))
+
+        XCTAssertTrue(backfiller.persistStalled)
+        XCTAssertTrue(store.cursorWrites.isEmpty)
+        XCTAssertTrue(requestedTrims.isEmpty)
+        XCTAssertNil(backfiller.lastAckedTrim)
+        XCTAssertTrue(logs.contains { $0.contains("failure=decoded_store_write") })
+        XCTAssertFalse(logs.contains { $0.contains("private-user-content") })
+        XCTAssertFalse(logs.contains { $0.contains("StorageFull") })
+
+        // An empty end after the failed records-bearing chunk must not trim past it.
+        await backfiller.ingest(historyEndFrame(trim: 1235))
+
+        XCTAssertTrue(store.cursorWrites.isEmpty)
+        XCTAssertTrue(requestedTrims.isEmpty)
+        XCTAssertNil(backfiller.lastAckedTrim)
     }
 
     /// The watchdog can tear down a session while its final `store.insert` is suspended. The durable

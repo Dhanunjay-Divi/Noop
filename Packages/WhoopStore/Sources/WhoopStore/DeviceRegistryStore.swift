@@ -15,6 +15,12 @@ import WhoopProtocol
 /// `DatabasePool` (#755) AND a plain `DatabaseQueue` (in-memory tests) unchanged: both expose the
 /// same synchronous `.read`/`.write` API used below.
 public struct DeviceRegistryStore: Sendable {
+    private enum MutationFailure: Error {
+        case activeVerificationFailed
+        case archiveVerificationFailed
+        case registrationVerificationFailed
+    }
+
     let dbQueue: any DatabaseWriter
     public init(dbQueue: any DatabaseWriter) { self.dbQueue = dbQueue }
 
@@ -34,8 +40,58 @@ public struct DeviceRegistryStore: Sendable {
         try dbQueue.write { db in try Self.upsert(db, d) }
     }
 
+    /// Insert or update a newly authenticated device and make it the sole active source in one
+    /// transaction. Returning the complete authoritative rows lets the app publish only a verified
+    /// commit; a crash or write failure cannot leave a paired-only partial registration behind.
+    public func addAndSetActive(
+        _ device: PairedDevice,
+        at unix: Int = Int(Date().timeIntervalSince1970)
+    ) throws -> [PairedDevice] {
+        try dbQueue.write { db in
+            let previous = try String.fetchOne(
+                db,
+                sql: "SELECT id FROM pairedDevice WHERE status = 'active' LIMIT 1"
+            )
+            var activeDevice = device
+            activeDevice.status = .active
+            activeDevice.lastSeenAt = unix
+
+            try db.execute(
+                sql: "UPDATE pairedDevice SET status = 'paired' WHERE status = 'active'"
+            )
+            try Self.upsert(db, activeDevice)
+            if previous != device.id {
+                try AnalysisOwnershipInvalidation.mark(db)
+            }
+
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM pairedDevice ORDER BY addedAt ASC"
+            ).map(Self.decode)
+            guard rows.filter({ $0.status == .active }).count == 1,
+                  let saved = rows.first(where: { $0.id == device.id }),
+                  Self.matchesRegistration(
+                    saved,
+                    requested: activeDevice
+                  ) else {
+                throw MutationFailure.registrationVerificationFailed
+            }
+            return rows
+        }
+    }
+
     /// I1: promoting one device demotes whatever was active, atomically (single write transaction).
     public func setActive(_ id: String) throws {
+        _ = try setActiveVerified(id)
+    }
+
+    /// Promote `id`, fetch the complete registry, and verify the requested row is the sole active
+    /// source in the same transaction. Callers can publish the returned rows without a second read.
+    /// Any failed update or verification rolls back the promotion and ownership invalidation.
+    public func setActiveVerified(
+        _ id: String,
+        at unix: Int = Int(Date().timeIntervalSince1970)
+    ) throws -> [PairedDevice] {
         try dbQueue.write { db in
             let previous = try String.fetchOne(
                 db,
@@ -44,14 +100,30 @@ public struct DeviceRegistryStore: Sendable {
             if previous == id {
                 try db.execute(
                     sql: "UPDATE pairedDevice SET lastSeenAt = ? WHERE id = ?",
-                    arguments: [Int(Date().timeIntervalSince1970), id]
+                    arguments: [unix, id]
                 )
-                return
+            } else {
+                try db.execute(
+                    sql: "UPDATE pairedDevice SET status = 'paired' WHERE status = 'active'"
+                )
+                try db.execute(
+                    sql: "UPDATE pairedDevice SET status = 'active', lastSeenAt = ? WHERE id = ?",
+                    arguments: [unix, id]
+                )
+                try AnalysisOwnershipInvalidation.mark(db)
             }
-            try db.execute(sql: "UPDATE pairedDevice SET status = 'paired' WHERE status = 'active'")
-            try db.execute(sql: "UPDATE pairedDevice SET status = 'active', lastSeenAt = ? WHERE id = ?",
-                           arguments: [Int(Date().timeIntervalSince1970), id])
-            try AnalysisOwnershipInvalidation.mark(db)
+
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM pairedDevice ORDER BY addedAt ASC"
+            ).map(Self.decode)
+            let activeRows = rows.filter { $0.status == .active }
+            guard activeRows.count == 1,
+                  activeRows[0].id == id,
+                  activeRows[0].lastSeenAt == unix else {
+                throw MutationFailure.activeVerificationFailed
+            }
+            return rows
         }
     }
 
@@ -66,21 +138,54 @@ public struct DeviceRegistryStore: Sendable {
     }
 
     public func archive(_ id: String) throws {
+        _ = try archiveVerified(id)
+    }
+
+    /// Archive the registry row, verify the durable status, clear its ownership
+    /// overrides, and invalidate analysis in one SQLite transaction. Returning
+    /// false means the row did not exist. Any failed write or verification rolls
+    /// the complete transaction back, including `dayOwnership`.
+    @discardableResult
+    public func archiveVerified(_ id: String) throws -> Bool {
         try dbQueue.write { db in
             guard let status = try String.fetchOne(
                 db,
                 sql: "SELECT status FROM pairedDevice WHERE id = ?",
                 arguments: [id]
-            ),
-            status != DeviceStatus.archived.rawValue else {
-                return
+            ) else { return false }
+            if status != DeviceStatus.archived.rawValue {
+                try db.execute(
+                    sql: "UPDATE pairedDevice SET status = 'archived' WHERE id = ?",
+                    arguments: [id]
+                )
             }
-            try db.execute(sql: "UPDATE pairedDevice SET status = 'archived' WHERE id = ?", arguments: [id])
+            guard try String.fetchOne(
+                db,
+                sql: "SELECT status FROM pairedDevice WHERE id = ?",
+                arguments: [id]
+            ) == DeviceStatus.archived.rawValue else {
+                throw MutationFailure.archiveVerificationFailed
+            }
             try db.execute(
                 sql: "DELETE FROM dayOwnership WHERE deviceId = ?",
                 arguments: [id]
             )
+            guard try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM dayOwnership WHERE deviceId = ?",
+                arguments: [id]
+            ) == 0 else {
+                throw MutationFailure.archiveVerificationFailed
+            }
+            guard try String.fetchOne(
+                db,
+                sql: "SELECT status FROM pairedDevice WHERE id = ?",
+                arguments: [id]
+            ) == DeviceStatus.archived.rawValue else {
+                throw MutationFailure.archiveVerificationFailed
+            }
             try AnalysisOwnershipInvalidation.mark(db)
+            return true
         }
     }
 
@@ -261,9 +366,28 @@ public struct DeviceRegistryStore: Sendable {
             || device.id.lowercased().hasPrefix("whoop-")
     }
 
+    private static func matchesRegistration(
+        _ saved: PairedDevice,
+        requested: PairedDevice
+    ) -> Bool {
+        let expectedCapabilities = isWhoop(requested)
+            ? WhoopLiveCapabilities.withoutUnvalidatedLiveMetrics(
+                requested.capabilities
+            )
+            : requested.capabilities
+        return saved.brand == requested.brand
+            && saved.model == requested.model
+            && saved.nickname == requested.nickname
+            && saved.peripheralId == requested.peripheralId
+            && saved.sourceKind == requested.sourceKind
+            && saved.capabilities == expectedCapabilities
+            && saved.status == .active
+            && saved.lastSeenAt == requested.lastSeenAt
+    }
+
     private static func updateModel(_ db: Database, id: String, model: String) throws {
-        // A model attestation also repairs the seeded WHOOP's capability truth. This is important
-        // for a 5/MG: only after generation is known can the live `steps` capability be advertised.
+        // A model attestation also repairs the seeded compatible band's capability truth.
+        // Unvalidated SpO2 and motion-counter Steps remain excluded for every generation.
         let capabilities = WhoopLiveCapabilities.encoded(forModel: model)
         try db.execute(sql: """
             UPDATE pairedDevice SET model = ?,
@@ -293,7 +417,7 @@ public struct DeviceRegistryStore: Sendable {
         let id = row["id"] as String
         let brand = row["brand"] as String
         if brand.caseInsensitiveCompare("WHOOP") == .orderedSame || id == "my-whoop" || id.hasPrefix("whoop-") {
-            caps = WhoopLiveCapabilities.withoutCalibratedSpo2(caps)
+            caps = WhoopLiveCapabilities.withoutUnvalidatedLiveMetrics(caps)
         }
         return PairedDevice(id: id, brand: brand, model: row["model"], nickname: row["nickname"],
                             peripheralId: row["peripheralId"],

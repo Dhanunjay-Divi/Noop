@@ -1,6 +1,6 @@
 # Release blockers and production readiness
 
-**Assessed:** 2026-08-27; release-control status refreshed 2026-09-20
+**Assessed:** 2026-08-27; release-control status refreshed 2026-09-26
 
 This older blocker summary remains useful historical context. The current
 ordered execution plan, including the first-party NOOP Band, firmware/SDK,
@@ -99,21 +99,26 @@ remains a separate explicit opt-in.
 
 ## Current engineering evidence
 
-The current protected baseline is
-`b688b3b725cd497e96a31b28540a219bf50446e1`. On 2026-09-18, live branch
-protection was reverified as strict, administrator-enforced, linear-history
-only, with force pushes and deletion disabled. That exact SHA has successful
-GitHub Actions results for the ten contexts listed in
-[`../RELEASE_CONTROLS.md`](../RELEASE_CONTROLS.md), including the exact-SHA
-`trusted-release-controls` result.
+The current protected `main` baseline is
+`9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`, the normal merge commit for
+pull request `#16`. Pull request `#17` is open and mergeable at exact head
+`169230a9ae38ac8b4ca4b690489cd29f5af47ee4`. All ten required contexts listed
+in [`../RELEASE_CONTROLS.md`](../RELEASE_CONTROLS.md) pass on that exact head,
+including the trusted release-control result and the complete hosted Apple,
+Android, package, server, claims, localization, operations, runtime-license,
+and release-control paths. Protected integration remains blocked by the
+requested non-author review; no administrative bypass is authorized.
 
-The September 17-21 UI/cloud-readiness replacement candidate has completed its
-applicable local Apple, Android, package, server, plan-only OpenTofu, and final
-post-documentation policy verification. The consolidated commit and hosted
-exact-SHA checks are still pending. Pull request `#16` currently points to
-superseded head `3edddda180963444b8eb8caa48e5298623cd66f4`; it becomes
-authoritative only after the replacement candidate is pushed and all ten
-contexts pass on that exact SHA.
+The supplier-independent September 17 follow-on is being published
+intermittently on
+`codex/sept17-readiness-closeout-20260926`. Public checkpoint
+`7b3250b9ef255a9786a8fa6be1cb519fc96dac81` adds Apple/Android account
+verification recovery and corrects the Watch publication policy after focused
+local verification. Record checkpoint
+`a9ff1cd4b94f0610c5aed15d568a9abe60fc54af` documents that evidence. Those
+branch pushes triggered no workflows because the branch has no pull request
+and push workflows are scoped to `main`; they are not yet part of PR `#17` or
+protected `main`.
 
 Protected source publication and hosted CI prove only the reviewed source
 commit. They do not close the external gates below.

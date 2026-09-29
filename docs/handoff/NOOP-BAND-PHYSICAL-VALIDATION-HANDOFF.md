@@ -1,6 +1,6 @@
 # NOOP Band physical validation handoff
 
-**Updated:** 2026-09-19
+**Updated:** 2026-09-24
 **Purpose:** give the next hardware agent an executable, evidence-bounded plan
 for closing only the supplier, firmware, signed-device, and physical-behavior
 gates that source, unit, simulator, emulator, and synthetic cloud tests cannot
@@ -11,9 +11,10 @@ prove.
 - Keep the existing WHOOP 4.0, 5.0, and MG transport available as a distinct
   comparison and regression adapter until the production NOOP Band path passes
   this matrix. Never relabel WHOOP rows as first-party-band data.
-- The binary-free, NOOP-owned neutral contract remains in the separate private
+- The binary-free, NOOP-owned neutral contract remains in the separate public
   `Dhanunjay-Divi/NoopBandSDK` repository. The original supplier drop and every
-  supplier binary remain outside this repository.
+  supplier binary remain outside this repository, as do firmware, credentials,
+  signing material, private reference inputs, and user or health data.
 - The current compatible-device path is local-authoritative. D-059 targets
   staged cloud authority for durable account history, canonical versioned
   metrics, recommendations, and cross-device state. The active phone still
@@ -28,6 +29,205 @@ prove.
   Mac presentation, SMS/voice fallback, or carrier behavior.
 - The supplier wrapper is not implemented or production-approved merely
   because the candidate SDK exposes an API or the app compiles.
+- The current working-tree candidate for app PR `#17` consumes the
+  supplier-neutral SDK at reviewed merge
+  `b02808372b7c537f22058c7ebc75d92c750373be` while retaining WHOOP as the
+  default comparison transport. The quarantined exact-model Apple and Android
+  adapters are integrated only when the approved external supplier artifacts
+  are verified and a Debug physical-device build is configured as documented
+  below. Clean, simulator, Release, and Archive builds remain supplier-disabled;
+  source integration does not prove physical pairing or sensor behavior.
+
+## 1.1 Immediate device-connected continuation
+
+After app PR `#17` is merged and protected `main` is verified:
+
+1. Create a new operations round from clean protected `main`; do not continue
+   from a stale SDK or adapter worktree.
+2. Build and install one exact signed candidate on a clean supported iPhone and
+   Android phone. Complete first-run account and onboarding rather than
+   injecting a preconfigured state.
+3. Run the existing WHOOP transport first to establish a comparison baseline:
+   discovery, connection, battery, live heart rate, available history,
+   disconnect/reconnect, background recovery, and diagnostics export.
+4. Integrate the approved Apple and Android supplier adapters only from the
+   exact hardware/firmware intake. Keep the adapter default-off until its
+   focused source, artifact, network, and signed-build gates pass.
+5. Run the same scenarios against the supplier band, then execute
+   `PHY-CON-007` to switch sources and prove isolation.
+6. Record the exact generalized phone/OS/band/firmware classes, failures,
+   blocked supplier inputs, diagnostics categories, and preserved data. Do not
+   include serials, printed identifiers, addresses, credentials, or health
+   values in Git.
+
+## 1.2 Exact install starting point
+
+Use a clean checkout of protected `main`; do not install from the integration
+worktree after PR `#17` has merged:
+
+```bash
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+git status --short
+
+python3 - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+
+manifest = Path("Vendor/NoopBandSDK/noop-band-sdk-manifest.json")
+data = json.loads(manifest.read_text())
+assert data["sourceRevision"] == "b02808372b7c537f22058c7ebc75d92c750373be"
+assert hashlib.sha256(manifest.read_bytes()).hexdigest() == (
+    "6beca829f3b2a367cf7046544e8d06dc74ae9f905e1eefe4bb58ccf41615fd34"
+)
+assert data["supplierArtifactsIncluded"] is False
+print("pinned source-only SDK verified")
+PY
+```
+
+`git status --short` must be empty before creating the device round. Record the
+exact source before building:
+
+```bash
+git rev-parse HEAD
+git status --short
+```
+
+For iOS, configure only the gitignored local signing file and the verified
+external supplier bundle, regenerate the project, and identify the connected
+device locally:
+
+```bash
+cp -n Config/BundleIdSecrets.example.xcconfig \
+  Config/BundleIdSecrets.xcconfig
+# Set the local BUNDLE_ID_PREFIX and DEVELOPMENT_TEAM values.
+
+VEEPOO_IOS_SDK_ROOT="<absolute path to the approved iOS_sdk_source directory>"
+python3 Tools/local/configure-veepoo-ios-sdk.py \
+  --sdk-root "${VEEPOO_IOS_SDK_ROOT}" \
+  --write-config
+git check-ignore Config/VeepooLocalSDK.xcconfig
+
+xcodegen generate
+xcrun devicectl list devices
+```
+
+The configurator must report that the protected manifest, build inputs, and all
+fixed and generated framework bundles match before it writes the ignored
+`Config/VeepooLocalSDK.xcconfig`. Do not copy supplier frameworks into the
+repository or commit the generated config. The generated settings enable only
+Debug iPhoneOS builds; Release and Archive remain blocked from supplier
+embedding.
+
+Keep the device identifier out of Git and shared logs. Xcode's `NOOPiOS`
+scheme may be used interactively, or the same signed development build can be
+installed and launched with:
+
+```bash
+IOS_UDID="<local connected-device identifier>"
+DERIVED_DATA="/tmp/noop-ios-device-build"
+
+xcodebuild \
+  -project Strand.xcodeproj \
+  -scheme NOOPiOS \
+  -configuration Debug \
+  -destination "platform=iOS,id=${IOS_UDID}" \
+  -derivedDataPath "${DERIVED_DATA}" \
+  build
+
+APP="$(find "${DERIVED_DATA}/Build/Products/Debug-iphoneos" \
+  -maxdepth 1 -type d -name '*.app' -print -quit)"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+  "${APP}/Info.plist")"
+xcrun devicectl device install app --device "${IOS_UDID}" "${APP}"
+xcrun devicectl device process launch \
+  --device "${IOS_UDID}" --terminate-existing "${BUNDLE_ID}"
+```
+
+Select the same team for the app, widget, Watch app, and complication targets.
+Record the app commit, bundle family, marketing/build version, and generalized
+iPhone/OS class. Do not publish or upload the archive from this step.
+
+For Android, generate the ignored local configuration directly from the
+protected artifact trust root, verify every external AAR, then build and install
+the full transport flavor rather than the fictional Review Sample:
+
+```bash
+ANDROID_SUPPLIER_SDK_ROOT="<absolute path to the approved Android SDK root>"
+export ANDROID_SUPPLIER_SDK_ROOT
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+sdk_root = Path(os.environ["ANDROID_SUPPLIER_SDK_ROOT"])
+if not sdk_root.is_absolute():
+    raise SystemExit("ANDROID_SUPPLIER_SDK_ROOT must be absolute")
+trust = json.loads(
+    Path("release/supplier/android-artifact-trust.json").read_text(
+        encoding="utf-8"
+    )
+)
+artifacts = trust["artifacts"]
+lines = [
+    "enabled=true",
+    f"sdk.root={sdk_root}",
+    f"artifact.count={len(artifacts)}",
+]
+for index, artifact in enumerate(artifacts):
+    prefix = f"artifact.{index}"
+    lines.extend(
+        [
+            f"{prefix}.path={artifact['path']}",
+            f"{prefix}.sha256={artifact['sha256']}",
+            (
+                f"{prefix}.requiredClasses="
+                + ",".join(artifact["requiredClasses"])
+            ),
+            f"{prefix}.nativeAbis=" + ",".join(artifact["nativeAbis"]),
+            (
+                f"{prefix}.nativeLibraries="
+                + ",".join(artifact["nativeLibraries"])
+            ),
+        ]
+    )
+Path("android/noop-supplier-sdk.properties").write_text(
+    "\n".join(lines) + "\n",
+    encoding="utf-8",
+)
+PY
+git check-ignore android/noop-supplier-sdk.properties
+python3 Tools/local/verify-android-supplier-sdk.py \
+  --repo-root . \
+  --config android/noop-supplier-sdk.properties
+(
+  cd android
+  ./gradlew -q :app:noopSupplierSdkStatus :app:verifyNoopSupplierSdk
+  ./gradlew --no-daemon --no-parallel :app:assembleFullDebug
+)
+
+adb devices -l
+adb install -r android/app/build/outputs/apk/full/debug/app-full-debug.apk
+shasum -a 256 android/app/build/outputs/apk/full/debug/app-full-debug.apk
+
+PACKAGE_ID="com.noop.whoop.debug"
+adb logcat -c
+adb shell am start -W -n "${PACKAGE_ID}/com.noop.IconDefault"
+adb logcat -d -v brief | \
+  grep -E "FATAL EXCEPTION|ANR in ${PACKAGE_ID}|Process: ${PACKAGE_ID}" || true
+```
+
+The verifier and Gradle status task must both report supplier enablement and the
+exact protected artifact inventory before installation. Do not commit the local
+properties file or any AAR, JAR, native library, APK, or supplier SDK directory.
+
+Record the exact APK SHA-256, app commit, version/build, and generalized
+phone/OS class. A successful install is only the start of the physical matrix;
+it does not close any `PHY-*` row by itself. Do not clear, uninstall, or change
+the bundle/application ID on a phone containing retained test or user history;
+use a clean test phone or first export and verify the approved backup.
 
 ## 2. Inputs required before testing
 
@@ -198,7 +398,7 @@ reviewed capability or platform reason.
 | ID | Procedure | Pass condition |
 |---|---|---|
 | PHY-MET-001 | Compare firmware step totals with synchronized video/manual counts for slow, normal, and fast walking, stairs, treadmill, carrying an object, short/long sessions, both wrists, and dominant/non-dominant wear. | Every cohort and scenario meets the pre-approved error budget. |
-| PHY-MET-002 | Measure false steps during seated/bed wrist motion, typing, dishes, brushing teeth, driving, cycling, and ordinary gestures. | False-positive budget passes. If aggregate firmware totals fail, block release pending firmware tuning or a separately validated raw-IMU classifier. |
+| PHY-MET-002 | Measure false steps during seated/bed wrist motion, typing, dishes, brushing teeth, head washing/showering, a matched hot-water interval without arm motion, driving, cycling, and ordinary gestures. Capture the synchronized activity class and bounded counter trace so wrist motion can be separated from heart-rate elevation. | False-positive budget passes. Heart rate is supporting context, not gait proof. If aggregate firmware totals fail, block release pending firmware tuning or a separately validated raw-IMU classifier. |
 | PHY-MET-003 | Verify each enabled sensor on-wrist, loose, off-wrist, charging, low battery, sweat, temperature variation, rest, sleep, and exercise. | Quality/wear/missing states prevent unsupported values from entering metrics. |
 | PHY-MET-004 | Compare enabled raw and normalized signals with approved reference instruments and held-out participants. | Each signal meets its pre-registered method, error, subgroup, and missing-data criteria. |
 | PHY-MET-005 | Run client/server formula parity with the same accepted physical source window. | Formula revision, inputs, missingness, provenance, and output match the approved tolerance before any D-059 authority change. |

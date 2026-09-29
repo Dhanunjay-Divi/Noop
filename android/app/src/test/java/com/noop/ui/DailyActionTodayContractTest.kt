@@ -49,6 +49,8 @@ class DailyActionTodayContractTest {
                 "it.flag == ReadinessEngine.Flag.WATCH || it.flag == ReadinessEngine.Flag.BAD"
             )
         )
+        assertTrue(today.contains("R.string.daily_plan_watch_unavailable"))
+        assertFalse(today.contains("R.string.daily_plan_why_unavailable"))
         listOf("CHECK_IN_NEEDED", "CALIBRATING", "RECOVERY_SHIFT", "STOP", "READY").forEach {
             assertTrue("Missing $it presentation", today.contains("Availability.$it"))
         }

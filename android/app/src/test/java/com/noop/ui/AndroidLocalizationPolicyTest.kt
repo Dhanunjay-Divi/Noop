@@ -95,8 +95,10 @@ class AndroidLocalizationPolicyTest {
         val expectedKeys = partial.getValue("values-it").keys
         val allowed = Regex(
                 """string:(wind_down_|sleep_planner_|strength_|key_metrics_(selection_|show_)|hydration_(adaptive_timing_|base_interval_label)).*|""" +
+                """string:key_metrics_open_history|""" +
                 """string:(profile_(bmi_|target_weight_)|vital_range_summary_).*|""" +
                 """string:ownership_(delete_|deletion_).*|""" +
+                """string:(nav_backup_sync|data_sync_subtitle|ownership_(resend_verification_countdown|send_code_countdown|verification_code_invalid|verification_session_expired|verification_rate_limited|verification_cooldown_active|network_unavailable|progress_step|setup_complete)|managed_cloud_error_document_conflict)|""" +
                 """string:(widget_hrv|trends_effort|l10n_today_screen_(recovery_ea924f72|sleep_3cac34e6|resting_hr_26677094|blood_oxygen_a8ad9ff5|respiratory_1cd8c175|steps_cdde4f20|weight_69c0b815|calories_3e62ecfe))|""" +
                 """string:(l10n_devices_screen_(the_whoop_4_0_reboot_frame_690a8ff2|waiting_for_the_straps_reply_5a06e7ac)|l10n_hrv_snapshot_screen_an_hrv_reading_needs_the_live_11b70bff|l10n_test_centre_screen_(heads_up_this_test_mode_is_8b82ed69|share_strap_log_for_bug_reports_b9802500)|l10n_settings_screen_share_strap_log_for_bug_reports_b9802500|l10n_workouts_screen_hrr_explanation_516)|""" +
                 """string:(nav_alarms|today_calibration_valid_hrv_progress|sleep_stage_detail_withheld|stale_sync_.*|health_live_hr_.*|changelog_.*|whats_new_.*|app_report_.*|managed_friends_(account_.*|status_account_ready|delete_account_.*|deletion_scheduled_detail|delete_body)|managed_cloud_error_forbidden|managed_cloud_(import_history|cancel_import|import_alert_.*|status_import_canceled|delete_account|fresh_code|schedule_deletion|deletion_scheduled_.*|deletion_after|deletion_time_unavailable|working|cancel_deletion|checking|check_deletion|local_data_remains|delete_alert_.*|cancel|status_deletion_.*|erasure_.*))""",
@@ -251,7 +253,7 @@ class AndroidLocalizationPolicyTest {
         val auditKeys = base.keys.filter {
             it.startsWith("string:appwide_ui_audit_")
         }.toSet()
-        assertEquals(50, auditKeys.size)
+        assertEquals(49, auditKeys.size)
 
         val forbidden = listOf(
             "whoop",

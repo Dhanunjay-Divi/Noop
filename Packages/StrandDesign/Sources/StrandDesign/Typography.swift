@@ -59,9 +59,15 @@ public enum StrandFont {
     /// Overline 11 / Semibold. Sparing ALL-CAPS labels. Scales with Dynamic Type.
     public static let overline = Font.system(.caption2, design: .default, weight: .semibold)
 
-    /// `overline` at a custom point size — same Helvetica face, weight and Dynamic-Type scaling
-    /// (relativeTo `.caption2`), just smaller. Passing 11 returns exactly `.overline`. Lets a caller
-    /// shrink an ALL-CAPS label to fit a small container without losing accessibility text-scaling.
+    /// Semantic metric label. Prefer this on user-facing metric tiles so the label scales.
+    public static let metricLabel = Font.system(.caption2, design: .default, weight: .semibold)
+
+    /// Semantic metric value with stable digits and Dynamic Type scaling.
+    public static let metricValue =
+        Font.system(.title2, design: .rounded, weight: .semibold).monospacedDigit()
+
+    /// Fixed-size compatibility helper for compact decorative labels. User-facing metric labels
+    /// should use `metricLabel` instead.
     public static func overlineScaled(_ size: CGFloat) -> Font {
         fixed(size, weight: .semibold)
     }

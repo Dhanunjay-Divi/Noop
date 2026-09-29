@@ -17,6 +17,30 @@ public struct HRBucket: Sendable, Equatable {
     public init(ts: Int, bpm: Double, conf: Double = 1.0) { self.ts = ts; self.bpm = bpm; self.conf = conf }
 }
 
+private struct OrderedReadSources {
+    let valuesSQL: String
+    let arguments: [DatabaseValueConvertible]
+}
+
+private func orderedReadSources(_ deviceIDs: [String]) -> OrderedReadSources? {
+    var seen: Set<String> = []
+    let ids = deviceIDs.filter {
+        !$0.isEmpty && seen.insert($0).inserted
+    }
+    guard !ids.isEmpty else { return nil }
+
+    var arguments: [DatabaseValueConvertible] = []
+    let values = ids.enumerated().map { priority, deviceID in
+        arguments.append(deviceID)
+        arguments.append(priority)
+        return "(?, ?)"
+    }
+    return OrderedReadSources(
+        valuesSQL: values.joined(separator: ", "),
+        arguments: arguments
+    )
+}
+
 extension WhoopStore {
     /// Shared decoder, JSONDecoder is stateless across decodes and was previously allocated once
     /// per event row. Battery events are dense (~every 8 min), so a multi-year read decodes
@@ -48,6 +72,63 @@ extension WhoopStore {
                                  deviceId, from, to,
                                  limit])
                 .map { HRSample(ts: $0["ts"], bpm: $0["bpm"]) }
+        }
+    }
+
+    /// Globally bounded raw HR across ordered sources. The first source wins an
+    /// overlapping second, matching Repository source precedence, while one SQL
+    /// LIMIT bounds the returned allocation regardless of source count.
+    public func hrSamples(
+        deviceIds: [String],
+        from: Int,
+        to: Int,
+        limit: Int
+    ) async throws -> [HRSample] {
+        guard limit > 0, let sources = orderedReadSources(deviceIds) else {
+            return []
+        }
+        return try syncRead { db in
+            var arguments = sources.arguments
+            arguments += [from, to, from, to, limit]
+            return try Row.fetchAll(
+                db,
+                sql: """
+                    WITH input_source(deviceId, priority) AS (
+                        VALUES \(sources.valuesSQL)
+                    ),
+                    candidate AS (
+                        SELECT h.ts, h.bpm, input_source.priority
+                        FROM hrSample AS h
+                        JOIN input_source ON input_source.deviceId = h.deviceId
+                        WHERE h.ts >= ? AND h.ts <= ?
+                        UNION ALL
+                        SELECT p.ts, CAST(ROUND(p.bpm) AS INTEGER),
+                               input_source.priority
+                        FROM ppgHrSample AS p
+                        JOIN input_source ON input_source.deviceId = p.deviceId
+                        WHERE p.ts >= ? AND p.ts <= ?
+                          AND NOT EXISTS (
+                            SELECT 1
+                            FROM hrSample AS h
+                            WHERE h.deviceId = p.deviceId AND h.ts = p.ts
+                          )
+                    ),
+                    ranked AS (
+                        SELECT ts, bpm,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY ts
+                                   ORDER BY priority ASC
+                               ) AS sourceRank
+                        FROM candidate
+                    )
+                    SELECT ts, bpm
+                    FROM ranked
+                    WHERE sourceRank = 1
+                    ORDER BY ts ASC
+                    LIMIT ?
+                    """,
+                arguments: StatementArguments(arguments)
+            ).map { HRSample(ts: $0["ts"], bpm: $0["bpm"]) }
         }
     }
 
@@ -160,6 +241,75 @@ extension WhoopStore {
         }
     }
 
+    /// SQL-aggregated HR buckets across ordered sources. An overlapping second
+    /// is selected once by source precedence before the bucket mean is
+    /// calculated, so a newer restored source can replace stale data without
+    /// discarding the other unique seconds in that bucket.
+    public func hrBuckets(
+        deviceIds: [String],
+        from: Int,
+        to: Int,
+        bucketSeconds: Int
+    ) async throws -> [HRBucket] {
+        guard let sources = orderedReadSources(deviceIds) else { return [] }
+        let bucket = max(1, bucketSeconds)
+        return try syncRead { db in
+            var arguments = sources.arguments
+            arguments += [
+                from, to,
+                from, to,
+                bucket, bucket, bucket,
+            ]
+            return try Row.fetchAll(
+                db,
+                sql: """
+                    WITH input_source(deviceId, priority) AS (
+                        VALUES \(sources.valuesSQL)
+                    ),
+                    candidate AS (
+                        SELECT h.ts, CAST(h.bpm AS REAL) AS bpm, 1.0 AS conf,
+                               input_source.priority
+                        FROM hrSample AS h
+                        JOIN input_source ON input_source.deviceId = h.deviceId
+                        WHERE h.ts >= ? AND h.ts <= ?
+                        UNION ALL
+                        SELECT p.ts, p.bpm, p.conf, input_source.priority
+                        FROM ppgHrSample AS p
+                        JOIN input_source ON input_source.deviceId = p.deviceId
+                        WHERE p.ts >= ? AND p.ts <= ?
+                          AND NOT EXISTS (
+                            SELECT 1
+                            FROM hrSample AS h
+                            WHERE h.deviceId = p.deviceId AND h.ts = p.ts
+                          )
+                    ),
+                    ranked AS (
+                        SELECT ts, bpm, conf,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY ts
+                                   ORDER BY priority ASC
+                               ) AS sourceRank
+                        FROM candidate
+                    )
+                    SELECT (ts / ?) * ? AS bucket,
+                           AVG(bpm) AS avgBpm,
+                           MIN(conf) AS minConf
+                    FROM ranked
+                    WHERE sourceRank = 1
+                    GROUP BY ts / ?
+                    ORDER BY bucket ASC
+                    """,
+                arguments: StatementArguments(arguments)
+            ).map {
+                HRBucket(
+                    ts: $0["bucket"],
+                    bpm: $0["avgBpm"],
+                    conf: $0["minConf"] ?? 1.0
+                )
+            }
+        }
+    }
+
     public func rrIntervals(deviceId: String, from: Int, to: Int, limit: Int) async throws -> [RRInterval] {
         try syncRead { db in
             try Row.fetchAll(db, sql: """
@@ -174,6 +324,73 @@ extension WhoopStore {
                                srcChannel: (row["srcChannel"] as Int?)
                                 .flatMap(RRSourceChannel.init(rawValue:)))
                 }
+        }
+    }
+
+    /// Globally bounded R-R union across ordered sources. Equal beats preserve
+    /// the maximum multiplicity present in any source, while an overlapping
+    /// occurrence is emitted only from the highest-priority source.
+    public func rrIntervals(
+        deviceIds: [String],
+        from: Int,
+        to: Int,
+        limit: Int
+    ) async throws -> [RRInterval] {
+        guard limit > 0, let sources = orderedReadSources(deviceIds) else {
+            return []
+        }
+        return try syncRead { db in
+            var arguments = sources.arguments
+            arguments += [
+                from, to,
+                RRSourceChannel.spo2Ibi.rawValue,
+                limit,
+            ]
+            return try Row.fetchAll(
+                db,
+                sql: """
+                    WITH input_source(deviceId, priority) AS (
+                        VALUES \(sources.valuesSQL)
+                    ),
+                    source_rows AS (
+                        SELECT r.ts, r.rrMs, r.srcChannel, r.ord, r.seq,
+                               input_source.priority,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY r.deviceId, r.ts, r.rrMs,
+                                                COALESCE(r.srcChannel, -1)
+                                   ORDER BY r.ord ASC, r.seq ASC
+                               ) AS occurrence
+                        FROM rrInterval AS r
+                        JOIN input_source ON input_source.deviceId = r.deviceId
+                        WHERE r.ts >= ? AND r.ts <= ?
+                          AND (r.tsSuspect IS NULL OR r.tsSuspect <> 1)
+                          AND (r.srcChannel IS NULL OR r.srcChannel <> ?)
+                    ),
+                    ranked AS (
+                        SELECT ts, rrMs, srcChannel, ord, seq, priority,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY ts, rrMs,
+                                                COALESCE(srcChannel, -1),
+                                                occurrence
+                                   ORDER BY priority ASC
+                               ) AS sourceRank
+                        FROM source_rows
+                    )
+                    SELECT ts, rrMs, srcChannel
+                    FROM ranked
+                    WHERE sourceRank = 1
+                    ORDER BY ts ASC, priority ASC, ord ASC, rrMs ASC, seq ASC
+                    LIMIT ?
+                    """,
+                arguments: StatementArguments(arguments)
+            ).map { row in
+                RRInterval(
+                    ts: row["ts"],
+                    rrMs: row["rrMs"],
+                    srcChannel: (row["srcChannel"] as Int?)
+                        .flatMap(RRSourceChannel.init(rawValue:))
+                )
+            }
         }
     }
 
@@ -259,6 +476,54 @@ extension WhoopStore {
                 ORDER BY ts ASC LIMIT ?
                 """, arguments: [deviceId, from, to, limit])
                 .map { GravitySample(ts: $0["ts"], x: $0["x"], y: $0["y"], z: $0["z"]) }
+        }
+    }
+
+    /// Globally bounded gravity union across ordered sources. The first source
+    /// wins an overlapping timestamp, and one SQL LIMIT bounds the result.
+    public func gravitySamples(
+        deviceIds: [String],
+        from: Int,
+        to: Int,
+        limit: Int
+    ) async throws -> [GravitySample] {
+        guard limit > 0, let sources = orderedReadSources(deviceIds) else {
+            return []
+        }
+        return try syncRead { db in
+            var arguments = sources.arguments
+            arguments += [from, to, limit]
+            return try Row.fetchAll(
+                db,
+                sql: """
+                    WITH input_source(deviceId, priority) AS (
+                        VALUES \(sources.valuesSQL)
+                    ),
+                    ranked AS (
+                        SELECT g.ts, g.x, g.y, g.z,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY g.ts
+                                   ORDER BY input_source.priority ASC
+                               ) AS sourceRank
+                        FROM gravitySample AS g
+                        JOIN input_source ON input_source.deviceId = g.deviceId
+                        WHERE g.ts >= ? AND g.ts <= ?
+                    )
+                    SELECT ts, x, y, z
+                    FROM ranked
+                    WHERE sourceRank = 1
+                    ORDER BY ts ASC
+                    LIMIT ?
+                    """,
+                arguments: StatementArguments(arguments)
+            ).map {
+                GravitySample(
+                    ts: $0["ts"],
+                    x: $0["x"],
+                    y: $0["y"],
+                    z: $0["z"]
+                )
+            }
         }
     }
 

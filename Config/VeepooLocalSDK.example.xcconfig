@@ -1,0 +1,12 @@
+// Generated only after Tools/local/configure-veepoo-ios-sdk.py verifies the
+// protected iOS supplier manifest and local bundle. Do not copy supplier
+// frameworks into this repo.
+// The values are qualified to Debug iPhoneOS builds so simulator and
+// Release/Archive builds retain the default-off settings.
+NOOP_VEEPOO_SDK_ENABLED[config=Debug][sdk=iphoneos*] = YES
+NOOP_VEEPOO_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "/absolute/path/to/iOS_Ble_SDK-master/iOS_sdk_source/Framework/2.2.XX.15"
+NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "/absolute/path/to/iOS_Ble_SDK-master/iOS_sdk_source/Demo/VeepooBleSDKDemo/VeepooBleSDKDemo"
+NOOP_VEEPOO_FMDB_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "/absolute/path/to/iOS_Ble_SDK-master/iOS_sdk_source/Demo/VeepooBleSDKDemo/build/Debug-iphoneos/FMDB"
+NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR[config=Debug][sdk=iphoneos*] = "/absolute/path/to/iOS_Ble_SDK-master/iOS_sdk_source/Demo/VeepooBleSDKDemo/build/Debug-iphoneos/MJExtension"
+NOOP_VEEPOO_LINK_FLAGS[config=Debug][sdk=iphoneos*] = -ObjC -framework VeepooBleSDK -framework ABParTool -framework DFUnits -framework GRDFUSDK -framework JLDialUnit -framework JL_BLEKit -framework ZipZap -framework FMDB -framework MJExtension -lsqlite3 -lz
+NOOP_VEEPOO_SWIFT_CONDITION[config=Debug][sdk=iphoneos*] = NOOP_SUPPLIER_VEEPOO NOOP_SUPPLIER_QUALIFICATION

@@ -50,12 +50,41 @@ The executable signed-device and hardware matrix is
 
 ## Repository boundary
 
-The NOOP-owned SDK contract now lives in the separate private
+The NOOP-owned SDK contract targets the separate public
 `Dhanunjay-Divi/NoopBandSDK` repository. Its initial `main` commit is
-`ee82cc0`. The repository contains only English NOOP-owned architecture,
-capability schema, conformance scenarios, supplier-intake records, platform
-adapter requirements, and local validation. It contains no vendor binary and
-no hosted GitHub Actions workflow.
+`ee82cc0`, and reviewed contract remediation is merged through
+`b02808372b7c537f22058c7ebc75d92c750373be`. The latest remediation retains
+exact connection, live-operation, and opaque one-use reconnect authority;
+preserves Swift actor authority across diagnostic suspension; invalidates
+reconnect authority when recovery restarts; rejects every public Kotlin
+session entry during caller-owned collection traversal; and completes the
+reviewed lifecycle chronology, bounded diagnostics, JVM compatibility,
+capability-report equivalence, exact UTF-8 byte-semantics contracts,
+privacy-safe model rendering, and exact-generation history-acknowledgement
+authority across suspension. It also rejects conflicting duplicate payloads,
+normalizes signed-zero equality, preserves Java checkpoint compatibility, and
+stores only collision-resistant replay evidence in encrypted app checkpoints.
+The repository
+contains only
+English NOOP-owned architecture, capability schema, conformance scenarios,
+supplier-intake records, platform adapter requirements, and local validation.
+It contains no vendor binary and no hosted GitHub Actions workflow. The
+repository was verified public on 2026-09-23 by owner decision. D-056 requires
+the public tree to remain binary-free and free of firmware, credentials,
+signing material, private inputs, and personal or health data.
+
+The 2026-09-23 local supplier-drop audit found Android Veepoo protocol and
+Bluetooth AARs plus an arm64 iPhoneOS-only `VeepooBleSDK.framework`. Those
+artifacts expose scan, connect, password confirmation, capability, battery,
+live-heart-rate, history-reader, raw-sensor, and vendor-specific OTA entry
+points, but they remain outside Git and are not production inputs. The drop
+does not provide an approved exact-SKU capability contract, per-device
+authentication lifecycle, device-origin timestamp/cursor semantics,
+redistribution authorization and complete SBOM, iOS simulator/XCFramework
+support and privacy manifest, firmware payload/signature compatibility data,
+or physical reconnect/background/history/haptic/accuracy/recovery evidence.
+It can support a separately gated experimental device bridge; it cannot yet
+close the production supplier-adapter or flashing gates.
 
 The original supplier package is not rewritten to remove Chinese comments or
 documentation. It remains immutable and outside Git so its provenance and
@@ -238,9 +267,10 @@ an untrusted transport/parser dependency, not an application architecture.
 10. Do not add the binaries to Git until distribution authority, notices, SBOM,
     security review, privacy disclosures, exact versions, and update ownership
     are approved.
-11. Publish the neutral SDK from the separate private repository as pinned
-    Apple and Android artifacts. The NOOP app repository consumes an exact
-    version and digest; it does not host supplier source or binaries.
+11. Publish the neutral SDK from the separate public, source-only repository as
+    pinned Apple and Android artifacts. The NOOP app repository consumes an
+    exact version and digest; neither public repository hosts supplier source,
+    binaries, firmware, credentials, signing material, or private inputs.
 12. Keep the existing WHOOP adapter selectable for controlled regression and
     comparison until every applicable `PHY-*` supplier row passes. WHOOP and
     supplier rows, cursors, diagnostics, and provenance must never be merged.

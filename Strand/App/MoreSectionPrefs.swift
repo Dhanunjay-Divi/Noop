@@ -33,10 +33,11 @@ enum MoreSectionPrefs {
     static let defaultExpanded: Set<String> = ["Insights", "Body"]
 
     /// A deliberately small shortcut row. Safety leads because a stressful moment is exactly when a user
-    /// should not have to remember which collapsed catalogue group owns the tool.
+    /// should not have to remember which collapsed catalogue group owns the tool. Profile remains in the
+    /// complete Body index; Journal replaces its former duplicate shortcut.
     static let quickAccess: [MoreQuickAccessItem] = [
         .init(id: "safety", title: "Safety", systemImage: "shield.fill"),
-        .init(id: "profile", title: "Profile", systemImage: "person.crop.circle.fill"),
+        .init(id: "insights", title: "Journal & Insights", systemImage: "book.closed.fill"),
         .init(id: "devices", title: "Devices", systemImage: "applewatch.side.right"),
         .init(id: "friends", title: "Friends", systemImage: "person.2.fill")
     ]

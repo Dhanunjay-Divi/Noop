@@ -19,6 +19,22 @@ final class ScreenStateContractTests: XCTestCase {
         )
     }
 
+    func testDestructiveButtonsUseTheContrastResolvedInkToken() throws {
+        let button = try sourceText(
+            "Packages/StrandDesign/Sources/StrandDesign/NoopButton.swift"
+        )
+        let destructive = button
+            .components(separatedBy: "case .destructive:")
+            .dropFirst()
+            .first?
+            .components(separatedBy: "}")
+            .first ?? ""
+
+        XCTAssertTrue(destructive.contains("fill = StrandPalette.statusCritical"))
+        XCTAssertTrue(destructive.contains("label = StrandPalette.accentInk"))
+        XCTAssertFalse(destructive.contains("goldDeepText"))
+    }
+
     func testFeedbackUploadCallbacksDropTerminalRacesBeforeDiagnostics() throws {
         let coordinator = try sourceText(
             "StrandiOS/System/FeedbackUploadCoordinator.swift"
@@ -65,7 +81,14 @@ final class ScreenStateContractTests: XCTestCase {
             root.contains("showStrengthTrainer = true")
         )
         XCTAssertTrue(
-            root.contains("selection = .workouts")
+            root.contains("select(.workouts)")
+        )
+        XCTAssertTrue(
+            root.contains(
+                "request.presentation == .lighterWorkoutOptions,\n"
+                    + "           !model.runtimeRole"
+                    + ".enforcesManagedViewerReadOnlyRoutes"
+            )
         )
         XCTAssertTrue(
             root.contains(
@@ -235,6 +258,12 @@ final class ScreenStateContractTests: XCTestCase {
         let journal = try sourceText("Strand/Screens/JournalLogCard.swift")
         XCTAssertTrue(journal.contains("placeholder: StrandFormat.missing"))
         XCTAssertFalse(journal.contains(#"placeholder: "-""#))
+        XCTAssertTrue(journal.contains("appwide.journal.attribution.title"))
+        XCTAssertTrue(journal.contains("appwide.journal.attribution.detail"))
+        XCTAssertTrue(journal.contains("showingAttributionInfo"))
+        XCTAssertFalse(journal.contains(
+            "Answers are about the night and day leading into this morning"
+        ))
     }
 
     func testAuditedSocialAndBandCopyUsesCurrentVocabulary() throws {
@@ -443,6 +472,24 @@ final class ScreenStateContractTests: XCTestCase {
         XCTAssertTrue(liquidToday.contains("dailySignalPillPresentation("))
         XCTAssertTrue(liquidToday.contains("appwide.readiness.balanced.headline"))
         XCTAssertTrue(liquidToday.contains("appwide.readiness.rundown.headline"))
+    }
+
+    func testScoringGuideUsesAuthoritativeFormulaMetadataWithoutChangingMath() throws {
+        let scoring = try sourceText("Strand/Screens/ScoringGuideView.swift")
+
+        XCTAssertTrue(scoring.contains("NoopScoreAlgorithmRevision.charge"))
+        XCTAssertTrue(scoring.contains("NoopScoreAlgorithmRevision.effort"))
+        XCTAssertTrue(scoring.contains("NoopScoreAlgorithmRevision.rest"))
+        XCTAssertTrue(scoring.contains("Baselines.hrvCfg"))
+        XCTAssertTrue(scoring.contains("Baselines.minNightsSeed"))
+        XCTAssertTrue(scoring.contains("Baselines.minNightsTrust"))
+        XCTAssertTrue(scoring.contains("Baselines.staleDays"))
+        XCTAssertTrue(scoring.contains("appwide.scoring_guide.recovery_inputs"))
+        XCTAssertTrue(scoring.contains("appwide.scoring_guide.recovery_excluded"))
+        XCTAssertTrue(scoring.contains("appwide.scoring_guide.source_on_device"))
+        XCTAssertFalse(scoring.contains(#""noop-charge-v2""#))
+        XCTAssertFalse(scoring.contains(#""noop-effort-v2""#))
+        XCTAssertFalse(scoring.contains(#""noop-rest-v2""#))
     }
 
     func testDailySignalPillMatchesReadinessVocabularyAndPolarity() {
@@ -798,6 +845,7 @@ final class TabShellVisualQAContractTests: XCTestCase {
         let script = try text("Tools/ios-tab-shell-visual-qa.sh")
         let shell = try text("StrandiOS/App/RootTabView.swift")
         let coach = try text("Strand/Screens/CoachView.swift")
+        let demoSeeder = try text("Strand/Data/AppleDemoSeeder.swift")
 
         XCTAssertTrue(script.contains("trap cleanup EXIT INT TERM"))
         XCTAssertTrue(script.contains("simctl shutdown"))
@@ -810,6 +858,9 @@ final class TabShellVisualQAContractTests: XCTestCase {
         XCTAssertTrue(coach.contains("Tab shell keyboard QA focused"))
         XCTAssertTrue(coach.contains("Tab shell keyboard QA dismissed"))
         XCTAssertTrue(script.contains("mixed=true"))
+        XCTAssertTrue(demoSeeder.contains(
+            #"VisualQALog.emit("AppleDemoSeeder: nutrition fixture ready mixed=true")"#
+        ))
         XCTAssertTrue(script.contains("Crash signature found"))
         XCTAssertTrue(script.contains("cmp -s"))
     }
@@ -954,7 +1005,13 @@ final class ReferenceSurfaceContractTests: XCTestCase {
             #").filter { ["resp", "spo2", "rhr", "hrv", "skin"].contains($0.key) }"#
         ))
         XCTAssertTrue(health.contains("HealthTimelineSection()"))
-        XCTAssertTrue(health.contains("BiomarkerTrendsSection()"))
+        XCTAssertTrue(
+            health.contains(
+                "BiomarkerTrendsSection(\n"
+                    + "                allowsLocalMutations: "
+                    + "allowsLocalMutations"
+            )
+        )
         XCTAssertTrue(health.contains("Missing wear time stays blank."))
         XCTAssertTrue(vitals.contains(#"key: "sleep""#))
         XCTAssertTrue(vitals.contains("populationRange: 7...9"))
@@ -1048,7 +1105,7 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(shell.contains(#"MoreRow("Health & Biology", "heart.text.square.fill", .health)"#))
     }
 
-    func testTodayShowsTheFullCatalogWithSavedMetricsPinnedFirst() throws {
+    func testTodayShowsOnlySavedKeyMetricsAndKeepsFullHistoryOneTapAway() throws {
         let classic = try text("Strand/Screens/TodayView.swift")
         let liquid = try text("Strand/Liquid/LiquidTodayView.swift")
         let recoveryRing = try text("Packages/StrandDesign/Sources/StrandDesign/RecoveryRing.swift")
@@ -1057,14 +1114,21 @@ final class ReferenceSurfaceContractTests: XCTestCase {
 
         XCTAssertTrue(classic.contains("private var visibleKeyMetrics: [KeyMetric]"))
         XCTAssertTrue(classic.contains("ForEach(visibleKeyMetrics)"))
-        XCTAssertTrue(classic.contains(
-            "KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)"
-        ))
+        XCTAssertTrue(classic.contains("{ enabledKeyMetrics }"))
         XCTAssertTrue(liquid.contains("private var visibleKeyMetrics: [KeyMetric]"))
         XCTAssertTrue(liquid.contains("ForEach(visibleKeyMetrics)"))
-        XCTAssertTrue(liquid.contains(
-            "KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)"
+        XCTAssertTrue(liquid.contains("{ enabledKeyMetrics }"))
+        XCTAssertTrue(liquid.contains("Open all metric history"))
+        XCTAssertTrue(androidToday.contains("val tiles = enabledMetrics"))
+        XCTAssertFalse(androidToday.contains("val tiles = KeyMetricPrefs.catalogOrder(enabledMetrics)"))
+        XCTAssertTrue(androidToday.contains("metricColumnCount"))
+        XCTAssertTrue(androidToday.contains("onClick = onOpenMetricHistory"))
+        XCTAssertTrue(androidToday.contains("R.string.key_metrics_open_history"))
+        let androidRoot = try text("android/app/src/main/java/com/noop/ui/AppRoot.kt")
+        XCTAssertTrue(androidRoot.contains(
+            "onOpenMetricHistory = { openTopLevel(Destination.Explore.route) }"
         ))
+        XCTAssertTrue(liquid.contains(".frame(maxWidth: .infinity, minHeight: 44)"))
         XCTAssertTrue(classic.contains("StrandPalette.recoveryGaugeColors(s).base"))
         XCTAssertTrue(liquid.contains("RecoveryBandPresentation.gaugeColors(for: score)"))
         XCTAssertTrue(recoveryRing.contains("StrandPalette.recoveryGaugeStops(score)"))
@@ -1254,6 +1318,35 @@ final class AppWideLocalizationContractTests: XCTestCase {
         )
         XCTAssertNil(source["appwide.live_session.start_accessibility"])
         XCTAssertNil(source["appwide.live_session.start_detail_calibrating"])
+        let supplierKeys = source.keys.filter {
+            $0.hasPrefix("appwide.onboarding.device_wizard.supplier_")
+        }
+        XCTAssertEqual(supplierKeys.count, 49)
+        XCTAssertEqual(
+            source[
+                "appwide.onboarding.device_wizard.supplier_prep_password_scope"
+            ]?["en"],
+            "The supplier password authorizes this Bluetooth transport only. It does not prove band ownership."
+        )
+        XCTAssertEqual(
+            source[
+                "appwide.onboarding.device_wizard.supplier_ready_body"
+            ]?["en"],
+            "Live heart rate uses the phone receipt time for display freshness only. This supplier stream is not added to durable health history or formulas."
+        )
+        let onboardingNotificationKeys = [
+            "appwide.onboarding.notifications.background_status_body",
+            "appwide.onboarding.notifications.background_status_subtitle",
+            "appwide.onboarding.notifications.permission_help",
+            "appwide.onboarding.notifications.wrist_alerts",
+        ]
+        XCTAssertNil(source["appwide.ui_audit.onboarding.background_pairing"])
+        XCTAssertEqual(
+            source[
+                "appwide.onboarding.notifications.background_status_body"
+            ]?["en"],
+            "For supported Bluetooth bands, Android may show one low-priority ongoing notification while NOOP collects. Background collection still depends on system permission and device support."
+        )
         XCTAssertEqual(
             source["appwide.friends.data_boundary"]?["en"],
             "Only Recovery, Effort, Sleep Score, sleep duration, HRV, and resting heart rate can be shared. Raw streams, locations, journals, routes, workouts, and sleep stages are excluded."
@@ -1267,7 +1360,9 @@ final class AppWideLocalizationContractTests: XCTestCase {
             "Until NOOP Band is ready, this version works with a compatible band you own."
         )
         let uiAuditKeys = source.keys.filter { $0.hasPrefix("appwide.ui_audit.") }
-        XCTAssertEqual(uiAuditKeys.count, 50)
+        XCTAssertEqual(uiAuditKeys.count, 49)
+        let fullyLocalizedKeys =
+            uiAuditKeys + supplierKeys + onboardingNotificationKeys
         let placeholderRegex = try NSRegularExpression(
             pattern: #"%(?:\d+\$)?[a-zA-Z@]"#
         )
@@ -1278,7 +1373,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
                 return String(value[range])
             }.sorted()
         }
-        for key in uiAuditKeys {
+        for key in fullyLocalizedKeys {
             let translations = try XCTUnwrap(source[key], key)
             XCTAssertEqual(Set(translations.keys), locales, key)
             let english = try XCTUnwrap(translations["en"], key)
@@ -1429,6 +1524,16 @@ final class AppWideLocalizationContractTests: XCTestCase {
 
         XCTAssertEqual(appleVersion, androidVersion)
         XCTAssertEqual(appleVersion, documentVersion)
+        XCTAssertFalse(document.contains("NOOP Band is not available yet"))
+        XCTAssertTrue(document.contains("approved supplier SDK"))
+
+        let catalog = try text("Tools/AppWideLocalization/appwide_strings.json")
+        XCTAssertFalse(catalog.contains("NOOP Band is not available yet"))
+        XCTAssertTrue(
+            catalog.contains(
+                "Approved supplier builds can connect NOOP Band"
+            )
+        )
     }
 }
 

@@ -324,6 +324,62 @@ issue {
                 "evidence_files=2\n",
             )
 
+    def test_workflow_announces_retries_only_after_classifier_approval(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "android.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "name: Announce approved production-shell infrastructure retry",
+            workflow,
+        )
+        self.assertIn(
+            "name: Announce approved Review Sample infrastructure retry",
+            workflow,
+        )
+
+        production_classifier = workflow.split(
+            "- name: Classify a zero-test production-shell infrastructure loss",
+            maxsplit=1,
+        )[1].split(
+            "- name: Announce approved production-shell infrastructure retry",
+            maxsplit=1,
+        )[0]
+        production_announcement = workflow.split(
+            "- name: Announce approved production-shell infrastructure retry",
+            maxsplit=1,
+        )[1].split(
+            "- name: Reset production-shell managed device before the approved retry",
+            maxsplit=1,
+        )[0]
+        self.assertNotIn("Managed-device infrastructure retry", production_classifier)
+        self.assertIn(
+            "steps.production_shell_retry.outputs.retry == 'true'",
+            production_announcement,
+        )
+        self.assertIn("resetting and retrying once", production_announcement)
+
+        review_classifier = workflow.split(
+            "- name: Classify a zero-test managed-device infrastructure loss",
+            maxsplit=1,
+        )[1].split(
+            "- name: Announce approved Review Sample infrastructure retry",
+            maxsplit=1,
+        )[0]
+        review_announcement = workflow.split(
+            "- name: Announce approved Review Sample infrastructure retry",
+            maxsplit=1,
+        )[1].split(
+            "- name: Reset managed device before the approved retry",
+            maxsplit=1,
+        )[0]
+        self.assertNotIn("Managed-device infrastructure retry", review_classifier)
+        self.assertIn(
+            "steps.review_sample_retry.outputs.retry == 'true'",
+            review_announcement,
+        )
+        self.assertIn("resetting and retrying once", review_announcement)
+
 
 if __name__ == "__main__":
     unittest.main()

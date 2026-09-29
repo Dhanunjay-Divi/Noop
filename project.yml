@@ -50,8 +50,18 @@ packages:
     path: Packages/WhoopProtocol
   WhoopStore:
     path: Packages/WhoopStore
+  # StrandTests directly imports GRDB for database failure-injection coverage.
+  # Keep this exact pin aligned with Packages/WhoopStore/Package.swift.
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    exactVersion: 6.29.3
   NoopRemoteSync:
     path: Packages/NoopRemoteSync
+  # Digest-pinned, source-only export from the public NoopBandSDK repository.
+  # The artifact verifier rejects drift and supplier binaries. This package is
+  # the neutral state machine only; no production transport is registered.
+  NoopBandSDK:
+    path: Vendor/NoopBandSDK
   Firebase:
     url: https://github.com/firebase/firebase-ios-sdk.git
     exactVersion: 12.18.0
@@ -111,6 +121,8 @@ targets:
       - path: DISCLAIMER.md
         buildPhase: resources
       - path: TERMS.md
+        buildPhase: resources
+      - path: release/supplier/runtime/noop-band-compatibility.json
         buildPhase: resources
     # Oura BYO-app OAuth credentials. OuraConfig.xcconfig is a tracked wrapper that optionally
     # includes the untracked, gitignored Strand/Oura/OuraSecrets.xcconfig (template at
@@ -190,6 +202,7 @@ targets:
       - package: WhoopProtocol
       - package: WhoopStore
       - package: NoopRemoteSync
+      - package: NoopBandSDK
       - package: Firebase
         product: FirebaseAuth
       - package: Firebase
@@ -221,7 +234,9 @@ targets:
       - target: Strand
       - package: WhoopProtocol
       - package: WhoopStore
+      - package: GRDB
       - package: NoopRemoteSync
+      - package: NoopBandSDK
       - package: OuraProtocol
     settings:
       base:
@@ -290,6 +305,8 @@ targets:
       - path: DISCLAIMER.md
         buildPhase: resources
       - path: TERMS.md
+        buildPhase: resources
+      - path: release/supplier/runtime/noop-band-compatibility.json
         buildPhase: resources
     # iPhone-only wrapper: preserves the Oura wrapper while making the ignored launch verifier
     # available exclusively to this target. Embedded extensions inherit only public policy from the
@@ -437,6 +454,13 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_EMIT_LOC_STRINGS: YES
+        # Restricted supplier SDK values remain empty unless the ignored
+        # Config/VeepooLocalSDK.xcconfig is generated locally. Qualifying all
+        # consumers by iphoneos keeps simulator, Mac, Watch, widgets, and CI
+        # independent of the arm64 device-only framework.
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]": "$(inherited) $(NOOP_VEEPOO_FRAMEWORK_DIR) $(NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR) $(NOOP_VEEPOO_FMDB_FRAMEWORK_DIR) $(NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR)"
+        "OTHER_LDFLAGS[sdk=iphoneos*]": "$(inherited) $(NOOP_VEEPOO_LINK_FLAGS)"
+        "SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphoneos*]": "$(inherited) $(NOOP_VEEPOO_SWIFT_CONDITION)"
       configs:
         Debug:
           NOOP_APP_ATTEST_ENVIRONMENT: development
@@ -456,10 +480,28 @@ targets:
         script: |
           "$SRCROOT/Tools/validate-launch-gate-config.sh"
         basedOnDependencyAnalysis: false
+      - name: Verify Optional Veepoo iPhoneOS SDK
+        script: |
+          if [ "${PLATFORM_NAME:-}" = "iphoneos" ] && [ "${NOOP_VEEPOO_SDK_ENABLED:-NO}" = "YES" ]; then
+            if [ "${CONFIGURATION:-}" != "Debug" ] || [ "${ACTION:-}" = "install" ]; then
+              echo "error: supplier SDK builds are limited to Debug device testing" >&2
+              exit 1
+            fi
+            "$SRCROOT/Tools/local/configure-veepoo-ios-sdk.py" --build-check
+          fi
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      - name: Embed Optional Veepoo iPhoneOS Dependencies
+        script: |
+          if [ "${PLATFORM_NAME:-}" = "iphoneos" ] && [ "${NOOP_VEEPOO_SDK_ENABLED:-NO}" = "YES" ]; then
+            "$SRCROOT/Tools/local/embed-veepoo-ios-frameworks.sh"
+          fi
+        basedOnDependencyAnalysis: false
     dependencies:
       - package: WhoopProtocol
       - package: WhoopStore
       - package: NoopRemoteSync
+      - package: NoopBandSDK
       - package: Firebase
         product: FirebaseAuth
       - package: Firebase

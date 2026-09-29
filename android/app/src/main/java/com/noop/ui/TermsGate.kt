@@ -51,7 +51,7 @@ import java.text.NumberFormat
  * `Terms.currentVersion`. The full text ships in TERMS.md.
  */
 object Terms {
-    const val CURRENT_VERSION = "2.5"
+    const val CURRENT_VERSION = "2.6"
 
     /**
      * Plain-English summary of TERMS.md §1–§6 — kept identical to the macOS `Terms.points`. Each is

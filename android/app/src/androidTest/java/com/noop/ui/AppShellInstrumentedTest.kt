@@ -192,7 +192,7 @@ class AppShellInstrumentedTest {
 
     @Test
     fun todayMetricDetailKeepsTodaySelectedAndReselectReturnsToRoot() {
-        val metricTag = "noop.today.metric.hrv"
+        val metricTag = "noop.today.metric.charge"
         compose.onNodeWithTag("noop.today.list")
             .performScrollToNode(hasTestTag(metricTag))
         compose.onNodeWithTag(metricTag).performClick()

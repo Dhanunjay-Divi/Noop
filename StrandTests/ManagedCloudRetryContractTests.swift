@@ -135,6 +135,49 @@ final class ManagedCloudRetryContractTests: XCTestCase {
         XCTAssertFalse(body.contains("ManagedCloudRetryScheduler.clear"))
     }
 
+    func testDocumentConflictHasBoundedEvidenceAndVisibleManualRetry()
+        throws
+    {
+        let appleService = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        XCTAssertTrue(appleService.contains("""
+            case .documentConflict:
+                            return "document_conflict"
+            """))
+        XCTAssertTrue(
+            appleService.contains(
+                "NOOP kept your current data. Review your latest changes, then tap Sync now to retry."
+            )
+        )
+        let appleView = try source(
+            "StrandiOS/System/ManagedCloudViews.swift"
+        )
+        XCTAssertTrue(appleView.contains("\"Sync now\""))
+
+        let androidService = try source(
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt"
+        )
+        XCTAssertTrue(
+            androidService.contains(
+                "if (error.documentKind == null) \"sync_conflict\" else \"document_conflict\""
+            )
+        )
+        XCTAssertTrue(
+            androidService.contains(
+                "R.string.managed_cloud_error_document_conflict"
+            )
+        )
+        let androidView = try source(
+            "android/app/src/main/java/com/noop/ui/ManagedCloudCard.kt"
+        )
+        XCTAssertTrue(
+            androidView.contains(
+                "stringResource(R.string.managed_cloud_sync_now)"
+            )
+        )
+    }
+
     func testManagedHistoryExportResetPolicyClearsOnlyUnusableState() {
         let resetErrors: [Error] = [
             ManagedHistoryExportStateError.unusableStagedArchive,
@@ -143,6 +186,10 @@ final class ManagedCloudRetryContractTests: XCTestCase {
             ManagedStorageError.cursorExpired(minimumSequence: nil),
             ManagedStorageError.notFound,
             ManagedStorageError.conflict,
+            ManagedStorageError.documentConflict(
+                documentKind: .hydration,
+                remoteRevision: 3
+            ),
             ManagedStorageError.digestMismatch,
             ManagedHistoryArchiveError.invalidArchive,
         ]

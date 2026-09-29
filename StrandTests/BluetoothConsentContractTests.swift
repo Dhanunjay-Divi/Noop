@@ -75,6 +75,195 @@ final class BluetoothConsentContractTests: XCTestCase {
         XCTAssertEqual(occurrences(of: "let scanner = OuraLiveSource(", in: source), 1)
     }
 
+    func testAddDeviceWizardClosesOnlyAfterVerifiedRegistration() throws {
+        let source = try text("Strand/Screens/AddDeviceWizard.swift")
+        let model = try text("Strand/App/AppModel.swift")
+
+        XCTAssertTrue(
+            source.contains(
+                "guard model.registerDevice(device, makeActive: makeActive) else"
+            )
+        )
+        XCTAssertTrue(source.contains("registrationFailed = true"))
+        XCTAssertTrue(
+            source.contains(
+                "String(localized: \"appwide.device_registration_failed\")"
+            )
+        )
+        XCTAssertTrue(model.contains(
+            "func registerDevice(_ device: PairedDevice, makeActive: Bool) -> Bool"
+        ))
+        XCTAssertTrue(model.contains("registry.addAndSetActive(device)"))
+    }
+
+    func testOnboardingDelegatesPairingToTheSourceAwareWizard() throws {
+        let source = try text("Strand/Onboarding/OnboardingWizard.swift")
+        let addDevice = try text("Strand/Screens/AddDeviceWizard.swift")
+        let scanStep = try slice(
+            source,
+            from: "private struct ScanStep: View",
+            to: "// MARK: - Step 6 · Device-setup celebration"
+        )
+
+        XCTAssertTrue(scanStep.contains("AddDeviceWizard("))
+        XCTAssertTrue(scanStep.contains("selectionScope: .launchBands"))
+        XCTAssertTrue(scanStep.contains("onAddedSource: { source in"))
+        XCTAssertTrue(scanStep.contains("onSetupSource(source)"))
+        XCTAssertTrue(scanStep.contains("completedDeviceSetupSource"))
+        XCTAssertTrue(scanStep.contains("requiresClaimEligibleBand: true"))
+        XCTAssertTrue(scanStep.contains("supplierUsable:"))
+        XCTAssertTrue(
+            scanStep.contains("VeepooBandSourceFactory.hasUsableRegistration")
+        )
+        XCTAssertTrue(scanStep.contains("\"onboarding.device_setup\""))
+        XCTAssertTrue(
+            scanStep.contains(
+                ".accessibilityIdentifier(\"noop.onboarding.choose-device\")"
+            )
+        )
+        XCTAssertFalse(scanStep.contains("model.scan()"))
+        XCTAssertFalse(scanStep.contains("RadarSweep"))
+        XCTAssertTrue(addDevice.contains("selectionScope: SelectionScope,"))
+        XCTAssertFalse(
+            addDevice.contains("selectionScope: SelectionScope ="),
+            "Every wizard caller must deliberately choose the customer or internal catalog."
+        )
+        XCTAssertTrue(addDevice.contains("let onAddedSource: (SourceKind) -> Void"))
+        XCTAssertTrue(addDevice.contains("onAddedSource(device.sourceKind)"))
+        XCTAssertTrue(addDevice.contains("onAddedSource(addedDevice.sourceKind)"))
+        XCTAssertTrue(addDevice.contains("case launchBands"))
+        XCTAssertTrue(addDevice.contains("type.isWhoop || type == .veepoo"))
+        XCTAssertTrue(
+            addDevice.contains(
+                "guard type != .veepoo || supplierPairingAvailable"
+            )
+        )
+        XCTAssertTrue(
+            addDevice.contains(
+                "if Self.supplierPairingAvailableForCurrentBuild"
+            )
+        )
+        XCTAssertTrue(addDevice.contains("return \"whoop-5-mg\""))
+        XCTAssertTrue(addDevice.contains("return \"whoop-4\""))
+        XCTAssertTrue(
+            addDevice.contains(
+                "appwide.onboarding.device_wizard.compatible_5_title"
+            )
+        )
+        XCTAssertTrue(
+            addDevice.contains(
+                "appwide.onboarding.device_wizard.compatible_4_title"
+            )
+        )
+        XCTAssertTrue(addDevice.contains("model: identity.registryModel"))
+        XCTAssertFalse(
+            addDevice.contains(
+                "nameDraft = String(localized: \"Noop Band\")"
+            )
+        )
+        XCTAssertFalse(
+            addDevice.contains(
+                "if pickedWhoop != nil { return String(localized: \"Noop Band\") }"
+            )
+        )
+        XCTAssertFalse(
+            addDevice.contains(
+                "appwide.onboarding.device_wizard.supplier_physical_device_required"
+            ),
+            "Unavailable supplier adapters must be hidden instead of shown as a dead row."
+        )
+        XCTAssertTrue(
+            addDevice.contains(
+                "appwide.onboarding.device_wizard.whoop_one_phone_body"
+            )
+        )
+        XCTAssertTrue(
+            source.contains(
+                "When the system prompt appears, choose Allow so NOOP can find Noop Band."
+            )
+        )
+        XCTAssertFalse(
+            source.contains(
+                "When the system prompt appears, choose Allow so NOOP can find your band."
+            )
+        )
+    }
+
+    func testSupplierLaunchRequiresAdapterAndOwnershipConfiguration() {
+        XCTAssertTrue(
+            AddDeviceWizard.supplierLaunchAvailable(
+                adapterAvailable: true,
+                ownershipConfigured: true
+            )
+        )
+        XCTAssertFalse(
+            AddDeviceWizard.supplierLaunchAvailable(
+                adapterAvailable: true,
+                ownershipConfigured: false
+            )
+        )
+        XCTAssertFalse(
+            AddDeviceWizard.supplierLaunchAvailable(
+                adapterAvailable: false,
+                ownershipConfigured: true
+            )
+        )
+        XCTAssertFalse(
+            AddDeviceWizard.SelectionScope.launchBands.allows(
+                .veepoo,
+                supplierPairingAvailable: false
+            )
+        )
+        XCTAssertTrue(
+            AddDeviceWizard.SelectionScope.launchBands.allows(
+                .whoop5mg,
+                supplierPairingAvailable: false
+            )
+        )
+    }
+
+    func testSupplierPairingCopyUsesAppWideLocalizationWithoutChangingTheGate() throws {
+        let source = try text("Strand/Screens/AddDeviceWizard.swift")
+        let supplierFace = try slice(
+            source,
+            from: "private struct VeepooPairingFace: View",
+            to: "// MARK: - Shared pick-step pieces"
+        )
+
+        XCTAssertTrue(
+            source.contains(
+                "if Self.supplierPairingAvailableForCurrentBuild"
+            )
+        )
+        XCTAssertTrue(source.contains("appwide.devices.supplier_display_model"))
+        XCTAssertTrue(
+            source.contains(
+                "appwide.onboarding.device_wizard.supplier_prep_password_scope"
+            )
+        )
+        XCTAssertTrue(
+            supplierFace.contains(
+                "appwide.onboarding.device_wizard.supplier_ready_body"
+            )
+        )
+        XCTAssertTrue(
+            supplierFace.contains(
+                "appwide.onboarding.device_wizard.supplier_registration_failed"
+            )
+        )
+        XCTAssertTrue(supplierFace.contains("session.registrationFailed"))
+        XCTAssertFalse(
+            supplierFace.contains(
+                "Live heart rate uses the phone receipt time for display freshness only."
+            )
+        )
+        XCTAssertFalse(
+            supplierFace.contains(
+                "The band could not be saved. Registration was not reported as complete."
+            )
+        )
+    }
+
     private func text(_ relativePath: String) throws -> String {
         let here = URL(fileURLWithPath: #filePath)
         let root = here.deletingLastPathComponent().deletingLastPathComponent()

@@ -38,6 +38,8 @@
     <string name="sleep_planner_duration_hours">%1$d h</string>
     <string name="sleep_planner_duration_hours_minutes">%1$d h %2$d min</string>
     <string name="nav_alarms">Pianificatore del sonno</string>
+    <string name="nav_backup_sync">Dati e sincronizzazione</string>
+    <string name="data_sync_subtitle">Scopri dove si trova la tua cronologia, proteggi i dati locali e gestisci la continuità facoltativa dell’account.</string>
     <string name="strength_title">Allenamento di forza</string>
     <string name="strength_subtitle">Routine, serie, ripetizioni, recupero e registrazioni oggettive, private su questo dispositivo.</string>
     <string name="strength_close_trainer">Chiudi allenamento di forza</string>
@@ -229,6 +231,7 @@
     <string name="key_metrics_selection_count">%1$d di %2$d fissate</string>
     <string name="key_metrics_show_selected">Mostra metriche selezionate</string>
     <string name="key_metrics_show_all_count">Mostra tutte le metriche (%1$d)</string>
+    <string name="key_metrics_open_history">Apri tutta la cronologia delle metriche</string>
     <string name="hydration_adaptive_timing_label">Programmazione adattiva</string>
     <string name="hydration_adaptive_timing_help">Regola l’intervallo di oggi usando lo Sforzo e l’assunzione confermata. I dati mancanti non vengono mai stimati.</string>
     <string name="hydration_adaptive_timing_status">Attualmente ogni %1$d min. La programmazione cambia solo quando i dati di oggi lo supportano.</string>
@@ -542,4 +545,14 @@
     <string name="managed_friends_delete_account_title">Eliminare l’account NOOP?</string>
     <string name="managed_friends_delete_account_detail">Friends, i dati cloud gestiti e l’account NOOP verranno programmati per l’eliminazione dopo un periodo di attesa di 24 ore. I dati sanitari locali su questo telefono non vengono eliminati.</string>
     <string name="managed_friends_deletion_scheduled_detail">Friends e i servizi dell’account sono sospesi durante il periodo di attesa di 24 ore. I dati sanitari locali restano su questo telefono.</string>
+    <string name="ownership_resend_verification_countdown">Invia di nuovo tra %1$d s</string>
+    <string name="ownership_send_code_countdown">Invia di nuovo tra %1$d s</string>
+    <string name="ownership_verification_code_invalid">Il codice di verifica non è corretto. Controllalo e riprova.</string>
+    <string name="ownership_verification_session_expired">La sessione di verifica è scaduta. Richiedi un nuovo codice.</string>
+    <string name="ownership_verification_rate_limited">Troppe richieste di verifica. Attendi prima di riprovare.</string>
+    <string name="ownership_verification_cooldown_active">Attendi la fine del conto alla rovescia prima di richiedere un altro messaggio di verifica.</string>
+    <string name="ownership_network_unavailable">Riconnettiti a Internet e riprova.</string>
+    <string name="managed_cloud_error_document_conflict">NOOP ha conservato i tuoi dati attuali. Controlla le modifiche più recenti, quindi tocca “Sincronizza ora” per riprovare.</string>
+    <string name="ownership_progress_step">Passaggio %1$d di %2$d</string>
+    <string name="ownership_setup_complete">Configurazione della proprietà completata.</string>
 </resources>

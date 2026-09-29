@@ -17,13 +17,13 @@ import SwiftUI
 
 /// The four button roles. Colour + emphasis differ; geometry is identical across all four.
 public enum NoopButtonKind: Sendable {
-    /// Filled accent (blue), white label — the one primary action on a screen.
+    /// Filled dynamic accent with inverse accent ink — the one primary action on a screen.
     case primary
     /// Raised-surface fill, primary-text label, hairline edge — secondary actions.
     case secondary
     /// No fill, accent label — low-emphasis / inline actions.
     case tertiary
-    /// Filled critical (red), white label — destructive / irreversible actions.
+    /// Filled critical with high-contrast dark ink — destructive / irreversible actions.
     case destructive
 }
 
@@ -75,7 +75,7 @@ struct NoopButtonAppearance {
             border = nil
         case .destructive:
             fill = StrandPalette.statusCritical
-            label = StrandPalette.goldDeepText   // crisp white on the critical fill
+            label = StrandPalette.accentInk
             border = nil
         }
     }

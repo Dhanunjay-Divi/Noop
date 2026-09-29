@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 import StrandAnalytics
 import WhoopStore
@@ -8,6 +9,12 @@ import WhoopStore
 /// must omit it until they can join a validated/imported step source explicitly.
 @MainActor
 final class StepProvenanceSafetyTests: XCTestCase {
+    private var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
     private func day(_ index: Int, steps: Int = 54_321) -> DailyMetric {
         DailyMetric(
             day: String(format: "2026-07-%02d", index),
@@ -128,5 +135,68 @@ final class StepProvenanceSafetyTests: XCTestCase {
         XCTAssertFalse(context.localizedCaseInsensitiveContains("steps:"))
         XCTAssertFalse(context.contains("54321"))
         XCTAssertTrue(context.contains("active energy: 500kcal/day"))
+    }
+
+    func testUnvalidatedMotionControlsCannotReenterProduction() throws {
+        let settings = try String(
+            contentsOf: repoRoot.appendingPathComponent("Strand/Screens/SettingsView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(settings.contains("FormRow(label: \"Step calibration\")"))
+        XCTAssertFalse(settings.contains("motionAwareWakeEnabled"))
+
+        let intelligence = try String(
+            contentsOf: repoRoot.appendingPathComponent("Strand/Data/IntelligenceEngine.swift"),
+            encoding: .utf8
+        )
+        let repository = try String(
+            contentsOf: repoRoot.appendingPathComponent("Strand/Data/Repository.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(intelligence.contains("PuffinExperiment.motionAwareWakeEnabled"))
+        XCTAssertFalse(repository.contains("PuffinExperiment.motionAwareWakeEnabled"))
+    }
+
+    func testPrimaryStepSurfacesCannotBypassImportedPedometerContract() throws {
+        let catalog = try String(
+            contentsOf: repoRoot.appendingPathComponent("Strand/Data/MetricCatalog.swift"),
+            encoding: .utf8
+        )
+        let today = try String(
+            contentsOf: repoRoot.appendingPathComponent("Strand/Screens/TodayView.swift"),
+            encoding: .utf8
+        )
+        let workouts = try String(
+            contentsOf: repoRoot.appendingPathComponent("Strand/Screens/WorkoutsView.swift"),
+            encoding: .utf8
+        )
+        let liquid = try String(
+            contentsOf: repoRoot.appendingPathComponent("Strand/Liquid/LiquidTodayView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(catalog.contains("return imported ?? motionDerived"))
+        XCTAssertFalse(today.contains("primarySteps = importedSteps ?? strapMotionSteps"))
+        XCTAssertFalse(today.contains("metric?.key ?? \"steps\""))
+        XCTAssertFalse(liquid.contains("stepsDetailKey"))
+        XCTAssertFalse(liquid.contains("stepsDetailSource"))
+        XCTAssertTrue(liquid.contains("cardLink(stepsDetailMetric.map"))
+        XCTAssertFalse(workouts.contains("case classifiedBand"))
+    }
+
+    func testFusionPublishesPrimaryStepsOnlyFromOSPedometerSources() {
+        let row = day(1, steps: 4_000)
+
+        XCTAssertNil(AppModel.fusionColumn(key: "steps", day: row, source: .whoopImport))
+        XCTAssertNil(AppModel.fusionColumn(key: "steps", day: row, source: .noopComputed))
+        XCTAssertNil(AppModel.fusionColumn(key: "steps", day: row, source: .xiaomiBand))
+        XCTAssertEqual(
+            AppModel.fusionColumn(key: "steps", day: row, source: .appleHealth),
+            4_000
+        )
+        XCTAssertEqual(
+            AppModel.fusionColumn(key: "steps", day: row, source: .healthConnect),
+            4_000
+        )
     }
 }

@@ -2,6 +2,7 @@ package com.noop.ui
 
 import com.noop.data.AppleDaily
 import com.noop.data.DailyMetric
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -117,6 +118,25 @@ class TodayMetricTilesTest {
     }
 
     @Test
+    fun stepsForDay_preservesMeasuredZeroAndRejectsNegativeValues() {
+        assertEquals(
+            0,
+            stepsForDay(
+                listOf(stepsDay("apple-health", "2026-01-03", 0)),
+                emptyList(),
+                "2026-01-03",
+            ),
+        )
+        assertNull(
+            stepsForDay(
+                listOf(stepsDay("apple-health", "2026-01-03", -1)),
+                emptyList(),
+                "2026-01-03",
+            ),
+        )
+    }
+
+    @Test
     fun stepsForDay_unionsBothSources_takesTheLargerForTheDay() {
         // Both Apple Health and Health Connect can report the same day; take the larger (most complete)
         // rather than summing, so we never double-count overlapping sources.
@@ -126,7 +146,7 @@ class TodayMetricTilesTest {
     }
 
     @Test
-    fun strapStepValueIsExplicitlyMotionDerived() {
+    fun unvalidatedBandMotionCannotPopulatePrimarySteps() {
         // A measured import wins when both are present.
         assertEquals(
             "Measured · Apple Health / Health Connect",
@@ -134,6 +154,12 @@ class TodayMetricTilesTest {
         )
         assertEquals("Steps", stepsTileLabel(9_000, 8_000, 7_000))
         assertEquals(8_000, resolvedSteps(imported = 8_000, motionDerived = 9_000, calibratedEstimate = 7_000))
+
+        assertNull(
+            stepsSourceCaption(motionDerived = 4_000, imported = null, calibratedEstimate = 7_000),
+        )
+        assertEquals("Steps", stepsTileLabel(4_000, null, 7_000))
+        assertNull(resolvedSteps(imported = null, motionDerived = 4_000, calibratedEstimate = 7_000))
     }
 
     @Test
@@ -146,12 +172,33 @@ class TodayMetricTilesTest {
     }
 
     @Test
-    fun calibratedFallbackIsAlsoExplicitlyMotionDerived() {
+    fun calibratedMotionDoesNotBecomePrimarySteps() {
+        assertNull(stepsSourceCaption(motionDerived = null, imported = null, calibratedEstimate = 7_000))
+        assertEquals("Steps", stepsTileLabel(null, null, 7_000))
+        assertNull(resolvedSteps(imported = null, motionDerived = null, calibratedEstimate = 7_000))
         assertEquals(
-            "Motion-derived estimate · calibrated",
-            stepsSourceCaption(motionDerived = null, imported = null, calibratedEstimate = 7_000),
+            emptyList<Pair<String, Double>>(),
+            resolvedStepsSeries(
+                imported = emptyMap(),
+                motionDerived = mapOf("2026-01-04" to 4_000),
+                calibratedEstimate = mapOf("2026-01-04" to 7_000),
+            ),
         )
-        assertEquals("Motion-derived steps", stepsTileLabel(null, null, 7_000))
+    }
+
+    @Test
+    fun todayDoesNotReadOrRenderLegacyStepActivityClass() {
+        val sourceFile = listOf(
+            File("src/main/java/com/noop/ui/TodayScreen.kt"),
+            File("app/src/main/java/com/noop/ui/TodayScreen.kt"),
+            File("android/app/src/main/java/com/noop/ui/TodayScreen.kt"),
+        ).firstOrNull(File::isFile)
+        requireNotNull(sourceFile) { "TodayScreen.kt source root is unavailable" }
+        val source = sourceFile.readText()
+
+        assertFalse(source.contains("stepActivityClassLatestUnion("))
+        assertFalse(source.contains("stepActivityClassForDay"))
+        assertFalse(source.contains("stepActivityIconFor("))
     }
 
     // MARK: buildingHint — the unscored Effort/Rest "it's coming" caption, today-only (#527)

@@ -5,6 +5,7 @@ import SwiftUI
 
 struct MacManagedFriendsView: View {
     @ObservedObject var service: MacManagedViewerService
+    @EnvironmentObject private var repo: Repository
 
     @State private var email = ""
     @State private var password = ""
@@ -15,7 +16,7 @@ struct MacManagedFriendsView: View {
             subtitle: "Read-only summaries from your NOOP account.",
             onRefresh: {
                 if service.phase == .ready {
-                    await service.refresh()
+                    await service.refresh(repo: repo)
                 }
             },
             topBackground: liquidScaffoldSky()
@@ -34,7 +35,9 @@ struct MacManagedFriendsView: View {
             }
         }
         .task {
-            await service.bootstrap()
+            if service.phase != .ready || service.lastUpdatedAt == nil {
+                await service.bootstrap(repo: repo)
+            }
         }
     }
 
@@ -157,7 +160,7 @@ struct MacManagedFriendsView: View {
                     fullWidth: true
                 ) {
                     Task {
-                        await service.checkEmailVerification()
+                        await service.checkEmailVerification(repo: repo)
                     }
                 }
                 .disabled(service.isBusy)
@@ -176,7 +179,7 @@ struct MacManagedFriendsView: View {
                         Text("Connect this Mac")
                             .font(StrandFont.title2)
                             .foregroundStyle(StrandPalette.textPrimary)
-                        Text("Allow this Mac to read your accepted Friends summaries. It cannot collect band data, upload health history, page contacts, poke friends, or change sharing.")
+                        Text("Allow this Mac to read your retained account history and accepted Friends summaries. It cannot collect band data, upload health history, page contacts, poke friends, or change sharing.")
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -199,7 +202,7 @@ struct MacManagedFriendsView: View {
                     fullWidth: true
                 ) {
                     Task {
-                        await service.enroll()
+                        await service.enroll(repo: repo)
                     }
                 }
                 .disabled(service.isBusy)
@@ -212,6 +215,7 @@ struct MacManagedFriendsView: View {
     @ViewBuilder
     private var readyContent: some View {
         accountCard
+        historyCard
 
         if service.socialProfile == nil {
             phoneSetupCard
@@ -220,6 +224,55 @@ struct MacManagedFriendsView: View {
             friendsSection
             recentDaysSection
         }
+    }
+
+    private var historyCard: some View {
+        StrandCard(padding: 18) {
+            HStack(alignment: .center, spacing: 14) {
+                DepthGlyph(
+                    "arrow.triangle.2.circlepath",
+                    size: 46,
+                    selected: true
+                )
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Account history")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(historyDetail)
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                NoopButton(
+                    service.isWorking ? "Syncing…" : "Sync now",
+                    systemImage: "arrow.triangle.2.circlepath",
+                    kind: .secondary
+                ) {
+                    Task {
+                        await service.refresh(repo: repo)
+                    }
+                }
+                .disabled(service.isWorking)
+            }
+        }
+    }
+
+    private var historyDetail: String {
+        if service.historyHasMore {
+            return String(localized: "History sync")
+        }
+        if let updated = service.historyLastUpdatedAt {
+            return String(localized: "History synced")
+                + " "
+                + updated.formatted(
+                    .relative(
+                        presentation: .named,
+                        unitsStyle: .abbreviated
+                    )
+                )
+        }
+        return String(localized: "History sync")
     }
 
     private var accountCard: some View {
@@ -241,7 +294,9 @@ struct MacManagedFriendsView: View {
                 }
                 Spacer(minLength: 12)
                 Button {
-                    service.signOut()
+                    Task {
+                        await service.signOut(repo: repo)
+                    }
                 } label: {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
                         .frame(
@@ -405,7 +460,9 @@ struct MacManagedFriendsView: View {
 
     private var signOutButton: some View {
         Button("Sign out on this Mac") {
-            service.signOut()
+            Task {
+                await service.signOut(repo: repo)
+            }
         }
         .buttonStyle(.plain)
         .font(StrandFont.caption)
@@ -415,7 +472,11 @@ struct MacManagedFriendsView: View {
 
     private func signIn() {
         Task {
-            await service.signIn(email: email, password: password)
+            await service.signIn(
+                email: email,
+                password: password,
+                repo: repo
+            )
             password = ""
         }
     }
@@ -423,6 +484,17 @@ struct MacManagedFriendsView: View {
 
 private struct MacManagedFriendCard: View {
     let friend: ManagedSocialFriend
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var visibleBadges: ArraySlice<ManagedSocialBadge> {
+        friend.badges.prefix(3)
+    }
+
+    private var visibleBadgeTitles: String {
+        visibleBadges
+            .map { MacManagedSocialFormat.badgeTitle($0.code) }
+            .joined(separator: ", ")
+    }
 
     var body: some View {
         StrandCard(padding: 18) {
@@ -451,22 +523,14 @@ private struct MacManagedFriendCard: View {
                 }
 
                 if let summary = friend.latest?.summary {
-                    HStack(spacing: 8) {
-                        MacManagedMetricTile(
-                            label: "Recovery",
-                            value: summary.charge,
-                            color: StrandPalette.chargeColor
-                        )
-                        MacManagedMetricTile(
-                            label: "Effort",
-                            value: summary.effort,
-                            color: StrandPalette.effortColor
-                        )
-                        MacManagedMetricTile(
-                            label: "Sleep Score",
-                            value: summary.rest,
-                            color: StrandPalette.restColor
-                        )
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(spacing: 8) {
+                            summaryTiles(summary)
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            summaryTiles(summary)
+                        }
                     }
                     let details = MacManagedSocialFormat.details(summary)
                     if !details.isEmpty {
@@ -487,33 +551,56 @@ private struct MacManagedFriendCard: View {
                 }
 
                 if !friend.badges.isEmpty {
-                    HStack(spacing: 8) {
-                        ForEach(friend.badges.prefix(3)) { badge in
-                            Label(
-                                MacManagedSocialFormat.badgeTitle(
-                                    badge.code
-                                ),
-                                systemImage:
-                                    MacManagedSocialFormat.badgeSymbol(
-                                        badge.code
-                                    )
-                            )
-                            .font(StrandFont.caption)
-                            .foregroundStyle(
-                                StrandPalette.textSecondary
-                            )
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(
-                                StrandPalette.surfaceInset,
-                                in: Capsule()
-                            )
+                    Group {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            VStack(alignment: .leading, spacing: 8) {
+                                badgeLabels
+                            }
+                        } else {
+                            HStack(spacing: 8) {
+                                badgeLabels
+                            }
                         }
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("Wellness badges")
+                    .accessibilityValue(visibleBadgeTitles)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func summaryTiles(_ summary: ManagedSocialSummary) -> some View {
+        MacManagedMetricTile(
+            label: "Recovery",
+            value: summary.charge,
+            color: StrandPalette.chargeColor
+        )
+        MacManagedMetricTile(
+            label: "Effort",
+            value: summary.effort,
+            color: StrandPalette.effortColor
+        )
+        MacManagedMetricTile(
+            label: "Sleep Score",
+            value: summary.rest,
+            color: StrandPalette.restColor
+        )
+    }
+
+    @ViewBuilder
+    private var badgeLabels: some View {
+        ForEach(visibleBadges) { badge in
+            Label(
+                MacManagedSocialFormat.badgeTitle(badge.code),
+                systemImage: MacManagedSocialFormat.badgeSymbol(badge.code)
+            )
+            .font(StrandFont.caption)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(StrandPalette.surfaceInset, in: Capsule())
         }
     }
 }
@@ -526,14 +613,14 @@ private struct MacManagedMetricTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(StrandFont.overlineScaled(9))
+                .font(StrandFont.metricLabel)
                 .foregroundStyle(StrandPalette.textTertiary)
-                .lineLimit(1)
+                .lineLimit(2)
             Text(
                 value.map { String(Int($0.rounded())) }
                     ?? StrandFormat.missing
             )
-            .font(StrandFont.number(24))
+            .font(StrandFont.metricValue)
             .foregroundStyle(
                 value == nil ? StrandPalette.textTertiary : color
             )

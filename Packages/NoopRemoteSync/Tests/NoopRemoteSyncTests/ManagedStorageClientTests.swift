@@ -1717,6 +1717,7 @@ final class ManagedStorageClientTests: XCTestCase {
             _ = try await client.createRestore(
                 requestID: requestID,
                 dataClasses: ["raw_ppg", "essential_timeseries"],
+                includeDocuments: true,
                 includeDeletedDocuments: true,
                 authorization: authorization
             )
@@ -1724,6 +1725,110 @@ final class ManagedStorageClientTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? ManagedStorageError, .conflict)
         }
+    }
+
+    func testHistoryOnlyRestoreRequestExcludesDocuments() async throws {
+        let (client, authorization) = try makeClient()
+        let restoreID = UUID()
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/managed/restores")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let body = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: requestBody(request))
+                    as? [String: Any]
+            )
+            XCTAssertEqual(body["include_documents"] as? Bool, false)
+            XCTAssertEqual(body["document_kinds"] as? [String], [])
+            XCTAssertEqual(
+                body["include_deleted_documents"] as? Bool,
+                false
+            )
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 201,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {
+                  "restore": {
+                    "restore_job_id": "\(restoreID.uuidString.lowercased())",
+                    "status": "running",
+                    "snapshot_at": "2026-09-01T00:00:00Z",
+                    "change_sequence": 42,
+                    "selected_objects": 1,
+                    "selected_bytes": 100,
+                    "delivered_objects": 0,
+                    "delivered_bytes": 0,
+                    "expires_at": "2026-09-02T00:00:00Z",
+                    "duplicate": false
+                  }
+                }
+                """.utf8)
+            )
+        }
+
+        let restore = try await client.createRestore(
+            requestID: UUID(),
+            dataClasses: ["essential_timeseries"],
+            includeDocuments: false,
+            includeDeletedDocuments: false,
+            authorization: authorization
+        )
+
+        XCTAssertEqual(restore.restoreJobID, restoreID)
+        XCTAssertEqual(restore.status, "running")
+    }
+
+    func testHistoryOnlyRestoreRejectsDeletedDocumentsBeforeNetwork() async throws {
+        let (client, authorization) = try makeClient()
+        ManagedURLProtocolStub.handler = { _ in
+            XCTFail("Invalid restore selection must not reach the network")
+            throw ManagedStorageError.transport
+        }
+
+        do {
+            _ = try await client.createRestore(
+                requestID: UUID(),
+                dataClasses: ["essential_timeseries"],
+                includeDocuments: false,
+                includeDeletedDocuments: true,
+                authorization: authorization
+            )
+            XCTFail("Expected invalid restore selection")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedStorageError,
+                .invalidConfiguration
+            )
+        }
+    }
+
+    func testFullDocumentRestoreSupportsLegacyTransportConformer() async throws {
+        let (_, authorization) = try makeClient()
+        let requestID = UUID()
+        let legacy = LegacyRestoreTransport()
+        let transport: any ManagedStorageTransport = legacy
+
+        let restore = try await transport.createRestore(
+            requestID: requestID,
+            dataClasses: ["essential_timeseries"],
+            includeDocuments: true,
+            includeDeletedDocuments: true,
+            authorization: authorization
+        )
+
+        XCTAssertEqual(restore.status, "running")
+        let recordedRequest = await legacy.recordedRequest()
+        XCTAssertEqual(
+            recordedRequest,
+            LegacyRestoreRequest(
+                requestID: requestID,
+                dataClasses: ["essential_timeseries"],
+                includeDeletedDocuments: true
+            )
+        )
     }
 
     func testSnapshotChunkListRequestsServerReadableContentMode() async throws {
@@ -2597,6 +2702,96 @@ final class ManagedStorageClientTests: XCTestCase {
                 options: [.sortedKeys, .withoutEscapingSlashes]
             )
         )
+    }
+}
+
+private struct LegacyRestoreRequest: Equatable, Sendable {
+    let requestID: UUID
+    let dataClasses: [String]
+    let includeDeletedDocuments: Bool
+}
+
+private actor LegacyRestoreTransport: ManagedStorageTransport {
+    private var request: LegacyRestoreRequest?
+
+    func recordedRequest() -> LegacyRestoreRequest? {
+        request
+    }
+
+    func registerSource(
+        _ source: ManagedSourceRegistration,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSourceResponse {
+        throw ManagedStorageError.invalidResponse
+    }
+
+    func reserveChunk(
+        _ reservation: ManagedChunkReservation,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedChunkReservationResponse {
+        throw ManagedStorageError.invalidResponse
+    }
+
+    func upload(
+        _ bytes: Data,
+        using capability: ManagedChunkReservationResponse.Upload
+    ) async throws -> ManagedObjectUploadReceipt {
+        throw ManagedStorageError.invalidResponse
+    }
+
+    func completeChunk(
+        chunkID: UUID,
+        receipt: ManagedObjectUploadReceipt,
+        authorization: ManagedAuthorization
+    ) async throws {
+        throw ManagedStorageError.invalidResponse
+    }
+
+    func changes(
+        after sequence: Int64,
+        limit: Int,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedChangeFeed {
+        throw ManagedStorageError.invalidResponse
+    }
+
+    func createRestore(
+        requestID: UUID,
+        dataClasses: [String],
+        includeDeletedDocuments: Bool,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedRestoreJob {
+        request = LegacyRestoreRequest(
+            requestID: requestID,
+            dataClasses: dataClasses,
+            includeDeletedDocuments: includeDeletedDocuments
+        )
+        return ManagedRestoreJob(
+            restoreJobID: UUID(),
+            status: "running",
+            snapshotAt: "2026-09-01T00:00:00Z",
+            changeSequence: 42,
+            selectedObjects: 0,
+            selectedBytes: 0,
+            deliveredObjects: 0,
+            deliveredBytes: 0,
+            expiresAt: "2026-09-02T00:00:00Z",
+            duplicate: false
+        )
+    }
+
+    func downloadCapability(
+        chunkID: UUID,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedDownloadCapability {
+        throw ManagedStorageError.invalidResponse
+    }
+
+    func download(
+        using capability: ManagedDownloadCapability
+    ) async throws -> Data {
+        throw ManagedStorageError.invalidResponse
     }
 }
 

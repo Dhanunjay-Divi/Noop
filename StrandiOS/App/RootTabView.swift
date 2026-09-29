@@ -106,10 +106,6 @@ struct RootTabView: View {
     /// A discoverable quick finish control in the More header. The full visual selector remains in
     /// Settings; this menu changes the same shared preference without adding clutter to Today's masthead.
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.defaultMode.rawValue
-    /// V8 liquid redesign is the default Today; the Settings toggle lets a user fall back to the classic
-    /// Today if they prefer it (keyed identically to the SettingsView toggle). Default ON.
-    @AppStorage("noop.liquidTodayEnabled") private var liquidTodayEnabled = true
-
     private static var initialSelectedTab: Int {
         #if DEBUG
         if ProcessInfo.processInfo.environment["NOOP_STRENGTH_GUIDE_DEMO"] != nil {
@@ -168,10 +164,8 @@ struct RootTabView: View {
         return paths
     }
 
-    /// The Today tab root, honouring the liquid/classic preference.
-    @ViewBuilder private var todayTabRoot: some View {
-        if liquidTodayEnabled { LiquidTodayView() } else { TodayView() }
-    }
+    /// One canonical Today surface across Apple platforms.
+    private var todayTabRoot: some View { LiquidTodayView() }
 
     init() {
         // Plain Titanium bar: pin the background to `surfaceBase` and clear the system
@@ -1001,7 +995,7 @@ struct RootTabView: View {
                            onRefresh: { await repo.refresh() },
                            topBackground: liquidScaffoldSky(),
                            trailing: { appearanceQuickMenu }) {
-                noopPlusEntry
+                moreAccountDataAccess
                 moreQuickAccess
                 moreSection("Insights") {
                     MoreRow("Month", "calendar", .calendar)
@@ -1016,7 +1010,6 @@ struct RootTabView: View {
                     // Profile is a first-class body destination, not a form hidden near the top of the
                     // much longer Settings page. It reuses SettingsView's exact ProfileStore-backed editor.
                     MoreRow("Profile", "person.crop.circle.fill", .profile)
-                    MoreRow("Band Account", "person.badge.key.fill", .bandAccount)
                     MoreRow("Friends", "person.2.fill", .friends)
                     MoreRow("Devices", "applewatch.side.right", .devices)
                     MoreRow("Band", "waveform.path.ecg", .live)
@@ -1035,7 +1028,6 @@ struct RootTabView: View {
                     MoreRow("Mi Band", "figure.walk.motion", .miBand)
                     MoreRow("Data Sources", "externaldrive.fill", .dataSources)
                     MoreRow("NOOP+", "icloud.fill", .noopPlus)
-                    MoreRow("Backup & Sync", "externaldrive.fill.badge.icloud", .backupSync)
                     // #155: HealthKit-free Apple Health path for sideloaded installs (Siri Shortcut
                     // reads the opt-in Documents/noop_sync.txt drop file).
                     MoreRow("Shortcuts Export", "square.and.arrow.up.fill", .shortcutsExport)
@@ -1110,25 +1102,35 @@ struct RootTabView: View {
         .tabItem { Label("More", systemImage: "ellipsis.circle.fill") }
     }
 
-    /// NOOP+ used to exist only inside the collapsed Backup & Sync destination, and an unavailable
-    /// runtime could hide it there entirely. Keep one honest, always-visible door at the top of More;
-    /// the destination itself explains when this build is not connected to managed storage.
-    private var noopPlusEntry: some View {
-        NavigationLink(value: MoreDestination.noopPlus) {
-            NoopPlusDiscoveryLabel()
+    /// Account ownership and data continuity are setup-critical, so they stay visible above the
+    /// shortcut grid instead of being duplicated inside collapsible catalogue sections.
+    private var moreAccountDataAccess: some View {
+        NoopCard(padding: 0) {
+            VStack(spacing: 0) {
+                MoreRow("Band Account", "person.badge.key.fill", .bandAccount)
+                MoreRow("Data & Sync", "externaldrive.fill.badge.icloud", .backupSync)
+            }
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: NoopMetrics.cardRadius,
+                    style: .continuous
+                )
+            )
         }
-        .buttonStyle(LiquidPressStyle())
-        .accessibilityLabel("NOOP+")
-        .accessibilityIdentifier("noop.more.noop-plus")
-        .accessibilityHint(
-            "Optional managed storage and multi-device restore"
-        )
+        .accessibilityIdentifier("noop.more.account-data")
     }
 
     /// The everyday utility doors, kept separate from the complete catalogue below. Four is intentional:
     /// this is a shortcut grid, not another navigation hierarchy. The pure titles/icons/order live in
     /// `MoreSectionPrefs.quickAccess`, while this shell owns only the typed navigation destinations.
     private var moreQuickAccess: some View {
+        let columns = dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.flexible())]
+            : [
+                GridItem(.flexible(), spacing: 10),
+                GridItem(.flexible(), spacing: 10),
+            ]
+
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Quick Access")
@@ -1142,11 +1144,13 @@ struct RootTabView: View {
                     .foregroundStyle(StrandPalette.textTertiary)
             }
 
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
-                                GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(MoreSectionPrefs.quickAccess, id: \.id) { item in
                     NavigationLink(value: quickAccessRoute(for: item.id)) {
-                        MoreQuickAccessLabel(item: item)
+                        MoreQuickAccessLabel(
+                            item: item,
+                            usesAccessibilityLayout: dynamicTypeSize.isAccessibilitySize
+                        )
                     }
                     .buttonStyle(LiquidPressStyle())
                     .accessibilityLabel(Text(LocalizedStringKey(item.title)))
@@ -1159,7 +1163,7 @@ struct RootTabView: View {
     private func quickAccessRoute(for id: String) -> MoreDestination {
         switch id {
         case "safety": return .safety
-        case "profile": return .profile
+        case "insights": return .insights
         case "devices": return .devices
         case "friends": return .friends
         case "widgets": return .widgets
@@ -1531,59 +1535,6 @@ private enum MoreDestination: Hashable {
     #endif
 }
 
-private struct NoopPlusDiscoveryLabel: View {
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "icloud.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(StrandPalette.accent)
-                .frame(width: 38, height: 38)
-                .background(
-                    StrandPalette.surfaceInset.opacity(0.86),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(StrandPalette.hairline, lineWidth: 0.8)
-                )
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("NOOP+")
-                    .font(StrandFont.headline)
-                    .foregroundStyle(StrandPalette.textPrimary)
-                Text(
-                    "Optional storage and multi-device restore. Core metrics, coaching, workouts, journal, automations and exports stay available without an account."
-                )
-                .font(StrandFont.caption)
-                .foregroundStyle(StrandPalette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 4)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(StrandPalette.textTertiary)
-                .accessibilityHidden(true)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
-        .background(
-            StrandPalette.surfaceRaised.opacity(0.94),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(
-                    StrandPalette.accent.opacity(0.42),
-                    lineWidth: 0.9
-                )
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-}
-
 private struct UpdateHistoryDestination: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -1599,6 +1550,7 @@ private struct UpdateHistoryDestination: View {
 /// the already-large RootTabView body. Navigation and scroll state remain owned by the parent stack.
 private struct MoreQuickAccessLabel: View {
     let item: MoreQuickAccessItem
+    let usesAccessibilityLayout: Bool
 
     var body: some View {
         HStack(spacing: 11) {
@@ -1617,12 +1569,17 @@ private struct MoreQuickAccessLabel: View {
             Text(LocalizedStringKey(item.title))
                 .font(StrandFont.subhead)
                 .foregroundStyle(StrandPalette.textPrimary)
-                .lineLimit(1)
+                .lineLimit(usesAccessibilityLayout ? 2 : 1)
                 .minimumScaleFactor(0.86)
+                .fixedSize(horizontal: false, vertical: usesAccessibilityLayout)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 13)
-        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: usesAccessibilityLayout ? 72 : 58,
+            alignment: .leading
+        )
         .background(StrandPalette.surfaceRaised.opacity(0.92),
                     in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -2275,6 +2232,7 @@ private struct LighterWorkoutOptionsSheet: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(StrandPalette.accent)
+                        .foregroundStyle(StrandPalette.accentInk)
 
                         Button(action: onOpenStrength) {
                             Label(

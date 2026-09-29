@@ -110,15 +110,23 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
         try String(contentsOf: repoRoot.appendingPathComponent(relativePath), encoding: .utf8)
     }
 
-    func testDailyRhythmAndPlanAppearBeforeDoneAndUseLocalizedCopy() throws {
+    func testConciseFirstRunKeepsDeferredFeaturesReachableAfterEntry() throws {
         let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
 
+        XCTAssertTrue(onboarding.contains("case welcome, account, bluetooth, scan, ownership, profile, plan, done"))
+        XCTAssertTrue(onboarding.contains(".account,"))
+        XCTAssertTrue(onboarding.contains(".bluetooth,"))
+        XCTAssertTrue(onboarding.contains(".scan,"))
+        XCTAssertTrue(onboarding.contains(".ownership,"))
+        XCTAssertTrue(onboarding.contains(".profile,"))
+        XCTAssertTrue(onboarding.contains(".plan,"))
+        XCTAssertTrue(onboarding.contains(".done,"))
         XCTAssertTrue(onboarding.contains("case .dailyRhythm: DailyRhythmStep()"))
         XCTAssertTrue(onboarding.contains("case .plan:"))
         XCTAssertTrue(onboarding.contains("ProductPlanStep("))
-        XCTAssertTrue(onboarding.contains("case .dailyRhythm: return String(localized: \"Continue\")"))
         XCTAssertTrue(onboarding.contains("String(localized: \"Continue with NOOP\")"))
         XCTAssertTrue(onboarding.contains("String(localized: \"Save NOOP+ preference\")"))
+        XCTAssertTrue(onboarding.contains("case .account:"))
         XCTAssertTrue(onboarding.contains("case .ownership:"))
         XCTAssertTrue(onboarding.contains("OwnershipAccountView()"))
         XCTAssertTrue(
@@ -126,11 +134,16 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
                 "static func onboardingSteps(ownershipConfigured _: Bool) -> [Step]"
             )
         )
-        XCTAssertTrue(onboarding.contains("Step.allCases"))
         XCTAssertTrue(onboarding.contains("OwnershipAvailabilityStep()"))
+        XCTAssertTrue(onboarding.contains("ConnectedTransportAccountStep("))
         XCTAssertTrue(
             onboarding.contains(
                 "forKey: Self.progressStorageKey"
+            )
+        )
+        XCTAssertTrue(
+            onboarding.contains(
+                "private static let progressStorageKey = \"noop.onboarding.progress.v2\""
             )
         )
         XCTAssertTrue(
@@ -157,7 +170,8 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
             "Persisted progress and debug demos must resolve before State is initialized once."
         )
         XCTAssertTrue(onboarding.contains("\"onboarding.progress\""))
-        XCTAssertTrue(onboarding.contains("return ownershipClaimed"))
+        XCTAssertTrue(onboarding.contains("return accountStepReady"))
+        XCTAssertTrue(onboarding.contains("supplierClaimRequired"))
         XCTAssertTrue(
             onboarding.contains(
                 "guard await ownershipService.selectPlan(selectedPlan) else"
@@ -183,7 +197,7 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
         )
         XCTAssertTrue(
             onboarding.contains(
-                "candidate.rawValue > Step.ownership.rawValue"
+                "return .account"
             )
         )
         XCTAssertTrue(onboarding.contains("guard ownershipAllows(.done) else"))
@@ -194,16 +208,18 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
         )
         XCTAssertTrue(
             onboarding.contains(
-                "if step == .scan && ownershipRequired { return bandBonded }"
+                "if step == .scan { return deviceSetupComplete }"
+            )
+        )
+        XCTAssertTrue(onboarding.contains("selectionScope: .launchBands"))
+        XCTAssertFalse(
+            onboarding.contains(
+                "noop.onboarding.continue-without-band-note"
             )
         )
         XCTAssertTrue(onboarding.contains("title: LocalizedStringKey"))
         XCTAssertTrue(onboarding.contains("subtitle: LocalizedStringKey"))
         XCTAssertTrue(onboarding.contains("detail: LocalizedStringKey"))
-        XCTAssertLessThan(
-            try XCTUnwrap(onboarding.range(of: "appearance, dailyRhythm, plan, done")?.lowerBound),
-            try XCTUnwrap(onboarding.range(of: "private struct DoneStep")?.lowerBound)
-        )
         XCTAssertLessThan(
             try XCTUnwrap(onboarding.range(of: "private struct ProductPlanStep")?.lowerBound),
             try XCTUnwrap(onboarding.range(of: "private struct DoneStep")?.lowerBound)

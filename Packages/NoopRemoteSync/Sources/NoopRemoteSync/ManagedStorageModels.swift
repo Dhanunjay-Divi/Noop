@@ -1142,6 +1142,10 @@ public enum ManagedStorageError: Error, Equatable, LocalizedError {
     case cursorExpired(minimumSequence: Int64?)
     case quotaExceeded
     case conflict
+    case documentConflict(
+        documentKind: ManagedDocumentKind,
+        remoteRevision: Int64
+    )
     case server(status: Int, retryAfter: TimeInterval? = nil)
     case digestMismatch
 
@@ -1173,6 +1177,8 @@ public enum ManagedStorageError: Error, Equatable, LocalizedError {
             return "This NOOP+ storage allowance is full."
         case .conflict:
             return "NOOP+ rejected conflicting sync state."
+        case .documentConflict:
+            return "NOOP kept your current data. Review your latest changes, then tap Sync now to retry."
         case .server:
             return "NOOP+ is temporarily unavailable."
         case .digestMismatch:

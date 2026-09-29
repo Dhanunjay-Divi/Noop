@@ -24,6 +24,15 @@ data class HealthConnectProjectionScope(
     val exercise: Boolean = false,
     val distance: Boolean = false,
 ) {
+    /**
+     * True when this reconciliation owns at least one column in the source's DailyMetric row.
+     * This is intentionally scope-based rather than row-based: replacing an owned value with no
+     * incoming record is still a real deletion that must invalidate readers.
+     */
+    val ownsDailyMetricColumns: Boolean
+        get() = steps || restingHeartRate || hrv || sleep || oxygenSaturation ||
+            respiratoryRate || exercise
+
     val seriesKeys: Set<String>
         get() = buildSet {
             if (weight) addAll(listOf("weight", "bmi"))
@@ -150,7 +159,7 @@ internal object HealthConnectProjectionMerge {
                 spo2Pct = if (scope.oxygenSaturation) fresh?.spo2Pct else old?.spo2Pct,
                 skinTempDevC = old?.skinTempDevC,
                 respRateBpm = if (scope.respiratoryRate) fresh?.respRateBpm else old?.respRateBpm,
-                steps = old?.steps,
+                steps = if (scope.steps) fresh?.steps else old?.steps,
                 activeKcalEst = old?.activeKcalEst,
                 spo2Red = old?.spo2Red,
                 spo2Ir = old?.spo2Ir,

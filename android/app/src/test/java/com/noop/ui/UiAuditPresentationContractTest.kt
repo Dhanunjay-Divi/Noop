@@ -308,12 +308,37 @@ class UiAuditPresentationContractTest {
 
         val onboarding = source("src/main/java/com/noop/ui/OnboardingScreen.kt")
         assertFalse(onboarding.contains("If the strap is nearby"))
-        assertTrue(onboarding.contains("appwide_ui_audit_onboarding_background_pairing"))
+        assertFalse(onboarding.contains("NOOP keeps Noop Band connected in the background"))
+        assertTrue(
+            onboarding.contains(
+                "appwide_onboarding_notifications_background_status_subtitle",
+            ),
+        )
+        assertTrue(
+            onboarding.contains(
+                "appwide_onboarding_notifications_background_status_body",
+            ),
+        )
+        assertTrue(onboarding.contains("appwide_onboarding_notifications_wrist_alerts"))
+        assertTrue(onboarding.contains("appwide_onboarding_notifications_permission_help"))
 
         val scoring = source("src/main/java/com/noop/ui/ScoringGuideScreen.kt")
         assertFalse(scoring.contains("your strap's raw signals"))
         assertTrue(scoring.contains("appwide_ui_audit_scoring_guide_overline"))
         assertTrue(scoring.contains("appwide_ui_audit_scoring_guide_intro"))
+        assertTrue(scoring.contains("NoopScoreAlgorithmRevision.CHARGE"))
+        assertTrue(scoring.contains("NoopScoreAlgorithmRevision.EFFORT"))
+        assertTrue(scoring.contains("NoopScoreAlgorithmRevision.REST"))
+        assertTrue(scoring.contains("Baselines.hrvCfg"))
+        assertTrue(scoring.contains("Baselines.minNightsSeed"))
+        assertTrue(scoring.contains("Baselines.minNightsTrust"))
+        assertTrue(scoring.contains("Baselines.staleDays"))
+        assertTrue(scoring.contains("appwide_scoring_guide_recovery_inputs"))
+        assertTrue(scoring.contains("appwide_scoring_guide_recovery_excluded"))
+        assertTrue(scoring.contains("appwide_scoring_guide_source_on_device"))
+        assertFalse(scoring.contains("\"noop-charge-v2\""))
+        assertFalse(scoring.contains("\"noop-effort-v2\""))
+        assertFalse(scoring.contains("\"noop-rest-v2\""))
 
         val devices = source("src/main/java/com/noop/ui/DevicesScreen.kt")
         assertFalse(devices.contains("watch BOTH the strap log and the strap itself"))
@@ -324,7 +349,13 @@ class UiAuditPresentationContractTest {
             .substringBefore("style = NoopType.subhead")
         assertFalse(rebootProbeCall.contains("+"))
         assertTrue(devices.contains("""displayModel = "Heart-rate strap""""))
-        assertTrue(devices.contains("Other heart-rate straps can stream live heart"))
+        assertTrue(devices.contains("appwide_devices_connect_action"))
+        assertTrue(devices.contains("appwide_devices_supported_footer"))
+        assertTrue(
+            devices.contains(
+                "selectionScope = AddDeviceSelectionScope.ClaimEligibleBands",
+            ),
+        )
 
         val logExport = source("src/main/java/com/noop/ui/LogExport.kt")
         assertFalse(logExport.contains("connect to your strap"))
@@ -511,9 +542,17 @@ class UiAuditPresentationContractTest {
         assertTrue(today.contains("appwide_charge_confidence_calibrating"))
         assertTrue(today.contains("chargeDriverPointLabel(driver.deltaPoints)"))
 
+        val journal = source("src/main/java/com/noop/ui/JournalLog.kt")
         assertTrue(
-            source("src/main/java/com/noop/ui/JournalLog.kt")
-                .contains("contentPadding = PaddingValues(horizontal = Metrics.space16)"),
+            journal.contains("contentPadding = PaddingValues(horizontal = Metrics.space16)"),
+        )
+        assertTrue(journal.contains("R.string.appwide_journal_attribution_title"))
+        assertTrue(journal.contains("R.string.appwide_journal_attribution_detail"))
+        assertTrue(journal.contains("showingAttributionInfo"))
+        assertFalse(
+            journal.contains(
+                "Answers are about the night and day leading into this morning",
+            ),
         )
         val health = source("src/main/java/com/noop/ui/HealthScreen.kt")
         assertTrue(health.contains("appwide_health_live_hr_disconnected"))

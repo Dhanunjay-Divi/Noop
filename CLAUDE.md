@@ -22,11 +22,15 @@ safe offline use. This target is not an authorization to flip current users or
 delete local history: every data class moves only after explicit migration,
 dual-run parity, provenance, restore and deletion, rollback, security,
 performance, and physical-device evidence.
-Optional network features are explicit opt-ins: bring-your-own-provider Coach, Oura import, and
-replication/private friend sharing through a server the user operates. A separately consented NOOP+
-managed-sync service may be developed, but it must never become a dependency of core collection,
-storage, metrics, export, or device control. The core BLE, storage, and analytics path must remain
-fully useful offline.
+Optional network features remain explicit opt-ins. Bring-your-own-provider Coach, Oura import, and
+the legacy Self-hosted Sync replication path are separate from the customer Friends experience.
+Per D-060, Friends is one NOOP-hosted account service: customer UI does not offer provider selection,
+local-server setup, or self-hosting, and every directional health or communication permission
+defaults off. Per D-059, separately consented managed sync may become authoritative only for an
+explicitly migrated data class or formula after its recorded migration, parity, restore/deletion,
+rollback, security, performance, and physical-device gates pass. BLE collection, immediate Safety,
+the bounded offline working set, export, and local device control remain usable without a
+continuously available network.
 
 These are hard constraints, not preferences. A PR is out of scope if it:
 - makes BLE collection, immediate Safety initiation, the bounded offline
@@ -38,8 +42,9 @@ These are hard constraints, not preferences. A PR is out of scope if it:
 - withholds protection, restore, export, or current safe offline use to force an
   upgrade, silently enrolls an existing user, or prunes local history before an
   exact server acknowledgement and proven restore;
-- weakens self-hosted sharing boundaries: member credentials must be scoped, secrets stored securely,
-  invites short-lived, and every shared metric revocable server-side;
+- weakens managed Friends boundaries: member credentials must be scoped, secrets stored securely,
+  invites short-lived, friendship mutually accepted, every directional permission default-off and
+  revocable server-side, and gated communication transports unavailable until their reviews pass;
 - adds analytics/telemetry/crash-reporting that phones home;
 - adds WHOOP firmware, decompiled app code, logos/assets, or any DRM circumvention. Protocol work
   must use documented provenance and pass the redistribution gate; never claim clean-room status

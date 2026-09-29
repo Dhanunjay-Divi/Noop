@@ -493,7 +493,7 @@ fun AutoWorkoutNudgeCard(
                     },
                     enabled = !saving,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
+                        containerColor = Palette.accent, contentColor = Palette.accentInk,
                     ),
                 ) {
                     Text(uiString(R.string.auto_workout_save_workout))
@@ -566,7 +566,7 @@ private fun AutoSavedWorkoutReviewCard(
                     onClick = onKeep,
                     enabled = !saving,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
+                        containerColor = Palette.accent, contentColor = Palette.accentInk,
                     ),
                 ) { Text(uiString(R.string.auto_workout_keep)) }
                 OutlinedButton(onClick = onUndo, enabled = !saving) {

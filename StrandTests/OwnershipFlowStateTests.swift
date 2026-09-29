@@ -229,7 +229,7 @@ final class OwnershipFlowStateTests: XCTestCase {
         )
     }
 
-    func testOnboardingReconcilesAllPostClaimPagesAndFinalCompletion() throws {
+    func testOnboardingReconcilesAccountClaimPostClaimPagesAndFinalCompletion() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -240,22 +240,31 @@ final class OwnershipFlowStateTests: XCTestCase {
             encoding: .utf8
         )
 
+        XCTAssertTrue(source.contains("guard reconciliationComplete else { return nil }"))
+        XCTAssertTrue(source.contains("guard accountStepCanContinue("))
+        XCTAssertTrue(source.contains("return .account"))
         XCTAssertTrue(
             source.contains(
-                "candidate.rawValue > Step.ownership.rawValue"
+                "let requiresCompletedClaim = supplierClaimRequired"
             )
         )
+        XCTAssertTrue(
+            source.contains(
+                "guard !requiresDeviceSetup || deviceSetupComplete else"
+            )
+        )
+        XCTAssertTrue(source.contains("return .scan"))
+        XCTAssertTrue(
+            source.contains(
+                "&& [.profile, .plan, .done].contains(candidate)"
+            )
+        )
+        XCTAssertTrue(source.contains("guard !requiresCompletedClaim"))
         XCTAssertTrue(source.contains("if !ownershipAllows(step) {"))
         XCTAssertTrue(source.contains("guard ownershipAllows(.done) else {"))
         XCTAssertTrue(
             source.contains(
                 "guard let destination = ownershipDestination(for: next) else"
-            )
-        )
-        XCTAssertTrue(
-            source.contains(
-                "guard reconciliationComplete else {\n" +
-                    "            return nil"
             )
         )
         XCTAssertTrue(
@@ -268,6 +277,8 @@ final class OwnershipFlowStateTests: XCTestCase {
                 ".onChange(of: ownershipService.isBusy) { _, _ in"
             )
         )
+        XCTAssertTrue(source.contains("DeviceSetupWatcher("))
+        XCTAssertTrue(source.contains(".onReceive(registry.$devices)"))
         XCTAssertTrue(source.contains("reconcileOwnershipRequirement()"))
     }
 

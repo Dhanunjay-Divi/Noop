@@ -124,9 +124,8 @@ data class Spo2Row(val ts: Long, val red: Int, val ir: Int)
 data class SkinTempRow(val ts: Long, val raw: Int)
 /**
  * Cumulative u16 step/motion counter at [ts] (WHOOP5 step_motion_counter@57). deviceId attached on insert. (#78)
- * [activityClass] is the per-record activity-class enum from @63 (community finding #316): 0=still, 1=walk,
- * 2=run; null when the byte was 0xFF/invalid or absent. Optional + defaulted so existing call sites and the
- * persisted store (which carries only ts/counter today) are unchanged.
+ * [activityClass] is retained only for compatibility with rows decoded before @63 was found to be the same
+ * byte as `motion_wear_quality`; new protocol decode leaves it null because it is not validated gait evidence.
  */
 data class StepRow(val ts: Long, val counter: Int, val activityClass: Int? = null)
 /**
@@ -331,7 +330,7 @@ internal data class AnalysisInputLease(
     val dirtyGateSucceeded: Boolean,
 )
 
-class WhoopRepository private constructor(
+class WhoopRepository internal constructor(
     private val dao: WhoopDao,
     /** Production wraps Room; DAO-only unit-test fixtures use a pass-through boundary. */
     private val transactor: Transactor,
@@ -461,9 +460,8 @@ class WhoopRepository private constructor(
                 dao.insertSpo2(streams.spo2.map { Spo2Sample(deviceId, it.ts, it.red, it.ir) })
             val skinIds = if (streams.skinTemp.isEmpty()) emptyList() else
                 dao.insertSkinTemp(streams.skinTemp.map { SkinTempSample(deviceId, it.ts, it.raw) })
-            // activityClass (#316, v13 column) is the @63 activity-class enum (0=still/1=walk/2=run) the decoder
-            // already carries on each StepRow; it was dropped here before v13 (the insert listed only ts/counter).
-            // it.activityClass is null when the @63 byte was 0xFF/invalid/absent -> stored as SQL NULL.
+            // activityClass remains mapped for compatibility with restored/legacy StepRows. Current protocol
+            // decode does not populate it because @63 is not validated still/walk/run evidence.
             val stepIds = if (streams.steps.isEmpty()) emptyList() else
                 dao.insertSteps(streams.steps.map { StepSample(deviceId, it.ts, it.counter, it.activityClass) })
             // Band sleep_state (#175). The strap's OWN @81 high-nibble state
@@ -697,6 +695,91 @@ class WhoopRepository private constructor(
         dao.upsertDailyMetrics(days)
         noteMetricsChanged(emptyList(), dailyMetricsChanged = true)
     }
+
+    /** Atomically reconcile computed step evidence without touching imported source namespaces. */
+    suspend fun reconcileComputedStepEvidence(
+        deviceIds: Collection<String>,
+        deleteEstimateDays: Collection<String>,
+        clearComputedStepDays: Collection<String> = emptyList(),
+        clearMatchingComputedStepsBySource: Map<String, Map<String, Int>> = emptyMap(),
+    ): Int {
+        val sources = deviceIds.distinct().sorted()
+        require(sources.all(::isComputedStepSourceId)) { "computed step source id is invalid" }
+        val estimateDays = deleteEstimateDays.distinct().sorted()
+        require(estimateDays.all(CycleTrackingStore::isValidLocalDayKey)) {
+            "invalid computed step estimate day"
+        }
+        val computedStepDays = clearComputedStepDays.distinct().sorted()
+        require(computedStepDays.all(CycleTrackingStore::isValidLocalDayKey)) {
+            "invalid computed step clear day"
+        }
+        val matchingStepClearsBySource = clearMatchingComputedStepsBySource
+            .toSortedMap()
+            .mapValues { (_, clears) -> clears.toSortedMap() }
+        require(
+            matchingStepClearsBySource.all { (source, clears) ->
+                isComputedStepSourceId(source) &&
+                    clears.all { (day, expectedSteps) ->
+                        CycleTrackingStore.isValidLocalDayKey(day) && expectedSteps > 0
+                    }
+            }
+        ) { "invalid computed step clear" }
+        require((estimateDays.isEmpty() && computedStepDays.isEmpty()) || sources.isNotEmpty()) {
+            "computed step source id is required"
+        }
+        if (
+            estimateDays.isEmpty() &&
+            computedStepDays.isEmpty() &&
+            matchingStepClearsBySource.isEmpty()
+        ) {
+            return 0
+        }
+
+        val changed = transactor.run {
+            applyComputedStepEvidence(
+                sources,
+                estimateDays,
+                computedStepDays,
+                matchingStepClearsBySource,
+            )
+        }
+        if (changed > 0) {
+            noteMetricsChanged(listOf("steps_est"))
+        }
+        return changed
+    }
+
+    private suspend fun applyComputedStepEvidence(
+        sources: List<String>,
+        estimateDays: List<String>,
+        clearComputedStepDays: List<String>,
+        matchingStepClearsBySource: Map<String, Map<String, Int>> = emptyMap(),
+    ): Int {
+        var total = 0
+        val clearedDaySet = clearComputedStepDays.toHashSet()
+        for (source in sources) {
+            for (days in clearComputedStepDays.chunked(STEP_EVIDENCE_DAY_CHUNK)) {
+                total += dao.clearComputedDailySteps(source, days)
+                total += dao.deleteMetricSeriesPoints(source, days, "steps_est")
+            }
+            for (days in estimateDays.filterNot(clearedDaySet::contains).chunked(STEP_EVIDENCE_DAY_CHUNK)) {
+                total += dao.deleteMetricSeriesPoints(source, days, "steps_est")
+            }
+        }
+        for ((source, matchingStepClears) in matchingStepClearsBySource) {
+            for ((day, expectedSteps) in matchingStepClears) {
+                total += dao.clearMatchingDailySteps(source, day, expectedSteps)
+                total += dao.deleteMatchingMetricSeriesPoint(
+                    deviceId = source,
+                    day = day,
+                    key = "steps_est",
+                    expectedValue = expectedSteps.toDouble(),
+                )
+            }
+        }
+        return total
+    }
+
     suspend fun upsertSleepSessions(sessions: List<SleepSession>) = dao.upsertSleepSessions(sessions)
     suspend fun insertHealthConnectSleepSessions(sessions: List<SleepSession>) {
         if (sessions.isNotEmpty()) dao.insertSleepSessionsIgnoringConflicts(sessions)
@@ -779,12 +862,14 @@ class WhoopRepository private constructor(
             workoutRows = workoutRows,
         )
         if (scope.exercise) noteWorkoutsChanged()
-        if (dailyRows.isNotEmpty() || scope.vo2Max || scope.seriesKeys.isNotEmpty() ||
+        if (scope.ownsDailyMetricColumns || scope.totalCalories ||
+            scope.activeCalories || scope.heartRate || scope.vo2Max ||
+            scope.seriesKeys.isNotEmpty() ||
             metricRows.isNotEmpty()
         ) {
             noteMetricsChanged(
                 keys = scope.seriesKeys + metricRows.map(MetricSeriesRow::key),
-                dailyMetricsChanged = dailyRows.isNotEmpty(),
+                dailyMetricsChanged = scope.ownsDailyMetricColumns,
             )
         }
     }
@@ -831,6 +916,12 @@ class WhoopRepository private constructor(
         managedRestKeys: Set<String>,
         restRows: List<MetricSeriesRow>,
         allowEmptyReplacement: Boolean = false,
+        preserveDailyStepDays: Set<String> = emptySet(),
+        preserveDailyFieldsDays: Set<String> = emptySet(),
+        stepEvidenceDeviceIds: Collection<String> = emptyList(),
+        deleteEstimateDays: Collection<String> = emptyList(),
+        clearComputedStepDays: Collection<String> = emptyList(),
+        clearMatchingComputedStepsBySource: Map<String, Map<String, Int>> = emptyMap(),
     ): Set<String> {
         require(deviceId.isNotBlank()) { "computed score device id is required" }
         require(
@@ -851,6 +942,53 @@ class WhoopRepository private constructor(
                     row.day in fromDay..toDay
             ) { "computed score row is outside the managed range" }
             require(retainedDays.add(row.day)) { "duplicate computed score day" }
+        }
+        val orderedPreservedStepDays = preserveDailyStepDays.sorted()
+        require(
+            orderedPreservedStepDays.all {
+                CycleTrackingStore.isValidLocalDayKey(it) && it in fromDay..toDay
+            }
+        ) { "invalid computed step preservation day" }
+        val orderedPreservedFieldDays = preserveDailyFieldsDays.sorted()
+        require(
+            orderedPreservedFieldDays.all {
+                CycleTrackingStore.isValidLocalDayKey(it) &&
+                    it in fromDay..toDay
+            }
+        ) { "invalid computed daily-field preservation day" }
+        val stepSources = stepEvidenceDeviceIds.distinct().sorted()
+        require(stepSources.all(::isComputedStepSourceId)) { "computed step source id is invalid" }
+        val estimateDays = deleteEstimateDays.distinct().sorted()
+        require(
+            estimateDays.all { CycleTrackingStore.isValidLocalDayKey(it) && it in fromDay..toDay }
+        ) { "invalid computed step estimate day" }
+        val computedStepDays = clearComputedStepDays.distinct().sorted()
+        require(
+            computedStepDays.all { CycleTrackingStore.isValidLocalDayKey(it) && it in fromDay..toDay }
+        ) { "invalid computed step clear day" }
+        require((estimateDays.isEmpty() && computedStepDays.isEmpty()) || stepSources.isNotEmpty()) {
+            "computed step source id is required"
+        }
+        val matchingStepClearsBySource = clearMatchingComputedStepsBySource
+            .toSortedMap()
+            .mapValues { (_, clears) -> clears.toSortedMap() }
+        require(
+            matchingStepClearsBySource.all { (source, clears) ->
+                isComputedStepSourceId(source) &&
+                    clears.all { (day, expectedSteps) ->
+                        CycleTrackingStore.isValidLocalDayKey(day) &&
+                            day in fromDay..toDay &&
+                            expectedSteps > 0
+                    }
+            }
+        ) { "invalid computed step clear" }
+        val mutatesStepEvidence =
+            stepSources.isNotEmpty() ||
+                estimateDays.isNotEmpty() ||
+                computedStepDays.isNotEmpty() ||
+                matchingStepClearsBySource.isNotEmpty()
+        require(!mutatesStepEvidence || isComputedStepSourceId(deviceId)) {
+            "computed score device id is invalid for step cleanup"
         }
 
         val keys = managedRestKeys.sorted()
@@ -877,10 +1015,45 @@ class WhoopRepository private constructor(
                 .size == normalizedRestRows.size
         ) { "duplicate computed Rest row" }
 
-        transactor.run {
+        val committedDays = transactor.run {
+            val priorRows = dao.dailyMetricsRange(deviceId, fromDay, toDay)
+                .associateBy(DailyMetric::day)
+            val preservedSteps = priorRows.values
+                .asSequence()
+                .filter { it.day in preserveDailyStepDays && it.steps != null }
+                .associate { it.day to requireNotNull(it.steps) }
+            val replacementByDay = LinkedHashMap<String, DailyMetric>(orderedDailyRows.size)
+            orderedDailyRows.forEach { replacementByDay[it.day] = it }
+            for (day in orderedPreservedFieldDays) {
+                val prior = priorRows[day] ?: continue
+                val fresh = replacementByDay[day]
+                replacementByDay[day] = if (fresh == null) {
+                    prior
+                } else {
+                    val merged = coalesceDay(fresh, prior)
+                    if (fresh.exerciseCount == 0 && prior.exerciseCount != null) {
+                        merged.copy(exerciseCount = prior.exerciseCount)
+                    } else {
+                        merged
+                    }
+                }
+            }
+            for (day in orderedPreservedStepDays) {
+                val steps = preservedSteps[day] ?: continue
+                val fresh = replacementByDay[day]
+                replacementByDay[day] = if (fresh == null) {
+                    DailyMetric(deviceId = deviceId, day = day, steps = steps)
+                } else if (fresh.steps == null) {
+                    fresh.copy(steps = steps)
+                } else {
+                    fresh
+                }
+            }
+            val replacementRows = replacementByDay.values.sortedBy(DailyMetric::day)
+
             dao.deleteDailyMetricsInRange(deviceId, fromDay, toDay)
-            if (orderedDailyRows.isNotEmpty()) {
-                dao.upsertDailyMetrics(orderedDailyRows)
+            if (replacementRows.isNotEmpty()) {
+                dao.upsertDailyMetrics(replacementRows)
             }
             dao.replaceMetricSeriesRange(
                 deviceId = deviceId,
@@ -889,15 +1062,25 @@ class WhoopRepository private constructor(
                 managedKeys = keys,
                 rows = normalizedRestRows,
             )
+            applyComputedStepEvidence(
+                stepSources,
+                estimateDays,
+                computedStepDays,
+                matchingStepClearsBySource,
+            )
+            replacementByDay.keys.toSet()
         }
         noteMetricsChanged(keys, dailyMetricsChanged = true)
-        return retainedDays
+        return committedDays
     }
 
     private fun validComputedMetricKey(key: String): Boolean =
         key.isNotEmpty() &&
             key.length <= 80 &&
             key.all { it.isLetterOrDigit() || it == '_' }
+
+    private fun isComputedStepSourceId(source: String): Boolean =
+        source.isNotBlank() && source.endsWith("-noop")
 
     /** Hand-correct the bed (onset) / wake (end) time of an existing sleep session, DURABLY , port
      *  of iOS PR #395 (Repository.editSleepTimes + MetricsCache.applySleepEdit).
@@ -1688,19 +1871,11 @@ class WhoopRepository private constructor(
         List<SleepStateRow> =
         dao.sleepStateSamples(deviceId, from, to, limit).map { SleepStateRow(it.ts, it.state) }
 
-    /**
-     * The latest (greatest-ts) non-null @63 activity class over [from, to], read across the active strap ∪
-     * canonical "my-whoop" union ([importedSourceIds]), for the Steps tile icon (#316 / @63). Kotlin twin of
-     * the Swift Repository.stepActivityClassLatest(from:to:). #908 family: a re-added strap banks its LIVE step
-     * samples (which carry [com.noop.data.StepSample.activityClass]) under its OWN fresh id, exactly like HR,
-     * so a read pinned to the canonical "my-whoop" returned nothing and the tile icon vanished for a re-added
-     * strap. A single-WHOOP install resolves to one id ⇒ byte-identical read. A ts tie favours the active strap
-     * (its list is scanned first by [latestActivityClass]).
-     */
+    /** Compatibility-only read of the latest legacy activityClass value across the active/canonical union. */
     suspend fun stepActivityClassLatestUnion(activeDeviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT):
         Int? = latestActivityClass(importedSourceIds(activeDeviceId).map { dao.stepSamples(it, from, to, limit) })
 
-    /** Full activity-class samples for an auto-workout window, active/canonical union, active wins ties. */
+    /** Full counter samples for an auto-workout window, active/canonical union, active wins ties. */
     suspend fun stepSamplesUnion(
         activeDeviceId: String,
         from: Long,
@@ -1712,6 +1887,31 @@ class WhoopRepository private constructor(
             for (row in dao.stepSamples(id, from, to, limit)) byTs.putIfAbsent(row.ts, row)
         }
         return byTs.values.sortedBy { it.ts }
+    }
+
+    /**
+     * Production manual-workout band counter. Sources are checked active-first and are never interleaved
+     * because each device owns an independent cumulative counter. Every positive delta is rejected as
+     * unverified motion; a failed active read also fails closed instead of falling through.
+     */
+    suspend fun strapStepTicks(
+        activeDeviceId: String,
+        from: Long,
+        to: Long,
+        limit: Int = DEFAULT_LIMIT,
+    ): Int? {
+        for (source in importedSourceIds(activeDeviceId)) {
+            // Propagate read failures so the presentation boundary can record one bounded failure event.
+            // The exception also stops iteration immediately, preserving active-source fail-closed ownership.
+            val samples = dao.stepSamples(source, from, to, limit)
+            if (samples.isNotEmpty()) {
+                return com.noop.analytics.StepsCounter.stepsInWindow(
+                    samples,
+                    com.noop.analytics.StepsCounter.ClassificationPolicy.rejectUnverifiedBandCounter,
+                )
+            }
+        }
+        return null
     }
 
     /** Delete a computed source's [sport] workouts in [from, to] (makes re-detection idempotent). (#78) */
@@ -2961,6 +3161,7 @@ class WhoopRepository private constructor(
 
         /** Default row cap on range reads. Matches the Swift call sites' bounded scans. */
         const val DEFAULT_LIMIT = 100_000
+        private const val STEP_EVIDENCE_DAY_CHUNK = 500
 
         const val COACH_MESSAGE_LIMIT = 40
         const val COACH_MESSAGE_MAX_CHARS = 16_000
@@ -3235,7 +3436,7 @@ class WhoopRepository private constructor(
          * "$strapDeviceId-noop". Port of macOS Repository.sourceCandidates:
          *  • strap-preferred → [imported strap, computed strap, compatible Apple] (Apple only for
          *    vitals with a declared 1:1 mapping);
-         *  • Apple-preferred → [Apple] (+ computed strap ONLY for steps/active_kcal, which the strap
+         *  • Apple-preferred → [Apple] (+ computed strap only for active energy, which the strap
          *    estimates and Apple may not carry);
          *  • nutrition-log → editable combined log, then legacy nutrition-csv as a migration fallback;
          *  • any other source → itself only.
@@ -3305,10 +3506,11 @@ class WhoopRepository private constructor(
             else -> null
         }
 
-        /** Whether the NOOP-computed strap source may fill an Apple-preferred metric. Only the two
-         *  daily totals the strap genuinely estimates (steps, calories) , never a derived score. */
+        /** Whether the NOOP-computed strap source may fill an Apple-preferred metric. The
+         *  reverse-engineered motion counter is not a validated pedometer, so only active energy may
+         *  fall back to the computed source. */
         private fun noopComputedCanFillAppleMetric(key: String): Boolean = when (key) {
-            "steps", "active_kcal" -> true
+            "active_kcal" -> true
             else -> false
         }
 

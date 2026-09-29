@@ -863,6 +863,17 @@ actor FeedbackUploadCoordinator {
                 outcome: .completed
             )
             notifyChange()
+            #if DEBUG
+            if Self.holdsDemoReportsQueued {
+                _ = try await outbox.markCancelled(id: id)
+                FeedbackDiagnostics.record(
+                    state: .cancelled,
+                    outcome: .completed
+                )
+                notifyChange()
+                return
+            }
+            #endif
             await cancelBackgroundUploadTasks(for: id)
             await pump(id: id)
         } catch {

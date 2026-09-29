@@ -576,24 +576,43 @@ struct ShakeDiagnosticReportSheet: View {
         NavigationStack {
             ZStack {
                 StrandPalette.surfaceBase.ignoresSafeArea()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
-                        switch controller.phase {
-                        case .explanation:
-                            explanation
-                        case .building:
-                            building
-                        case .review:
-                            review
-                        case .queued, .uploading, .retryScheduled, .sent,
-                                .cancelling, .cancelled:
-                            delivery
-                        case .failed:
-                            failure
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
+                            Color.clear
+                                .frame(height: 0)
+                                .id(scrollAnchor(for: controller.phase))
+
+                            switch controller.phase {
+                            case .explanation:
+                                explanation
+                            case .building:
+                                building
+                            case .review:
+                                review
+                            case .queued, .uploading, .retryScheduled, .sent,
+                                    .cancelling, .cancelled:
+                                delivery
+                            case .failed:
+                                failure
+                            }
+                        }
+                        .screenPadding()
+                        .padding(.vertical, NoopMetrics.space5)
+                    }
+                    .onChange(of: controller.phase) { _, phase in
+                        let anchor = scrollAnchor(for: phase)
+                        Task { @MainActor in
+                            // The explanation page can be scrolled to its final action before the
+                            // phase is replaced. Wait for the replacement layout, then reset twice:
+                            // the second pass covers SwiftUI preserving the old offset while the new
+                            // review attachment list finishes entering the accessibility tree.
+                            await Task.yield()
+                            proxy.scrollTo(anchor, anchor: .top)
+                            try? await Task.sleep(for: .milliseconds(80))
+                            proxy.scrollTo(anchor, anchor: .top)
                         }
                     }
-                    .screenPadding()
-                    .padding(.vertical, NoopMetrics.space5)
                 }
             }
             .navigationTitle(appReportText("app_report_title"))
@@ -625,6 +644,33 @@ struct ShakeDiagnosticReportSheet: View {
         }
         .task {
             controller.refreshFeedbackState()
+        }
+    }
+
+    private func scrollAnchor(
+        for phase: ShakeDiagnosticReportController.Phase
+    ) -> String {
+        switch phase {
+        case .explanation:
+            return "noop.app-report.phase.explanation"
+        case .building:
+            return "noop.app-report.phase.building"
+        case .review:
+            return "noop.app-report.phase.review"
+        case .queued:
+            return "noop.app-report.phase.queued"
+        case .uploading:
+            return "noop.app-report.phase.uploading"
+        case .retryScheduled:
+            return "noop.app-report.phase.retry-scheduled"
+        case .sent:
+            return "noop.app-report.phase.sent"
+        case .cancelling:
+            return "noop.app-report.phase.cancelling"
+        case .cancelled:
+            return "noop.app-report.phase.cancelled"
+        case .failed:
+            return "noop.app-report.phase.failed"
         }
     }
 
@@ -776,6 +822,7 @@ struct ShakeDiagnosticReportSheet: View {
                     controller.build(live: live, repo: repo)
                 }
                 .disabled(controller.isScreenshotCaptureInProgress)
+                .accessibilityIdentifier("noop.app-report.build")
                 NoopButton(
                     "app_report_cancel",
                     systemImage: "xmark",
@@ -1021,6 +1068,7 @@ struct ShakeDiagnosticReportSheet: View {
                 ) {
                     controller.cancelFeedback()
                 }
+                .accessibilityIdentifier("noop.app-report.cancel-feedback")
             case .sent, .cancelled:
                 NoopButton(
                     "app_report_close",
@@ -1040,6 +1088,7 @@ struct ShakeDiagnosticReportSheet: View {
                 ) {
                     controller.cancelFeedback()
                 }
+                .accessibilityIdentifier("noop.app-report.cancel-feedback")
             case .cancelling:
                 NoopButton(
                     "app_report_canceling_title",

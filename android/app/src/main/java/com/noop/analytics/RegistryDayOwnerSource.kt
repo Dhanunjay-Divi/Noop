@@ -38,6 +38,9 @@ class RegistryDayOwnerSource(private val registry: DeviceRegistry) : Intelligenc
             }
     }
 
+    override suspend fun allSourceIds(): List<String> =
+        registry.all().map { it.id }.distinct()
+
     // Any dayOwnership override wins outright, regardless of its `locked` flag — matching the Swift
     // `(try? registry.dayOwner(day))?.deviceId` read in IntelligenceEngine.resolveDayOwner, which uses
     // the stored owner as an authoritative override (the `locked` flag gates the UI, not the read).

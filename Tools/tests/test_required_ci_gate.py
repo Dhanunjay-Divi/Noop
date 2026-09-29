@@ -315,9 +315,13 @@ class RequiredCIGateTests(unittest.TestCase):
         text = (ROOT / ".github/workflows/app-build.yml").read_text(encoding="utf-8")
         for marker in (
             "NOOPWatch|NOOPWatchComplications",
+            "Vendor/NoopBandSDK/",
+            "release/supplier/runtime/noop-band-compatibility\\.json",
             "Strand\\.xcodeproj/project\\.xcworkspace/xcshareddata/swiftpm/"
             "Package\\.resolved",
             "LICENSE|NOTICE|ATTRIBUTION\\.md|DISCLAIMER\\.md|TERMS\\.md",
+            "swift test --package-path Vendor/NoopBandSDK",
+            '--scratch-path "$RUNNER_TEMP/noop-band-sdk-swiftpm"',
         ):
             self.assertIn(marker, text)
 
@@ -446,8 +450,13 @@ class RequiredCIGateTests(unittest.TestCase):
             "Tools.tests.test_github_release_tag_gate",
             "Tools.tests.test_homebrew_helper",
             "Tools.tests.test_homebrew_version_gate",
+            "Tools.tests.test_android_supplier_sdk_verifier",
+            "Tools.tests.test_noop_band_sdk_artifact",
+            "Tools.tests.test_supplier_band_compatibility_manifest",
             "Tools.tests.test_testing_release_workflow",
             "Tools.tests.test_trusted_release_controls",
+            "Tools.tests.test_veepoo_ios_app_slice",
+            "Tools.tests.test_veepoo_ios_sdk_wiring",
         ):
             self.assertIn(module, workflow)
         self.assertIn(
@@ -776,6 +785,11 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertEqual(source.count("timeout-minutes: 50"), 2)
         self.assertEqual(source.count("continue-on-error: true"), 2)
         self.assertIn("Tools/android-managed-device-retry.py", source)
+        self.assertIn("Vendor/NoopBandSDK/", source)
+        self.assertIn(
+            "release/supplier/runtime/noop-band-compatibility\\.json",
+            source,
+        )
         self.assertEqual(source.count("Tools/run-bounded-command.py"), 8)
         self.assertEqual(source.count("--timeout-seconds 1200"), 2)
         self.assertEqual(source.count("--timeout-seconds 420"), 2)
@@ -796,20 +810,18 @@ class RequiredCIGateTests(unittest.TestCase):
             "DEFAULT_MIN_FREE_MEMORY_PERCENT = 10.0",
             bounded_runner,
         )
-        self.assertEqual(
-            source.count(
-                '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"'
-            ),
-            2,
+        self.assertNotIn(
+            '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"',
+            source,
         )
         self.assertEqual(
             source.count(
                 '"-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8"'
             ),
-            2,
+            4,
         )
-        self.assertEqual(source.count("--max-workers=2"), 2)
-        self.assertEqual(source.count("--max-workers=1"), 2)
+        self.assertNotIn("--max-workers=2", source)
+        self.assertEqual(source.count("--max-workers=1"), 4)
         self.assertEqual(source.count("app/build/noop-managed-device-status/"), 22)
         self.assertEqual(source.count("--no-daemon"), 8)
         self.assertEqual(source.count("--no-configuration-cache"), 8)
@@ -871,29 +883,20 @@ class RequiredCIGateTests(unittest.TestCase):
                 "Prove Review Sample worker isolation" in step_name
                 or "Retry Review Sample isolation once" in step_name
             )
+            managed_device_test = production_shell_test or review_sample_test
             self.assertEqual(
                 block.count("--min-free-disk-gib 4"),
                 expected_disk_floor_count,
             )
             self.assertEqual(
                 block.count(
-                    '"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"'
-                ),
-                1 if review_sample_test else 0,
-            )
-            self.assertEqual(
-                block.count(
                     '"-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8"'
                 ),
-                1 if production_shell_test else 0,
-            )
-            self.assertEqual(
-                block.count("--max-workers=2"),
-                1 if review_sample_test else 0,
+                1 if managed_device_test else 0,
             )
             self.assertEqual(
                 block.count("--max-workers=1"),
-                1 if production_shell_test else 0,
+                1 if managed_device_test else 0,
             )
             self.assertEqual(block.count("--max-log-mib 16"), 1)
             status_path = re.search(r"--status-file ([^ \\\\\n]+)", block)

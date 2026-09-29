@@ -8,7 +8,9 @@ import androidx.work.WorkerParameters
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 /**
  * Debug-only predecessor used to inspect ordering in the production feedback scheduler graph.
@@ -16,15 +18,23 @@ import kotlinx.coroutines.flow.first
  */
 object FeedbackContinuityProbe {
     class Session internal constructor(
+        holdUnwind: Boolean = false,
         val started: CompletableDeferred<Unit> = CompletableDeferred(),
         val release: CompletableDeferred<Unit> = CompletableDeferred(),
         val cancelled: CompletableDeferred<Unit> = CompletableDeferred(),
-    )
+        val unwound: CompletableDeferred<Unit> = CompletableDeferred(),
+    ) {
+        val unwindRelease: CompletableDeferred<Unit> =
+            CompletableDeferred<Unit>().also {
+                if (!holdUnwind) it.complete(Unit)
+            }
+    }
 
     @Volatile
     private var activeSession = Session()
 
-    fun reset(): Session = Session().also { activeSession = it }
+    fun reset(holdUnwind: Boolean = false): Session =
+        Session(holdUnwind = holdUnwind).also { activeSession = it }
 
     internal fun currentSession(): Session = activeSession
 }
@@ -62,6 +72,11 @@ class BlockingFeedbackContinuityProbeWorker(
         } catch (cancelled: CancellationException) {
             session.cancelled.complete(Unit)
             throw cancelled
+        } finally {
+            withContext(NonCancellable) {
+                session.unwindRelease.await()
+                session.unwound.complete(Unit)
+            }
         }
     }
 }

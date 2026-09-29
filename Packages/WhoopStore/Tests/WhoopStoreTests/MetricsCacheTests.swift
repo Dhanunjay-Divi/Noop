@@ -741,6 +741,167 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertEqual(unmanaged.map(\.value), [30])
     }
 
+    func testComputedScoreReconciliationPreservesOnlyRequestedPriorSteps() async throws {
+        let store = try await WhoopStore.inMemory()
+        let computed = "my-whoop-noop"
+        try await store.upsertDailyMetrics([
+            computedDay("2026-05-10", recovery: 50, steps: 4_000),
+            computedDay("2026-05-11", recovery: 51, steps: 3_000),
+            computedDay("2026-05-12", recovery: 52, steps: 2_000),
+        ], deviceId: computed)
+
+        let receipt = try await store.reconcileComputedScoreRange(
+            deviceId: computed,
+            from: "2026-05-10",
+            to: "2026-05-12",
+            dailyRows: [
+                computedDay("2026-05-10", recovery: 80),
+            ],
+            managedMetricKeys: ["sleep_performance"],
+            metricRows: [],
+            preserveDailyStepDays: ["2026-05-10", "2026-05-11"]
+        )
+
+        XCTAssertEqual(receipt, ["2026-05-10", "2026-05-11"])
+        let rows = try await store.dailyMetrics(
+            deviceId: computed,
+            from: "2026-05-10",
+            to: "2026-05-12"
+        )
+        XCTAssertEqual(rows.map(\.day), ["2026-05-10", "2026-05-11"])
+        XCTAssertEqual(rows[0].recovery, 80)
+        XCTAssertEqual(rows[0].steps, 4_000)
+        XCTAssertNil(rows[1].recovery)
+        XCTAssertEqual(rows[1].steps, 3_000)
+    }
+
+    func testComputedScoreReconciliationPreservesPriorDailyFieldsForStepOnlyRefresh() async throws {
+        let store = try await WhoopStore.inMemory()
+        let computed = "my-whoop-noop"
+        let day = "2026-05-10"
+        try await store.upsertDailyMetrics([
+            DailyMetric(
+                day: day,
+                totalSleepMin: 420,
+                efficiency: 0.91,
+                deepMin: 80,
+                remMin: 100,
+                lightMin: 240,
+                disturbances: 2,
+                restingHr: 54,
+                avgHrv: 62,
+                recovery: 71,
+                strain: 8,
+                exerciseCount: 1,
+                spo2Pct: 97,
+                skinTempDevC: 0.2,
+                respRateBpm: 14.4,
+                steps: 4_000,
+                activeKcalEst: 560,
+                spo2Red: 120,
+                spo2Ir: 240,
+                hrvMethod: .rmssd
+            ),
+        ], deviceId: computed)
+
+        let receipt = try await store.reconcileComputedScoreRange(
+            deviceId: computed,
+            from: day,
+            to: day,
+            dailyRows: [
+                DailyMetric(
+                    day: day,
+                    totalSleepMin: nil,
+                    efficiency: nil,
+                    deepMin: nil,
+                    remMin: nil,
+                    lightMin: nil,
+                    disturbances: nil,
+                    restingHr: nil,
+                    avgHrv: nil,
+                    recovery: nil,
+                    strain: 9.5,
+                    exerciseCount: 0,
+                    steps: 1_715
+                ),
+            ],
+            managedMetricKeys: ["sleep_performance"],
+            metricRows: [],
+            preserveDailyFieldsDays: [day]
+        )
+
+        XCTAssertEqual(receipt, [day])
+        let savedRows = try await store.dailyMetrics(
+            deviceId: computed,
+            from: day,
+            to: day
+        )
+        let saved = try XCTUnwrap(savedRows.first)
+        XCTAssertEqual(saved.totalSleepMin, 420)
+        XCTAssertEqual(saved.efficiency, 0.91)
+        XCTAssertEqual(saved.restingHr, 54)
+        XCTAssertEqual(saved.avgHrv, 62)
+        XCTAssertEqual(saved.recovery, 71)
+        XCTAssertEqual(saved.strain, 9.5)
+        XCTAssertEqual(saved.exerciseCount, 1)
+        XCTAssertEqual(saved.spo2Pct, 97)
+        XCTAssertEqual(saved.skinTempDevC, 0.2)
+        XCTAssertEqual(saved.respRateBpm, 14.4)
+        XCTAssertEqual(saved.steps, 1_715)
+        XCTAssertEqual(saved.activeKcalEst, 560)
+        XCTAssertEqual(saved.spo2Red, 120)
+        XCTAssertEqual(saved.spo2Ir, 240)
+        XCTAssertEqual(saved.hrvMethod, .rmssd)
+    }
+
+    func testComputedScoreReconciliationDeletesHistoricalOwnerStepEstimate() async throws {
+        let store = try await WhoopStore.inMemory()
+        let activeComputed = "active-band-noop"
+        let historicalComputed = "old-band-noop"
+        let day = "2026-05-10"
+        try await store.upsertDailyMetrics([
+            computedDay(day, recovery: 60),
+        ], deviceId: activeComputed)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: day, key: "steps_est", value: 4_000),
+        ], deviceId: activeComputed)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: day, key: "steps_est", value: 4_000),
+        ], deviceId: historicalComputed)
+
+        _ = try await store.reconcileComputedScoreRange(
+            deviceId: activeComputed,
+            from: day,
+            to: day,
+            dailyRows: [computedDay(day, recovery: 80, steps: 1_715)],
+            managedMetricKeys: ["sleep_performance"],
+            metricRows: [],
+            stepEvidenceDeviceIds: [activeComputed, historicalComputed],
+            deleteEstimateDays: [day]
+        )
+
+        let activeEstimate = try await store.metricSeries(
+            deviceId: activeComputed,
+            key: "steps_est",
+            from: day,
+            to: day
+        )
+        let historicalEstimate = try await store.metricSeries(
+            deviceId: historicalComputed,
+            key: "steps_est",
+            from: day,
+            to: day
+        )
+        XCTAssertTrue(activeEstimate.isEmpty)
+        XCTAssertTrue(historicalEstimate.isEmpty)
+        let daily = try await store.dailyMetrics(
+            deviceId: activeComputed,
+            from: day,
+            to: day
+        )
+        XCTAssertEqual(daily.first?.steps, 1_715)
+    }
+
     func testComputedScoreReconciliationEmptyReplacementDeletesOnlyScopedComputedRows() async throws {
         let store = try await WhoopStore.inMemory()
         let computed = "my-whoop-noop"
@@ -862,6 +1023,59 @@ final class MetricsCacheTests: XCTestCase {
             from: "2026-05-10", to: "2026-05-11")
         XCTAssertEqual(performance.map(\.day), ["2026-05-10"])
         XCTAssertEqual(performance.map(\.value), [75])
+    }
+
+    func testComputedScoreAndStepRepairRollBackTogetherAfterLateFailure() async throws {
+        enum InjectedFailure: Error { case stop }
+
+        let store = try await WhoopStore.inMemory()
+        let device = "my-whoop-noop"
+        let day = "2026-05-10"
+        try await store.upsertDailyMetrics([
+            computedDay(day, recovery: 60, steps: 4_000),
+        ], deviceId: device)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: day, key: "sleep_performance", value: 75),
+            MetricPoint(day: day, key: "steps_est", value: 4_000),
+        ], deviceId: device)
+
+        do {
+            _ = try await store.reconcileComputedScoreRangeForTesting(
+                deviceId: device,
+                from: day,
+                to: day,
+                dailyRows: [computedDay(day, recovery: 88)],
+                managedMetricKeys: ["sleep_performance"],
+                metricRows: [
+                    MetricPoint(day: day, key: "sleep_performance", value: 93),
+                ],
+                stepEvidenceDeviceIds: [device],
+                deleteEstimateDays: [day],
+                beforeStepEvidenceWrite: { throw InjectedFailure.stop }
+            )
+            XCTFail("expected the injected step-repair failure")
+        } catch InjectedFailure.stop {
+            // Expected.
+        }
+
+        let daily = try await store.dailyMetrics(deviceId: device, from: day, to: day)
+        XCTAssertEqual(daily.count, 1)
+        XCTAssertEqual(daily.first?.recovery, 60)
+        XCTAssertEqual(daily.first?.steps, 4_000)
+        let performance = try await store.metricSeries(
+            deviceId: device,
+            key: "sleep_performance",
+            from: day,
+            to: day
+        )
+        XCTAssertEqual(performance.map(\.value), [75])
+        let estimates = try await store.metricSeries(
+            deviceId: device,
+            key: "steps_est",
+            from: day,
+            to: day
+        )
+        XCTAssertEqual(estimates.map(\.value), [4_000])
     }
 
     func testComputedScoreReconciliationRejectsInvalidInputBeforeMutation() async throws {
@@ -1026,6 +1240,405 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertNil(bareRow.activeKcalEst)
     }
 
+    func testReconcileComputedStepEvidenceDeletesOnlySupersededEstimate() async throws {
+        let store = try await WhoopStore.inMemory()
+        let targetSource = "devA-noop"
+        let otherSourceId = "devB-noop"
+        let target = DailyMetric(
+            day: "2026-05-27",
+            totalSleepMin: 410,
+            efficiency: 0.9,
+            deepMin: 85,
+            remMin: 105,
+            lightMin: 220,
+            disturbances: 2,
+            restingHr: 51,
+            avgHrv: 64,
+            recovery: 0.72,
+            strain: 10.9,
+            exerciseCount: 1,
+            steps: 4_000,
+            activeKcalEst: 2_310.5
+        )
+        let adjacent = DailyMetric(
+            day: "2026-05-28",
+            totalSleepMin: nil,
+            efficiency: nil,
+            deepMin: nil,
+            remMin: nil,
+            lightMin: nil,
+            disturbances: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            recovery: nil,
+            strain: nil,
+            exerciseCount: nil,
+            steps: 2_000
+        )
+        try await store.upsertDailyMetrics([target, adjacent], deviceId: targetSource)
+        try await store.upsertDailyMetrics([target], deviceId: otherSourceId)
+        _ = try await store.upsertMetricSeries(
+            [
+                MetricPoint(day: "2026-05-27", key: "steps_est", value: 4_000),
+                MetricPoint(day: "2026-05-27", key: "rest_quality", value: 0.8),
+                MetricPoint(day: "2026-05-28", key: "steps_est", value: 2_000),
+            ],
+            deviceId: targetSource
+        )
+        _ = try await store.upsertMetricSeries(
+            [MetricPoint(day: "2026-05-27", key: "steps_est", value: 4_000)],
+            deviceId: otherSourceId
+        )
+
+        let changed = try await store.reconcileComputedStepEvidence(
+            deviceIds: [targetSource, targetSource],
+            deleteEstimateDays: ["2026-05-27", "2026-05-27"]
+        )
+
+        XCTAssertEqual(changed, 1)
+        let targetRows = try await store.dailyMetrics(
+            deviceId: targetSource,
+            from: "2026-05-27",
+            to: "2026-05-28"
+        )
+        XCTAssertEqual(targetRows.first(where: { $0.day == "2026-05-27" })?.steps, 4_000)
+        XCTAssertEqual(targetRows.first(where: { $0.day == "2026-05-27" })?.recovery, 0.72)
+        XCTAssertEqual(targetRows.first(where: { $0.day == "2026-05-28" })?.steps, 2_000)
+        let otherSource = try await store.dailyMetrics(
+            deviceId: otherSourceId,
+            from: "2026-05-27",
+            to: "2026-05-27"
+        )
+        XCTAssertEqual(otherSource.first?.steps, 4_000)
+        let removedEstimate = try await store.metricSeries(
+            deviceId: targetSource,
+            key: "steps_est",
+            from: "2026-05-27",
+            to: "2026-05-27"
+        )
+        let retainedRest = try await store.metricSeries(
+            deviceId: targetSource,
+            key: "rest_quality",
+            from: "2026-05-27",
+            to: "2026-05-27"
+        )
+        let retainedAdjacentEstimate = try await store.metricSeries(
+            deviceId: targetSource,
+            key: "steps_est",
+            from: "2026-05-28",
+            to: "2026-05-28"
+        )
+        let retainedOtherSourceEstimate = try await store.metricSeries(
+            deviceId: otherSourceId,
+            key: "steps_est",
+            from: "2026-05-27",
+            to: "2026-05-27"
+        )
+        XCTAssertTrue(removedEstimate.isEmpty)
+        XCTAssertEqual(retainedRest.first?.value, 0.8)
+        XCTAssertEqual(retainedAdjacentEstimate.first?.value, 2_000)
+        XCTAssertEqual(retainedOtherSourceEstimate.first?.value, 4_000)
+    }
+
+    func testUnverifiedBandStepCleanupClearsOnlyNamedComputedSources() async throws {
+        let store = try await WhoopStore.inMemory()
+        let computed = "my-whoop-noop"
+        let imported = "apple-health"
+        let day = "2026-05-27"
+        try await store.upsertDailyMetrics(
+            [computedDay(day, recovery: 60, steps: 4_000)],
+            deviceId: computed
+        )
+        try await store.upsertDailyMetrics(
+            [computedDay(day, recovery: 90, steps: 4_000)],
+            deviceId: imported
+        )
+        _ = try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "steps_est", value: 4_000)],
+            deviceId: computed
+        )
+        _ = try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "steps_est", value: 4_000)],
+            deviceId: imported
+        )
+
+        let changed = try await store.reconcileComputedStepEvidence(
+            deviceIds: [computed],
+            deleteEstimateDays: [],
+            clearComputedStepDays: [day]
+        )
+
+        XCTAssertEqual(changed, 2)
+        let computedDaily = try await store.dailyMetrics(
+            deviceId: computed, from: day, to: day
+        )
+        XCTAssertNil(computedDaily.first?.steps)
+        XCTAssertEqual(computedDaily.first?.recovery, 60)
+        let computedEstimate = try await store.metricSeries(
+            deviceId: computed, key: "steps_est", from: day, to: day
+        )
+        XCTAssertTrue(computedEstimate.isEmpty)
+
+        let importedDaily = try await store.dailyMetrics(
+            deviceId: imported, from: day, to: day
+        )
+        XCTAssertEqual(importedDaily.first?.steps, 4_000)
+        XCTAssertEqual(importedDaily.first?.recovery, 90)
+        let importedEstimate = try await store.metricSeries(
+            deviceId: imported, key: "steps_est", from: day, to: day
+        )
+        XCTAssertEqual(importedEstimate.first?.value, 4_000)
+    }
+
+    func testUnverifiedBandStepCleanupRejectsImportedSourceIdentifier() async throws {
+        let store = try await WhoopStore.inMemory()
+
+        do {
+            _ = try await store.reconcileComputedStepEvidence(
+                deviceIds: ["apple-health"],
+                deleteEstimateDays: [],
+                clearComputedStepDays: ["2026-05-27"]
+            )
+            XCTFail("an imported source must never be accepted as a computed cleanup target")
+        } catch {
+            XCTAssertEqual(
+                error as? ComputedScoreReconciliationError,
+                .missingDeviceIdentifier
+            )
+        }
+    }
+
+    func testComputedScoreStepCleanupRejectsImportedPrimaryTarget() async throws {
+        let store = try await WhoopStore.inMemory()
+        let imported = "apple-health"
+        let computed = "my-whoop-noop"
+        let day = "2026-05-27"
+        try await store.upsertDailyMetrics(
+            [computedDay(day, recovery: 90, steps: 8_000)],
+            deviceId: imported
+        )
+        try await store.upsertDailyMetrics(
+            [computedDay(day, recovery: 60, steps: 4_000)],
+            deviceId: computed
+        )
+
+        do {
+            _ = try await store.reconcileComputedScoreRange(
+                deviceId: imported,
+                from: day,
+                to: day,
+                dailyRows: [computedDay(day, recovery: 50)],
+                managedMetricKeys: ["sleep_performance"],
+                metricRows: [],
+                stepEvidenceDeviceIds: [computed],
+                clearComputedStepDays: [day]
+            )
+            XCTFail("step cleanup must never reconcile into an imported primary target")
+        } catch {
+            XCTAssertEqual(
+                error as? ComputedScoreReconciliationError,
+                .missingDeviceIdentifier
+            )
+        }
+
+        let importedRows = try await store.dailyMetrics(
+            deviceId: imported, from: day, to: day
+        )
+        XCTAssertEqual(importedRows.first?.recovery, 90)
+        XCTAssertEqual(importedRows.first?.steps, 8_000)
+        let computedRows = try await store.dailyMetrics(
+            deviceId: computed, from: day, to: day
+        )
+        XCTAssertEqual(computedRows.first?.recovery, 60)
+        XCTAssertEqual(computedRows.first?.steps, 4_000)
+    }
+
+    func testReconcileComputedStepEvidenceClearsOnlyExactLegacyStationaryValue() async throws {
+        let store = try await WhoopStore.inMemory()
+        let matching = "active-band-noop"
+        let equalOtherComputed = "other-band-noop"
+        let mismatching = "old-band-noop"
+        let imported = "my-whoop"
+        let day = "2026-05-27"
+        try await store.upsertDailyMetrics(
+            [computedDay(day, recovery: 60, steps: 4_000)],
+            deviceId: matching
+        )
+        try await store.upsertDailyMetrics(
+            [computedDay(day, recovery: 62, steps: 4_000)],
+            deviceId: equalOtherComputed
+        )
+        try await store.upsertDailyMetrics(
+            [computedDay(day, recovery: 61, steps: 4_500)],
+            deviceId: mismatching
+        )
+        try await store.upsertDailyMetrics(
+            [computedDay(day, recovery: 90, steps: 4_000)],
+            deviceId: imported
+        )
+        try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "steps_est", value: 4_000)],
+            deviceId: matching
+        )
+        try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "steps_est", value: 4_000)],
+            deviceId: equalOtherComputed
+        )
+        try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "steps_est", value: 4_500)],
+            deviceId: mismatching
+        )
+        try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: "steps_est", value: 4_000)],
+            deviceId: imported
+        )
+
+        let changed = try await store.reconcileComputedStepEvidence(
+            deviceIds: [matching, equalOtherComputed, mismatching],
+            deleteEstimateDays: [],
+            clearMatchingComputedStepsBySource: [matching: [day: 4_000]]
+        )
+
+        XCTAssertEqual(changed, 2)
+        let matchingDaily = try await store.dailyMetrics(
+            deviceId: matching, from: day, to: day
+        )
+        XCTAssertNil(matchingDaily.first?.steps)
+        XCTAssertEqual(matchingDaily.first?.recovery, 60)
+        let matchingEstimate = try await store.metricSeries(
+            deviceId: matching, key: "steps_est", from: day, to: day
+        )
+        XCTAssertTrue(matchingEstimate.isEmpty)
+
+        let equalOtherDaily = try await store.dailyMetrics(
+            deviceId: equalOtherComputed, from: day, to: day
+        )
+        XCTAssertEqual(equalOtherDaily.first?.steps, 4_000)
+        XCTAssertEqual(equalOtherDaily.first?.recovery, 62)
+        let equalOtherEstimate = try await store.metricSeries(
+            deviceId: equalOtherComputed, key: "steps_est", from: day, to: day
+        )
+        XCTAssertEqual(equalOtherEstimate.first?.value, 4_000)
+
+        let mismatchingDaily = try await store.dailyMetrics(
+            deviceId: mismatching, from: day, to: day
+        )
+        XCTAssertEqual(mismatchingDaily.first?.steps, 4_500)
+        let mismatchingEstimate = try await store.metricSeries(
+            deviceId: mismatching, key: "steps_est", from: day, to: day
+        )
+        XCTAssertEqual(mismatchingEstimate.first?.value, 4_500)
+
+        let importedDaily = try await store.dailyMetrics(
+            deviceId: imported, from: day, to: day
+        )
+        XCTAssertEqual(importedDaily.first?.steps, 4_000)
+        let importedEstimate = try await store.metricSeries(
+            deviceId: imported, key: "steps_est", from: day, to: day
+        )
+        XCTAssertEqual(importedEstimate.first?.value, 4_000)
+    }
+
+    func testComputedScoreReconciliationClearsMatchingStepAfterFieldPreservation() async throws {
+        let store = try await WhoopStore.inMemory()
+        let computed = "my-whoop-noop"
+        let equalOtherComputed = "other-band-noop"
+        let day = "2026-05-27"
+        try await store.upsertDailyMetrics([
+            computedDay(day, recovery: 60, steps: 4_000),
+        ], deviceId: computed)
+        try await store.upsertDailyMetrics([
+            computedDay(day, recovery: 62, steps: 4_000),
+        ], deviceId: equalOtherComputed)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: day, key: "steps_est", value: 4_000),
+        ], deviceId: computed)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: day, key: "steps_est", value: 4_000),
+        ], deviceId: equalOtherComputed)
+
+        let receipt = try await store.reconcileComputedScoreRange(
+            deviceId: computed,
+            from: day,
+            to: day,
+            dailyRows: [computedDay(day, recovery: 80)],
+            managedMetricKeys: ["sleep_performance"],
+            metricRows: [],
+            preserveDailyFieldsDays: [day],
+            stepEvidenceDeviceIds: [computed, equalOtherComputed],
+            clearMatchingComputedStepsBySource: [computed: [day: 4_000]]
+        )
+
+        XCTAssertEqual(receipt, [day])
+        let savedRows = try await store.dailyMetrics(
+            deviceId: computed, from: day, to: day
+        )
+        let saved = try XCTUnwrap(savedRows.first)
+        XCTAssertEqual(saved.recovery, 80)
+        XCTAssertNil(saved.steps)
+        let savedEstimate = try await store.metricSeries(
+            deviceId: computed, key: "steps_est", from: day, to: day
+        )
+        XCTAssertTrue(savedEstimate.isEmpty)
+        let equalOtherRows = try await store.dailyMetrics(
+            deviceId: equalOtherComputed, from: day, to: day
+        )
+        XCTAssertEqual(equalOtherRows.first?.steps, 4_000)
+        XCTAssertEqual(equalOtherRows.first?.recovery, 62)
+        let equalOtherEstimate = try await store.metricSeries(
+            deviceId: equalOtherComputed, key: "steps_est", from: day, to: day
+        )
+        XCTAssertEqual(equalOtherEstimate.first?.value, 4_000)
+    }
+
+    func testComputedScoreReconciliationPreservesCompletePriorRowWithoutFreshScore() async throws {
+        let store = try await WhoopStore.inMemory()
+        let day = "2026-05-27"
+        let target = DailyMetric(
+            day: day,
+            totalSleepMin: 410,
+            efficiency: 0.9,
+            deepMin: 85,
+            remMin: 105,
+            lightMin: 220,
+            disturbances: 2,
+            restingHr: 51,
+            avgHrv: 64,
+            recovery: 0.72,
+            strain: 10.9,
+            exerciseCount: 2,
+            spo2Pct: 97,
+            skinTempDevC: 0.2,
+            respRateBpm: 14.1,
+            steps: 4_000,
+            activeKcalEst: 510
+        )
+        try await store.upsertDailyMetrics([target], deviceId: "devA")
+
+        let receipt = try await store.reconcileComputedScoreRange(
+            deviceId: "devA",
+            from: day,
+            to: day,
+            dailyRows: [],
+            managedMetricKeys: ["sleep_performance"],
+            metricRows: [],
+            preserveDailyFieldsDays: [day]
+        )
+
+        XCTAssertEqual(receipt, [day])
+        let rows = try await store.dailyMetrics(deviceId: "devA", from: day, to: day)
+        let saved = try XCTUnwrap(rows.first)
+        XCTAssertEqual(saved.totalSleepMin, 410)
+        XCTAssertEqual(saved.recovery, 0.72)
+        XCTAssertEqual(saved.strain, 10.9)
+        XCTAssertEqual(saved.exerciseCount, 2)
+        XCTAssertEqual(saved.steps, 4_000)
+        XCTAssertEqual(saved.activeKcalEst, 510)
+        XCTAssertEqual(saved.spo2Pct, 97)
+        XCTAssertEqual(saved.skinTempDevC, 0.2)
+        XCTAssertEqual(saved.respRateBpm, 14.1)
+    }
+
     // MARK: - read highwater cursor (distinct prefix from upload highwater)
 
     func testReadHighwaterRoundTripsUnderDistinctPrefix() async throws {
@@ -1046,7 +1659,7 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertEqual(raw, 1_716_400_000)
     }
 
-    private func computedDay(_ day: String, recovery: Double) -> DailyMetric {
+    private func computedDay(_ day: String, recovery: Double, steps: Int? = nil) -> DailyMetric {
         DailyMetric(
             day: day,
             totalSleepMin: 420,
@@ -1059,7 +1672,8 @@ final class MetricsCacheTests: XCTestCase {
             avgHrv: 60,
             recovery: recovery,
             strain: 40,
-            exerciseCount: 1
+            exerciseCount: 1,
+            steps: steps
         )
     }
 }

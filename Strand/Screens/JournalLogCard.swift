@@ -49,6 +49,7 @@ struct JournalLogCard: View {
     /// The item being renamed (drives the rename sheet).
     @State private var renaming: JournalCatalogItem?
     @State private var renameDraft = ""
+    @State private var showingAttributionInfo = false
 
     private var dayKey: String {
         Repository.localDayKey(
@@ -82,6 +83,20 @@ struct JournalLogCard: View {
             HStack(alignment: .center) {
                 SectionHeader("Journal", overline: "Log")
                 Spacer()
+                Button {
+                    showingAttributionInfo = true
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "appwide.journal.attribution.title"))
+                .accessibilityLabel(
+                    String(localized: "appwide.journal.attribution.title")
+                )
                 if editing {
                     pillButton("Done", selected: true) { editing = false }
                 } else {
@@ -112,14 +127,14 @@ struct JournalLogCard: View {
             }
             NoopCard(tint: StrandPalette.restColor) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(editing
-                         ? String(localized: "appwide.journal.editing_help")
-                         : dayOffset == -1
-                         ? "Logging ahead for tomorrow: today's activities inform tomorrow's recovery, just as yesterday's are reflected in today's. Tomorrow's answers line up with tomorrow's morning."
-                         : String(localized: "Answers are about the night and day leading into this morning, the same attribution a wearable export uses, so logged and imported days line up."))
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if editing || dayOffset == -1 {
+                        Text(editing
+                             ? String(localized: "appwide.journal.editing_help")
+                             : "Logging ahead for tomorrow: today's activities inform tomorrow's recovery, just as yesterday's are reflected in today's. Tomorrow's answers line up with tomorrow's morning.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     ForEach(JournalGroup.displayOrder, id: \.self) { group in
                         groupBlock(group)
@@ -131,6 +146,14 @@ struct JournalLogCard: View {
             }
         }
         .sheet(item: $renaming) { item in renameSheet(item) }
+        .alert(
+            String(localized: "appwide.journal.attribution.title"),
+            isPresented: $showingAttributionInfo
+        ) {
+            Button("appwide.action.done", role: .cancel) {}
+        } message: {
+            Text("appwide.journal.attribution.detail")
+        }
     }
 
     // MARK: - Group block
@@ -307,6 +330,8 @@ struct JournalLogCard: View {
                     renaming = nil
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(StrandPalette.accent)
+                .foregroundStyle(StrandPalette.accentInk)
             }
         }
         .padding(NoopMetrics.space4)

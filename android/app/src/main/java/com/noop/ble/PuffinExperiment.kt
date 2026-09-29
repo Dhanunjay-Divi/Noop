@@ -80,17 +80,9 @@ class PuffinExperiment(private val prefs: SharedPreferences) {
         get() = prefs.getBoolean(KEY_HRV_READINESS, false)
         set(v) = prefs.edit().putBoolean(KEY_HRV_READINESS, v).apply()
 
-    /** True if the user opted in to "Motion-aware wake refinement" (default false, #364 "Proposal 2"
-     *  follow-up): a post-pass ([com.noop.analytics.WakeMotionRefinement]) over the already-staged
-     *  hypnogram that reclassifies a scored WAKE segment to `light` when its per-minute step-tick cadence
-     *  shows no locomotion AND its per-minute gravity posture stays stable outside a minority of isolated
-     *  "turn-over" burst minutes (which are kept as wake). Targets the HR-led wake call misreading a
-     *  hot-but-still/atonic stretch as an awakening. Self-gates on the OBSERVED gravity + step-sample
-     *  density (never on strap family/model, per #345): a WHOOP 4.0 night (sparse gravity, no step stream
-     *  at all) fails the gate and is left untouched every time; a WHOOP 5.0/MG night, which streams both
-     *  densely, is the expected beneficiary. Pure analysis switch — it only ever SHRINKS an already-scored
-     *  wake segment, never invents wake time; detection and the V1/V2 staging engines are untouched either
-     *  way. Mirrors the macOS `PuffinExperiment.motionAwareWakeKey`. */
+    /** Retired compatibility preference. It is no longer exposed or read by production staging because
+     * historical activity byte @63 also represents wear/contact quality. Kept only so existing preference
+     * stores and backups remain decodable. */
     var motionAwareWake: Boolean
         get() = prefs.getBoolean(KEY_MOTION_AWARE_WAKE, false)
         set(v) = prefs.edit().putBoolean(KEY_MOTION_AWARE_WAKE, v).apply()
@@ -120,7 +112,7 @@ class PuffinExperiment(private val prefs: SharedPreferences) {
         /** "HRV readiness (Plews/Altini)" readout opt-in (mirrors macOS `PuffinExperiment.hrvReadinessKey`). */
         const val KEY_HRV_READINESS = "noopHrvReadiness"
 
-        /** "Motion-aware wake refinement" opt-in (mirrors macOS `PuffinExperiment.motionAwareWakeKey`). */
+        /** Retired motion-aware wake preference key retained for backup compatibility. */
         const val KEY_MOTION_AWARE_WAKE = "noopMotionAwareWake"
 
         fun from(context: Context): PuffinExperiment =

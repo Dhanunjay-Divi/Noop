@@ -811,7 +811,10 @@ class RoomManagedDocumentAdapter internal constructor(
             if (advancePendingTombstoneBaseline(db, spec, identity, document)) {
                 return
             }
-            throw ManagedStorageException.Conflict()
+            throw ManagedStorageException.Conflict(
+                documentKind = document.documentKind,
+                remoteRevision = document.revision,
+            )
         }
         val changed = db.compileStatement(
             "DELETE FROM `${spec.table}` WHERE ${spec.localKey(spec.table)} = ?",
@@ -906,7 +909,13 @@ class RoomManagedDocumentAdapter internal constructor(
                     ?: throw ManagedStorageException.InvalidResponse(),
             )
         }
-        ensureNoUnacknowledgedLocalGeneration(db, spec.table, localKey)
+        ensureNoUnacknowledgedLocalGeneration(
+            db = db,
+            tableName = spec.table,
+            localKey = localKey,
+            documentKind = document.documentKind,
+            remoteRevision = document.revision,
+        )
         discardConflictingDirtyProfiles(
             db,
             spec.table,
@@ -1320,9 +1329,14 @@ class RoomManagedDocumentAdapter internal constructor(
         db: SupportSQLiteDatabase,
         tableName: String,
         localKey: String,
+        documentKind: ManagedDocumentKind,
+        remoteRevision: Long,
     ) {
         if (hasUnacknowledgedLocalGeneration(db, tableName, localKey)) {
-            throw ManagedStorageException.Conflict()
+            throw ManagedStorageException.Conflict(
+                documentKind = documentKind,
+                remoteRevision = remoteRevision,
+            )
         }
     }
 

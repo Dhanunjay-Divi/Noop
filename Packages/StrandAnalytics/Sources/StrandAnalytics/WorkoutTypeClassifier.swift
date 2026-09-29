@@ -7,8 +7,8 @@ import WhoopProtocol
 // a BROAD activity class — walk / run / strength / cycle / ski / other — plus a confidence, from
 // four signal families that are already decoded and stored, no raw IMU:
 //   1. HR profile over the window (mean/peak/%HRR, HR variability shape) — `HRSample`.
-//   2. Activity-class tick composition — `StepSample.activityClass` (0 still / 1 walk / 2 run,
-//      community finding #316) — the on-device per-tick gait classifier, rolled up to a window.
+//   2. Optional validated-provider gait composition. The persisted `StepSample.activityClass` field is
+//      compatibility-only and the current band extractor deliberately contributes no gait composition.
 //   3. Gravity-derived posture/motion variance — the SAME per-record L2 gravity-delta intensity
 //      `WorkoutDetector.activitySeries` already computes for detection, re-used here as a shape
 //      signal rather than a threshold gate.
@@ -76,15 +76,14 @@ public struct WorkoutClassFeatures: Equatable, Sendable, Codable {
     /// effort (run/walk/cycle); high = saw-tooth (sets-then-rest strength, or intermittent ski runs).
     public let hrCV: Double
 
-    // --- Activity-class tick composition (StepSample.activityClass: 0 still / 1 walk / 2 run) ---
-    /// Fraction of ticks WITH a decoded activity class that read "still", "walk", "run" respectively
-    /// (sum to ~1 when `tickCoverage > 0`; all 0 when no tick in the window carried a class).
+    // --- Optional validated-provider gait composition ---
+    /// Fraction of validated gait observations that read still, walk, or run respectively. Current raw
+    /// band extraction reports all zero because its persisted legacy class is not trusted.
     public let stillFraction: Double
     public let walkFraction: Double
     public let runFraction: Double
-    /// How much of the window is actually backed by a decoded activity-class tick, clamped [0, 1]
-    /// (classified ticks per second of window). Low/zero on a WHOOP 4.0 or any capture predating the
-    /// @63 decode — the classifier falls back to HR+motion-only scoring below `minTickCoverage`.
+    /// How much of the window is backed by a validated gait provider, clamped [0, 1]. Current band
+    /// extraction reports zero and falls back to HR plus gravity.
     public let tickCoverage: Double
 
     // --- Gravity-derived posture / motion shape ---
@@ -368,17 +367,12 @@ public enum WorkoutTypeFeatureExtractor {
         let motionVariance = variance(intensitySeries)
         let motionCV = motionMean > 0 ? stddev(intensitySeries) / motionMean : 0
 
-        // Activity-class tick composition.
-        let stepsWindow = steps.filter { $0.ts >= start && $0.ts <= end }
-        let validTicks = stepsWindow.compactMap { $0.activityClass }
-        let tickCoverage = min(1.0, Double(validTicks.count) / max(1.0, durationSec))
-        var stillFraction = 0.0, walkFraction = 0.0, runFraction = 0.0
-        if !validTicks.isEmpty {
-            let n = Double(validTicks.count)
-            stillFraction = Double(validTicks.filter { $0 == 0 }.count) / n
-            walkFraction = Double(validTicks.filter { $0 == 1 }.count) / n
-            runFraction = Double(validTicks.filter { $0 == 2 }.count) / n
-        }
+        // The persisted legacy activity class is not validated gait evidence. Keep the feature-vector
+        // fields for future validated providers and historical fixtures, but raw band extraction falls
+        // back to HR and gravity by reporting zero tick coverage.
+        _ = steps
+        let tickCoverage = 0.0
+        let stillFraction = 0.0, walkFraction = 0.0, runFraction = 0.0
 
         let kcalPerMin = caloriesKcal.map { $0 / (durationSec / 60.0) }
 

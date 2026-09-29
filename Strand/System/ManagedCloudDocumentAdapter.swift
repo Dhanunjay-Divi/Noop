@@ -84,7 +84,10 @@ actor ManagedCloudDocumentAdapter:
                 appliedAtMs: Self.nowMilliseconds()
             )
         } catch ManagedDocumentStoreError.unacknowledgedLocalGeneration {
-            throw ManagedStorageError.conflict
+            throw ManagedStorageError.documentConflict(
+                documentKind: document.documentKind,
+                remoteRevision: document.revision
+            )
         } catch {
             throw ManagedStorageError.invalidResponse
         }

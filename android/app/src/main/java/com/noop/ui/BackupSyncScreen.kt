@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Replay
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -37,10 +39,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
@@ -60,7 +67,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Backup & Sync (Phase 1 - folder). Apple mirror of `BackupSyncView`: pick a folder, turn on the
+ * Data & Sync. Apple mirror of `BackupSyncView`: pick a folder, turn on the
  * opt-in daily auto-backup, back up now, or restore. Snapshots are the existing `.noopbak` whole-DB
  * format ([DataBackup]). Point the folder at a Google Drive / Dropbox sync app for off-device backup
  * with no in-app cloud account.
@@ -108,6 +115,7 @@ fun BackupSyncScreen() {
     var serverBusy by remember { mutableStateOf(false) }
     var confirmFullReplay by remember { mutableStateOf(false) }
     var confirmServerDisconnect by remember { mutableStateOf(false) }
+    var advancedServerOpen by rememberSaveable { mutableStateOf(false) }
 
     // Restore-from-folder sheet state: the listed snapshots, and the one pending confirmation.
     var snapshots by remember { mutableStateOf<List<BackupSync.SnapshotDoc>>(emptyList()) }
@@ -181,14 +189,7 @@ fun BackupSyncScreen() {
         pendingRestore = "the selected file" to uri
     }
 
-    LazyScreenScaffold(
-        title = uiString(R.string.l10n_backup_sync_screen_backup_sync_81758ffa),
-        subtitle = "Keep local snapshots, use optional NOOP+ continuity, or connect a server you control.",
-    ) {
-        item { ManagedCloudBackupCard() }
-
-        // Optional self-hosted decoded-data upload. Distinct from immutable .noopbak snapshots below.
-        item {
+    val selfHostedServerCard: @Composable () -> Unit = {
             NoopCard(
                 padding = 20.dp,
                 tint = if (serverAuto && RemoteSyncPrefs.isConfigured()) Palette.accent else null,
@@ -415,7 +416,21 @@ fun BackupSyncScreen() {
                     )
                 }
             }
-        }
+    }
+
+    val advancedStateDescription = uiString(
+        if (advancedServerOpen) {
+            R.string.appwide_a11y_expanded
+        } else {
+            R.string.appwide_a11y_collapsed
+        },
+    )
+
+    LazyScreenScaffold(
+        title = uiString(R.string.nav_backup_sync),
+        subtitle = uiString(R.string.data_sync_subtitle),
+    ) {
+        item { ManagedCloudBackupCard() }
 
         // 1 · Destination folder
         item {
@@ -729,6 +744,43 @@ fun BackupSyncScreen() {
                             }
                         },
                     )
+                }
+            }
+        }
+
+        // Legacy self-hosted decoded-data upload remains available but no longer competes with
+        // managed continuity or local backup and restore in the default information hierarchy.
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            role = Role.Button,
+                            onClick = { advancedServerOpen = !advancedServerOpen },
+                        )
+                        .padding(vertical = 8.dp)
+                        .semantics(mergeDescendants = true) {
+                            stateDescription = advancedStateDescription
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        uiString(R.string.l10n_settings_screen_advanced_4d064726),
+                        style = NoopType.overline,
+                        color = Palette.textSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = Palette.textTertiary,
+                        modifier = Modifier.rotate(if (advancedServerOpen) 90f else 0f),
+                    )
+                }
+
+                if (advancedServerOpen) {
+                    selfHostedServerCard()
                 }
             }
         }

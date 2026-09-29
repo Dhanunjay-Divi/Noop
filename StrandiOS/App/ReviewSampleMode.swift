@@ -57,22 +57,22 @@ struct ReviewSampleEntryView: View {
 
                     VStack(spacing: NoopMetrics.space3) {
                         NoopButton(
-                            "Explore Review Sample",
-                            systemImage: "sparkles",
-                            kind: .primary,
-                            fullWidth: true,
-                            action: onExplore
-                        )
-                        .accessibilityIdentifier("noop.review.entry.explore")
-
-                        NoopButton(
                             "Continue setup",
                             systemImage: "arrow.right",
-                            kind: .secondary,
+                            kind: .primary,
                             fullWidth: true,
                             action: onContinueSetup
                         )
                         .accessibilityIdentifier("noop.review.entry.continue")
+
+                        NoopButton(
+                            "Explore Review Sample",
+                            systemImage: "eye.fill",
+                            kind: .secondary,
+                            fullWidth: true,
+                            action: onExplore
+                        )
+                        .accessibilityIdentifier("noop.review.entry.explore")
                     }
                     Spacer(minLength: NoopMetrics.space6)
                 }

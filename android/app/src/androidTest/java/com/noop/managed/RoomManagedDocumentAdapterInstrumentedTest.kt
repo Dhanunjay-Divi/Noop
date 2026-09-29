@@ -533,9 +533,11 @@ class RoomManagedDocumentAdapterInstrumentedTest {
             locked = true,
         )
 
-        assertConflict {
+        val conflict = assertConflict {
             adapter.apply(competingRemote, competingRemote.asChange())
         }
+        assertEquals(ManagedDocumentKind.DAY_OWNERSHIP, conflict.documentKind)
+        assertEquals(2L, conflict.remoteRevision)
 
         assertEquals(
             "local-band",
@@ -692,9 +694,11 @@ class RoomManagedDocumentAdapterInstrumentedTest {
         val acknowledgedGeneration = stateAcknowledgedGeneration("2026-09-07")
         val tombstone = tombstone(firstRemote, revision = 2)
 
-        assertConflict {
+        val conflict = assertConflict {
             adapter.apply(tombstone, tombstone.asChange())
         }
+        assertEquals(ManagedDocumentKind.DAY_OWNERSHIP, conflict.documentKind)
+        assertEquals(2L, conflict.remoteRevision)
 
         assertEquals(
             0L,
@@ -908,7 +912,9 @@ class RoomManagedDocumentAdapterInstrumentedTest {
         )
     }
 
-    private suspend fun assertConflict(block: suspend () -> Unit) {
+    private suspend fun assertConflict(
+        block: suspend () -> Unit,
+    ): ManagedStorageException.Conflict {
         val failure = try {
             block()
             null
@@ -919,6 +925,7 @@ class RoomManagedDocumentAdapterInstrumentedTest {
             "Expected ManagedStorageException.Conflict but was $failure",
             failure is ManagedStorageException.Conflict,
         )
+        return failure as ManagedStorageException.Conflict
     }
 
     private suspend fun assertInvalidResponse(

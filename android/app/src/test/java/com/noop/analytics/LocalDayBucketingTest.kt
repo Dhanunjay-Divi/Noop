@@ -123,13 +123,23 @@ class LocalDayBucketingTest {
             StepSample(deviceId = "my-whoop", ts = lateEveningUtc + 1800L, counter = 360), // +260
         )
         val withOffset = AnalyticsEngine.analyzeDay(
-            day = day, steps = steps, profile = UserProfile(), tzOffsetSeconds = offset,
+            day = day,
+            steps = steps,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = UserProfile(),
+            tzOffsetSeconds = offset,
         ).daily.steps
         assertEquals(260, withOffset)
         // The OLD UTC bucketing (offset 0, UTC day key) would have dropped these → nil, proving the
         // offset is what saves them.
         val utc = AnalyticsEngine.analyzeDay(
-            day = day, steps = steps, profile = UserProfile(), tzOffsetSeconds = 0L,
+            day = day,
+            steps = steps,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = UserProfile(),
+            tzOffsetSeconds = 0L,
         ).daily.steps
         assertNull(utc)
     }

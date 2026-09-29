@@ -129,24 +129,22 @@ struct WorkoutDetailView: View {
         let hrr = await repo.workoutHeartRateRecovery(
             from: row.startTs, to: row.endTs, maxHR: Double(profile.hrMax))
 
-        // Steps for an on-foot session (#398), computed at display time over the exact window so it
-        // "fills in after sync": prefer the strap's own counter (MG/5.0) once it has offloaded the window,
-        // else the phone pedometer (any strap, incl. WHOOP 4.0 / CSV-import). Never shown for non-foot
-        // sports (cycling/rowing/… have no footfalls). Both sources return nil for "no data", so an empty
-        // window stays "–" rather than a fabricated 0.
+        // Steps for an on-foot session come from the phone/watch pedometer over the exact window. The
+        // reverse-engineered band motion counter is not validated gait evidence and cannot authorize a
+        // workout step count. Never shown for non-foot sports (cycling/rowing/… have no footfalls).
         var stepReadout: StepReadout? = nil
         if WorkoutCatalog.isOnFoot(row.sport) {
-            if let ticks = await repo.strapStepTicks(from: row.startTs, to: row.endTs) {
-                // Same per-user ticks-per-step calibration the daily total applies (#139), floor 0.5.
-                let scaled = Int((Double(ticks) / max(profile.stepTicksPerStep, 0.5)).rounded())
-                if scaled > 0 { stepReadout = StepReadout(count: scaled, fromStrap: true) }
-            }
-            if stepReadout == nil,
-               let ped = await WorkoutPedometer.steps(fromSec: row.startTs, toSec: row.endTs), ped > 0 {
-                stepReadout = StepReadout(count: ped, fromStrap: false)
+            let pedometerSteps = await WorkoutPedometer.steps(
+                fromSec: row.startTs,
+                toSec: row.endTs
+            )
+            guard !Task.isCancelled else { return }
+            if let pedometerSteps, pedometerSteps > 0 {
+                stepReadout = StepReadout(count: pedometerSteps, fromStrap: false)
             }
         }
 
+        guard !Task.isCancelled else { return }
         await MainActor.run {
             self.route = routePoints
             self.hrPoints = points

@@ -125,6 +125,17 @@ public final class LiveState: ObservableObject {
     /// radio-off / connect-fail / disconnect). Twin of the Android LiveState.streamingLiveHR.
     @Published public var streamingLiveHR: Bool = false
     @Published public private(set) var heartRate: Int? = nil
+    /// Live transport value that may be rendered but must not enter the accepted-sample
+    /// publisher, smoothing, workouts, history, or health formulas. Supplier adapters use
+    /// this lane until their physiological provenance has been validated end to end.
+    @Published public private(set) var displayOnlyHeartRate: Int? = nil
+    public private(set) var displayOnlyHeartRateReceivedAt: Date?
+    public var displayedHeartRate: Int? { displayOnlyHeartRate ?? heartRate }
+    public var displayedHeartRateReceivedAt: Date? {
+        displayOnlyHeartRate != nil
+            ? displayOnlyHeartRateReceivedAt
+            : latestHeartRateSample?.receivedAt
+    }
     /// Monotonic in-process identity of the latest accepted HR packet. It advances even when the BPM is
     /// unchanged, while merely reading the cached `heartRate` does not. Clock-driven consumers use the
     /// pair to distinguish a genuinely fresh sensor event from a held value after transport goes quiet.
@@ -733,11 +744,24 @@ public final class LiveState: ObservableObject {
         return published
     }
 
+    /// Updates only user-facing live readouts. This deliberately does not advance
+    /// `heartRateSampleSequence` or emit `heartRateSamplePublisher`.
+    public func setDisplayOnlyHeartRate(_ bpm: Int, receivedAt: Date) {
+        displayOnlyHeartRateReceivedAt = receivedAt
+        displayOnlyHeartRate = bpm
+    }
+
+    public func clearDisplayOnlyHeartRate() {
+        displayOnlyHeartRate = nil
+        displayOnlyHeartRateReceivedAt = nil
+    }
+
     /// Blank all live biometric readouts (HR + R-R + the rolling buffer) so a stale heart rate or
     /// R-R strip can't outlive the link. Called on CoreBluetooth disconnect (BLEManager), the twin of
     /// the `charging = nil` / `encryptedBond = false` clears on the same path.
     public func clearBiometrics() {
         heartRate = nil
+        clearDisplayOnlyHeartRate()
         latestHeartRateSample = nil
         rr.removeAll()
         rrRecent.removeAll()

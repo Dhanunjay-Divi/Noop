@@ -41,7 +41,11 @@ final class CycleTrackingValidationTests: XCTestCase {
             of: "private struct",
             range: firstRun.upperBound..<health.endIndex
         )?.lowerBound ?? health.endIndex
-        XCTAssertTrue(health[firstRun.lowerBound..<nextTypeStart].contains("SkinTempSection()"))
+        XCTAssertTrue(
+            health[firstRun.lowerBound..<nextTypeStart].contains(
+                "SkinTempSection(allowsLocalMutations: allowsLocalMutations)"
+            )
+        )
     }
 
     func testCycleRingNeverInventsALoggedDayOneMarker() throws {

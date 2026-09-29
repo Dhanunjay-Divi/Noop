@@ -1,6 +1,7 @@
 #if os(iOS)
 import SwiftUI
 import StrandDesign
+import UIKit
 
 struct OwnershipAccountView: View {
     @StateObject private var service = OwnershipService.shared
@@ -40,8 +41,12 @@ struct OwnershipAccountView: View {
                 termsReview
             case .registering:
                 progress(
-                    title: "Securing your account",
-                    detail: "NOOP is reconciling the versioned terms and this phone installation."
+                    title: String(localized: "Securing your account"),
+                    detail: String(
+                        localized: "NOOP is reconciling the versioned terms and this phone installation."
+                    ),
+                    currentStep: 1,
+                    totalSteps: 3
                 )
             case .accountReady, .possessionUnavailable, .claimed, .complete:
                 account
@@ -49,15 +54,23 @@ struct OwnershipAccountView: View {
                 deletionPending
             case .claiming:
                 progress(
-                    title: "Confirming band ownership",
-                    detail: "Keep the band worn and nearby until confirmation completes."
+                    title: String(localized: "Confirming band ownership"),
+                    detail: String(
+                        localized: "Keep the band worn and nearby until confirmation completes."
+                    ),
+                    currentStep: 2,
+                    totalSteps: 3
                 )
             case .replacementRequired:
                 replacement
             case .authorizingReplacement:
                 progress(
-                    title: "Authorizing this phone",
-                    detail: "Keep the claimed band worn and nearby while NOOP verifies possession."
+                    title: String(localized: "Authorizing this phone"),
+                    detail: String(
+                        localized: "Keep the claimed band worn and nearby while NOOP verifies possession."
+                    ),
+                    currentStep: 1,
+                    totalSteps: 1
                 )
             }
             status
@@ -69,6 +82,10 @@ struct OwnershipAccountView: View {
         }
         .onChange(of: service.overview) { _, value in
             if let value { selectedPlan = value.plan }
+        }
+        .onChange(of: service.status) { previous, current in
+            guard current != previous, !current.isEmpty else { return }
+            announceAccessibility(current)
         }
         .alert(item: $pendingRevocation) { installation in
             Alert(
@@ -188,12 +205,18 @@ struct OwnershipAccountView: View {
                     .textFieldStyle(.roundedBorder)
                     .disabled(service.isBusy)
                     .accessibilityIdentifier("noop.ownership.email")
+                    .accessibilityHint(
+                        Text(authenticationEmailAccessibilityError ?? "")
+                    )
 
                 SecureField("Password", text: $password)
                     .textContentType(createMode ? .newPassword : .password)
                     .textFieldStyle(.roundedBorder)
                     .disabled(service.isBusy)
                     .accessibilityIdentifier("noop.ownership.password")
+                    .accessibilityHint(
+                        Text(authenticationPasswordAccessibilityError ?? "")
+                    )
 
                 if createMode {
                     SecureField("Confirm password", text: $confirmation)
@@ -201,6 +224,9 @@ struct OwnershipAccountView: View {
                         .textFieldStyle(.roundedBorder)
                         .disabled(service.isBusy)
                         .accessibilityIdentifier("noop.ownership.password-confirmation")
+                        .accessibilityHint(
+                            Text(authenticationPasswordAccessibilityError ?? "")
+                        )
                 }
 
                 NoopButton(
@@ -313,14 +339,19 @@ struct OwnershipAccountView: View {
                 .disabled(service.isBusy)
 
                 NoopButton(
-                    "Resend verification",
+                    service.emailVerificationResendSecondsRemaining > 0
+                        ? "Resend in \(service.emailVerificationResendSecondsRemaining)s"
+                        : "Resend verification",
                     systemImage: "arrow.clockwise",
                     kind: .secondary,
                     fullWidth: true
                 ) {
                     Task { await service.resendEmailVerification() }
                 }
-                .disabled(service.isBusy)
+                .disabled(
+                    service.isBusy
+                        || service.emailVerificationResendSecondsRemaining > 0
+                )
 
                 signOutButton
             }
@@ -499,6 +530,9 @@ struct OwnershipAccountView: View {
                     .accessibilityIdentifier(
                         "noop.ownership.deletion-confirmation"
                     )
+                    .accessibilityHint(
+                        Text(deletionConfirmationAccessibilityError ?? "")
+                    )
 
                     SecureField(
                         "Current password",
@@ -509,6 +543,9 @@ struct OwnershipAccountView: View {
                     .disabled(service.isBusy)
                     .accessibilityIdentifier(
                         "noop.ownership.deletion-password"
+                    )
+                    .accessibilityHint(
+                        Text(deletionPasswordAccessibilityError ?? "")
                     )
 
                     Toggle(isOn: $deletionExportAcknowledged) {
@@ -667,6 +704,9 @@ struct OwnershipAccountView: View {
                 .accessibilityIdentifier(
                     "noop.ownership.pending-deletion-password"
                 )
+                .accessibilityHint(
+                    Text(deletionPasswordAccessibilityError ?? "")
+                )
 
                 Text(
                     "Checking or canceling requires a fresh account verification. The password is sent only to the identity provider."
@@ -801,21 +841,33 @@ struct OwnershipAccountView: View {
                         .keyboardType(.phonePad)
                         .textFieldStyle(.roundedBorder)
                         .disabled(service.isBusy)
+                        .accessibilityHint(
+                            Text(phoneAccessibilityError ?? "")
+                        )
                     NoopButton(
-                        "Send verification code",
+                        service.phoneVerificationResendSecondsRemaining > 0
+                            ? "Resend in \(service.phoneVerificationResendSecondsRemaining)s"
+                            : "Send verification code",
                         systemImage: "message",
                         kind: .secondary,
                         fullWidth: true
                     ) {
                         Task { await service.sendPhoneCode(to: phone) }
                     }
-                    .disabled(service.isBusy || phone.isEmpty)
+                    .disabled(
+                        service.isBusy
+                            || phone.isEmpty
+                            || service.phoneVerificationResendSecondsRemaining > 0
+                    )
 
                     TextField("Verification code", text: $phoneCode)
                         .textContentType(.oneTimeCode)
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
                         .disabled(service.isBusy)
+                        .accessibilityHint(
+                            Text(phoneCodeAccessibilityError ?? "")
+                        )
                     NoopButton(
                         "Verify optional number",
                         systemImage: "checkmark.shield",
@@ -874,11 +926,21 @@ struct OwnershipAccountView: View {
         }
     }
 
-    private func progress(title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
-        StrandCard(padding: 20) {
+    private func progress(
+        title: String,
+        detail: String,
+        currentStep: Int,
+        totalSteps: Int
+    ) -> some View {
+        let ordinal = String(
+            localized: "Step \(currentStep) of \(totalSteps)"
+        )
+        return StrandCard(padding: 20) {
             VStack(alignment: .leading, spacing: 14) {
                 ProgressView()
                     .tint(StrandPalette.accent)
+                    .accessibilityLabel(Text(title))
+                    .accessibilityValue(Text(ordinal))
                 Text(title)
                     .font(StrandFont.title2)
                     .foregroundStyle(StrandPalette.textPrimary)
@@ -886,7 +948,15 @@ struct OwnershipAccountView: View {
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Text(ordinal)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .accessibilityHidden(true)
             }
+        }
+        .accessibilityIdentifier("noop.ownership.progress")
+        .onAppear {
+            announceAccessibility("\(title). \(ordinal)")
         }
     }
 
@@ -932,11 +1002,150 @@ struct OwnershipAccountView: View {
     @ViewBuilder
     private var status: some View {
         if !service.status.isEmpty {
-            Text(service.status)
-                .font(StrandFont.caption)
-                .foregroundStyle(StrandPalette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            let isError = accessibilityStatusError != nil
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(
+                    systemName: isError
+                        ? "exclamationmark.circle.fill"
+                        : "info.circle"
+                )
+                .foregroundStyle(
+                    isError
+                        ? StrandPalette.statusCritical
+                        : StrandPalette.textTertiary
+                )
+                Text(service.status)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(
+                        isError
+                            ? StrandPalette.statusCritical
+                            : StrandPalette.textTertiary
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(statusAccessibilityLabel))
+            .accessibilityIdentifier("noop.ownership.status")
         }
+    }
+
+    private var statusAccessibilityLabel: String {
+        guard let error = accessibilityStatusError else {
+            return service.status
+        }
+        return String(localized: "Error: \(error)")
+    }
+
+    private var accessibilityStatusError: String? {
+        guard ownershipAccessibilityErrorMessages.contains(service.status) else {
+            return nil
+        }
+        return service.status
+    }
+
+    private var authenticationEmailAccessibilityError: String? {
+        let message = String(
+            localized: "Enter a valid email and password, or use password reset."
+        )
+        return service.status == message ? message : nil
+    }
+
+    private var authenticationPasswordAccessibilityError: String? {
+        let message = String(
+            localized: "Use matching passwords with at least 12 characters."
+        )
+        return service.status == message ? message : nil
+    }
+
+    private var phoneAccessibilityError: String? {
+        let message = String(
+            localized: "Enter a mobile number with country code."
+        )
+        return service.status == message ? message : nil
+    }
+
+    private var phoneCodeAccessibilityError: String? {
+        let messages = Set([
+            String(localized: "Enter the current six-digit code."),
+            String(
+                localized: "That code is incorrect. Check it and try again."
+            ),
+            String(localized: "That code expired. Request a new one."),
+        ])
+        return messages.contains(service.status) ? service.status : nil
+    }
+
+    private var deletionConfirmationAccessibilityError: String? {
+        let message = String(
+            localized: "Type the full ownership account deletion confirmation exactly as shown."
+        )
+        return service.status == message ? message : nil
+    }
+
+    private var deletionPasswordAccessibilityError: String? {
+        let message = String(localized: "Sign in again to continue.")
+        return service.status == message ? message : nil
+    }
+
+    private var ownershipAccessibilityErrorMessages: Set<String> {
+        Set([
+            String(
+                localized: "Band ownership setup is not available in this build."
+            ),
+            String(
+                localized: "Enter a valid email and password, or use password reset."
+            ),
+            String(
+                localized: "Use matching passwords with at least 12 characters."
+            ),
+            String(localized: "Verify your email address before continuing."),
+            String(localized: "Reload and review the current ownership terms."),
+            String(localized: "Enter a mobile number with country code."),
+            String(localized: "Enter the current six-digit code."),
+            String(
+                localized: "That code is incorrect. Check it and try again."
+            ),
+            String(localized: "That code expired. Request a new one."),
+            String(
+                localized: "Too many attempts. Wait before requesting another code."
+            ),
+            String(
+                localized: "Wait for the resend timer before requesting another code."
+            ),
+            String(
+                localized: "Type the full ownership account deletion confirmation exactly as shown."
+            ),
+            String(
+                localized: "Confirm both the export and retention acknowledgements before continuing."
+            ),
+            String(localized: "Sign in again to continue."),
+            String(
+                localized: "That band confirmation is no longer active. Start confirmation again."
+            ),
+            String(
+                localized: "Band confirmation was not accepted. Keep the band worn and try again."
+            ),
+            String(localized: "This band is not available for activation."),
+            String(localized: "Band confirmation is temporarily unavailable."),
+            String(localized: "The ownership service could not be reached."),
+            String(
+                localized: "The ownership service is temporarily unavailable."
+            ),
+            String(
+                localized: "Secure ownership data on this phone could not be read. Reset this phone's setup to continue."
+            ),
+            String(localized: "NOOP could not safely continue ownership setup."),
+            String(
+                localized: "NOOP could not complete that account action. Try again or reset the password."
+            ),
+        ])
+    }
+
+    private func announceAccessibility(_ message: String) {
+        guard UIAccessibility.isVoiceOverRunning, !message.isEmpty else {
+            return
+        }
+        UIAccessibility.post(notification: .announcement, argument: message)
     }
 
     private var localBoundary: some View {

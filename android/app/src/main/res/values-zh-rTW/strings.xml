@@ -38,6 +38,8 @@
     <string name="sleep_planner_duration_hours">%1$d 小時</string>
     <string name="sleep_planner_duration_hours_minutes">%1$d 小時 %2$d 分鐘</string>
     <string name="nav_alarms">睡眠規劃</string>
+    <string name="nav_backup_sync">資料與同步</string>
+    <string name="data_sync_subtitle">查看歷史記錄的儲存位置、保護本機資料，並管理選用的帳戶連續性。</string>
     <string name="strength_title">肌力訓練</string>
     <string name="strength_subtitle">訓練計畫、組數、次數、休息與客觀紀錄，僅保存在此裝置。</string>
     <string name="strength_close_trainer">關閉肌力訓練</string>
@@ -229,6 +231,7 @@
     <string name="key_metrics_selection_count">已置頂 %1$d/%2$d 項</string>
     <string name="key_metrics_show_selected">顯示已選指標</string>
     <string name="key_metrics_show_all_count">顯示所有指標（%1$d）</string>
+    <string name="key_metrics_open_history">開啟完整指標記錄</string>
     <string name="hydration_adaptive_timing_label">自動調整時間</string>
     <string name="hydration_adaptive_timing_help">根據今天的運動負荷和已確認飲水量調整間隔。不會推估缺少的資料。</string>
     <string name="hydration_adaptive_timing_status">目前每 %1$d 分鐘一次。只有在今天的資料充分支持時才會調整時間。</string>
@@ -542,4 +545,14 @@
     <string name="managed_friends_delete_account_title">要刪除 NOOP 帳戶嗎？</string>
     <string name="managed_friends_delete_account_detail">Friends、受管理的雲端資料與 NOOP 帳戶將在 24 小時冷靜期後安排刪除。這支手機上的本機健康資料不會刪除。</string>
     <string name="managed_friends_deletion_scheduled_detail">Friends 與帳戶服務會在 24 小時冷靜期內暫停。本機健康資料仍保留在這支手機上。</string>
+    <string name="ownership_resend_verification_countdown">%1$d 秒後重新傳送</string>
+    <string name="ownership_send_code_countdown">%1$d 秒後再次傳送</string>
+    <string name="ownership_verification_code_invalid">驗證碼不正確。請檢查後再試一次。</string>
+    <string name="ownership_verification_session_expired">驗證工作階段已過期。請要求新的驗證碼。</string>
+    <string name="ownership_verification_rate_limited">驗證要求過多。請稍候再試。</string>
+    <string name="ownership_verification_cooldown_active">請等待倒數結束後再要求新的驗證訊息。</string>
+    <string name="ownership_network_unavailable">請重新連接網際網路後再試。</string>
+    <string name="managed_cloud_error_document_conflict">NOOP 保留了你目前的資料。請檢查最近的變更，然後點一下「立即同步」重試。</string>
+    <string name="ownership_progress_step">第 %1$d 步，共 %2$d 步</string>
+    <string name="ownership_setup_complete">所有權設定已完成。</string>
 </resources>

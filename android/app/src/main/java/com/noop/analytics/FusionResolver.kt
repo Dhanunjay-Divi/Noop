@@ -42,9 +42,24 @@ object FusionResolver {
             )
         }
 
-        // Winner = lowest tier, then lowest source-priority, then earliest input index (fully stable).
+        // Winner = lowest tier. Apple Health and Health Connect are two views of overlapping phone/watch
+        // pedometer data; between those two only, use the largest cumulative total rather than summing.
+        // A band cannot displace a phone/watch count merely by reporting a larger value.
         val ranked = indexed.sortedWith(
-            compareBy({ it.second.tier }, { it.second.sourcePriority }, { it.first }),
+            Comparator { left, right ->
+                val tier = left.second.tier.compareTo(right.second.tier)
+                if (tier != 0) return@Comparator tier
+                if (kind == MetricArbitrationPolicy.MetricKind.STEPS &&
+                    left.second.source.isPhoneHealthStore() &&
+                    right.second.source.isPhoneHealthStore()
+                ) {
+                    val value = right.second.value.compareTo(left.second.value)
+                    if (value != 0) return@Comparator value
+                }
+                val priority = left.second.sourcePriority.compareTo(right.second.sourcePriority)
+                if (priority != 0) return@Comparator priority
+                left.first.compareTo(right.first)
+            },
         ).map { it.second }
 
         val winner = ranked[0]
@@ -58,6 +73,9 @@ object FusionResolver {
             agreement = agreement,
         )
     }
+
+    private fun FusionSource.isPhoneHealthStore(): Boolean =
+        this == FusionSource.APPLE_HEALTH || this == FusionSource.HEALTH_CONNECT
 
     /**
      * Classify how the non-winning sources agree with [winningValue], using the metric's tolerance.

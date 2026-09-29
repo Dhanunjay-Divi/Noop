@@ -217,6 +217,7 @@ private data class CalendarDayOverviewTarget(
 private data class CalendarDayOverviewContent(
     val target: CalendarDayOverviewTarget,
     val daily: DailyMetric?,
+    val importedSteps: Int?,
     val metricRows: List<MetricSeriesRow>,
 )
 
@@ -374,16 +375,22 @@ internal fun CalendarMonthScreen(
                     val metrics = async {
                         if (scope.loadsMetricRows) vm.repo.metricSeriesForDay(key) else emptyList()
                     }
+                    // Imported steps are a best-effort enhancement. A provider/database failure must
+                    // not discard the day's band metrics or leave the whole detail sheet blank.
+                    val importedSteps = async {
+                        runCatching { vm.importedStepsForDay(key) }.getOrNull()
+                    }
                     CalendarDayOverviewContent(
                         target = target,
                         daily = daily.await(),
+                        importedSteps = importedSteps.await(),
                         metricRows = metrics.await(),
                     )
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Throwable) {
-                CalendarDayOverviewContent(target, null, emptyList())
+                CalendarDayOverviewContent(target, null, null, emptyList())
             }
         }
 
@@ -401,6 +408,7 @@ internal fun CalendarMonthScreen(
             scope = scope,
             focusValue = target.focusValue,
             daily = exact?.daily,
+            importedSteps = exact?.importedSteps,
             workouts = dayWorkouts,
             metricRows = exact?.metricRows.orEmpty(),
             journal = emptyList(),

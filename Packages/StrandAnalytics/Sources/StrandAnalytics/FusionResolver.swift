@@ -35,10 +35,17 @@ public enum FusionResolver {
             )
         }
 
-        // Winner = lowest tier, then lowest source-priority. Stable: equal keys keep input order via a
-        // final index tiebreak so the result is fully deterministic across platforms.
+        // Winner = lowest tier. Apple Health and Health Connect are two views of overlapping phone/watch
+        // pedometer data; between those two only, use the largest cumulative total rather than summing.
+        // A band cannot displace a phone/watch count merely by reporting a larger value.
         let ranked = contributorsUnsorted.enumerated().sorted { lhs, rhs in
             if lhs.element.tier != rhs.element.tier { return lhs.element.tier < rhs.element.tier }
+            if kind == .steps,
+               isPhoneHealthStore(lhs.element.source),
+               isPhoneHealthStore(rhs.element.source),
+               lhs.element.value != rhs.element.value {
+                return lhs.element.value > rhs.element.value
+            }
             if lhs.element.sourcePriority != rhs.element.sourcePriority {
                 return lhs.element.sourcePriority < rhs.element.sourcePriority
             }
@@ -55,6 +62,10 @@ public enum FusionResolver {
             contributors: ranked,
             agreement: agreement
         )
+    }
+
+    private static func isPhoneHealthStore(_ source: FusionSource) -> Bool {
+        source == .appleHealth || source == .healthConnect
     }
 
     /// Classify how the non-winning sources agree with `winningValue`, using the metric's tolerance.

@@ -64,20 +64,52 @@ final class MoreListParityTests: XCTestCase {
                       "The real Nutrition destination needs a deterministic simulator capture route.")
     }
 
-    /// NOOP+ must not disappear merely because Data is collapsed or this build lacks managed-cloud
-    /// configuration. More exposes one always-visible entry and one conventional Data row, both routing
-    /// to a dedicated screen whose card renders the unavailable state instead of hiding itself.
+    /// NOOP+ remains a conventional Data row whose destination renders the unavailable state honestly.
+    /// Account and Data & Sync are the always-visible setup rows; the former NOOP+ hero must not
+    /// compete with those core setup actions or duplicate the Data catalogue.
     func testNoopPlusIsDiscoverableAndHonestWhenUnavailable() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
         let managed = try sourceText("StrandiOS/System/ManagedCloudViews.swift")
 
-        XCTAssertTrue(shell.contains("noopPlusEntry"))
+        XCTAssertTrue(shell.contains("moreAccountDataAccess"))
+        XCTAssertTrue(shell.contains("MoreRow(\"Band Account\", \"person.badge.key.fill\", .bandAccount)"))
+        XCTAssertTrue(shell.contains("MoreRow(\"Data & Sync\", \"externaldrive.fill.badge.icloud\", .backupSync)"))
         XCTAssertTrue(shell.contains("MoreRow(\"NOOP+\", \"icloud.fill\", .noopPlus)"))
+        XCTAssertFalse(shell.contains("noopPlusEntry"))
+        XCTAssertFalse(shell.contains("NoopPlusDiscoveryLabel"))
         XCTAssertTrue(shell.contains("case .noopPlus:        NoopPlusView()"))
         XCTAssertTrue(shell.contains("case \"noopplus\", \"noop_plus\": return .noopPlus"))
         XCTAssertTrue(managed.contains("struct NoopPlusView: View"))
         XCTAssertTrue(managed.contains("if service.phase == .unavailable"))
         XCTAssertTrue(managed.contains("Local NOOP and folder backup continue to work."))
+    }
+
+    func testDataSyncKeepsLocalControlsPrimaryAndSelfHostingAdvanced() throws {
+        let screen = try sourceText("Strand/Screens/BackupSyncView.swift")
+        let root = try sourceText("Strand/App/RootView.swift")
+
+        XCTAssertTrue(screen.contains(#"title: "Data & Sync""#))
+        XCTAssertTrue(screen.contains(
+            #"subtitle: "See where your history lives, protect local data, and manage optional account continuity.""#
+        ))
+        XCTAssertTrue(root.contains(#"case .backupSync: return "Data & Sync""#))
+        XCTAssertTrue(root.contains(
+            #"case .backupSync: return String(localized: "Data & Sync")"#
+        ))
+
+        let folder = try XCTUnwrap(screen.range(of: "folderCard"))
+        let restore = try XCTUnwrap(screen.range(of: "restoreCard"))
+        let advanced = try XCTUnwrap(screen.range(of: "advancedServerSection"))
+        XCTAssertLessThan(folder.lowerBound, restore.lowerBound)
+        XCTAssertLessThan(restore.lowerBound, advanced.lowerBound)
+
+        let advancedBody = try XCTUnwrap(
+            screen.range(of: "private var advancedServerSection")
+        )
+        let advancedSource = String(screen[advancedBody.lowerBound...])
+        XCTAssertTrue(advancedSource.contains("if advancedServerOpen"))
+        XCTAssertTrue(advancedSource.contains("serverCard"))
+        XCTAssertFalse(screen.contains("serverCard\n                folderCard"))
     }
 
     func testManagedHistoryImportIsReachableFromEnrolledNoopPlusUI()
@@ -412,15 +444,30 @@ final class MoreListParityTests: XCTestCase {
 
     func testiPhoneMoreHasBoundedQuickAccess() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
+        XCTAssertTrue(shell.contains("moreAccountDataAccess\n                moreQuickAccess"),
+                      "Account and data continuity must lead the More index before everyday shortcuts.")
         XCTAssertTrue(shell.contains("moreQuickAccess\n                moreSection(\"Insights\")"),
-                      "Quick Access should lead the More index before the complete grouped catalogue.")
+                      "Quick Access should remain before the complete grouped catalogue.")
         XCTAssertTrue(shell.contains("ForEach(MoreSectionPrefs.quickAccess"),
                       "The rendered shortcuts must use the tested shared four-item contract.")
         XCTAssertTrue(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "safety" }),
                       "Safety must stay in Quick Access so it is not hidden behind the collapsed App group.")
+        XCTAssertTrue(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "insights" }),
+                      "Journal must replace the duplicate Profile shortcut.")
+        XCTAssertFalse(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "profile" }),
+                       "Profile belongs once in the complete Body index.")
         XCTAssertTrue(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "friends" }),
                       "Friends must remain one tap away after Workouts moves into primary navigation.")
-        XCTAssertTrue(shell.contains("MoreQuickAccessLabel(item: item)"),
+        XCTAssertTrue(shell.contains(
+            "let columns = dynamicTypeSize.isAccessibilitySize"
+        ), "Accessibility Dynamic Type must switch shortcut tiles to one column.")
+        XCTAssertTrue(shell.contains(
+            "usesAccessibilityLayout: dynamicTypeSize.isAccessibilitySize"
+        ), "The tile must receive the same accessibility layout decision as its grid.")
+        XCTAssertTrue(shell.contains(
+            ".lineLimit(usesAccessibilityLayout ? 2 : 1)"
+        ), "Accessibility shortcuts must wrap the full localized command instead of truncating it.")
+        XCTAssertTrue(shell.contains("MoreQuickAccessLabel("),
                       "Keep the tile view split out so RootTabView remains cheap to type-check.")
         XCTAssertTrue(shell.contains("MoreRow(\"Profile\", \"person.crop.circle.fill\", .profile)"),
                       "Profile must stay visible in the Body index instead of being buried in Settings.")

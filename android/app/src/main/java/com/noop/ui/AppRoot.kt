@@ -281,7 +281,7 @@ private val drawerGroups: List<DrawerGroup> = listOf(
         Destination.Insights, Destination.Explore, Destination.Compare,
     ), defaultExpanded = true),
     DrawerGroup("Body", R.string.more_group_body, listOf(
-        Destination.Profile, Destination.BandAccount, Destination.Friends, Destination.Devices,
+        Destination.Profile, Destination.Friends, Destination.Devices,
         Destination.Live, Destination.Nutrition,
         Destination.Health, Destination.VitalSigns,
         Destination.LabBook, Destination.Stress, Destination.Breathe, Destination.Intervals,
@@ -289,7 +289,7 @@ private val drawerGroups: List<DrawerGroup> = listOf(
     ), defaultExpanded = true),
     DrawerGroup("Data", R.string.more_group_data, listOf(
         Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,
-        Destination.NoopPlus, Destination.BackupSync,
+        Destination.NoopPlus,
     ), defaultExpanded = false),
     DrawerGroup("App", R.string.more_group_app, listOf(
         Destination.Safety, Destination.SmartAlarm, Destination.Automations, Destination.Notifications,
@@ -572,6 +572,7 @@ fun AppRoot(
                         // Every metric/vital card opens its OWN focused detail trend (vital_detail/<key>),
                         // not the shared Health hub (2026-07-03). Mirrors the iOS liquidCard metricDetail.
                         onOpenMetric = { key -> nav.navigate("vital_detail/$key") },
+                        onOpenMetricHistory = { openTopLevel(Destination.Explore.route) },
                         onOpenSleep = { openTopLevel(Destination.Sleep.route) },
                         // Optional Coupled view card (task #43): a normal push so back returns to Today.
                         onOpenCoupled = { nav.navigate(Destination.CoupledView.route) },
@@ -1047,7 +1048,7 @@ private fun MoreScreen(onNavigate: (String) -> Unit) {
         // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way down.
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
-        NoopPlusEntry(onNavigate = onNavigate)
+        MoreAccountDataAccess(onNavigate = onNavigate)
         MoreQuickAccess(onNavigate = onNavigate)
 
         // Mirror the iOS More page: each group is a tappable UPPERCASE overline header (with a disclosure
@@ -1087,61 +1088,26 @@ private fun MoreScreen(onNavigate: (String) -> Unit) {
     }
 }
 
-/** An always-visible NOOP+ door. Managed storage used to be discoverable only after expanding Data
- * and opening Backup & Sync, which also made an unavailable build look as though NOOP+ did not exist. */
+/** Account ownership and data continuity stay above the collapsible catalogue. Their destinations
+ * remain unchanged; this card only removes duplicate entry points and clarifies hierarchy. */
 @Composable
-private fun NoopPlusEntry(onNavigate: (String) -> Unit) {
-    val title = stringResource(R.string.managed_cloud_brand)
+private fun MoreAccountDataAccess(onNavigate: (String) -> Unit) {
     NoopCard(
-        modifier = Modifier
-            .clickable { onNavigate(Destination.NoopPlus.route) }
-            .semantics { contentDescription = title }
-            .testTag("noop.more.noop_plus_entry"),
+        modifier = Modifier.testTag("noop.more.account_data"),
         padding = 0.dp,
-        tint = Palette.accent,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Palette.surfaceInset.copy(alpha = 0.86f))
-                    .border(0.8.dp, Palette.hairline, RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Cloud,
-                    contentDescription = null,
-                    tint = Palette.accent,
-                    modifier = Modifier.size(19.dp),
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Text(
-                    title,
-                    style = NoopType.headline,
-                    color = Palette.textPrimary,
-                )
-                Text(
-                    stringResource(R.string.managed_cloud_summary),
-                    style = NoopType.caption,
-                    color = Palette.textTertiary,
-                )
-            }
-            Icon(
-                Icons.Filled.ChevronRight,
-                contentDescription = null,
-                tint = Palette.textTertiary,
-                modifier = Modifier.size(18.dp),
+        Column(modifier = Modifier.fillMaxWidth()) {
+            MoreRow(
+                dest = Destination.BandAccount,
+                onClick = { onNavigate(Destination.BandAccount.route) },
+            )
+            HorizontalDivider(
+                color = Palette.hairline,
+                modifier = Modifier.padding(start = 50.dp),
+            )
+            MoreRow(
+                dest = Destination.BackupSync,
+                onClick = { onNavigate(Destination.BackupSync.route) },
             )
         }
     }
@@ -1209,9 +1175,9 @@ private data class MoreQuickAccessItem(
 private val moreQuickAccessItems = listOf(
     MoreQuickAccessItem(R.string.nav_safety, Icons.Filled.Shield, Destination.Safety.route, critical = true),
     MoreQuickAccessItem(
-        R.string.l10n_settings_screen_profile_ff4fc027,
-        Icons.Filled.AccountCircle,
-        Destination.Profile.route,
+        R.string.nav_insights,
+        Icons.Filled.Insights,
+        Destination.Insights.route,
     ),
     MoreQuickAccessItem(R.string.nav_devices, Icons.Filled.Watch, Destination.Devices.route),
     MoreQuickAccessItem(R.string.nav_friends, Icons.Filled.People, Destination.Friends.route),
@@ -2086,10 +2052,12 @@ private fun NavHostController.returnToTabRoot(route: String) {
  */
 @Composable
 private fun FusedRecordRoute(viewModel: AppViewModel) {
+    val metricDataVersion by viewModel.metricDataVersion.collectAsStateWithLifecycle()
+    val activeDeviceId by viewModel.selectedDeviceId.collectAsStateWithLifecycle()
     var record by remember {
         mutableStateOf(FusedRecord(rows = emptyList(), dayOwner = null as FusionSource?, contributingSourceCount = 0))
     }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(metricDataVersion, activeDeviceId) {
         record = runCatching { viewModel.fusedRecordForToday() }.getOrDefault(record)
     }
     FusedRecordScreen(record = record)

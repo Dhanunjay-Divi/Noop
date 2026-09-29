@@ -19,15 +19,30 @@ class DeviceDisplayNameTest {
     }
 
     @Test
+    fun compatibleFamilyRegistrationLabelsRemainDistinct() {
+        assertEquals(
+            "Compatible band 4.0",
+            displayName(band(model = "4.0", nickname = "Compatible band 4.0")),
+        )
+        assertEquals(
+            "Compatible band 5.0 / MG",
+            displayName(band(model = "5.0 MG", nickname = "Compatible band 5.0 / MG")),
+        )
+    }
+
+    @Test
     fun duplicateModelIsHiddenButDistinctModelRemainsVisible() {
         assertEquals(false, shouldShowDeviceModel(" Compatible band ", "compatible BAND"))
         assertEquals(true, shouldShowDeviceModel("Morning Band", "Compatible band"))
     }
 
-    private fun band(nickname: String?) = PairedDeviceRow(
+    private fun band(
+        model: String = "5.0 MG",
+        nickname: String?,
+    ) = PairedDeviceRow(
         id = "my-whoop",
         brand = "WHOOP",
-        model = "5.0 MG",
+        model = model,
         nickname = nickname,
         sourceKind = SourceKind.liveBLE.name,
         capabilities = "hr,hrv,sleep",

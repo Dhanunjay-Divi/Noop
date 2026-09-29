@@ -8,6 +8,18 @@ class HealthConnectProjectionTest {
     private val source = WhoopRepository.HEALTH_CONNECT_SOURCE
 
     @Test
+    fun emptyOwnedStepReplacementStillInvalidatesDailyMetricReaders() {
+        assertEquals(
+            true,
+            HealthConnectProjectionScope(steps = true).ownsDailyMetricColumns,
+        )
+        assertEquals(
+            false,
+            HealthConnectProjectionScope(activeCalories = true).ownsDailyMetricColumns,
+        )
+    }
+
+    @Test
     fun partialPermissionRefreshesOwnedColumnAndPreservesOthers() {
         val old = AppleDaily(source, "2026-08-10", steps = 100, activeKcal = 450.0, weightKg = 80.0)
         val fresh = AppleDaily(source, old.day, steps = 125)
@@ -22,6 +34,30 @@ class HealthConnectProjectionTest {
         assertEquals(125, merged.steps)
         assertEquals(450.0, merged.activeKcal!!, 0.0)
         assertEquals(80.0, merged.weightKg!!, 0.0)
+    }
+
+    @Test
+    fun stepPermissionRefreshesAndClearsTheDailyProjection() {
+        val old = DailyMetric(source, "2026-08-10", steps = 4_000, restingHr = 52)
+        val fresh = DailyMetric(source, old.day, steps = 9_500)
+
+        val refreshed = HealthConnectProjectionMerge.dailyMetrics(
+            source,
+            existing = listOf(old),
+            incoming = listOf(fresh),
+            scope = HealthConnectProjectionScope(steps = true),
+        ).single()
+        assertEquals(9_500, refreshed.steps)
+        assertEquals(52, refreshed.restingHr)
+
+        val cleared = HealthConnectProjectionMerge.dailyMetrics(
+            source,
+            existing = listOf(refreshed),
+            incoming = emptyList(),
+            scope = HealthConnectProjectionScope(steps = true),
+        ).single()
+        assertNull(cleared.steps)
+        assertEquals(52, cleared.restingHr)
     }
 
     @Test
@@ -80,9 +116,10 @@ class HealthConnectProjectionTest {
 
         val oldDaily = DailyMetric(
             source, oldApple.day, restingHr = 52, avgHrv = 61.0, spo2Pct = 97.0,
+            steps = 100,
             hrvMethod = DailyHrvMethod.RMSSD,
         )
-        val freshDaily = DailyMetric(source, oldApple.day, restingHr = 50)
+        val freshDaily = DailyMetric(source, oldApple.day, restingHr = 50, steps = 125)
         val mergedDaily = HealthConnectProjectionMerge.dailyMetricsAdditive(
             listOf(oldDaily),
             listOf(freshDaily),
@@ -91,6 +128,7 @@ class HealthConnectProjectionTest {
         assertEquals(61.0, mergedDaily.avgHrv!!, 0.0)
         assertEquals(DailyHrvMethod.RMSSD, mergedDaily.hrvMethod)
         assertEquals(97.0, mergedDaily.spo2Pct!!, 0.0)
+        assertEquals(125, mergedDaily.steps)
     }
 
     @Test

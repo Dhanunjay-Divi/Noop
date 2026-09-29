@@ -573,7 +573,8 @@ final class Backfiller {
                 // Diag (#601): the decoded rows couldn't be written - this is the "history stalls but live HR
                 // works" class. We return WITHOUT acking so the strap keeps this chunk and re-sends it next
                 // session (no data loss), but a silent return left a strap log with no trace of the stall.
-                log?("Backfill: failed to persist decoded rows (trim=\(trim)): \(error) - holding ack so the strap re-sends this chunk; history won't advance until the write succeeds.")
+                // Keep the category fixed; arbitrary error descriptions may contain private payloads.
+                log?("Backfill: failed to persist decoded rows (trim=\(trim), failure=decoded_store_write); holding ack so the strap re-sends this chunk; history won't advance until the write succeeds.")
                 persistStalled = true   // #57: stall ALL further acks so an empty END can't advance past this
                 return
             }
@@ -638,7 +639,7 @@ final class Backfiller {
                     // Diag (#601): raw-capture is ON and the raw batch couldn't be enqueued. Hold the ack
                     // (return) so the strap re-sends — the research toggle's contract is that raw is durable
                     // before the trim advances. Surface it so a stalled offload with raw-capture on is visible.
-                    log?("Backfill: failed to enqueue raw batch (trim=\(trim)): \(error) - holding ack so the strap re-sends this chunk; raw capture must be durable before the trim advances.")
+                    log?("Backfill: failed to enqueue raw batch (trim=\(trim), failure=raw_store_write); holding ack so the strap re-sends this chunk; raw capture must be durable before the trim advances.")
                     persistStalled = true   // #57
                     return
                 }
@@ -684,7 +685,7 @@ final class Backfiller {
             // recorded, so on reconnect the offload could replay or skip. Holding the ack keeps it safe; the
             // strap re-offers this chunk next session. A silent return here was a prime "history won't advance"
             // suspect with nothing in the log to confirm it.
-            log?("Backfill: failed to write strap_trim cursor (trim=\(trim)): \(error) - holding ack so the strap re-sends this chunk; history won't advance until the cursor write succeeds.")
+            log?("Backfill: failed to write strap_trim cursor (trim=\(trim), failure=cursor_store_write); holding ack so the strap re-sends this chunk; history won't advance until the cursor write succeeds.")
             persistStalled = true   // #57
             return
         }

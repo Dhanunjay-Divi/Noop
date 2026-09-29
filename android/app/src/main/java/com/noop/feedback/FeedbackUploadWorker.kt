@@ -1034,69 +1034,142 @@ internal object FeedbackScheduler {
     }
 }
 
+internal enum class FeedbackWorkerExecutionPhase {
+    STARTED,
+    EXITED,
+}
+
+internal fun interface FeedbackWorkerExecutionListener {
+    fun onExecution(workId: UUID, phase: FeedbackWorkerExecutionPhase)
+}
+
+/**
+ * Default-no-op execution fence for instrumentation teardown.
+ *
+ * The observer is process-local, records no payload, and cannot change worker
+ * success. Production never installs a listener.
+ */
+internal object FeedbackWorkerExecutionObserver {
+    @Volatile
+    private var listener: FeedbackWorkerExecutionListener? = null
+
+    fun install(listener: FeedbackWorkerExecutionListener) {
+        synchronized(this) {
+            check(this.listener == null) {
+                "Feedback worker execution observer is already installed"
+            }
+            this.listener = listener
+        }
+    }
+
+    fun clear(listener: FeedbackWorkerExecutionListener) {
+        synchronized(this) {
+            if (this.listener === listener) {
+                this.listener = null
+            }
+        }
+    }
+
+    fun record(workId: UUID, phase: FeedbackWorkerExecutionPhase) {
+        val current = listener ?: return
+        try {
+            current.onExecution(workId, phase)
+        } catch (_: Throwable) {
+            // Test observation must never alter production worker behavior.
+        }
+    }
+}
+
 class FeedbackUploadWorker(
     appContext: Context,
     parameters: WorkerParameters,
 ) : CoroutineWorker(appContext, parameters) {
-    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val localId = inputData.getString(FeedbackScheduler.INPUT_LOCAL_ID)
-            ?.let { runCatching { UUID.fromString(it).toString().lowercase(Locale.US) }.getOrNull() }
-            ?: return@withContext Result.failure()
-        val workerGeneration = inputData.getString(FeedbackScheduler.INPUT_WORKER_GENERATION)
-            ?.let { runCatching { UUID.fromString(it).toString().lowercase(Locale.US) }.getOrNull() }
-            ?: return@withContext Result.failure()
-        val outbox = FeedbackOutbox.from(applicationContext)
-        val initial = try {
-            outbox.load(localId)
-        } catch (error: FeedbackOutboxException) {
-            val decision = FeedbackWorkerStateReadPolicy.decide(
-                reason = error.reason,
-                runAttemptCount = runAttemptCount,
-            )
-            AppDiagnosticsRecorder.record(
-                "feedback.worker_state_read",
-                fields = mapOf(
-                    "outcome" to decision.outcome.wireValue,
-                ),
-            )
-            return@withContext if (decision.retry) {
-                Result.retry()
-            } else {
-                Result.failure()
-            }
-        } ?: return@withContext Result.success()
-        if (initial.workerGeneration != workerGeneration) {
-            AppDiagnosticsRecorder.record(
-                "feedback.worker_generation",
-                fields = mapOf("outcome" to "superseded"),
-            )
-            return@withContext Result.success()
-        }
+    override suspend fun doWork(): Result {
+        FeedbackWorkerExecutionObserver.record(
+            id,
+            FeedbackWorkerExecutionPhase.STARTED,
+        )
         try {
-            when (initial.state) {
-                FeedbackState.SENT,
-                FeedbackState.CANCELED,
-                FeedbackState.FAILED,
-                FeedbackState.CANCEL_FAILED,
-                -> {
-                    FeedbackRuntimeStatusBus.publish(
-                        initial,
-                        FeedbackScheduler.progressFor(initial.state),
+            return withContext(Dispatchers.IO) {
+                val localId = inputData.getString(FeedbackScheduler.INPUT_LOCAL_ID)
+                    ?.let {
+                        runCatching {
+                            UUID.fromString(it).toString().lowercase(Locale.US)
+                        }.getOrNull()
+                    }
+                    ?: return@withContext Result.failure()
+                val workerGeneration =
+                    inputData.getString(FeedbackScheduler.INPUT_WORKER_GENERATION)
+                        ?.let {
+                            runCatching {
+                                UUID.fromString(it).toString().lowercase(Locale.US)
+                            }.getOrNull()
+                        }
+                        ?: return@withContext Result.failure()
+                val outbox = FeedbackOutbox.from(applicationContext)
+                val initial = try {
+                    outbox.load(localId)
+                } catch (error: FeedbackOutboxException) {
+                    val decision = FeedbackWorkerStateReadPolicy.decide(
+                        reason = error.reason,
+                        runAttemptCount = runAttemptCount,
+                    )
+                    AppDiagnosticsRecorder.record(
+                        "feedback.worker_state_read",
+                        fields = mapOf(
+                            "outcome" to decision.outcome.wireValue,
+                        ),
+                    )
+                    return@withContext if (decision.retry) {
+                        Result.retry()
+                    } else {
+                        Result.failure()
+                    }
+                }
+                    ?: return@withContext Result.success()
+                if (initial.workerGeneration != workerGeneration) {
+                    AppDiagnosticsRecorder.record(
+                        "feedback.worker_generation",
+                        fields = mapOf("outcome" to "superseded"),
                     )
                     return@withContext Result.success()
                 }
-                FeedbackState.CANCELING,
-                FeedbackState.CANCEL_RETRY_SCHEDULED,
-                -> return@withContext cancelReport(outbox, initial, workerGeneration)
-                else -> uploadReport(outbox, initial, workerGeneration)
+                try {
+                    when (initial.state) {
+                        FeedbackState.SENT,
+                        FeedbackState.CANCELED,
+                        FeedbackState.FAILED,
+                        FeedbackState.CANCEL_FAILED,
+                        -> {
+                            FeedbackRuntimeStatusBus.publish(
+                                initial,
+                                FeedbackScheduler.progressFor(initial.state),
+                            )
+                            return@withContext Result.success()
+                        }
+                        FeedbackState.CANCELING,
+                        FeedbackState.CANCEL_RETRY_SCHEDULED,
+                        -> return@withContext cancelReport(
+                            outbox,
+                            initial,
+                            workerGeneration,
+                        )
+                        else -> uploadReport(outbox, initial, workerGeneration)
+                    }
+                } catch (error: Throwable) {
+                    if (!error.isWorkerSuperseded()) throw error
+                    AppDiagnosticsRecorder.record(
+                        "feedback.worker_generation",
+                        fields = mapOf("outcome" to "superseded"),
+                    )
+                    Result.success()
+                }
             }
-        } catch (error: Throwable) {
-            if (!error.isWorkerSuperseded()) throw error
-            AppDiagnosticsRecorder.record(
-                "feedback.worker_generation",
-                fields = mapOf("outcome" to "superseded"),
+        } finally {
+            FeedbackWorkerExecutionObserver.record(
+                id,
+                FeedbackWorkerExecutionPhase.EXITED,
             )
-            Result.success()
         }
     }
 

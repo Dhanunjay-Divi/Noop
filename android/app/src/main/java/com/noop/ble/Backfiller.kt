@@ -1,6 +1,7 @@
 package com.noop.ble
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.noop.data.InsertCounts
 import com.noop.data.WhoopRepository
 import com.noop.protocol.BadClockDiagnostics
@@ -593,12 +594,12 @@ class Backfiller(
                     "offload progress trim=$trim chunkRows=$rows " +
                         "sessionRows=$sessionRowsPersisted sessionMotion=$sessionMotionRows nights=$sessionNights"
                 }
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
                 // Diag (#601 / #13): the decoded rows couldn't be written, the "history stalls but live HR
                 // works" class. We return WITHOUT acking so the strap keeps this chunk and re-sends it next
                 // session (no data loss), but a silent return left a strap log with no trace of the stall.
-                // Mirrors the Swift twin's log so a write-stall is falsifiable here too.
-                log("Backfill: failed to persist decoded rows (trim=$trim): $t, holding ack so the strap re-sends this chunk; history won't advance until the write succeeds.")
+                // Mirrors the Swift twin's fixed category without exposing an arbitrary exception string.
+                log("Backfill: failed to persist decoded rows (trim=$trim, failure=decoded_store_write); holding ack so the strap re-sends this chunk; history won't advance until the write succeeds.")
                 persistStalled = true   // #57: stall ALL further acks so an empty END can't advance past this
                 return // do NOT advance/ack, chunk was never durably committed
             }
@@ -655,11 +656,11 @@ class Backfiller(
         }
         try {
             cursorStore.set(STRAP_TRIM_CURSOR, trim)
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             // Diag (#601 / #13): decoded rows are durable but the local strap_trim watermark write failed.
             // Return WITHOUT acking so diagnostics cannot fall behind a confirmed band trim. Firmware keeps
             // the unacknowledged range authoritative and can offer it again on the next session.
-            log("Backfill: failed to write strap_trim cursor (trim=$trim): $t, holding ack so the strap re-sends this chunk; history won't advance until the cursor write succeeds.")
+            log("Backfill: failed to write strap_trim cursor (trim=$trim, failure=cursor_store_write); holding ack so the strap re-sends this chunk; history won't advance until the cursor write succeeds.")
             persistStalled = true   // #57
             return
         }
@@ -849,14 +850,23 @@ interface TrimCursorStore {
     suspend fun get(name: String): Long?
 }
 
+internal class TrimCursorPersistenceException :
+    IllegalStateException("trim cursor commit failed")
+
 /** Default [TrimCursorStore] backed by a private SharedPreferences file. */
-class PrefsTrimCursorStore(context: Context) : TrimCursorStore {
-    private val prefs = context.applicationContext
-        .getSharedPreferences("noop_backfill_cursors", Context.MODE_PRIVATE)
+class PrefsTrimCursorStore internal constructor(
+    private val prefs: SharedPreferences,
+) : TrimCursorStore {
+    constructor(context: Context) : this(
+        context.applicationContext
+            .getSharedPreferences("noop_backfill_cursors", Context.MODE_PRIVATE),
+    )
 
     override suspend fun set(name: String, value: Long) {
         // commit() is synchronous so the diagnostic watermark is durable before the acknowledgement.
-        prefs.edit().putLong(name, value).commit()
+        if (!prefs.edit().putLong(name, value).commit()) {
+            throw TrimCursorPersistenceException()
+        }
     }
 
     override suspend fun get(name: String): Long? =

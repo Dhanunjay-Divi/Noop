@@ -1,4 +1,5 @@
 import SwiftUI
+import StrandAnalytics
 import StrandDesign
 
 // MARK: - Scoring guide
@@ -66,6 +67,20 @@ enum ScoreSection: String, CaseIterable, Identifiable {
         case .rest:   return String(localized: "Sleep")
         }
     }
+
+    /// The exact published algorithm revision already stamped on derived score values.
+    var algorithmRevision: String {
+        switch self {
+        case .charge: return NoopScoreAlgorithmRevision.charge
+        case .effort: return NoopScoreAlgorithmRevision.effort
+        case .rest:   return NoopScoreAlgorithmRevision.rest
+        }
+    }
+}
+
+private struct ScoreMethodDetail: Identifiable {
+    let id: String
+    let text: String
 }
 
 struct ScoringGuideView: View {
@@ -91,15 +106,18 @@ struct ScoringGuideView: View {
                         scoreCard(.charge,
                                   headline: String(localized: "Recovery: how recovered are you?"),
                                   body: String(localized: "Led by your heart-rate variability (HRV) measured against your own personal baseline, plus resting heart rate, last night's Sleep Score, breathing rate, and a skin-temperature signal (an early illness or overreach flag). Higher HRV versus your baseline means higher Recovery. NOOP needs a few nights to learn your baseline first. Until then you'll see “Calibrating”."),
-                                  methodNote: String(localized: "NOOP uses an HRV-led recovery model with its own openly documented weighting and personal-baseline math."))
+                                  methodNote: String(localized: "NOOP uses an HRV-led recovery model with its own openly documented weighting and personal-baseline math."),
+                                  methodDetails: methodDetails(for: .charge))
                         scoreCard(.effort,
                                   headline: String(localized: "Effort: how hard did your heart work?"),
                                   body: String(localized: "Your cardiovascular load. NOOP turns every second of heart rate into a training-impulse using heart-rate-reserve zones (Karvonen), weights time in harder zones more heavily (Edwards / Banister), and places it on a logarithmic 0-100 scale, so easy days sit low and an all-out day approaches 100, which stays genuinely rare. A long walk with little cardio still counts, through a steps / active-energy floor."),
-                                  methodNote: String(localized: "NOOP uses a cardiovascular-load model and presents all three scores on one 0-100 scale. A 100 is reserved for an exceptionally hard day."))
+                                  methodNote: String(localized: "NOOP uses a cardiovascular-load model and presents all three scores on one 0-100 scale. A 100 is reserved for an exceptionally hard day."),
+                                  methodDetails: methodDetails(for: .effort))
                         scoreCard(.rest,
                                   headline: String(localized: "Sleep Score: how restorative was your sleep?"),
                                   body: String(localized: "A blend of how long you slept versus your personal need (the biggest factor), how efficiently (asleep versus in bed), how much was restorative (deep + REM sleep), and how consistent your sleep and wake timing is."),
-                                  methodNote: String(localized: "NOOP combines duration, efficiency, restorative sleep and consistency in its own composite."))
+                                  methodNote: String(localized: "NOOP combines duration, efficiency, restorative sleep and consistency in its own composite."),
+                                  methodDetails: methodDetails(for: .rest))
                         confidenceCard
                         footerNote
                     }
@@ -155,6 +173,7 @@ struct ScoringGuideView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(StrandPalette.accent)
+            .foregroundStyle(StrandPalette.accentInk)
             .keyboardShortcut(.defaultAction)
         }
         .padding(16)
@@ -199,7 +218,11 @@ struct ScoringGuideView: View {
     /// day reads like" preview in the section's own colour - so a glance maps a card to its Today ring.
     /// Design Reset: a flat GlowRing (no bloom) replaces the old BevelGauge; the accent is a Reset score
     /// token, never gold / strain / sleep-purple.
-    private func scoreCard(_ section: ScoreSection, headline: String, body: String, methodNote: String) -> some View {
+    private func scoreCard(_ section: ScoreSection,
+                           headline: String,
+                           body: String,
+                           methodNote: String,
+                           methodDetails: [ScoreMethodDetail]) -> some View {
         NoopCard(tint: section.accent) {
             VStack(alignment: .leading, spacing: 14) {
                 // Header row — the flat sample ring sits beside the accent icon + headline.
@@ -241,6 +264,27 @@ struct ScoringGuideView: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Divider().overlay(StrandPalette.hairline)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("appwide.scoring_guide.method_details")
+                        .font(StrandFont.overline)
+                        .tracking(StrandFont.overlineTracking)
+                        .textCase(.uppercase)
+                        .foregroundStyle(section.accent)
+                    ForEach(methodDetails) { detail in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Circle()
+                                .fill(section.accent)
+                                .frame(width: 4, height: 4)
+                                .accessibilityHidden(true)
+                            Text(detail.text)
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -252,6 +296,58 @@ struct ScoringGuideView: View {
         )
         .animation(.easeOut(duration: 0.35), value: highlighted)
         .id(section.id)
+    }
+
+    private func methodDetails(for section: ScoreSection) -> [ScoreMethodDetail] {
+        let revision = String(
+            format: String(localized: "appwide.scoring_guide.revision_format"),
+            section.algorithmRevision
+        )
+        let source = String(localized: "appwide.scoring_guide.source_on_device")
+
+        switch section {
+        case .charge:
+            let hrv = Baselines.hrvCfg
+            let baseline = String(
+                format: String(localized: "appwide.scoring_guide.recovery_baseline_format"),
+                Int64(hrv.halfLifeB.rounded()),
+                Int64(hrv.halfLifeS.rounded()),
+                Int64(Baselines.minNightsSeed),
+                Int64(Baselines.minNightsTrust),
+                Int64(Baselines.staleDays)
+            )
+            return [
+                ScoreMethodDetail(id: "revision", text: revision),
+                ScoreMethodDetail(id: "source", text: source),
+                ScoreMethodDetail(
+                    id: "inputs",
+                    text: String(localized: "appwide.scoring_guide.recovery_inputs")
+                ),
+                ScoreMethodDetail(id: "baseline", text: baseline),
+                ScoreMethodDetail(
+                    id: "excluded",
+                    text: String(localized: "appwide.scoring_guide.recovery_excluded")
+                ),
+            ]
+        case .effort:
+            return [
+                ScoreMethodDetail(id: "revision", text: revision),
+                ScoreMethodDetail(id: "source", text: source),
+                ScoreMethodDetail(
+                    id: "implemented",
+                    text: String(localized: "appwide.scoring_guide.effort_implemented")
+                ),
+            ]
+        case .rest:
+            return [
+                ScoreMethodDetail(id: "revision", text: revision),
+                ScoreMethodDetail(id: "source", text: source),
+                ScoreMethodDetail(
+                    id: "implemented",
+                    text: String(localized: "appwide.scoring_guide.sleep_implemented")
+                ),
+            ]
+        }
     }
 
     /// The flat illustrative ring for a score section — a clean GlowRing (Design Reset: solid crisp arc,

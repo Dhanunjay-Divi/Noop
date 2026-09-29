@@ -273,6 +273,80 @@ final class AnalyticsEngineTests: XCTestCase {
         XCTAssertLessThanOrEqual(result.recovery!, 100)
     }
 
+    func testProductionRecoveryWiringOmitsOptionalIndexAndActivityBalanceTerms() throws {
+        let day = "2021-06-17"
+        let n = night(endDay: day, hours: 7)
+        let hrvBase = Baselines.foldHistory(
+            Array(repeating: 10.0, count: Baselines.minNightsTrust),
+            cfg: Baselines.hrvCfg
+        )
+        let rhrBase = Baselines.foldHistory(
+            Array(repeating: 50.0, count: Baselines.minNightsTrust),
+            cfg: Baselines.restingHRCfg
+        )
+        let result = AnalyticsEngine.analyzeDay(
+            day: day,
+            hr: n.hr,
+            rr: n.rr,
+            gravity: n.gravity,
+            profile: UserProfile(age: 30),
+            baselines: AnalyticsEngine.ProfileBaselines(
+                hrv: hrvBase,
+                restingHR: rhrBase
+            )
+        )
+
+        let hrv = try XCTUnwrap(result.daily.avgHrv)
+        let rhr = Double(try XCTUnwrap(result.daily.restingHr))
+        let production = try XCTUnwrap(result.recovery)
+        let expectedWithoutUnapprovedTerms = try XCTUnwrap(
+            RecoveryScorer.recovery(
+                hrv: hrv,
+                rhr: rhr,
+                resp: result.daily.respRateBpm,
+                hrvBaseline: hrvBase,
+                rhrBaseline: rhrBase,
+                respBaseline: nil,
+                sleepPerf: result.restScore.map { $0 / 100.0 },
+                restQualityBaseline: nil,
+                skinTempDev: result.daily.skinTempDevC,
+                recoveryIndexSlope: nil,
+                effortBaseline: nil,
+                priorDayEffort: nil
+            )
+        )
+        XCTAssertEqual(production, expectedWithoutUnapprovedTerms, accuracy: 1e-12)
+
+        let effortBase = BaselineState(
+            baseline: 50,
+            spread: 5,
+            nValid: Baselines.minNightsTrust,
+            nightsSinceUpdate: 0,
+            status: .trusted
+        )
+        let scoreIfOptionalTermsWereWired = try XCTUnwrap(
+            RecoveryScorer.recovery(
+                hrv: hrv,
+                rhr: rhr,
+                resp: result.daily.respRateBpm,
+                hrvBaseline: hrvBase,
+                rhrBaseline: rhrBase,
+                respBaseline: nil,
+                sleepPerf: result.restScore.map { $0 / 100.0 },
+                restQualityBaseline: nil,
+                skinTempDev: result.daily.skinTempDevC,
+                recoveryIndexSlope: -10,
+                effortBaseline: effortBase,
+                priorDayEffort: 0
+            )
+        )
+        XCTAssertGreaterThan(
+            abs(scoreIfOptionalTermsWereWired - production),
+            1,
+            "the fixture must detect either optional term being admitted to production"
+        )
+    }
+
     func testAnalyzeDayNoMatchingNight() {
         // A night ending on a different day → no sleep attributed to `day`.
         let n = night(endDay: "2021-06-18", hours: 7)
@@ -320,7 +394,9 @@ final class AnalyticsEngineTests: XCTestCase {
                                              cfg: Baselines.metricCfg["skin_temp"]!)
         XCTAssertTrue(skinBase.usable)
         let result = AnalyticsEngine.analyzeDay(
-            day: day, hr: n.hr, rr: rr, gravity: n.gravity, steps: steps, skinTemp: skin,
+            day: day, hr: n.hr, rr: rr, gravity: n.gravity, steps: steps,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            skinTemp: skin,
             profile: UserProfile(age: 30),
             baselines: AnalyticsEngine.ProfileBaselines(skinTemp: skinBase))
         XCTAssertEqual(result.sleepSessions.count, 1)
@@ -491,12 +567,20 @@ final class AnalyticsEngineTests: XCTestCase {
         let steps = [StepSample(ts: lateEveningUtc, counter: 100),
                      StepSample(ts: lateEveningUtc + 1800, counter: 360)]  // +260 within the local day
         let result = AnalyticsEngine.analyzeDay(
-            day: day, steps: steps, profile: UserProfile(), tzOffsetSeconds: offset)
+            day: day,
+            steps: steps,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            profile: UserProfile(),
+            tzOffsetSeconds: offset)
         XCTAssertEqual(result.daily.steps, 260)
         // Sanity: the OLD UTC bucketing would have dropped these (they're UTC day 2021-06-16) →
         // verify offset 0 with the UTC day produces nil, proving the offset is what saves them.
         let utcResult = AnalyticsEngine.analyzeDay(
-            day: day, steps: steps, profile: UserProfile(), tzOffsetSeconds: 0)
+            day: day,
+            steps: steps,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            profile: UserProfile(),
+            tzOffsetSeconds: 0)
         XCTAssertNil(utcResult.daily.steps)
     }
 

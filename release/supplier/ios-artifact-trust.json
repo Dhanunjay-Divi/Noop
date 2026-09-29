@@ -1,0 +1,99 @@
+{
+  "buildInputs": {
+    "files": [
+      {
+        "path": "Demo/VeepooBleSDKDemo/Podfile",
+        "sha256": "e4cbb9aad39995b49b26d0c9c620cf54d48374ce13b2265321b510c2d70c9227"
+      },
+      {
+        "path": "Demo/VeepooBleSDKDemo/Podfile.lock",
+        "sha256": "5b3d84bdf572038b972f3d793c628256f36e055141e577d68a6a5db2599d3e13"
+      }
+    ],
+    "trees": [
+      {
+        "bytes": 393993,
+        "fileCount": 81,
+        "inventorySha256": "c0f0a36aa48d8566546196d5329a3e52bbfdef1cc5dc4041f82bd9d5115b57f9",
+        "path": "Demo/VeepooBleSDKDemo/Pods"
+      }
+    ]
+  },
+  "fixedFrameworks": [
+    {
+      "binarySha256": "585f084f6955f5da0abc7d57eacaa123c0a0342016238770119cab077a74e39b",
+      "bytes": 56137,
+      "fileCount": 6,
+      "inventorySha256": "964947d92a8dfa94f0f7e1679a3d75f2b683bac378d71e24e5381272d146e560",
+      "name": "ABParTool",
+      "path": "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/ABParTool.framework"
+    },
+    {
+      "binarySha256": "9fdd6bf728f2733051ccb1aeaf9c8035b8916556401b1e0c932d27e2673f0100",
+      "bytes": 5677841,
+      "fileCount": 35,
+      "inventorySha256": "916318be7fb422059f8c774ecbd76cd965d730e7f825e495cda6cb0aea21ed73",
+      "name": "DFUnits",
+      "path": "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/DFUnits.framework"
+    },
+    {
+      "binarySha256": "8a84fde46a0f9fdb36a8aa1150afa6f01ad054abf9621e74385de8fcf2ade499",
+      "bytes": 2491057,
+      "fileCount": 34,
+      "inventorySha256": "aa2b1809b3c6ee711e07779db9ddcc47fa8971639005ec137e7693591f37dcd9",
+      "name": "GRDFUSDK",
+      "path": "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/GRDFUSDK.framework"
+    },
+    {
+      "binarySha256": "3bcd10c92d490187ff8b441bedbae9f7bb3ff32918d4130d6db7156be8737146",
+      "bytes": 1080369,
+      "fileCount": 7,
+      "inventorySha256": "08f41c2e20a8871391e04d80d3ccaf43adaddfe701c051d1531278e5d8d39f3b",
+      "name": "JLDialUnit",
+      "path": "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/JLDialUnit.framework"
+    },
+    {
+      "binarySha256": "e35bb7b223f35f624af8323aa6ed39b8356e0694bfffd10ecd3925026ce4aa48",
+      "bytes": 8619527,
+      "fileCount": 99,
+      "inventorySha256": "7f62684721cd86e2765b109644a0c45bb0b615ed347ccb96958964a14234c5b2",
+      "name": "JL_BLEKit",
+      "path": "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/JL_BLEKit.framework"
+    },
+    {
+      "binarySha256": "22e9d0154c5fecddbd3a21ef309fb3d33d734ec5f8e671787fa9ee8564d13d35",
+      "bytes": 14600052,
+      "fileCount": 133,
+      "inventorySha256": "b7ef91819dfd077434366a60c360023cd215a875406e83a233969633bb41f65e",
+      "name": "VeepooBleSDK",
+      "path": "Framework/2.2.XX.15/VeepooBleSDK.framework"
+    },
+    {
+      "binarySha256": "a9fe0ba509e08b4bc13b7f41f7770596d1496fca297d1ff032d0d7e1e6cc51c2",
+      "bytes": 456311,
+      "fileCount": 8,
+      "inventorySha256": "92587c4d3d9340ea8b230a3794e4302c45a28d4a9f4acab43cb5e729ec206e16",
+      "name": "ZipZap",
+      "path": "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/ZipZap.framework"
+    }
+  ],
+  "generatedFrameworks": [
+    {
+      "binarySha256": "c22b46589e8bf9b7198146226366a421963d682945d0dc80c69f6d4d1fa95aae",
+      "bytes": 263465,
+      "fileCount": 10,
+      "inventorySha256": "71ff4640f71c21ebb03d3ef644dabbb00fba676f50af805b8973a98fedf9b92b",
+      "name": "FMDB",
+      "path": "Demo/VeepooBleSDKDemo/build/Debug-iphoneos/FMDB/FMDB.framework"
+    },
+    {
+      "binarySha256": "fadb76572cb8d507751cacbd4b37f742d291c2b6cff8ff5fb7149b8560ce9d3d",
+      "bytes": 197388,
+      "fileCount": 15,
+      "inventorySha256": "39c50fdfce9d83c5276c875a526b9e96019b7d0e25efda9c7b108548851afae8",
+      "name": "MJExtension",
+      "path": "Demo/VeepooBleSDKDemo/build/Debug-iphoneos/MJExtension/MJExtension.framework"
+    }
+  ],
+  "schemaVersion": 2
+}

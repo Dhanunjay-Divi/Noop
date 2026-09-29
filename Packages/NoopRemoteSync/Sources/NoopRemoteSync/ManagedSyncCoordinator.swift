@@ -439,6 +439,14 @@ public struct ManagedSyncRunResult: Equatable, Sendable {
 public struct ManagedRestoreOnlyRunResult: Equatable, Sendable {
     public let appliedChanges: Int
     public let hasMoreChanges: Bool
+
+    public init(
+        appliedChanges: Int,
+        hasMoreChanges: Bool
+    ) {
+        self.appliedChanges = appliedChanges
+        self.hasMoreChanges = hasMoreChanges
+    }
 }
 
 public actor ManagedSyncCoordinator {
@@ -453,6 +461,9 @@ public actor ManagedSyncCoordinator {
     // Older in-progress checkpoints may include client-encrypted chunks and
     // therefore must be replaced before resuming.
     public static let changeFeedCapabilityVersion = 2
+    // A history-only viewer must never resume a checkpoint whose restore job
+    // selected documents. Keep that mode in a separate persisted capability.
+    public static let historyOnlyChangeFeedCapabilityVersion = 3
 
     private let transport: any ManagedStorageTransport
     private let extractor: any ManagedChunkExtracting
@@ -482,6 +493,7 @@ public actor ManagedSyncCoordinator {
     public func restoreOnly(
         authorization: ManagedAuthorization,
         dataClasses: [String] = ManagedSyncCoordinator.chunkDataClasses,
+        restoreDocuments: Bool = true,
         maxChangePages: Int = 2,
         changePageSize: Int = 100,
         maxSnapshotRestoreObjects: Int = 16,
@@ -502,7 +514,8 @@ public actor ManagedSyncCoordinator {
             dataClasses: dataClasses.sorted(),
             maxSnapshotObjects: maxSnapshotRestoreObjects,
             maxSnapshotBytes: maxSnapshotRestoreBytes,
-            acknowledgeLocalUploads: false
+            acknowledgeLocalUploads: false,
+            restoreDocuments: restoreDocuments
         )
         try Task.checkCancellation()
         return ManagedRestoreOnlyRunResult(
@@ -565,7 +578,8 @@ public actor ManagedSyncCoordinator {
             dataClasses: dataClasses.sorted(),
             maxSnapshotObjects: maxSnapshotRestoreObjects,
             maxSnapshotBytes: maxSnapshotRestoreBytes,
-            acknowledgeLocalUploads: true
+            acknowledgeLocalUploads: true,
+            restoreDocuments: true
         )
         try Task.checkCancellation()
         let documentUpload = try await uploadPendingDocuments(
@@ -733,7 +747,10 @@ public actor ManagedSyncCoordinator {
             try Task.checkCancellation()
             if let localPruneNowMs,
                let localPruneBeforeMs = ManagedLocalRetentionPolicy.cutoff(
-                   nowMs: localPruneNowMs,
+                   // The explicit prune opt-in may be captured before this run
+                   // starts, but it must never advance deletion beyond the
+                   // run's own upload/settling clock.
+                   nowMs: min(localPruneNowMs, nowMs),
                    dataClass: dataClass
                ),
                maxPruneWindowsPerClass > 0 {
@@ -1117,7 +1134,8 @@ public actor ManagedSyncCoordinator {
         dataClasses: [String],
         maxSnapshotObjects: Int,
         maxSnapshotBytes: Int,
-        acknowledgeLocalUploads: Bool
+        acknowledgeLocalUploads: Bool,
+        restoreDocuments: Bool
     ) async throws -> (applied: Int, hasMore: Bool) {
         guard maxPages > 0 else { return (0, false) }
         try await validateOperationBoundary()
@@ -1128,9 +1146,12 @@ public actor ManagedSyncCoordinator {
 
         var checkpoint = try await state.snapshotRestoreCheckpoint()
         let storedCapabilityVersion = try await state.changeFeedCapabilityVersion()
+        let expectedCapabilityVersion = restoreDocuments
+            ? Self.changeFeedCapabilityVersion
+            : Self.historyOnlyChangeFeedCapabilityVersion
         try await validateOperationBoundary()
-        if storedCapabilityVersion != Self.changeFeedCapabilityVersion {
-            if checkpoint?.changeFeedCapabilityVersion != Self.changeFeedCapabilityVersion
+        if storedCapabilityVersion != expectedCapabilityVersion {
+            if checkpoint?.changeFeedCapabilityVersion != expectedCapabilityVersion
                 || checkpoint?.dataClasses != dataClasses {
                 try await validateOperationBoundary()
                 try await state.clearSnapshotRestoreCheckpoint()
@@ -1138,13 +1159,14 @@ public actor ManagedSyncCoordinator {
                 let initial = ManagedSnapshotRestoreCheckpoint(
                     requestID: UUID(),
                     dataClasses: dataClasses,
-                    changeFeedCapabilityVersion: Self.changeFeedCapabilityVersion
+                    changeFeedCapabilityVersion: expectedCapabilityVersion,
+                    documentsComplete: false
                 )
                 try await state.saveSnapshotRestoreCheckpoint(initial)
                 try await validateOperationBoundary()
                 checkpoint = initial
             }
-        } else if checkpoint?.changeFeedCapabilityVersion != Self.changeFeedCapabilityVersion
+        } else if checkpoint?.changeFeedCapabilityVersion != expectedCapabilityVersion
             || checkpoint?.dataClasses != dataClasses {
             if checkpoint != nil {
                 try await validateOperationBoundary()
@@ -1162,7 +1184,8 @@ public actor ManagedSyncCoordinator {
                 pageSize: min(pageSize, 200),
                 maxObjects: maxSnapshotObjects,
                 maxBytes: maxSnapshotBytes,
-                acknowledgeLocalUploads: acknowledgeLocalUploads
+                acknowledgeLocalUploads: acknowledgeLocalUploads,
+                restoreDocuments: restoreDocuments
             )
             applied += snapshot.applied
             guard snapshot.completed else {
@@ -1187,7 +1210,8 @@ public actor ManagedSyncCoordinator {
                 var checkpoint = ManagedSnapshotRestoreCheckpoint(
                     requestID: UUID(),
                     dataClasses: dataClasses,
-                    changeFeedCapabilityVersion: Self.changeFeedCapabilityVersion
+                    changeFeedCapabilityVersion: expectedCapabilityVersion,
+                    documentsComplete: false
                 )
                 try await state.saveSnapshotRestoreCheckpoint(checkpoint)
                 try await validateOperationBoundary()
@@ -1200,7 +1224,8 @@ public actor ManagedSyncCoordinator {
                     pageSize: min(pageSize, 200),
                     maxObjects: maxSnapshotObjects,
                     maxBytes: maxSnapshotBytes,
-                    acknowledgeLocalUploads: acknowledgeLocalUploads
+                    acknowledgeLocalUploads: acknowledgeLocalUploads,
+                    restoreDocuments: restoreDocuments
                 )
                 return (applied + snapshot.applied, true)
             }
@@ -1258,15 +1283,24 @@ public actor ManagedSyncCoordinator {
                     }
                 } else if change.resourceKind == "document",
                           let changedDocument = change.document {
-                    let document = try await transport.document(
-                        kind: changedDocument.documentKind,
-                        id: changedDocument.documentID,
-                        revision: changedDocument.revision,
-                        authorization: authorization
-                    )
-                    try await validateOperationBoundary()
-                    try await restore.apply(document: document, change: change)
-                    try await validateOperationBoundary()
+                    if restoreDocuments {
+                        let document = try await transport.document(
+                            kind: changedDocument.documentKind,
+                            id: changedDocument.documentID,
+                            revision: changedDocument.revision,
+                            authorization: authorization
+                        )
+                        try await validateOperationBoundary()
+                        try await restore.apply(
+                            document: document,
+                            change: change
+                        )
+                        try await validateOperationBoundary()
+                    } else {
+                        try await validateOperationBoundary()
+                        try await restore.applyMetadataOnly(change: change)
+                        try await validateOperationBoundary()
+                    }
                 } else {
                     try await validateOperationBoundary()
                     try await restore.applyMetadataOnly(change: change)
@@ -1299,7 +1333,8 @@ public actor ManagedSyncCoordinator {
         pageSize: Int,
         maxObjects: Int,
         maxBytes: Int,
-        acknowledgeLocalUploads: Bool
+        acknowledgeLocalUploads: Bool,
+        restoreDocuments: Bool
     ) async throws -> (applied: Int, completed: Bool) {
         do {
             return try await resumeSnapshotRestore(
@@ -1309,7 +1344,8 @@ public actor ManagedSyncCoordinator {
                 pageSize: pageSize,
                 maxObjects: maxObjects,
                 maxBytes: maxBytes,
-                acknowledgeLocalUploads: acknowledgeLocalUploads
+                acknowledgeLocalUploads: acknowledgeLocalUploads,
+                restoreDocuments: restoreDocuments
             )
         } catch let error as ManagedStorageError {
             switch error {
@@ -1324,7 +1360,9 @@ public actor ManagedSyncCoordinator {
                     ManagedSnapshotRestoreCheckpoint(
                         requestID: UUID(),
                         dataClasses: checkpoint.dataClasses,
-                        changeFeedCapabilityVersion: Self.changeFeedCapabilityVersion
+                        changeFeedCapabilityVersion:
+                            checkpoint.changeFeedCapabilityVersion,
+                        documentsComplete: false
                     )
                 )
                 try await validateOperationBoundary()
@@ -1342,14 +1380,23 @@ public actor ManagedSyncCoordinator {
         pageSize: Int,
         maxObjects: Int,
         maxBytes: Int,
-        acknowledgeLocalUploads: Bool
+        acknowledgeLocalUploads: Bool,
+        restoreDocuments: Bool
     ) async throws -> (applied: Int, completed: Bool) {
         var checkpoint = initialCheckpoint
+        let expectedCapabilityVersion = restoreDocuments
+            ? Self.changeFeedCapabilityVersion
+            : Self.historyOnlyChangeFeedCapabilityVersion
+        guard checkpoint.changeFeedCapabilityVersion
+                == expectedCapabilityVersion else {
+            throw ManagedStorageError.invalidResponse
+        }
         if checkpoint.restoreJobID == nil {
             let restoreJob = try await transport.createRestore(
                 requestID: checkpoint.requestID,
                 dataClasses: checkpoint.dataClasses,
-                includeDeletedDocuments: true,
+                includeDocuments: restoreDocuments,
+                includeDeletedDocuments: restoreDocuments,
                 authorization: authorization
             )
             try await validateOperationBoundary()
@@ -1476,6 +1523,18 @@ public actor ManagedSyncCoordinator {
         guard checkpoint.dataClassIndex == checkpoint.dataClasses.count else {
             return (applied, false)
         }
+        if !restoreDocuments {
+            guard checkpoint.deliveredObjects == selectedObjects else {
+                throw ManagedStorageError.invalidResponse
+            }
+            if !checkpoint.documentsComplete || checkpoint.documentCursor != nil {
+                checkpoint.documentCursor = nil
+                checkpoint.documentsComplete = true
+                try await validateOperationBoundary()
+                try await state.saveSnapshotRestoreCheckpoint(checkpoint)
+                try await validateOperationBoundary()
+            }
+        }
         if checkpoint.deliveredObjects == selectedObjects {
             checkpoint.documentCursor = nil
             checkpoint.documentsComplete = true
@@ -1483,7 +1542,8 @@ public actor ManagedSyncCoordinator {
             try await state.saveSnapshotRestoreCheckpoint(checkpoint)
             try await validateOperationBoundary()
         }
-        while !checkpoint.documentsComplete,
+        while restoreDocuments,
+              !checkpoint.documentsComplete,
               pages < maxPages,
               processedObjects < maxObjects {
             let page = try await transport.documents(

@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -74,6 +75,7 @@ import com.noop.analytics.HrZones
 import com.noop.analytics.SpotHrvReading
 import com.noop.analytics.Sport
 import com.noop.analytics.WorkoutSport
+import com.noop.ble.LiveHeartRateNotificationPolicy
 import com.noop.ble.LiveState
 import com.noop.oura.OuraWearState
 import com.noop.ble.WhoopModel
@@ -99,9 +101,45 @@ internal const val LIVE_TRACKING_BATTERY_COPY =
 internal const val LIVE_TRACKING_SEPARATION_COPY =
     "Connection and history sync continue when it is off. " +
         "Continuous HRV capture is a separate option in Settings."
+internal const val SUPPLIER_HEART_RATE_MAX_EXPIRY_DELAY_MS =
+    LiveHeartRateNotificationPolicy.FRESHNESS_MS + 1L
+
+internal fun visibleSupplierBatteryPercent(
+    display: com.noop.ble.veepoo.VeepooDisplayState,
+): Int? = display.batteryPercent.takeIf {
+    display.adapterState == com.noop.ble.veepoo.VeepooAdapterState.LIVE_DISPLAY_ONLY
+}
+
+internal enum class LiveControlMode {
+    RESOLVING,
+    SUPPLIER,
+    STANDARD,
+}
+
+internal fun liveControlMode(activeSourceState: ActiveDeviceSourceState): LiveControlMode =
+    when (activeSourceState) {
+        ActiveDeviceSourceState.UNRESOLVED -> LiveControlMode.RESOLVING
+        ActiveDeviceSourceState.SUPPLIER -> LiveControlMode.SUPPLIER
+        ActiveDeviceSourceState.NO_ACTIVE_DEVICE,
+        ActiveDeviceSourceState.STANDARD,
+        -> LiveControlMode.STANDARD
+    }
 
 @Composable
 fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
+    val supplierDisplay by viewModel.supplierBandDisplay.collectAsStateWithLifecycle()
+    val activeSourceState by viewModel.activeDeviceSourceState.collectAsStateWithLifecycle()
+    when (liveControlMode(activeSourceState)) {
+        LiveControlMode.RESOLVING -> {
+            ResolvingLiveSourceScreen(onManageDevices)
+            return
+        }
+        LiveControlMode.SUPPLIER -> {
+            SupplierBandLiveScreen(supplierDisplay, onManageDevices)
+            return
+        }
+        LiveControlMode.STANDARD -> Unit
+    }
     val live by viewModel.live.collectAsStateWithLifecycle()
     // #628: the Oura ring's live wear/charge state (null for WHOOP / before evidence). Preferred by the
     // "Worn" stat below, so removing the ring or putting it on the charger flips it instead of lingering.
@@ -475,7 +513,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                     enabled = liveHrConnection,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
+                        containerColor = Palette.accent, contentColor = Palette.accentInk,
                     ),
                 ) {
                     Text(
@@ -582,7 +620,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Palette.accent,
-                    contentColor = Palette.surfaceBase,
+                    contentColor = Palette.accentInk,
                 ),
             ) {
                 Icon(
@@ -704,6 +742,144 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
             item {
             ConnectionHelp(viewModel, modifier = Modifier.fillMaxWidth())
             }
+        }
+    }
+}
+
+@Composable
+private fun ResolvingLiveSourceScreen(onManageDevices: () -> Unit) {
+    ScreenScaffold(
+        title = uiString(R.string.nav_live),
+        subtitle = uiString(R.string.nav_devices),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            CircularProgressIndicator(
+                color = Palette.accent,
+                modifier = Modifier.size(28.dp),
+            )
+            Text(
+                uiString(R.string.appwide_health_live_hr_waiting),
+                style = NoopType.body,
+                color = Palette.textSecondary,
+            )
+        }
+        OutlinedButton(
+            onClick = onManageDevices,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(uiString(R.string.l10n_live_screen_manage_devices_e5c277ff))
+        }
+    }
+}
+
+@Composable
+private fun SupplierBandLiveScreen(
+    display: com.noop.ble.veepoo.VeepooDisplayState,
+    onManageDevices: () -> Unit,
+) {
+    var nowMillis by remember(
+        display.adapterState,
+        display.active,
+        display.heartRate,
+        display.phoneReceiptMilliseconds,
+    ) {
+        mutableLongStateOf(System.currentTimeMillis())
+    }
+    LaunchedEffect(
+        display.adapterState,
+        display.active,
+        display.heartRate,
+        display.phoneReceiptMilliseconds,
+    ) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            nowMillis = now
+            val wait = SupplierDisplayHeartRatePolicy.expiryCheckDelayMillis(
+                display = display,
+                nowMillis = now,
+            )
+            if (wait == null || wait <= 0L) break
+            delay(wait.coerceAtMost(SUPPLIER_HEART_RATE_MAX_EXPIRY_DELAY_MS))
+        }
+    }
+    val visibleHeartRate = SupplierDisplayHeartRatePolicy.visibleBpm(
+        display = display,
+        nowMillis = nowMillis,
+    )
+    val visibleBatteryPercent = visibleSupplierBatteryPercent(display)
+
+    ScreenScaffold(
+        title = uiString(R.string.nav_live),
+        subtitle = uiString(R.string.timeline_my_whoop),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Palette.surfaceRaised)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text(
+                        uiString(R.string.widget_heart_rate),
+                        style = NoopType.footnote,
+                        color = Palette.textSecondary,
+                    )
+                    Text(
+                        visibleHeartRate?.toString() ?: "--",
+                        style = NoopType.number(48f),
+                        color = Palette.textPrimary,
+                    )
+                }
+                Icon(
+                    Icons.Filled.MonitorHeart,
+                    contentDescription = null,
+                    tint = Palette.accent,
+                    modifier = Modifier.size(32.dp),
+                )
+            }
+            Text(
+                visibleBatteryPercent?.let {
+                    uiString(R.string.l10n_devices_screen_battery_clamped_2494c8c9, it)
+                } ?: when (display.adapterState) {
+                    com.noop.ble.veepoo.VeepooAdapterState.CONNECTING ->
+                        uiString(R.string.appwide_onboarding_device_wizard_supplier_android_connecting)
+                    com.noop.ble.veepoo.VeepooAdapterState.AUTHENTICATING ->
+                        uiString(R.string.appwide_onboarding_device_wizard_supplier_android_authenticating)
+                    com.noop.ble.veepoo.VeepooAdapterState.READING_BATTERY ->
+                        uiString(R.string.appwide_onboarding_device_wizard_supplier_android_reading_battery)
+                    com.noop.ble.veepoo.VeepooAdapterState.RECONNECTING ->
+                        uiString(R.string.appwide_health_live_hr_reconnecting)
+                    com.noop.ble.veepoo.VeepooAdapterState.FAILED ->
+                        uiString(R.string.appwide_onboarding_device_wizard_supplier_connection_failed)
+                    else -> uiString(R.string.appwide_health_live_hr_waiting)
+                },
+                style = NoopType.body,
+                color = Palette.textSecondary,
+            )
+            Text(
+                uiString(R.string.appwide_onboarding_device_wizard_supplier_ready_body),
+                style = NoopType.footnote,
+                color = Palette.statusWarning,
+            )
+        }
+        OutlinedButton(
+            onClick = onManageDevices,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(uiString(R.string.l10n_live_screen_manage_devices_e5c277ff))
         }
     }
 }
@@ -955,7 +1131,7 @@ private fun OfflineConnectCallout(scanning: Boolean, onConnect: () -> Unit) {
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Palette.accent,
-                    contentColor = Palette.surfaceBase,
+                    contentColor = Palette.accentInk,
                 ),
             ) {
                 Icon(

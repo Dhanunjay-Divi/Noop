@@ -27,6 +27,15 @@ class PrimaryNavigationContractTest {
         ).firstOrNull(File::isFile)
     }
 
+    private fun resourceSource(localeDirectory: String = "values"): String? {
+        val root = File(System.getProperty("user.dir") ?: ".")
+        return listOf(
+            File(root, "src/main/res/$localeDirectory/strings.xml"),
+            File(root, "app/src/main/res/$localeDirectory/strings.xml"),
+            File(root, "android/app/src/main/res/$localeDirectory/strings.xml"),
+        ).firstOrNull(File::isFile)?.readText()
+    }
+
     @Test
     fun localizedLabelWidthsChooseStableSingleLineFit() {
         val englishLabels = listOf("Today", "Trends", "Workouts", "Sleep", "More")
@@ -218,7 +227,7 @@ class PrimaryNavigationContractTest {
             "Friends(\"friends\", R.string.nav_friends, Icons.Filled.People)"
         ))
         assertTrue(text.contains(
-            "Destination.Profile, Destination.BandAccount, Destination.Friends, Destination.Devices"
+            "Destination.Profile, Destination.Friends, Destination.Devices"
         ))
         assertTrue(text.contains(
             "BandAccount(\"band_account\", R.string.ownership_screen_title, Icons.Filled.Badge)"
@@ -238,7 +247,7 @@ class PrimaryNavigationContractTest {
     }
 
     @Test
-    fun noopPlusIsAlwaysDiscoverableAndHasItsOwnRoute() {
+    fun accountDataAndNoopPlusHaveOneClearHierarchy() {
         val source = appRootSource()
         assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
         val text = source!!
@@ -246,11 +255,46 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains(
             "NoopPlus(\"noop_plus\", R.string.managed_cloud_brand, Icons.Filled.Cloud)"
         ))
-        assertTrue(text.contains("Destination.NoopPlus, Destination.BackupSync"))
-        assertTrue(text.contains("NoopPlusEntry(onNavigate = onNavigate)"))
+        assertTrue(text.contains("MoreAccountDataAccess(onNavigate = onNavigate)"))
+        assertTrue(text.contains("dest = Destination.BandAccount"))
+        assertTrue(text.contains("dest = Destination.BackupSync"))
+        assertTrue(text.contains(
+            "Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,\n" +
+                "        Destination.NoopPlus,"
+        ))
+        assertFalse(text.contains("NoopPlusEntry(onNavigate = onNavigate)"))
+        assertTrue(text.contains("R.string.nav_insights"))
+        assertTrue(text.contains("Destination.Insights.route"))
         assertTrue(text.contains(
             "composable(Destination.NoopPlus.route) { NoopPlusScreen() }"
         ))
+    }
+
+    @Test
+    fun dataSyncKeepsLocalControlsPrimaryAndSelfHostingAdvanced() {
+        val screenFile = uiSource("BackupSyncScreen.kt")
+        assertTrue("BackupSyncScreen.kt is missing", screenFile != null)
+        val screen = screenFile!!.readText()
+        val english = resourceSource() ?: error("English strings.xml is missing")
+
+        assertTrue(english.contains(
+            """<string name="nav_backup_sync">Data &amp; Sync</string>"""
+        ))
+        assertTrue(english.contains("""<string name="data_sync_subtitle">"""))
+        assertTrue(screen.contains("subtitle = uiString(R.string.data_sync_subtitle)"))
+        assertTrue(screen.contains("var advancedServerOpen by rememberSaveable"))
+        assertTrue(screen.contains("val selfHostedServerCard: @Composable () -> Unit"))
+        assertTrue(screen.contains("if (advancedServerOpen)"))
+        assertTrue(screen.contains("selfHostedServerCard()"))
+        assertTrue(screen.contains("R.string.appwide_a11y_expanded"))
+        assertTrue(screen.contains("R.string.appwide_a11y_collapsed"))
+
+        val folder = screen.indexOf("// 1 · Destination folder")
+        val restore = screen.indexOf("// 4 · Restore")
+        val advanced = screen.indexOf("// Legacy self-hosted decoded-data upload")
+        assertTrue(folder >= 0)
+        assertTrue(restore > folder)
+        assertTrue(advanced > restore)
     }
 
     @Test

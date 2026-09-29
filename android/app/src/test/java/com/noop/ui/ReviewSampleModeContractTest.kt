@@ -40,6 +40,29 @@ class ReviewSampleModeContractTest {
     }
 
     @Test
+    fun realSetupIsPrimaryAndReviewSampleIsSecondary() {
+        val source = source("com/noop/ui/ReviewSampleMode.kt")
+        val entry = source.substring(
+            source.indexOf("internal fun ReviewSampleEntry("),
+            source.indexOf("@Composable\ninternal fun ReviewSampleDisclosure("),
+        )
+
+        assertTrue(
+            entry.indexOf("R.string.review_sample_continue_setup") <
+                entry.indexOf("R.string.review_sample_explore"),
+        )
+        assertTrue(
+            entry.substringAfter("R.string.review_sample_continue_setup")
+                .substringBefore("R.string.review_sample_explore")
+                .contains("modifier = Modifier.testTag(\"noop.review.entry.continue\")"),
+        )
+        assertTrue(
+            entry.substringAfter("R.string.review_sample_explore")
+                .contains("kind = NoopButtonKind.Secondary"),
+        )
+    }
+
+    @Test
     fun reviewSampleBottomBarKeepsFullNamesWithoutLargeTextEllipses() {
         val source = source("com/noop/ui/ReviewSampleMode.kt")
         val block = source.substring(

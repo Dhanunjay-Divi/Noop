@@ -179,8 +179,8 @@ struct InAppLiveHeartRateBanner: View {
                 let state = LiveHeartRatePresentationState.resolve(
                     enabled: true,
                     connected: live.connected || live.streamingLiveHR,
-                    bpm: live.heartRate,
-                    observedAt: live.heartRateSample?.receivedAt,
+                    bpm: live.displayedHeartRate,
+                    observedAt: live.displayedHeartRateReceivedAt,
                     now: timeline.date
                 )
                 if state != .hidden {
@@ -204,8 +204,8 @@ struct MacLiveHeartRateToolbarSurface: View {
                 let state = LiveHeartRatePresentationState.resolve(
                     enabled: true,
                     connected: live.connected || live.streamingLiveHR,
-                    bpm: live.heartRate,
-                    observedAt: live.heartRateSample?.receivedAt,
+                    bpm: live.displayedHeartRate,
+                    observedAt: live.displayedHeartRateReceivedAt,
                     now: timeline.date
                 )
                 if state != .hidden {

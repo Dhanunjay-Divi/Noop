@@ -6,17 +6,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Guards the additive v12 -> v13 Room migration (the `stepSample.activityClass` column, #316) — the Android
- * twin of the Swift WhoopStore v19 migration. This environment has no Robolectric / Room-testing, so the
+ * Guards the additive v12 -> v13 Room migration for the compatibility-only
+ * `stepSample.activityClass` column. This environment has no Robolectric / Room-testing, so the
  * migration's SQL is exposed as an internal constant ([WhoopDatabase.STEP_ACTIVITY_CLASS_MIGRATION_SQL]) and
  * pinned here to Room's generated shape:
  *
  *  - one ALTER ... ADD COLUMN statement, a nullable INTEGER (an `Int?` field): no NOT NULL, no DEFAULT.
  *  - ADDITIVE: only ALTER ADD COLUMN; no DROP/DELETE/UPDATE/INSERT/CREATE on existing data.
  *
- * The write+read round-trip of the value itself is pinned at the model-mapping boundary — exactly where the
- * value was DROPPED before this change (WhoopRepository.insert mapped StepRow -> StepSample without it). The
- * DAO read is `SELECT *`, so once the column exists the entity carries it back automatically.
+ * Legacy backups may still carry this value, so the model-mapping boundary remains pinned even though
+ * current protocol decode no longer emits activity_class from byte @63.
  */
 class StepActivityClassMigrationTest {
 
@@ -48,26 +47,23 @@ class StepActivityClassMigrationTest {
     }
 
     /**
-     * #316 — a decoded [StepRow]'s `activityClass` survives the insert MAPPING the repository uses
-     * (StepRow -> StepSample entity), and a null class (the @63 byte was 0xFF/invalid/absent) stays null:
-     * an absent class stays absent, never a fabricated 0/"still". This is the boundary that DROPPED the
-     * value before v13 (the mapping built StepSample(deviceId, ts, counter) only). The entity is what the
-     * DAO `SELECT *` reads back, so this pins the persisted shape end to end.
+     * Compatibility values on an explicitly constructed [StepRow] survive the repository's entity
+     * mapping. This does not establish that the values are gait labels.
      */
     @Test
-    fun activityClass_survivesInsertMapping() {
+    fun legacyActivityClass_survivesCompatibilityMapping() {
         val deviceId = "my-whoop"
         val rows = listOf(
-            StepRow(ts = 1_780_916_200, counter = 60, activityClass = 0),   // still
-            StepRow(ts = 1_780_916_201, counter = 61, activityClass = 1),   // walk
-            StepRow(ts = 1_780_916_202, counter = 62, activityClass = 2),   // run
-            StepRow(ts = 1_780_916_203, counter = 63, activityClass = null), // no class
+            StepRow(ts = 1_780_916_200, counter = 60, activityClass = 0),
+            StepRow(ts = 1_780_916_201, counter = 61, activityClass = 1),
+            StepRow(ts = 1_780_916_202, counter = 62, activityClass = 2),
+            StepRow(ts = 1_780_916_203, counter = 63, activityClass = null),
         )
         // The exact mapping WhoopRepository.insert applies before dao.insertSteps(...).
         val entities = rows.map { StepSample(deviceId, it.ts, it.counter, it.activityClass) }
 
         assertEquals(listOf(0, 1, 2, null), entities.map { it.activityClass })
         assertEquals(listOf(60, 61, 62, 63), entities.map { it.counter })
-        assertNull("a nil @63 class round-trips back as null", entities.last().activityClass)
+        assertNull(entities.last().activityClass)
     }
 }

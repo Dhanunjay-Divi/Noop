@@ -276,6 +276,12 @@ private let readingShortDateFormatter: DateFormatter = {
 /// The "Explore" picker - categories as sections, metrics as rows, each pushing a
 /// MetricDetailView. A faint trailing "•" marks metrics whose series is empty.
 struct MetricExplorerView: View {
+    let allowsLocalMutations: Bool
+
+    init(allowsLocalMutations: Bool = true) {
+        self.allowsLocalMutations = allowsLocalMutations
+    }
+
     @EnvironmentObject var repo: Repository
     @EnvironmentObject private var profile: ProfileStore
     /// metric.id → whether its series is empty. Filled INCREMENTALLY by each visible category's probe; a metric
@@ -347,7 +353,10 @@ struct MetricExplorerView: View {
                                     // against TWO registered destinations and double-pushed — the detail
                                     // flashed then popped straight back (#38).
                                     NavigationLink {
-                                        MetricDetailView(metric: metric)
+                                        MetricDetailView(
+                                            metric: metric,
+                                            allowsLocalMutations: allowsLocalMutations
+                                        )
                                     } label: {
                                         MetricRow(metric: metric,
                                                   isEmpty: emptyByID[metric.id] ?? false)
@@ -506,6 +515,16 @@ private struct MetricRow: View {
 /// StatTile row (Average / Min / Max / Latest / Δ), and a "What correlates" NoopCard.
 struct MetricDetailView: View {
     let metric: MetricDescriptor
+    let allowsLocalMutations: Bool
+
+    init(
+        metric: MetricDescriptor,
+        allowsLocalMutations: Bool = true
+    ) {
+        self.metric = metric
+        self.allowsLocalMutations = allowsLocalMutations
+    }
+
     @EnvironmentObject var repo: Repository
     /// The detail carries the SAME backdrop as Liquid Today: the satin-obsidian field when dimensional
     /// backgrounds are enabled, or the plain canvas when they are not. Keeping the persisted switches in
@@ -782,7 +801,7 @@ struct MetricDetailView: View {
     @ViewBuilder
     var body: some View {
         if metric.key == "bmi" && !canPresentBMI {
-            HealthView()
+            HealthView(allowsLocalMutations: allowsLocalMutations)
         } else {
             metricBody
         }
@@ -822,9 +841,9 @@ struct MetricDetailView: View {
                             // Force the weekly recompute NOW from stored data (works offline), then re-read.
                             if refreshing {
                                 ProgressView().controlSize(.small).tint(StrandPalette.accent)
-                            } else {
+                            } else if allowsLocalMutations {
                                 Button {
-                                    guard !refreshing else { return }
+                                    guard allowsLocalMutations, !refreshing else { return }
                                     refreshing = true
                                     Task {
                                         _ = await intelligence.recomputeFitnessAgeOnly()

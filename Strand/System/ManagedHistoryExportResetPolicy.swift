@@ -16,7 +16,8 @@ func managedHistoryExportNeedsReset(
     }
     if let storage = error as? ManagedStorageError {
         switch storage {
-        case .cursorExpired, .notFound, .conflict, .digestMismatch,
+        case .cursorExpired, .notFound, .conflict, .documentConflict,
+             .digestMismatch,
              .decoding, .invalidResponse:
             return true
         default:

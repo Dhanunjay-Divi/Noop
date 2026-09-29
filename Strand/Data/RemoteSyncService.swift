@@ -329,7 +329,7 @@ enum RemoteSyncService {
     static func disconnect(repo: Repository) async {
         RemoteSyncKeyStore.clear()
         RemoteSyncPreferences.clearConfiguration()
-        if let store = await repo.storeHandle() {
+        if let store = await repo.legacyRemoteSyncStoreHandle() {
             try? await store.configureRemoteSyncPendingIndexes(enabled: false)
         }
     }
@@ -384,7 +384,7 @@ enum RemoteSyncService {
               !RemoteSyncPreferences.endpoint.isEmpty else {
             throw RemoteSyncSettingsError.notConfigured
         }
-        guard let store = await repo.storeHandle() else {
+        guard let store = await repo.legacyRemoteSyncStoreHandle() else {
             throw RemoteSyncSettingsError.storeUnavailable
         }
 

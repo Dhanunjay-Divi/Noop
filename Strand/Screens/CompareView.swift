@@ -121,6 +121,11 @@ struct CompareView: View {
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
     @EnvironmentObject var intelligence: IntelligenceEngine
+    let allowsScoreRefresh: Bool
+
+    init(allowsScoreRefresh: Bool = true) {
+        self.allowsScoreRefresh = allowsScoreRefresh
+    }
 
     // Effort display scale (#268) — routes the Effort metric's min/max + hover read-outs onto WHOOP's
     // 0–21 axis; display-only, the normalized overlay shape is untouched. Every other metric is
@@ -314,6 +319,13 @@ struct CompareView: View {
         referenceExportStatus = nil
         referenceReport = nil
         referenceEstimate = nil
+        guard allowsScoreRefresh else {
+            diagnosticOutcome = "unavailable"
+            referenceError = String(
+                localized: "appwide.mac.viewer.phone_only_detail"
+            )
+            return
+        }
         guard let store = await repo.storeHandle() else {
             diagnosticOutcome = "unavailable"
             referenceReport = nil
@@ -1274,7 +1286,7 @@ private struct ReferenceComparisonExportSheet: View {
         HStack(alignment: .top, spacing: NoopMetrics.space3) {
             Text(number)
                 .font(StrandFont.caption)
-                .foregroundStyle(StrandPalette.surfaceBase)
+                .foregroundStyle(StrandPalette.accentInk)
                 .frame(width: 24, height: 24)
                 .background(Circle().fill(StrandPalette.accent))
                 .accessibilityHidden(true)

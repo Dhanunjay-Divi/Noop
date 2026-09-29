@@ -64,13 +64,24 @@ struct ChargeProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<ChargeEntry>) -> Void) {
+        let now = Date()
         let snap = WatchSnapshotAccess.load()
         // The phone forces a reload (WidgetCenter.reloadAllTimelines) whenever it pushes a fresh
         // snapshot, so this periodic refresh is just a backstop. Roughly every 30 minutes keeps the
         // "as of …" age honest without burning the watch's complication budget.
-        let next = Calendar.current.date(byAdding: .minute, value: 30, to: Date())
-            ?? Date().addingTimeInterval(1800)
-        completion(Timeline(entries: [ChargeEntry(date: Date(), snapshot: snap)], policy: .after(next)))
+        let next = Calendar.current.date(byAdding: .minute, value: 30, to: now)
+            ?? now.addingTimeInterval(1800)
+        var entries = [ChargeEntry(date: now, snapshot: snap)]
+        // Timeline entries keep their own date while displayed. Insert a second entry immediately after
+        // the two-minute HR window so WidgetKit removes the BPM on time instead of holding it until the
+        // 30-minute score backstop. The same snapshot still supplies Recovery/Effort/Sleep.
+        if let expiresAt = snap?.liveHeartRateExpiresAt {
+            let expiredEntryDate = expiresAt.addingTimeInterval(0.001)
+            if expiredEntryDate > now && expiredEntryDate < next {
+                entries.append(ChargeEntry(date: expiredEntryDate, snapshot: snap))
+            }
+        }
+        completion(Timeline(entries: entries, policy: .after(next)))
     }
 }
 
@@ -86,6 +97,7 @@ private extension WatchScoreSnapshot {
             effort: 41, effortCalibrating: false,
             rest: nil, restCalibrating: true,
             hr: 58,
+            heartRateObservedAt: Date(),
             sleepSummary: "7h 12m",
             asOf: Date(),
             launchGateRequired: launchAuthorization.required,
@@ -171,6 +183,12 @@ struct NOOPChargeView: View {
 
     /// True when nothing has ever synced from the phone. Drives the neutral placeholder.
     private var noSnapshot: Bool { entry.snapshot == nil }
+
+    /// Phone HR is supplemental complication content, never a daily score. It is present only while the
+    /// original packet timestamp remains inside the same two-minute live window used by iPhone widgets.
+    private var liveHeartRate: Int? {
+        entry.snapshot?.liveHeartRate(at: entry.date)
+    }
 
     /// The honest recency label for the families that have room for one, straight from the contract.
     private var freshness: String? {
@@ -330,7 +348,7 @@ struct NOOPChargeView: View {
         case .value(let v):
             // A fresh number reads as live, so append the recency once it starts to age.
             let suffix = inlineFreshnessSuffix
-            if let hr = entry.snapshot?.hr { return String(localized: "Recovery \(v) · \(hr) bpm\(suffix)") }
+            if let hr = liveHeartRate { return String(localized: "Recovery \(v) · \(hr) bpm\(suffix)") }
             return String(localized: "Recovery \(v)\(suffix)")
         case .calibrating:
             return String(localized: "Recovery calibrating")

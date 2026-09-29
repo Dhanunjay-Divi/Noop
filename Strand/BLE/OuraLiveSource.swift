@@ -342,6 +342,9 @@ public final class OuraLiveSource: NSObject, ObservableObject {
     /// A delayed callback from a replaced source must not clear or repopulate the shared live surface.
     private let isLiveOwner: () -> Bool
     private var mayPublishLive: Bool { feedsLive && isLiveOwner() }
+    #if DEBUG
+    var ownsLivePublicationForTesting: Bool { mayPublishLive }
+    #endif
     /// EXPLICIT, USER-GRANTED adopt consent for THIS connection. Default FALSE. The dangerous installKey
     /// opcode (`0x24`) may be sent ONLY when this is true: it is what gates the post-factory-reset key
     /// provisioning (s3.2). It is set true by the adopt flow AFTER the wizard's irreversible-consent gate

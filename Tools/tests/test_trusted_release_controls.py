@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -37,6 +40,34 @@ class FakeCheckClient:
 
 
 class TrustedReleaseControlTests(unittest.TestCase):
+    def _git(
+        self,
+        repository: Path,
+        *arguments: str,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(repository), *arguments],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    def _candidate_with_artifact(
+        self,
+        temporary: str,
+    ) -> tuple[Path, Path]:
+        candidate = Path(temporary).resolve() / "candidate"
+        artifact = candidate / "Vendor" / "NoopBandSDK"
+        artifact.parent.mkdir(parents=True)
+        shutil.copytree(ROOT / "Vendor" / "NoopBandSDK", artifact)
+        self._git(candidate, "init", "-q")
+        self._git(candidate, "config", "user.name", "NOOP Test")
+        self._git(candidate, "config", "user.email", "noop@example.invalid")
+        self._git(candidate, "add", "Vendor/NoopBandSDK")
+        self._git(candidate, "commit", "-qm", "Add synthetic SDK artifact")
+        return candidate, artifact
+
     def test_repository_self_contract_is_valid(self) -> None:
         TRUSTED.verify_self(ROOT)
 
@@ -45,19 +76,132 @@ class TrustedReleaseControlTests(unittest.TestCase):
             ".github/workflows/release.yml",
             ".github/workflows/release-controls.yml",
             ".github/workflows/trusted-release-controls.yml",
+            "Config/VeepooLocalSDK.example.xcconfig",
             "release/required-ci.json",
+            "release/supplier/android-artifact-trust.json",
+            "release/supplier/ios-artifact-trust.json",
+            "release/supplier/runtime/noop-band-compatibility.json",
             "Tools/forgejo-release.sh",
             "Tools/github-release-publish.py",
             "Tools/github-release-tag-gate.py",
             "Tools/homebrew-version-gate.py",
+            "Tools/local/configure-veepoo-ios-sdk.py",
+            "Tools/local/embed-veepoo-ios-frameworks.sh",
+            "Tools/local/verify-android-supplier-sdk.py",
+            "Tools/tests/test_android_supplier_sdk_verifier.py",
+            "Tools/tests/test_noop_band_sdk_artifact.py",
+            "Tools/tests/test_supplier_band_compatibility_manifest.py",
+            "Tools/tests/test_supplier_sdk_wrapper_boundary.py",
+            "Tools/tests/test_trusted_release_controls.py",
+            "Tools/tests/test_veepoo_ios_sdk_wiring.py",
             "Tools/release.sh",
             "Tools/required-ci-gate.py",
             "Tools/run-bounded-command.py",
             "Tools/trusted-release-controls.py",
             "Tools/update-homebrew-cask.sh",
+            "Tools/verify-noop-band-sdk-artifact.py",
         ):
             with self.subTest(path=path):
                 self.assertTrue(TRUSTED.is_protected_path(path))
+
+    def test_python_runtime_shadow_paths_are_protected(self) -> None:
+        for path in (
+            "unittest.py",
+            "unittest/__init__.py",
+            "unittest/__main__.py",
+            "sitecustomize.py",
+            "Tools/json.py",
+            "Tools/pathlib/__init__.py",
+            "Tools/local/hashlib.py",
+            "Tools/local/hashlib.pyc",
+            "Tools/local/hashlib.abi3.so",
+            "Tools/local/hashlib.cpython-314-darwin.so",
+            "Tools/local/Json.py",
+            "Tools/local/COMPRESSION.py",
+            "Tools/local/compression.py",
+            "Tools/local/pathlib/__init__.py",
+            "Tools/local/sitecustomize.py",
+            "Tools/__init__.py",
+            "Tools/yaml.py",
+            "Tools/yaml/__init__.py",
+            "Tools/tests/__init__.py",
+            "Tools/tests/test_unittest.py",
+            "Tools/tests/re.py",
+            "Tools/tests/usercustomize.py",
+            "yaml.py",
+            "yaml/__init__.py",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(TRUSTED.is_protected_path(path))
+        for path in (
+            "server/app/unittest.py",
+            "server/app/yaml.py",
+            "Strand/App/AppModel.swift",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(TRUSTED.is_protected_path(path))
+
+    def test_non_owner_cannot_shadow_unittest_runner(self) -> None:
+        with self.assertRaisesRegex(
+            TRUSTED.TrustedControlError, "require the repository owner"
+        ):
+            TRUSTED.authorize_changed_paths(
+                ["unittest/__init__.py", "unittest/__main__.py"],
+                repository_owner="Dhanunjay-Divi",
+                actor="another-builder",
+            )
+
+    def test_non_owner_cannot_shadow_third_party_release_dependency(self) -> None:
+        with self.assertRaisesRegex(
+            TRUSTED.TrustedControlError, "require the repository owner"
+        ):
+            TRUSTED.authorize_changed_paths(
+                ["Tools/yaml.py"],
+                repository_owner="Dhanunjay-Divi",
+                actor="another-builder",
+            )
+
+    def test_protected_base_verifier_rejects_tamper_and_gitlink(self) -> None:
+        with self.subTest(case="content-tamper"):
+            with tempfile.TemporaryDirectory() as temporary:
+                candidate, artifact = self._candidate_with_artifact(temporary)
+                model = artifact / "production" / "android" / "Models.kt"
+                model.write_text(
+                    model.read_text(encoding="utf-8") + "\n// tampered\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(
+                    TRUSTED.TrustedControlError,
+                    "protected NOOP Band SDK artifact contract",
+                ):
+                    TRUSTED._check_candidate_band_sdk_with_base_verifier(
+                        ROOT,
+                        candidate,
+                    )
+
+        with self.subTest(case="gitlink"):
+            with tempfile.TemporaryDirectory() as temporary:
+                candidate, _ = self._candidate_with_artifact(temporary)
+                commit = self._git(candidate, "rev-parse", "HEAD").stdout.strip()
+                self._git(
+                    candidate,
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    (
+                        "160000,"
+                        f"{commit},"
+                        "Vendor/NoopBandSDK/production/unmanifested-submodule"
+                    ),
+                )
+                with self.assertRaisesRegex(
+                    TRUSTED.TrustedControlError,
+                    "protected NOOP Band SDK artifact contract",
+                ):
+                    TRUSTED._check_candidate_band_sdk_with_base_verifier(
+                        ROOT,
+                        candidate,
+                    )
 
     def test_non_owner_cannot_change_a_trust_root(self) -> None:
         with self.assertRaisesRegex(

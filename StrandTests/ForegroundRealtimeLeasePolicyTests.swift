@@ -83,7 +83,13 @@ final class ForegroundRealtimeLeasePolicyTests: XCTestCase {
         XCTAssertTrue(source.contains(".onAppear { prepareLiveDisplayForMountedRow() }"))
         XCTAssertFalse(source.contains(".onDisappear { stopLiveTracking() }"),
                        "Lazy row recycling must not consume the screen-owned lease.")
-        XCTAssertTrue(source.contains(".onDisappear {\n                guard liveTrackingOptedIn else { return }"))
+        XCTAssertTrue(
+            source.contains(
+                ".onDisappear {\n"
+                    + "                guard allowsLocalMutations, "
+                    + "liveTrackingOptedIn else { return }"
+            )
+        )
         XCTAssertTrue(source.contains("if !hasLiveHR && !live.connected"),
                       "A connected first-time user must be able to reach Start Live HR before history exists.")
         XCTAssertFalse(source.contains(".onAppear { startLiveTracking() }"))

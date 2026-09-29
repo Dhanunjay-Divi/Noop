@@ -15,12 +15,34 @@ final class StepsDailyTests: XCTestCase {
     private let dayUtc = "2026-01-02"
     private let noonUtc = 1_767_355_200
 
-    private func step(_ tsOffsetSec: Int, _ counter: Int) -> StepSample {
-        StepSample(ts: noonUtc + tsOffsetSec, counter: counter)
+    private func step(_ tsOffsetSec: Int, _ counter: Int, activityClass: Int? = nil) -> StepSample {
+        StepSample(ts: noonUtc + tsOffsetSec, counter: counter, activityClass: activityClass)
     }
 
     private func stepsFor(_ samples: [StepSample]) -> Int? {
-        AnalyticsEngine.analyzeDay(day: dayUtc, steps: samples, profile: profile).daily.steps
+        AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            steps: samples,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            profile: profile
+        ).daily.steps
+    }
+
+    private var lowHeartRateWearEvidence: [HRSample] {
+        (0..<StrainScorer.minSparseReadings).map {
+            HRSample(ts: noonUtc + $0, bpm: 50)
+        }
+    }
+
+    private var activeWristGravity: [GravitySample] {
+        (0...10).map { index in
+            GravitySample(
+                ts: noonUtc + index * 60,
+                x: index.isMultiple(of: 2) ? 0 : 0.30,
+                y: 0,
+                z: 1
+            )
+        }
     }
 
     func testSumsPositiveConsecutiveDeltas() {
@@ -95,7 +117,12 @@ final class StepsDailyTests: XCTestCase {
             step(11 * 3_600, 1_100),
         ]
         let total = AnalyticsEngine.analyzeDay(
-            day: dayUtc, steps: nightWindow, daySteps: fullDay, profile: profile).daily.steps
+            day: dayUtc,
+            steps: nightWindow,
+            daySteps: fullDay,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            profile: profile
+        ).daily.steps
         // deltas over the full day: 100->300=200, 300->700=400, 700->1100=400 => 1000 (all < 512 guard).
         XCTAssertEqual(total, 1_000)
     }
@@ -104,15 +131,26 @@ final class StepsDailyTests: XCTestCase {
         // No calendar-day stream supplied (pure-function callers / old tests) -> total falls
         // back to the night-window `steps` exactly as before.
         let s = [step(0, 100), step(60, 150), step(120, 220)]  // 50 + 70 = 120
-        XCTAssertEqual(AnalyticsEngine.analyzeDay(day: dayUtc, steps: s, profile: profile).daily.steps,
-                       120)
+        XCTAssertEqual(
+            AnalyticsEngine.analyzeDay(
+                day: dayUtc,
+                steps: s,
+                stepClassificationPolicy: .allowLegacyRawMotion,
+                profile: profile
+            ).daily.steps,
+            120
+        )
     }
 
     // MARK: - Step-scale calibration (#139)
 
     private func stepsFor(_ samples: [StepSample], ticksPerStep: Double) -> Int? {
-        AnalyticsEngine.analyzeDay(day: dayUtc, steps: samples,
-                                   profile: UserProfile(stepTicksPerStep: ticksPerStep)).daily.steps
+        AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            steps: samples,
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            profile: UserProfile(stepTicksPerStep: ticksPerStep)
+        ).daily.steps
     }
 
     func testTicksPerStepTwoHalvesTheTotal() {
@@ -142,14 +180,75 @@ final class StepsDailyTests: XCTestCase {
         XCTAssertEqual(stepsFor(s, ticksPerStep: 0.1), 240)
     }
 
-    func testDailyEffortIncludesOrdinaryWalkingWithoutExerciseHR() {
-        // 1,715 calibrated steps and no HR stream: the daily movement floor should keep Effort from
-        // reading zero, while the same calibrated total remains visible on the Steps metric.
-        let counters = [100, 400, 700, 1_000, 1_300, 1_600, 1_815]
-        let samples = counters.enumerated().map { step($0.offset * 60, $0.element) }
+    func testDailyStationaryClassedBurstDoesNotBecomeSteps() {
+        let samples = (0...10).map {
+            step($0 * 60, $0 * 400, activityClass: 0)
+        }
+
         let result = AnalyticsEngine.analyzeDay(
             day: dayUtc,
             steps: samples,
+            stepClassificationPolicy: .requireActivityClass,
+            profile: profile
+        )
+
+        XCTAssertNil(result.daily.steps)
+    }
+
+    func testCurrentClasslessBurstDoesNotBecomeStepsOrGravityEffort() {
+        let samples = (0...10).map { step($0 * 60, $0 * 400) }
+        let result = AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            hr: lowHeartRateWearEvidence,
+            gravity: activeWristGravity,
+            steps: samples,
+            stepClassificationPolicy: .requireActivityClass,
+            profile: profile
+        )
+
+        XCTAssertNil(result.daily.steps)
+        XCTAssertNil(result.daily.strain)
+    }
+
+    func testDailyStationaryClassedBurstDoesNotReappearAsGravityEffort() {
+        let samples = (0...10).map {
+            step($0 * 60, $0 * 400, activityClass: 0)
+        }
+        let result = AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            hr: lowHeartRateWearEvidence,
+            gravity: activeWristGravity,
+            steps: samples,
+            profile: profile
+        )
+
+        XCTAssertNil(result.daily.steps)
+        XCTAssertNil(result.daily.strain)
+    }
+
+    func testDailyNoCounterStillAllowsWornGravityEffortFallback() {
+        let result = AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            hr: lowHeartRateWearEvidence,
+            gravity: activeWristGravity,
+            steps: [],
+            profile: profile
+        )
+
+        XCTAssertNil(result.daily.steps)
+        XCTAssertGreaterThan(result.daily.strain ?? 0, 0)
+    }
+
+    func testDailyNoHRWalkClassStepsStillCount() {
+        // Research compatibility policy only: retain the former class-filter behavior explicitly.
+        let counters = [100, 400, 700, 1_000, 1_300, 1_600, 1_815]
+        let samples = counters.enumerated().map {
+            step($0.offset * 60, $0.element, activityClass: 1)
+        }
+        let result = AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            steps: samples,
+            stepClassificationPolicy: .requireActivityClass,
             profile: profile
         )
 

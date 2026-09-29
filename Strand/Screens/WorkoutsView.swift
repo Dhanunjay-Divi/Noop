@@ -210,6 +210,10 @@ struct DayOverviewTarget: Identifiable {
 }
 
 enum DailyOverviewPresentation {
+    enum StepSource: Equatable {
+        case importedPedometer
+    }
+
     static func efficiencyFraction(_ value: Double?) -> Double? {
         guard let value, value.isFinite, value >= 0, value <= 100 else { return nil }
         return value <= 1 ? value : value / 100
@@ -246,6 +250,19 @@ enum DailyOverviewPresentation {
             hrvMethod: daily.hrvMethod
         )
         return AnalyticsEngine.Rest.composite(daily: normalized)
+    }
+
+    /// Primary Steps requires an imported pedometer aggregate. `daily.steps` is retained in storage for
+    /// compatibility but cannot fill this customer-facing value.
+    static func steps(daily: DailyMetric?, importedSteps: Int?) -> Int? {
+        _ = daily
+        return importedSteps
+    }
+
+    static func stepSource(daily: DailyMetric?, importedSteps: Int?) -> StepSource? {
+        _ = daily
+        if importedSteps != nil { return .importedPedometer }
+        return nil
     }
 }
 
@@ -2649,6 +2666,7 @@ struct DailyOverviewSheet: View {
     let focusValue: Double?
 
     @State private var daily: DailyMetric?
+    @State private var importedSteps: Int?
     @State private var workouts: [WorkoutRow] = []
     @State private var trackedMetrics: [DayTrackedMetric] = []
     @State private var hydration: HydrationReading?
@@ -3006,10 +3024,15 @@ struct DailyOverviewSheet: View {
     }
 
     private var activityItems: [MetricItem] {
+        let resolvedSteps = DailyOverviewPresentation.steps(
+            daily: daily,
+            importedSteps: importedSteps
+        )
+        let stepsLabel = stepLabel
         return [
             MetricItem(
-                label: "appwide.day_overview.steps",
-                value: daily?.steps.map { grouped(Double($0)) } ?? noData,
+                label: stepsLabel,
+                value: resolvedSteps.map { grouped(Double($0)) } ?? noData,
                 tint: StrandPalette.statusPositive
             ),
             MetricItem(
@@ -3048,7 +3071,12 @@ struct DailyOverviewSheet: View {
     }
 
     private var energyItems: [MetricItem] {
-        [
+        let resolvedSteps = DailyOverviewPresentation.steps(
+            daily: daily,
+            importedSteps: importedSteps
+        )
+        let stepsLabel = stepLabel
+        return [
             MetricItem(
                 label: "appwide.day_overview.workout_calories",
                 value: workoutCalories.isEmpty
@@ -3067,11 +3095,23 @@ struct DailyOverviewSheet: View {
                 tint: StrandPalette.effortColor
             ),
             MetricItem(
-                label: "appwide.day_overview.steps",
-                value: daily?.steps.map { grouped(Double($0)) } ?? noData,
+                label: stepsLabel,
+                value: resolvedSteps.map { grouped(Double($0)) } ?? noData,
                 tint: StrandPalette.statusPositive
             ),
         ]
+    }
+
+    private var stepLabel: LocalizedStringKey {
+        switch DailyOverviewPresentation.stepSource(
+            daily: daily,
+            importedSteps: importedSteps
+        ) {
+        case .importedPedometer:
+            return "appwide.day_overview.phone_watch_steps"
+        case nil:
+            return "appwide.day_overview.steps"
+        }
     }
 
     private var workoutDurationSeconds: Double {
@@ -3267,27 +3307,32 @@ struct DailyOverviewSheet: View {
 
     private func load() async {
         loading = true
+        importedSteps = nil
         let key = Repository.localDayKey(date)
         let window = WorkoutDateWindow.localDay(containing: date)
         async let dailyRows = repo.dailyMetrics(fromDay: key, toDay: key)
+        async let appleRows = repo.appleDailyRows(fromDay: key, toDay: key)
         async let exactWorkouts = loadWorkouts(window: window)
         async let exactMetrics = loadTrackedMetrics(day: key)
         async let exactHydration = loadHydration(day: key)
         async let exactJournal = loadJournal(day: key)
         let (
             resolvedDaily,
+            resolvedAppleRows,
             resolvedWorkouts,
             resolvedMetrics,
             resolvedHydration,
             resolvedJournal
         ) = await (
             dailyRows,
+            appleRows,
             exactWorkouts,
             exactMetrics,
             exactHydration,
             exactJournal
         )
         daily = resolvedDaily.last(where: { $0.day == key })
+        importedSteps = resolvedAppleRows.compactMap(\.steps).max()
         workouts = resolvedWorkouts.filter {
             Repository.localDayKey(
                 Date(timeIntervalSince1970: TimeInterval($0.startTs))

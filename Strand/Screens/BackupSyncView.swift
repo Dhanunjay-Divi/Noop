@@ -1,7 +1,7 @@
 import SwiftUI
 import StrandDesign
 
-/// Backup & Sync (folder destination). The Apple mirror of the Android `BackupSyncScreen`: pick a
+/// Data & Sync. The Apple mirror of the Android `BackupSyncScreen`: pick a
 /// folder, turn on daily auto-backup (an on-launch catch-up), back up now, or restore from a snapshot
 /// already in that folder. Automatic snapshots remain the existing unencrypted `.noopbak` ZIP format
 /// because NOOP never persists a passphrase. Point the folder at Google Drive / iCloud / Dropbox for
@@ -25,6 +25,7 @@ struct BackupSyncView: View {
     @State private var serverStatus = RemoteSyncPreferences.lastStatus
     @State private var confirmServerReplay = false
     @State private var confirmServerDisconnect = false
+    @State private var advancedServerOpen = false
 
     // Result alert (backup outcome / restore outcome).
     @State private var alertTitle = ""
@@ -41,8 +42,8 @@ struct BackupSyncView: View {
 
     var body: some View {
         ScreenScaffold(
-            title: "Backup & Sync",
-            subtitle: "Protect your history with optional managed storage, your own server, or a folder you choose. Local NOOP works without an account."
+            title: "Data & Sync",
+            subtitle: "See where your history lives, protect local data, and manage optional account continuity."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 #if os(iOS)
@@ -53,10 +54,10 @@ struct BackupSyncView: View {
                     )
                 }
                 #endif
-                serverCard
                 folderCard
                 autoCard
                 restoreCard
+                advancedServerSection
             }
         }
         // Result of a backup or a restore.
@@ -110,6 +111,43 @@ struct BackupSyncView: View {
     }
 
     // MARK: - Cards
+
+    private var advancedServerSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
+                    advancedServerOpen.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Advanced")
+                        .font(StrandFont.overline)
+                        .tracking(StrandFont.overlineTracking)
+                        .textCase(.uppercase)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.down")
+                        .font(StrandFont.footnote.weight(.semibold))
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .rotationEffect(.degrees(advancedServerOpen ? 0 : -90))
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Advanced")
+            .accessibilityValue(
+                advancedServerOpen
+                    ? String(localized: "Expanded")
+                    : String(localized: "Collapsed")
+            )
+
+            if advancedServerOpen {
+                serverCard
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
 
     private var serverCard: some View {
         StrandCard(

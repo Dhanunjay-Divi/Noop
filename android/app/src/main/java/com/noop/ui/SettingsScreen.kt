@@ -733,10 +733,6 @@ fun SettingsScreen(
     // "Sleep staging (V2)" - V2 is the DEFAULT for every strap (WHOOP 4 and 5/MG); turn it OFF to fall back
     // to V1. Model-agnostic, so it lives outside the 5/MG-only card. 4.0 is unvalidated either way (#319/#347).
     var experimentalSleepV2 by remember { mutableStateOf(puffinExperiment.experimentalSleepV2) }
-    // "Motion-aware wake refinement" (#364 follow-up) - OFF by default. Self-gates on observed gravity +
-    // step density, so it is a no-op on a sparse (e.g. WHOOP 4.0) night regardless of this switch.
-    var motionAwareWake by remember { mutableStateOf(puffinExperiment.motionAwareWake) }
-
     // Whether to surface the WHOOP 5/MG-only probes (puffin / R22 / broadcast-HR / frame-capture). Gated
     // so a confident 4.0 owner never sees 5/MG controls that can't touch their strap (#22). The model
     // preference DEFAULTS to WHOOP4, so we deliberately do NOT hide on the raw default alone — the same
@@ -1519,31 +1515,9 @@ fun SettingsScreen(
                     }
                 }
                 RowDivider()
-                // Step calibration (#139/#132): daily steps = @57 counter ticks ÷ this divisor.
-                // 1.0 = raw pass-through until the true 5/MG tick rate is known. The divisor goes
-                // up to 30 because a 5/MG motion counter can overcount by ~24×; the stepper uses a
-                // variable increment (fine near 1.0, coarse up top) so high values stay reachable.
-                FormRow(label = uiString(R.string.l10n_settings_screen_step_calibration_351c09bf)) {
-                    StepperField(
-                        value = "%.1f".format(profile.stepTicksPerStep),
-                        accessibility = "Step calibration, %.1f counter ticks per step"
-                            .format(profile.stepTicksPerStep),
-                        onMinus = { mutate { profile.stepTicksPerStep = ProfileStore.steppedStepScale(profile.stepTicksPerStep, up = false) } },
-                        onPlus = { mutate { profile.stepTicksPerStep = ProfileStore.steppedStepScale(profile.stepTicksPerStep, up = true) } },
-                    )
-                }
-                Text(
-                    "Counter ticks per step. Leave at 1.0 unless your steps run high. Some Noop Band " +
-                        "firmware reports a much larger motion count, so this goes up to 30. Walk a known " +
-                        "1,000 steps and divide NOOP's count by the real count to get your value.",
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                )
-                RowDivider()
-                // Tap-through to the WHOOP 4.0 steps-ESTIMATE calibration (a SEPARATE thing from the 5/MG
-                // @57 counter divisor above): a 4.0 sends no step count, so NOOP estimates steps from
-                // motion and calibrates that to the phone. Opens the explainer + fit + comparison + manual
-                // override screen. Mirrors the macOS Profile "Steps estimate" row.
+                // Tap through to the explicitly labelled motion estimate. Primary Steps never use the
+                // unvalidated band motion counter; this calibration remains separate and compares a
+                // non-primary estimate with the phone pedometer.
                 val stepsSummary = when {
                     profile.stepsManualCoefficient > 0 -> "Manual"
                     profile.stepsCalibrationCoefficient > 0 ->
@@ -2636,39 +2610,6 @@ fun SettingsScreen(
                     color = Palette.textTertiary,
                 )
 
-                // --- Motion-aware wake refinement (#364 follow-up) — OFF by default. ---
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Text(
-                        uiString(R.string.l10n_settings_screen_motion_aware_wake_refinement_67a91e47),
-                        style = NoopType.subhead,
-                        color = Palette.textPrimary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    NoopToggleSwitch(
-                        checked = motionAwareWake,
-                        onCheckedChange = {
-                            motionAwareWake = it
-                            puffinExperiment.motionAwareWake = it
-                        },
-                        modifier = Modifier.semantics {
-                            contentDescription = uiString(R.string.l10n_settings_screen_motion_aware_wake_refinement_67a91e47)
-                        },
-                    )
-                }
-                Text(
-                    uiString(R.string.l10n_settings_screen_reviews_each_scored_wake_block_for_537924ea) +
-                        "change in body position) instead of just a heart-rate rise. A wake block with no " +
-                        "locomotion and a stable posture -- a hot night, a brief turn-over -- is folded back " +
-                        "into light sleep; a real get-up is left alone. Self-checks how much motion detail " +
-                        "Noop Band actually recorded and stays off on a night that's too sparse to trust " +
-                        "(mainly firmware with sparse motion history). Off by default; takes effect on the next nights staged.",
-                    style = NoopType.caption,
-                    color = Palette.textTertiary,
-                )
 
                 // Diagnostics: dump the decoded per-sample sensor streams (last 24h) to one long-format
                 // CSV so power users / external devs can prototype sleep/activity/VBT algorithms on real

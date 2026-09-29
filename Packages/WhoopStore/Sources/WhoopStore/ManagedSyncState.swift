@@ -287,6 +287,20 @@ extension WhoopStore {
         }
     }
 
+    public func managedRestoreLocalSourceIDs() async throws -> [String] {
+        try syncRead { db in
+            try String.fetchAll(
+                db,
+                sql: """
+                    SELECT localSourceId
+                    FROM managedSyncSource
+                    WHERE sourceKind = 'managed_restore'
+                    ORDER BY createdAtMs DESC, sourceId DESC
+                    """
+            )
+        }
+    }
+
     public func managedSyncCheckpoint(
         accountScopeHash: String,
         sourceID: String,

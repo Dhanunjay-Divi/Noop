@@ -4,6 +4,12 @@ import StrandDesign
 /// Root — the sidebar shell, with the first-run onboarding/pairing wizard overlaid until complete,
 /// and a "What's New" changelog sheet shown automatically after an update.
 struct ContentView: View {
+    enum EntryDestination: Equatable {
+        case terms
+        case collectorOnboarding
+        case operationalShell
+    }
+
     private let onOnboardingFinished: () -> Void
     @AppStorage("noop.onboarded") private var onboarded = false
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
@@ -27,16 +33,47 @@ struct ContentView: View {
         self.onOnboardingFinished = onOnboardingFinished
     }
 
+    static func entryDestination(
+        acceptedCurrentTerms: Bool,
+        onboarded: Bool,
+        runtimeRole: AppRuntimeRole,
+        bypassesEntryGates: Bool
+    ) -> EntryDestination {
+        if bypassesEntryGates {
+            return .operationalShell
+        }
+        if !acceptedCurrentTerms {
+            return .terms
+        }
+        if runtimeRole.requiresCollectorOnboarding && !onboarded {
+            return .collectorOnboarding
+        }
+        return .operationalShell
+    }
+
+    private var entryDestination: EntryDestination {
+        Self.entryDestination(
+            acceptedCurrentTerms: acceptedTerms == Terms.currentVersion,
+            onboarded: onboarded,
+            runtimeRole: .currentPlatform,
+            bypassesEntryGates: isStrengthGuideDemo
+        )
+    }
+
+    private var completedRequiredOnboarding: Bool {
+        onboarded || !AppRuntimeRole.currentPlatform.requiresCollectorOnboarding
+    }
+
     var body: some View {
         ZStack {
             // RootView starts repository refresh, backup catch-up and optional remote sync from its task.
             // Keep those operational side effects outside the pre-acceptance view hierarchy.
-            if acceptedTerms == Terms.currentVersion || isStrengthGuideDemo {
+            if entryDestination != .terms {
                 RootView()
             } else {
                 StrandPalette.surfaceBase.ignoresSafeArea()
             }
-            if acceptedTerms == Terms.currentVersion && !onboarded && !isStrengthGuideDemo {
+            if entryDestination == .collectorOnboarding {
                 OnboardingWizard(onFinished: {
                     onOnboardingFinished()
                     onboarded = true
@@ -46,7 +83,7 @@ struct ContentView: View {
             }
             // Terms acknowledgment gate — before onboarding or the operational shell until
             // the current terms version is accepted; re-appears if the terms materially change.
-            if acceptedTerms != Terms.currentVersion && !isStrengthGuideDemo {
+            if entryDestination == .terms {
                 TermsGateView(onAccept: {
                     acceptedTermsAt = ISO8601DateFormatter().string(from: Date())
                     acceptedTerms = Terms.currentVersion
@@ -83,7 +120,7 @@ struct ContentView: View {
     private func showWhatsNewIfDue() {
         // Existing users who updated, plus a brand-new user after onboarding: their last-seen version
         // is genuinely behind the current one. A downgrade never replays newer notes.
-        if onboarded && acceptedTerms == Terms.currentVersion
+        if completedRequiredOnboarding && acceptedTerms == Terms.currentVersion
             && TrialNoticePolicy.isNewerMarketingVersion(
                 AppChangelog.currentVersion,
                 than: lastSeenChangelog

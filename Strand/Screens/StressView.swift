@@ -74,6 +74,12 @@ enum StressDaytimeAnalysis {
 // Every historical point has its own causal baseline, so later data cannot rewrite it.
 
 struct StressView: View {
+    let allowsLocalMutations: Bool
+
+    init(allowsLocalMutations: Bool = true) {
+        self.allowsLocalMutations = allowsLocalMutations
+    }
+
     @EnvironmentObject var repo: Repository
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
@@ -285,17 +291,19 @@ struct StressView: View {
         // The sustained-stress suggestion opens the existing Breathe trainer in a sheet —
         // in-app and passive (no alert / notification), inheriting the app environment.
         .sheet(isPresented: $showBreathe) {
-            NavigationStack {
-                BreathingView()
-                    .toolbar {
-                        ToolbarItem {
-                            Button("Done") { showBreathe = false }
+            if allowsLocalMutations {
+                NavigationStack {
+                    BreathingView()
+                        .toolbar {
+                            ToolbarItem {
+                                Button("Done") { showBreathe = false }
+                            }
                         }
-                    }
+                }
+                #if os(macOS)
+                .frame(width: 520, height: 760)
+                #endif
             }
-            #if os(macOS)
-            .frame(width: 520, height: 760)
-            #endif
         }
     }
 
@@ -351,7 +359,9 @@ struct StressView: View {
             }
 
             // Sustained-high suggestion — only when the recent run stays in the HIGH band.
-            if day.sustainedHigh { sustainedBreatheCard(day) }
+            if allowsLocalMutations, day.sustainedHigh {
+                sustainedBreatheCard(day)
+            }
         }
     }
 
@@ -380,6 +390,7 @@ struct StressView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 NoopButton("Start a Breathe session", systemImage: "wind",
                            kind: .primary, fullWidth: true) {
+                    guard allowsLocalMutations else { return }
                     showBreathe = true
                 }
             }
@@ -1043,13 +1054,15 @@ struct StressModel {
         }
     }
 
-    /// The assessment used for either the loaded model or the calibration card. Direct Noop Band
-    /// data wins only once it is actually scorable; until then a complete Apple Health reference
-    /// can be used without blending its values with the strap. When nothing is scorable, show the
-    /// candidate with the most real prior support instead of implying all history is absent.
+    /// The assessment used for either the loaded model or the calibration card. Direct or
+    /// account-restored Noop Band data wins only once it is actually scorable; until then a complete
+    /// Apple Health reference can be used without blending its values with the band. When nothing is
+    /// scorable, show the candidate with the most real prior support instead of implying all history
+    /// is absent.
     static func preferredAssessment(sourceRows: [SourcedDailyMetric]) -> SourceAssessment {
         let candidates: [SourceAssessment] = [
             assessment(source: .noopComputed, sourceRows: sourceRows),
+            assessment(source: .managedHistory, sourceRows: sourceRows),
             assessment(source: .whoopImport, sourceRows: sourceRows),
             assessment(source: .appleHealth, sourceRows: sourceRows),
             assessment(source: .localCache, sourceRows: sourceRows),
@@ -1057,6 +1070,9 @@ struct StressModel {
 
         if let direct = candidates.first(where: { $0.source == .noopComputed && $0.isScorable }) {
             return direct
+        }
+        if let managed = candidates.first(where: { $0.source == .managedHistory && $0.isScorable }) {
+            return managed
         }
         if let apple = candidates.first(where: { $0.source == .appleHealth && $0.isScorable }) {
             return apple
@@ -1093,6 +1109,7 @@ struct StressModel {
     private static func sourceRank(_ source: DailyMetricSource) -> Int {
         switch source {
         case .noopComputed: return 0
+        case .managedHistory: return 1
         case .whoopImport: return 1
         case .appleHealth: return 2
         case .localCache: return 3
@@ -1103,6 +1120,8 @@ struct StressModel {
         switch source {
         case .noopComputed:
             return (String(localized: "Noop Band"), nil)
+        case .managedHistory:
+            return (String(localized: "Account history"), nil)
         case .whoopImport:
             return (String(localized: "Wearable export reference"),
                     String(localized: "Derived by NOOP from a single wearable export series; not provider-score parity."))

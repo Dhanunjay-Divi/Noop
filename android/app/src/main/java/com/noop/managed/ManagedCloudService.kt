@@ -3021,7 +3021,8 @@ class ManagedCloudService private constructor(context: Context) {
         is ManagedStorageException.CursorExpired -> "cursor_expired"
         is ManagedStorageException.NotFound -> "not_found"
         is ManagedStorageException.QuotaExceeded -> "quota_exceeded"
-        is ManagedStorageException.Conflict -> "sync_conflict"
+        is ManagedStorageException.Conflict ->
+            if (error.documentKind == null) "sync_conflict" else "document_conflict"
         is ManagedStorageException.Server -> when (error.statusCode) {
             408, 504 -> "server_timeout"
             429 -> "rate_limited"
@@ -4065,7 +4066,13 @@ class ManagedCloudService private constructor(context: Context) {
         is ManagedStorageException.QuotaExceeded ->
             text(R.string.managed_cloud_error_quota)
         is ManagedStorageException.Conflict ->
-            text(R.string.managed_cloud_error_conflict)
+            text(
+                if (error.documentKind == null) {
+                    R.string.managed_cloud_error_conflict
+                } else {
+                    R.string.managed_cloud_error_document_conflict
+                },
+            )
         is ManagedStorageException.Server ->
             text(R.string.managed_cloud_error_server)
         is ManagedStorageException.DigestMismatch ->

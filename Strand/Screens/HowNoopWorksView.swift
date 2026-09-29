@@ -152,6 +152,7 @@ struct HowNoopWorksView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(StrandPalette.accent)
+            .foregroundStyle(StrandPalette.accentInk)
             .keyboardShortcut(.defaultAction)
         }
         .padding(16)

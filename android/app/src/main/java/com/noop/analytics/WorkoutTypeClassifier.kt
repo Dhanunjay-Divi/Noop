@@ -10,19 +10,21 @@ import kotlin.math.sqrt
 /*
  * WorkoutTypeClassifier.kt — COARSE workout-type classifier over ALREADY-CAPTURED signals.
  *
- * Faithful Kotlin twin of StrandAnalytics/WorkoutTypeClassifier.swift (#414) — same constants, same
- * ramp/plateau memberships, same per-class weights, byte-identical scores for the same feature vector.
+ * Based on StrandAnalytics/WorkoutTypeClassifier.swift (#414), with Android's disputed @63 activity
+ * fields disabled as classifier evidence.
  *
  * Given a detected workout window (from [WorkoutDetector] / [AutoWorkoutDetector]), this predicts a
- * BROAD activity class — walk / run / strength / cycle / ski / other — plus a confidence, from four
+ * BROAD activity class — walk / run / strength / cycle / ski / other — plus a confidence, from three
  * signal families that are already decoded and stored, no raw IMU:
  *   1. HR profile over the window (mean/peak/%HRR, HR variability shape) — [HrSample].
- *   2. Activity-class tick composition — [StepSample.activityClass] (0 still / 1 walk / 2 run,
- *      community finding #316) — the on-device per-tick gait classifier, rolled up to a window.
- *   3. Gravity-derived posture/motion variance — the SAME per-record L2 gravity-delta intensity
+ *   2. Gravity-derived posture/motion variance — the SAME per-record L2 gravity-delta intensity
  *      [WorkoutDetector.activitySeries] already computes for detection, re-used here as a shape
  *      signal rather than a threshold gate.
- *   4. Duration and calories.
+ *   3. Duration and calories.
+ *
+ * [StepSample.activityClass] remains in persisted rows for schema compatibility, but is ignored here.
+ * WHOOP 5 historical byte @63 is also `motion_wear_quality`, so its legacy 0/1/2 values are not
+ * validated gait labels. HR remains activity context, never gait proof.
  *
  * BROAD ONLY. This deliberately does NOT attempt fine-grained sport discrimination (e.g. basketball
  * vs tennis) — that needs raw high-rate IMU (type-43, ~100 Hz) this app does not capture. `gravity`/
@@ -91,19 +93,17 @@ data class WorkoutClassFeatures(
      */
     val hrCV: Double,
 
-    // --- Activity-class tick composition (StepSample.activityClass: 0 still / 1 walk / 2 run) ---
+    // --- Legacy activity-class compatibility fields; ignored by current scoring ---
     /**
-     * Fraction of ticks WITH a decoded activity class that read "still", "walk", "run" respectively
-     * (sum to ~1 when [tickCoverage] > 0; all 0 when no tick in the window carried a class).
+     * Retained so stored/research feature vectors remain readable. Current extraction sets all three
+     * fractions to 0 and current scoring does not consume them.
      */
     val stillFraction: Double,
     val walkFraction: Double,
     val runFraction: Double,
     /**
-     * How much of the window is actually backed by a decoded activity-class tick, clamped [0, 1]
-     * (classified ticks per second of window). Low/zero on a WHOOP 4.0 or any capture predating the
-     * @63 decode — the classifier falls back to HR+motion-only scoring below
-     * [WorkoutTypeClassifier.minTickCoverage].
+     * Retained for feature-vector compatibility. Current extraction always reports 0 because byte @63
+     * is not validated gait evidence.
      */
     val tickCoverage: Double,
 
@@ -133,7 +133,7 @@ data class WorkoutClassPrediction(
     val predictedClass: CoarseWorkoutClass,
     /**
      * 0..1. Reflects BOTH how cleanly the winner beat the runner-up (margin) and how complete the
-     * inputs were (tick coverage, %HRR availability) — never higher than the evidence supports.
+     * inputs were (%HRR availability) — never higher than the evidence supports.
      */
     val confidence: Double,
     /**
@@ -165,17 +165,14 @@ class HeuristicWorkoutClassifier : WorkoutTypeClassifying {
         WorkoutTypeClassifier.classify(features)
 }
 
-/** The heuristic. Mirrors Swift `WorkoutTypeClassifier` — same constants, same scores. */
+/** The Android heuristic with legacy tick composition disabled. */
 object WorkoutTypeClassifier {
 
     // ─────────────────────────────────────────────────────────────────────────
     // Constants (first-pass heuristic — see file header; tune against real labels later)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Below this fraction of the window backed by a decoded activity-class tick, walk/run scoring
-     * falls back to HR+motion-only (ticks are too sparse/absent — e.g. a WHOOP 4.0 capture — to trust).
-     */
+    /** Retained for compatibility with callers/tests that inspect the former advisory threshold. */
     const val minTickCoverage: Double = 0.15
 
     /** A candidate's top raw score must clear this to be reported as anything other than OTHER. */
@@ -186,7 +183,7 @@ object WorkoutTypeClassifier {
      * too close and reports OTHER instead of an arbitrary tie-break.
      */
     const val minMargin: Double = 0.05
-    /** UI type hints require this confidence plus real decoded activity-class coverage. */
+    /** UI type hints require this confidence plus a future validated gait signal. */
     const val minAdvisoryConfidence: Double = 0.35
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -208,13 +205,11 @@ object WorkoutTypeClassifier {
         val marginFactor = 0.5 + 0.5 * min(1.0, margin)
         var confidence = top.value * marginFactor
 
-        // Data-completeness dampener: never let a prediction read more confident than the inputs
-        // backing it. Neither known → floor at 0.70×; both known → no penalty.
+        // Data-completeness dampener. Legacy tick composition is intentionally never "known":
+        // byte @63 is motion_wear_quality, not validated gait evidence.
         val hrrKnown = features.meanHRRPct != null
-        val ticksKnown = features.tickCoverage >= minTickCoverage
         var completeness = 0.70
         if (hrrKnown) completeness += 0.15
-        if (ticksKnown) completeness += 0.15
         confidence = min(1.0, max(0.0, confidence * completeness))
 
         if (top.value < minPlausibleScore || margin < minMargin) {
@@ -256,22 +251,11 @@ object WorkoutTypeClassifier {
     internal fun plateau(x: Double, a: Double, b: Double, c: Double, d: Double): Double =
         min(rampUp(x, a, b), rampDown(x, c, d))
 
-    /**
-     * How strongly the activity-class ticks should be trusted vs. falling back to HR+motion-only.
-     * 0 with no/negligible tick coverage, ramping to 1 once coverage reaches [minTickCoverage].
-     */
-    internal fun tickReliability(f: WorkoutClassFeatures): Double =
-        rampUp(f.tickCoverage, minTickCoverage * 0.3, minTickCoverage)
+    /** Legacy activity-class ticks are not validated gait evidence and carry zero reliability. */
+    internal fun tickReliability(@Suppress("UNUSED_PARAMETER") f: WorkoutClassFeatures): Double = 0.0
 
-    /**
-     * "No walk/run gait" evidence for the non-foot classes (strength/cycle/ski). When ticks are too
-     * sparse to trust, this returns a NEUTRAL 0.5 rather than penalizing — an absent signal must not
-     * read as evidence against a class (a WHOOP 4.0 capture has no @63 activity class at all).
-     */
-    internal fun gaitAbsenceScore(f: WorkoutClassFeatures): Double {
-        if (f.tickCoverage < minTickCoverage) return 0.5
-        return rampUp(f.stillFraction, 0.40, 0.75)
-    }
+    /** Without validated gait evidence, absence remains neutral for non-foot classes. */
+    internal fun gaitAbsenceScore(@Suppress("UNUSED_PARAMETER") f: WorkoutClassFeatures): Double = 0.5
 
     // ─────────────────────────────────────────────────────────────────────────
     // Per-class scoring
@@ -282,14 +266,10 @@ object WorkoutTypeClassifier {
      * higher-impact (higher `motionVariance`) fallback signature.
      */
     internal fun runScore(f: WorkoutClassFeatures): Double {
-        val tick = rampUp(f.runFraction, 0.15, 0.55)
         val hr = rampUp(f.meanHRRPct ?: 55.0, 45.0, 75.0)
         val motion = plateau(f.motionVariance, 0.05, 0.10, 0.35, 0.60)
         val smooth = rampDown(f.hrCV, 0.05, 0.12)
-        val tickWeighted = 0.55 * tick + 0.25 * hr + 0.15 * motion + 0.05 * smooth
-        val fallback = 0.45 * hr + 0.35 * motion + 0.20 * smooth
-        val rel = tickReliability(f)
-        return tickWeighted * rel + fallback * (1 - rel)
+        return 0.45 * hr + 0.35 * motion + 0.20 * smooth
     }
 
     /**
@@ -297,13 +277,9 @@ object WorkoutTypeClassifier {
      * rarely pushes %HRR high) with modest motion variance (rhythmic but low-impact gait).
      */
     internal fun walkScore(f: WorkoutClassFeatures): Double {
-        val tick = rampUp(f.walkFraction, 0.15, 0.55)
         val hr = plateau(f.meanHRRPct ?: 30.0, 5.0, 15.0, 35.0, 55.0)
         val motion = plateau(f.motionVariance, 0.005, 0.02, 0.07, 0.12)
-        val tickWeighted = 0.60 * tick + 0.25 * hr + 0.15 * motion
-        val fallback = 0.55 * hr + 0.45 * motion
-        val rel = tickReliability(f)
-        return tickWeighted * rel + fallback * (1 - rel)
+        return 0.55 * hr + 0.45 * motion
     }
 
     /**
@@ -357,8 +333,7 @@ object WorkoutTypeClassifier {
  * Builds a [WorkoutClassFeatures] vector for a [start, end] window from the SAME decoded streams
  * [WorkoutDetector]/[AutoWorkoutDetector] already read ([HrSample], [GravitySample], [StepSample]) —
  * no new store, no new decode. Pure/deterministic; slices the caller's lists to the window itself so
- * callers can pass a whole day's streams or an already-sliced window interchangeably. Mirrors Swift
- * `WorkoutTypeFeatureExtractor`.
+ * callers can pass a whole day's streams or an already-sliced window interchangeably.
  */
 object WorkoutTypeFeatureExtractor {
 
@@ -366,8 +341,8 @@ object WorkoutTypeFeatureExtractor {
      * @param hr HR samples covering (at least) the window; required — null result if none fall inside.
      * @param gravity gravity samples covering the window (and a little before, ideally, so the first
      *   in-window delta isn't a false 0 — matches [WorkoutDetector.activitySeries] behavior either way).
-     * @param steps step/activity-class samples covering the window; may be empty (pre-#316 firmware or
-     *   a WHOOP 4.0) — `tickCoverage` reports 0 and the classifier falls back to HR+motion.
+     * @param steps retained for API compatibility; legacy activityClass values are ignored and
+     *   `tickCoverage` is always 0.
      * @param start / @param end window bounds, unix SECONDS (Long, inclusive), e.g. a detected session's.
      * @param restingHR day resting-HR baseline; null → derived from the window's own HR (10th
      *   percentile), same fallback [WorkoutDetector] uses.
@@ -378,7 +353,7 @@ object WorkoutTypeFeatureExtractor {
     fun extract(
         hr: List<HrSample>,
         gravity: List<GravitySample>,
-        steps: List<StepSample>,
+        @Suppress("UNUSED_PARAMETER") steps: List<StepSample>,
         start: Long,
         end: Long,
         restingHR: Double? = null,
@@ -413,19 +388,12 @@ object WorkoutTypeFeatureExtractor {
         val motionVariance = variance(intensitySeries)
         val motionCV = if (motionMean > 0) stddev(intensitySeries) / motionMean else 0.0
 
-        // Activity-class tick composition.
-        val stepsWindow = steps.filter { it.ts in start..end }
-        val validTicks = stepsWindow.mapNotNull { it.activityClass }
-        val tickCoverage = min(1.0, validTicks.size.toDouble() / max(1.0, durationSec))
-        var stillFraction = 0.0
-        var walkFraction = 0.0
-        var runFraction = 0.0
-        if (validTicks.isNotEmpty()) {
-            val n = validTicks.size.toDouble()
-            stillFraction = validTicks.count { it == 0 } / n
-            walkFraction = validTicks.count { it == 1 } / n
-            runFraction = validTicks.count { it == 2 } / n
-        }
+        // Persisted activityClass values are compatibility-only. Historical byte @63 is also decoded
+        // as motion_wear_quality and cannot establish still/walk/run composition.
+        val stillFraction = 0.0
+        val walkFraction = 0.0
+        val runFraction = 0.0
+        val tickCoverage = 0.0
 
         val kcalPerMin = caloriesKcal?.let { it / (durationSec / 60.0) }
 

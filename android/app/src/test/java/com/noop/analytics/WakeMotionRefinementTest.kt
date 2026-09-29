@@ -3,7 +3,6 @@ package com.noop.analytics
 import com.noop.data.GravitySample
 import com.noop.data.StepSample
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -11,8 +10,8 @@ import org.junit.Test
  * Pins [WakeMotionRefinement] (#364 "Proposal 2" follow-up; density-gate precedent #345) against
  * SYNTHETIC fixtures only — no real user data. Every fixture is built from [buildNight], which lays down
  * a dense, still, non-ambulatory baseline (4 gravity samples/min at one fixed orientation, 1 step record/
- * min with a flat counter and `activityClass = 0`) and overrides specific minutes to inject either a
- * posture "burst" (a turn-over) or real walking cadence. Android twin of the Swift
+ * min with a flat counter and legacy `activityClass = 0`) and overrides specific minutes to inject either
+ * a posture "burst" or disputed legacy walk-class counter movement. Android twin of the Swift
  * `WakeMotionRefinementTests`.
  */
 class WakeMotionRefinementTest {
@@ -29,8 +28,8 @@ class WakeMotionRefinementTest {
      * - [burstMinutes]: these minutes get a gravity vector that swings between two orientations within
      *   the minute (posture variance well above [WakeMotionRefinement.STABLE_POSTURE_VARIANCE_G2]); every
      *   other minute is a fixed, motionless orientation (variance 0).
-     * - [walkMinutes]: these minutes accrue [ticksPerWalkMinute] walk-class (`activityClass = 1`)
-     *   step-counter ticks; every other minute accrues 0 ticks at `activityClass = 0` (still).
+     * - [walkMinutes]: these minutes accrue [ticksPerWalkMinute] counter ticks with legacy
+     *   `activityClass = 1`; current refinement must not treat that disputed byte as locomotion.
      * - [sparse]: when true, mimics a WHOOP 4.0 night instead — gravity only every 5th minute, no step
      *   samples at all — so the density self-gate declines regardless of the burst/walk pattern.
      */
@@ -86,7 +85,12 @@ class WakeMotionRefinementTest {
         val seg = wakeSegment(180)
         val (grav, steps) = buildNight(totalMinutes = 180, burstMinutes = setOf(45, 135))
 
-        val result = WakeMotionRefinement.refine(listOf(seg), grav, steps)
+        val result = WakeMotionRefinement.refine(
+            listOf(seg),
+            grav,
+            steps,
+            allowLegacyActivityClassForResearch = true,
+        )
 
         val expected = listOf(
             StageSegment(start, start + 44 * 60L, "light"),
@@ -107,19 +111,32 @@ class WakeMotionRefinementTest {
         assertEquals("wake should shrink from 180 min to the 2 burst blocks (3 min each)", 6 * 60L, wakeDuration)
     }
 
-    // ── (b) a real get-up (3 consecutive minutes of 25 ticks/min) stays wake ───────────────────────────
+    // ── (b) legacy 1/2 classes remain research-only ───────────────────────────────────────────────────
 
     @Test
-    fun realGetUpStaysWake() {
+    fun legacyWalkClassesStayResearchOnly() {
         val seg = wakeSegment(30)
         val (grav, steps) = buildNight(totalMinutes = 30, walkMinutes = setOf(10, 11, 12), ticksPerWalkMinute = 25)
 
-        val result = WakeMotionRefinement.refine(listOf(seg), grav, steps)
+        assertTrue(WakeMotionRefinement.walkClassTicksPerMinute(steps).isEmpty())
+        val production = WakeMotionRefinement.refine(listOf(seg), grav, steps)
+        assertEquals(
+            "production cannot consume the disputed legacy activity byte",
+            listOf(seg),
+            production,
+        )
+
+        val research = WakeMotionRefinement.refine(
+            listOf(seg),
+            grav,
+            steps,
+            allowLegacyActivityClassForResearch = true,
+        )
 
         assertEquals(
-            "3 consecutive minutes at 25 ticks/min clears the sustained-walk locomotion gate (>=2 " +
-                "consecutive minutes >=10 ticks), so the whole segment must be left untouched",
-            listOf(seg), result,
+            "the explicit research path preserves the withdrawn sustained-cadence comparison",
+            listOf(seg),
+            research,
         )
     }
 
@@ -132,7 +149,12 @@ class WakeMotionRefinementTest {
         // is density -- proving the decline is the gate, not the burst pattern being ineligible.
         val (grav, steps) = buildNight(totalMinutes = 180, burstMinutes = setOf(45, 135), sparse = true)
 
-        val result = WakeMotionRefinement.refine(listOf(seg), grav, steps)
+        val result = WakeMotionRefinement.refine(
+            listOf(seg),
+            grav,
+            steps,
+            allowLegacyActivityClassForResearch = true,
+        )
 
         assertEquals(
             "a WHOOP-4.0-shaped stream (sparse gravity, no step samples) must fail the density self-gate " +
@@ -151,9 +173,9 @@ class WakeMotionRefinementTest {
         val off = WakeMotionRefinement.apply(listOf(seg), grav, steps, enabled = false)
         assertEquals("enabled=false must be a guaranteed byte-identical passthrough", listOf(seg), off)
 
-        // Sanity: the SAME fixture actually changes when enabled, so the assertion above isn't vacuous.
+        // An old enabled preference cannot re-authorize an unvalidated legacy activity byte.
         val on = WakeMotionRefinement.apply(listOf(seg), grav, steps, enabled = true)
-        assertNotEquals("fixture sanity check: this fixture must be live when enabled", listOf(seg), on)
+        assertEquals("enabled=true must remain a production passthrough", listOf(seg), on)
     }
 
     // ── (e) tracks VARYING inputs -- multiple patterns, each with a different injected reclaim amount,
@@ -175,7 +197,12 @@ class WakeMotionRefinementTest {
         for (s in scenarios) {
             val seg = wakeSegment(s.totalMinutes)
             val (grav, steps) = buildNight(totalMinutes = s.totalMinutes, burstMinutes = s.burstMinutes)
-            val result = WakeMotionRefinement.refine(listOf(seg), grav, steps)
+            val result = WakeMotionRefinement.refine(
+                listOf(seg),
+                grav,
+                steps,
+                allowLegacyActivityClassForResearch = true,
+            )
 
             // Expected kept-as-wake minutes = union of each burst minute +/-1, clamped to the segment.
             val expectedKept = mutableSetOf<Int>()
@@ -215,7 +242,12 @@ class WakeMotionRefinementTest {
         )
         val (grav, steps) = buildNight(totalMinutes = 180, burstMinutes = setOf(45, 135))
 
-        val refined = WakeMotionRefinement.refine(session, grav, steps)
+        val refined = WakeMotionRefinement.refine(
+            session,
+            grav,
+            steps,
+            allowLegacyActivityClassForResearch = true,
+        )
 
         assertTrue(
             "reclassifying 174 of 180 wake minutes to light must raise efficiency",

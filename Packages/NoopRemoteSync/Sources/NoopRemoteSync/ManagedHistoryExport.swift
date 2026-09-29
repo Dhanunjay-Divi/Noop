@@ -572,6 +572,7 @@ public actor ManagedHistoryExporter {
                     try await self.transport.createRestore(
                         requestID: requestID,
                         dataClasses: classes,
+                        includeDocuments: true,
                         includeDeletedDocuments: false,
                         authorization: credential
                     )

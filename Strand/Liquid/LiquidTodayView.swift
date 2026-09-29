@@ -20,6 +20,12 @@ import UIKit
 #endif
 
 struct LiquidTodayView: View {
+    let allowsLocalMutations: Bool
+
+    init(allowsLocalMutations: Bool = true) {
+        self.allowsLocalMutations = allowsLocalMutations
+    }
+
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var router: NavRouter
     @EnvironmentObject var profile: ProfileStore
@@ -92,7 +98,7 @@ struct LiquidTodayView: View {
     private var visibleVitality: Double? {
         ageMetricsLoadedProfileState == profile.ageMetricStateToken ? vitality : nil
     }
-    @State private var stepsEst: Double?           // steps_est, day-keyed to the selected day (fallback)
+    @State private var stepsEst: Double?           // steps_est, selected-day diagnostic only
     @State private var importedStepsDay: Int?      // Apple Health measured steps for the selected day (preferred)
     @State private var importedActiveKcalDay: Double?  // Apple Health active component for the selected day
     @State private var importedRestingKcalDay: Double? // Apple Health basal/resting component for the selected day
@@ -137,14 +143,12 @@ struct LiquidTodayView: View {
         #endif
         return saved
     }
-    // The Key-Metrics grid always shows the full catalog. The shared editor chooses the three-to-five
-    // metrics pinned first and their order; every applicable tile keeps its compact history trace.
+    // Today stays focused on the user's three-to-five selected metrics. The full catalog remains one
+    // tap away through "Open all metric history".
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showKeyMetricsEditor = false
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
-    private var visibleKeyMetrics: [KeyMetric] {
-        KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)
-    }
+    private var visibleKeyMetrics: [KeyMetric] { enabledKeyMetrics }
     /// One shared, selected-day-anchored history cache for the compact tile traces. Building this in
     /// `load()` keeps the grid body O(1), and prevents an older selected day from seeing future readings.
     @State private var keyMetricTrends: [KeyMetric: [Double]] = [:]
@@ -445,7 +449,9 @@ struct LiquidTodayView: View {
                     // here as the SAME leaf the classic TodayView renders (and Android's WorkoutInProgressCard),
                     // pinned above the reorderable block so an active manual workout is immediately visible
                     // and taps straight through to Live. Renders nothing when no workout is active.
-                    ActiveWorkoutIndicatorSection()
+                    if allowsLocalMutations {
+                        ActiveWorkoutIndicatorSection()
+                    }
                     // #today-layout (parity with Android): every Today section — the Charge/Effort/Rest hero
                     // and Start-session included — renders in the user's saved order. Reorder via the Arrange
                     // sheet (the header's up/down button; native drag rows); the order persists under the
@@ -466,7 +472,9 @@ struct LiquidTodayView: View {
                     // The suggestion leaf owns the auto-detection mode and candidate gates, so mounting it
                     // here has zero empty-state footprint while making the opt-in feature reachable from
                     // the default Liquid Today screen.
-                    AutoWorkoutCard()
+                    if allowsLocalMutations {
+                        AutoWorkoutCard()
+                    }
                     dataSourcesSection
                 }
                 .padding(.horizontal, 16)
@@ -481,9 +489,9 @@ struct LiquidTodayView: View {
             }
             .modifier(LegacyLiquidTodayScrollOffsetProbe())
             #if os(macOS)
-            // Keep the phone-shaped column readable + centred on the wide mac detail pane. The sky is a
-            // ScrollView background (full-bleed), so constraining the content column here doesn't touch it.
-            .frame(maxWidth: 680)
+            // Use the desktop pane without returning to the detached two-column self-check layout.
+            // The sky remains full-bleed while one stable content track keeps the reading order intact.
+            .frame(maxWidth: 960)
             .frame(maxWidth: .infinity)
             #endif
         }
@@ -604,20 +612,27 @@ struct LiquidTodayView: View {
             set: { if !$0 { selectedHeroMetric = nil } }
         )) {
             if let metric = selectedHeroMetric {
-                MetricDetailView(metric: metric)
+                MetricDetailView(
+                    metric: metric,
+                    allowsLocalMutations: allowsLocalMutations
+                )
             }
         }
         .sheet(item: $explainedMetric) { metric in
             MetricExplanationSheet(metric: metric)
         }
         .sheet(isPresented: $showCustomise) {
-            DashboardCardsEditorSheet(selectionRaw: $dashboardCardsRaw)
+            if allowsLocalMutations {
+                DashboardCardsEditorSheet(selectionRaw: $dashboardCardsRaw)
+            }
         }
         .sheet(isPresented: $showSettings) {
-            NavigationStack {
-                SettingsView(focus: .profile)
-                    .background(StrandPalette.surfaceBase.ignoresSafeArea())
-                    .liquidSheetDoneChrome { showSettings = false }
+            if allowsLocalMutations {
+                NavigationStack {
+                    SettingsView(focus: .profile)
+                        .background(StrandPalette.surfaceBase.ignoresSafeArea())
+                        .liquidSheetDoneChrome { showSettings = false }
+                }
             }
         }
         // Live Session (silent guardian, beta): the in-session screen owns the whole display — full
@@ -626,12 +641,16 @@ struct LiquidTodayView: View {
         .liveSessionCover(isPresented: $showLiveSession)
         // #today-layout: the Arrange sheet — native drag-to-reorder rows over the same persisted order.
         .sheet(isPresented: $showArrangeSheet) {
-            TodayArrangeSheet(orderRaw: $sectionOrderRaw)
+            if allowsLocalMutations {
+                TodayArrangeSheet(orderRaw: $sectionOrderRaw)
+            }
         }
         // #430 parity: the Key-Metrics editor (selection + order + the Detailed-tiles switch), the same
         // sheet the classic macOS grid uses, bound to the same persisted layout string.
         .sheet(isPresented: $showKeyMetricsEditor) {
-            KeyMetricsEditorSheet(layoutRaw: $keyMetricsRaw)
+            if allowsLocalMutations {
+                KeyMetricsEditorSheet(layoutRaw: $keyMetricsRaw)
+            }
         }
         #if os(macOS)
         // Hide the mac window toolbar's vibrant material so the full-bleed day-of-sky reads dark + edge-to-edge
@@ -683,7 +702,9 @@ struct LiquidTodayView: View {
                 // a UI reload. syncNow() is internally gated (connected + bonded + not-already-backfilling),
                 // so a pull while disconnected or mid-offload safely no-ops. The sync status chip owns the
                 // ongoing offload progress; the pull spinner stays short (the reload below).
-                ble.syncNow()
+                if allowsLocalMutations {
+                    ble.syncNow()
+                }
                 let previousSeq = repo.refreshSeq
                 await repo.refresh()
                 // A changed refreshSeq re-runs the keyed task above. Only an unchanged refresh needs an
@@ -710,63 +731,68 @@ struct LiquidTodayView: View {
                 LiquidWordmark(compact: true)
                 Spacer(minLength: 8)
                 HStack(spacing: 8) {
-                    NavigationLink(value: TabRoute.calendar) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(StrandPalette.textPrimary)
-                            .frame(width: 34, height: 34)
-                            .background(Circle().fill(StrandPalette.surfaceRaised.opacity(0.82)))
-                            .overlay(Circle().strokeBorder(
-                                StrandPalette.hairlineStrong.opacity(0.72),
-                                lineWidth: 1
-                            ))
-                            .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
+                    Group {
+                        if allowsLocalMutations {
+                            NavigationLink(value: TabRoute.calendar) {
+                                todayCalendarButtonLabel
+                            }
+                        } else {
+                            NavigationLink {
+                                CalendarMonthView()
+                            } label: {
+                                todayCalendarButtonLabel
+                            }
+                        }
                     }
                     .buttonStyle(LiquidPressStyle())
                     .accessibilityLabel("History calendar")
                     .accessibilityIdentifier("noop.today.calendar")
                     // A real profile photo can carry identity beside the wordmark. With no photo, use a
                     // quiet person glyph instead of repeating the NOOP logo twice in the same masthead.
-                    Button { showSettings = true } label: {
-                        if profile.hasAvatar {
-                            ProfileAvatarView(imageData: profile.avatarImageData, size: 34)
-                                .frame(width: 34, height: 34)
-                        } else {
-                            Image(systemName: "person.crop.circle")
-                                .font(.system(size: 18, weight: .semibold))
+                    if allowsLocalMutations {
+                        Button { showSettings = true } label: {
+                            if profile.hasAvatar {
+                                ProfileAvatarView(imageData: profile.avatarImageData, size: 34)
+                                    .frame(width: 34, height: 34)
+                            } else {
+                                Image(systemName: "person.crop.circle")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                    .frame(width: 34, height: 34)
+                                    .background(Circle().fill(StrandPalette.surfaceRaised.opacity(0.82)))
+                                    .overlay(Circle().strokeBorder(StrandPalette.hairlineStrong.opacity(0.72), lineWidth: 1))
+                                    .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
+                            }
+                        }
+                        .buttonStyle(LiquidPressStyle())
+                        .accessibilityLabel("Profile")
+                    }
+                    LiquidBatteryButton()
+                    // Keep page customisation in one conventional overflow instead of giving three
+                    // editing actions equal visual weight beside live health controls.
+                    if allowsLocalMutations {
+                        Menu {
+                            Button { showArrangeSheet = true } label: {
+                                Label("Arrange sections", systemImage: "arrow.up.arrow.down")
+                            }
+                            Button { showCustomise = true } label: {
+                                Label("Dashboard cards", systemImage: "rectangle.grid.1x2")
+                            }
+                            Button { showKeyMetricsEditor = true } label: {
+                                Label("Key metrics", systemImage: "slider.horizontal.3")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 14, weight: .bold))
                                 .foregroundStyle(StrandPalette.textPrimary)
                                 .frame(width: 34, height: 34)
                                 .background(Circle().fill(StrandPalette.surfaceRaised.opacity(0.82)))
                                 .overlay(Circle().strokeBorder(StrandPalette.hairlineStrong.opacity(0.72), lineWidth: 1))
                                 .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
                         }
+                        .buttonStyle(LiquidPressStyle())
+                        .accessibilityLabel("Customize Today")
                     }
-                    .buttonStyle(LiquidPressStyle())
-                    .accessibilityLabel("Profile")
-                    LiquidBatteryButton()
-                    // Keep page customisation in one conventional overflow instead of giving three
-                    // editing actions equal visual weight beside live health controls.
-                    Menu {
-                        Button { showArrangeSheet = true } label: {
-                            Label("Arrange sections", systemImage: "arrow.up.arrow.down")
-                        }
-                        Button { showCustomise = true } label: {
-                            Label("Dashboard cards", systemImage: "rectangle.grid.1x2")
-                        }
-                        Button { showKeyMetricsEditor = true } label: {
-                            Label("Key metrics", systemImage: "slider.horizontal.3")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(StrandPalette.textPrimary)
-                            .frame(width: 34, height: 34)
-                            .background(Circle().fill(StrandPalette.surfaceRaised.opacity(0.82)))
-                            .overlay(Circle().strokeBorder(StrandPalette.hairlineStrong.opacity(0.72), lineWidth: 1))
-                            .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
-                    }
-                    .buttonStyle(LiquidPressStyle())
-                    .accessibilityLabel("Customize Today")
                 }
             }
 
@@ -806,6 +832,19 @@ struct LiquidTodayView: View {
                     .liquidPopoverAdaptation()
             }
         }
+    }
+
+    private var todayCalendarButtonLabel: some View {
+        Image(systemName: "calendar")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(StrandPalette.textPrimary)
+            .frame(width: 34, height: 34)
+            .background(Circle().fill(StrandPalette.surfaceRaised.opacity(0.82)))
+            .overlay(Circle().strokeBorder(
+                StrandPalette.hairlineStrong.opacity(0.72),
+                lineWidth: 1
+            ))
+            .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
     }
 
     private var dayPickerButton: some View {
@@ -934,6 +973,7 @@ struct LiquidTodayView: View {
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Enable weather") {
+                    guard allowsLocalMutations else { return }
                     todayWeatherEnabled = true
                     weather.enableAndRefresh()
                 }
@@ -949,6 +989,7 @@ struct LiquidTodayView: View {
         if weather.snapshot != nil || weather.status == .denied {
             showWeatherDetails = true
         } else {
+            guard allowsLocalMutations else { return }
             todayWeatherEnabled = true
             weather.enableAndRefresh()
         }
@@ -996,7 +1037,8 @@ struct LiquidTodayView: View {
         case .hero:
             heroCard
         case .liveSession:
-            if Self.showsCollectorLiveSessionEntry(liveSessionsBeta: liveSessionsBeta) {
+            if allowsLocalMutations,
+               Self.showsCollectorLiveSessionEntry(liveSessionsBeta: liveSessionsBeta) {
                 liveSessionStartRow
             }
         case .why:
@@ -1026,7 +1068,9 @@ struct LiquidTodayView: View {
         case .yourCards:
             yourCardsSection
         case .journal:
-            if selectedDayOffset == 0 { JournalReminderCard() }
+            if allowsLocalMutations, selectedDayOffset == 0 {
+                JournalReminderCard()
+            }
         }
     }
 
@@ -1414,24 +1458,38 @@ struct LiquidTodayView: View {
             // "Full day" affordance so it's discoverable again. (This comment used to claim the Deep
             // Timeline already drew sleep + activity bands — it didn't at the time; the #979 spin-off
             // added that parity in FullDayChartView.)
-            NavigationLink(value: TabRoute.fullDayChart) {
-                card {
-                    VStack(spacing: 10) {
-                        // Isolated leaf: it observes LiveState so the ~1 Hz HR notifies re-render ONLY
-                        // this card, never the whole Today. Shows the current bpm live with a rolling
-                        // beat-by-beat trace; falls back to today's banked 5-minute trace when idle.
-                        LiquidLiveHR(tint: liquidHeart, fallback: hrValues, animated: dataLoaded)
-                        HStack(spacing: 4) {
-                            Spacer()
-                            Text("Full day").font(StrandFont.caption).foregroundStyle(StrandPalette.accent)
-                            Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(StrandPalette.accent)
-                        }
+            Group {
+                if allowsLocalMutations {
+                    NavigationLink(value: TabRoute.fullDayChart) {
+                        heartRateCardContent
+                    }
+                } else {
+                    NavigationLink {
+                        FullDayChartView()
+                    } label: {
+                        heartRateCardContent
                     }
                 }
             }
             .buttonStyle(LiquidPressStyle())
             .accessibilityHint("Opens the full-day heart rate timeline")
+        }
+    }
+
+    private var heartRateCardContent: some View {
+        card {
+            VStack(spacing: 10) {
+                // Isolated leaf: it observes LiveState so the ~1 Hz HR notifies re-render ONLY
+                // this card, never the whole Today. Shows the current bpm live with a rolling
+                // beat-by-beat trace; falls back to today's banked 5-minute trace when idle.
+                LiquidLiveHR(tint: liquidHeart, fallback: hrValues, animated: dataLoaded)
+                HStack(spacing: 4) {
+                    Spacer()
+                    Text("Full day").font(StrandFont.caption).foregroundStyle(StrandPalette.accent)
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(StrandPalette.accent)
+                }
+            }
         }
     }
 
@@ -1443,14 +1501,16 @@ struct LiquidTodayView: View {
                 Text("YOUR CARDS").font(StrandFont.overline).tracking(0)
                     .foregroundStyle(StrandPalette.textTertiary)
                 Spacer()
-                Button { showCustomise = true } label: {
-                    // #492 item 4 parity: unify the Your Cards / Key Metrics edit affordance to "EDIT" across
-                    // platforms (Android #563). Reuse the localized "Edit" key, uppercased at display, so this
-                    // stays translated (BEARBEITEN / MODIFIER / …) without a new literal.
-                    Text(String(localized: "Edit").uppercased()).font(StrandFont.overlineScaled(11)).tracking(0)
-                        .foregroundStyle(StrandPalette.accent)
+                if allowsLocalMutations {
+                    Button { showCustomise = true } label: {
+                        // #492 item 4 parity: unify the Your Cards / Key Metrics edit affordance to "EDIT" across
+                        // platforms (Android #563). Reuse the localized "Edit" key, uppercased at display, so this
+                        // stays translated (BEARBEITEN / MODIFIER / …) without a new literal.
+                        Text(String(localized: "Edit").uppercased()).font(StrandFont.overlineScaled(11)).tracking(0)
+                            .foregroundStyle(StrandPalette.accent)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 2)
             .padding(.top, 4)
@@ -1497,10 +1557,10 @@ struct LiquidTodayView: View {
                      symbol: card.icon, tint: StrandPalette.accent,
                      frac: fracOver(displayDay?.respRateBpm, 24))
         case .steps:
-            // Route by the EXACT (key, source) the tile chose to display — WHOOP 5/MG motion estimate,
-            // imported Apple Health count, or calibrated motion estimate - NOT by bare key (bare "steps"
-            // resolves to apple-health and would mismatch a strap-derived value). Order-independent.
-            cardLink(.metricSourced(key: stepsDetailKey, source: stepsDetailSource), title: card.title, sub: stepsSourceCaption,
+            // A blank primary Steps card is intentionally not a link: there is no measured source whose
+            // dossier can be opened without exposing wrist motion as walking.
+            cardLink(stepsDetailMetric.map { .metricSourced(key: $0.key, source: $0.source) },
+                     title: card.title, sub: stepsSourceCaption,
                      value: stepsText, symbol: card.icon,
                      tint: StrandPalette.metricCyan, frac: fracOver(stepCount, 10000))
         case .bloodOxygen:
@@ -1539,32 +1599,109 @@ struct LiquidTodayView: View {
 
     /// One card row pushing its `TabRoute` by value — the first hop off the Today root must ride
     /// the tab's `NavigationPath` so a re-tap of the Today tab can pop it (#198; see TabRoute.swift).
-    private func cardLink(_ route: TabRoute, title: String, sub: String,
+    @ViewBuilder
+    private func cardLink(_ route: TabRoute?, title: String, sub: String,
                           value: String, symbol: String, tint: Color, frac: Double?) -> some View {
-        NavigationLink(value: route) {
-            HStack(spacing: 12) {
-                MetricGlyph(symbol, size: 32)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title.uppercased()).font(StrandFont.overlineScaled(11)).tracking(0)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                    Text(sub).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+        if let route {
+            if allowsLocalMutations {
+                NavigationLink(value: route) {
+                    cardLinkContent(
+                        title: title, sub: sub, value: value, symbol: symbol,
+                        tint: tint, showsChevron: true)
                 }
-                Spacer(minLength: 8)
-                Text(value).font(StrandFont.number(17)).foregroundStyle(StrandPalette.textPrimary)
+                .buttonStyle(LiquidPressStyle())
+            } else if isReadOnlyNavigationRoute(route) {
+                NavigationLink {
+                    readOnlyDestination(for: route)
+                } label: {
+                    cardLinkContent(
+                        title: title, sub: sub, value: value, symbol: symbol,
+                        tint: tint, showsChevron: true)
+                }
+                .buttonStyle(LiquidPressStyle())
+            } else {
+                cardLinkContent(
+                    title: title, sub: sub, value: value, symbol: symbol,
+                    tint: tint, showsChevron: false)
+            }
+        } else {
+            cardLinkContent(
+                title: title, sub: sub, value: value, symbol: symbol,
+                tint: tint, showsChevron: false)
+        }
+    }
+
+    private func isReadOnlyNavigationRoute(_ route: TabRoute) -> Bool {
+        switch route {
+        case .fullDayChart, .metric, .metricSourced, .metricExplorer,
+             .stress, .health, .calendar:
+            return true
+        case .workouts, .dataSources, .sleep, .hydration, .smartAlarm,
+             .coupled:
+            return false
+        }
+    }
+
+    @ViewBuilder
+    private func readOnlyDestination(for route: TabRoute) -> some View {
+        switch route {
+        case .fullDayChart:
+            FullDayChartView()
+        case .metric(let key):
+            if let metric = MetricCatalog.all.first(where: { $0.key == key }) {
+                MetricDetailView(metric: metric, allowsLocalMutations: false)
+            }
+        case .metricSourced(let key, let source):
+            if let metric = MetricCatalog.all.first(where: {
+                $0.key == key && $0.source == source
+            }) ?? MetricCatalog.all.first(where: { $0.key == key }) {
+                MetricDetailView(metric: metric, allowsLocalMutations: false)
+            }
+        case .metricExplorer:
+            MetricExplorerView(allowsLocalMutations: false)
+        case .stress:
+            StressView(allowsLocalMutations: false)
+        case .health:
+            HealthView(allowsLocalMutations: false)
+        case .calendar:
+            CalendarMonthView()
+        case .workouts, .dataSources, .sleep, .hydration, .smartAlarm,
+             .coupled:
+            EmptyView()
+        }
+    }
+
+    private func cardLinkContent(
+        title: String,
+        sub: String,
+        value: String,
+        symbol: String,
+        tint: Color,
+        showsChevron: Bool
+    ) -> some View {
+        HStack(spacing: 12) {
+            MetricGlyph(symbol, size: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title.uppercased()).font(StrandFont.overlineScaled(11)).tracking(0)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(sub).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+            }
+            Spacer(minLength: 8)
+            Text(value).font(StrandFont.number(17)).foregroundStyle(StrandPalette.textPrimary)
+            if showsChevron {
                 Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(StrandPalette.textTertiary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(
-                FrostedCardSurface(
-                    tint: tint,
-                    cornerRadius: 20,
-                    washStrength: 0.60
-                )
-            )
         }
-        .buttonStyle(LiquidPressStyle())
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(
+            FrostedCardSurface(
+                tint: tint,
+                cornerRadius: 20,
+                washStrength: 0.60
+            )
+        )
     }
 
     /// Calories need more hierarchy than a one-number dashboard row. The large number is Total only
@@ -1573,9 +1710,11 @@ struct LiquidTodayView: View {
     private func energyCardLink(_ card: DashboardCard) -> some View {
         let breakdown = energyBreakdown
         let metric = caloriesDetailMetric
-        return NavigationLink(value: TabRoute.metricSourced(
-            key: metric?.key ?? "energy_kcal", source: metric?.source ?? "my-whoop")) {
-            VStack(alignment: .leading, spacing: 10) {
+        let route = TabRoute.metricSourced(
+            key: metric?.key ?? "energy_kcal",
+            source: metric?.source ?? "my-whoop"
+        )
+        let content = VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
                     MetricGlyph(card.icon, size: 32)
                     VStack(alignment: .leading, spacing: 2) {
@@ -1618,6 +1757,18 @@ struct LiquidTodayView: View {
             .padding(.vertical, 12)
             .background(FrostedCardSurface(tint: StrandPalette.metricAmber,
                                            cornerRadius: 20, washStrength: 0.60))
+        return Group {
+            if allowsLocalMutations {
+                NavigationLink(value: route) {
+                    content
+                }
+            } else {
+                NavigationLink {
+                    readOnlyDestination(for: route)
+                } label: {
+                    content
+                }
+            }
         }
         .buttonStyle(LiquidPressStyle())
         .accessibilityHint("Opens the energy breakdown, trend and explanation")
@@ -1847,7 +1998,7 @@ struct LiquidTodayView: View {
                 if signals.isEmpty {
                     dailyPlanEmptyRow(
                         symbol: "waveform.path.ecg",
-                        text: String(localized: "daily_plan.why.unavailable")
+                        text: String(localized: "daily_plan.watch.unavailable")
                     )
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
@@ -1888,18 +2039,22 @@ struct LiquidTodayView: View {
             sectionHead("daily_plan.target.title", trailing: dailyPlanTargetStatusKey(plan))
             card {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("daily_plan.check_in.question")
-                        .font(StrandFont.headline)
-                        .foregroundStyle(StrandPalette.textPrimary)
+                    if allowsLocalMutations {
+                        Text("daily_plan.check_in.question")
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
 
-                    VStack(spacing: 8) {
-                        dailyPlanCheckInButton(.asUsual, label: "daily_plan.check_in.as_usual")
-                        dailyPlanCheckInButton(.belowUsual, label: "daily_plan.check_in.below_usual")
-                        dailyPlanCheckInButton(.painOrUnwell, label: "daily_plan.check_in.pain_unwell")
+                        VStack(spacing: 8) {
+                            dailyPlanCheckInButton(.asUsual, label: "daily_plan.check_in.as_usual")
+                            dailyPlanCheckInButton(.belowUsual, label: "daily_plan.check_in.below_usual")
+                            dailyPlanCheckInButton(.painOrUnwell, label: "daily_plan.check_in.pain_unwell")
+                        }
                     }
 
-                    dailyPlanDivider
-                    dailyPlanResult(plan)
+                    if plan.availability != .checkInNeeded || !allowsLocalMutations {
+                        dailyPlanDivider
+                        dailyPlanResult(plan)
+                    }
                     if let adjustment = plan.workoutAdjustment {
                         dailyPlanDivider
                         dailyPlanWorkoutAdjustment(adjustment)
@@ -2018,7 +2173,7 @@ struct LiquidTodayView: View {
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
 
-                if selectedDayOffset == 0 {
+                if allowsLocalMutations, selectedDayOffset == 0 {
                     Divider().overlay(StrandPalette.hairline)
                     Toggle(isOn: strainTargetToggle(plan: plan)) {
                         VStack(alignment: .leading, spacing: 3) {
@@ -2042,6 +2197,7 @@ struct LiquidTodayView: View {
         Binding(
             get: { behavior.strainTargetNudge },
             set: { enabled in
+                guard allowsLocalMutations else { return }
                 guard enabled else {
                     behavior.strainTargetNudge = false
                     StrainTargetNotifier.setEnabled(false)
@@ -2649,18 +2805,22 @@ struct LiquidTodayView: View {
                     ? String(localized: "Today's snapshot")
                     : selectedLogicalDay.formatted(date: .abbreviated, time: .omitted))
                 // The editor chooses metrics/order; full trend exploration stays in detail/Trends.
-                Button { showKeyMetricsEditor = true } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(StrandPalette.accent)
+                if allowsLocalMutations {
+                    Button { showKeyMetricsEditor = true } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(StrandPalette.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Edit Key Metrics")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Edit Key Metrics")
             }
-            // Pinned metrics lead in the user's order, followed by every remaining catalog metric.
-            // Two columns keep values and long labels readable; three made the grid feel like a table.
+            // Show only the editor-selected metrics here. The full catalog remains in metric history.
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: NoopMetrics.space3), count: 2),
+                columns: Array(
+                    repeating: GridItem(.flexible(), spacing: NoopMetrics.space3),
+                    count: dynamicTypeSize.isAccessibilitySize ? 1 : 2
+                ),
                 spacing: NoopMetrics.space3
             ) {
                 ForEach(visibleKeyMetrics) { metric in
@@ -2668,15 +2828,29 @@ struct LiquidTodayView: View {
                         .accessibilityIdentifier("noop.today.key-metric.\(metric.rawValue)")
                 }
             }
-            NavigationLink(value: TabRoute.metricExplorer) {
-                Label("Open all metric history", systemImage: "clock.arrow.circlepath")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .frame(maxWidth: .infinity)
+            Group {
+                if allowsLocalMutations {
+                    NavigationLink(value: TabRoute.metricExplorer) {
+                        openMetricHistoryLabel
+                    }
+                } else {
+                    NavigationLink {
+                        MetricExplorerView(allowsLocalMutations: false)
+                    } label: {
+                        openMetricHistoryLabel
+                    }
+                }
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("noop.today.key-metrics.open-history")
         }
-        .accessibilityIdentifier("noop.today.key-metrics")
+    }
+
+    private var openMetricHistoryLabel: some View {
+        Label("Open all metric history", systemImage: "clock.arrow.circlepath")
+            .font(StrandFont.footnote)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .frame(maxWidth: .infinity, minHeight: 44)
     }
 
     /// One editor-selected Key-Metric tile: the metric's value/tint/fill exactly as the old hard-coded
@@ -2721,7 +2895,7 @@ struct LiquidTodayView: View {
                   symbol: metric.icon, key: "resp_rate")
         case .steps:
             ktile(String(localized: "Steps"), stepsText, "", StrandPalette.chargeColor,
-                  nil, trend: keyMetricTrends[.steps], symbol: metric.icon, key: stepsDetailKey,
+                  nil, trend: keyMetricTrends[.steps], symbol: metric.icon, key: nil,
                   detailMetric: stepsDetailMetric)
         case .weight:
             ktile(String(localized: "Weight"), importedWeightKg.map(weightText) ?? StrandFormat.missing, "",
@@ -2777,11 +2951,22 @@ struct LiquidTodayView: View {
 
         return Group {
             if let metric {
-                NavigationLink(value: TabRoute.metricSourced(key: metric.key, source: metric.source)) {
-                    tile
+                let route = TabRoute.metricSourced(key: metric.key, source: metric.source)
+                if allowsLocalMutations {
+                    NavigationLink(value: route) {
+                        tile
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens active, resting and total energy details")
+                } else {
+                    NavigationLink {
+                        readOnlyDestination(for: route)
+                    } label: {
+                        tile
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens active, resting and total energy details")
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("Opens active, resting and total energy details")
             } else {
                 tile
             }
@@ -2811,11 +2996,23 @@ struct LiquidTodayView: View {
             spacing: showsTrend ? NoopMetrics.space1 : NoopMetrics.space2
         ) {
             keyMetricTileHeader(label, symbol: symbol, trend: trend)
-            (Text(value).font(StrandFont.number(24))
-                + Text(unit.isEmpty ? "" : " \(unit)").font(StrandFont.subhead))
-                .foregroundStyle(StrandPalette.textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                        Text(value)
+                            .font(StrandFont.metricValue)
+                        if !unit.isEmpty {
+                            Text(unit)
+                                .font(StrandFont.subhead)
+                        }
+                    }
+                } else {
+                    (Text(value).font(StrandFont.metricValue)
+                        + Text(unit.isEmpty ? "" : " \(unit)").font(StrandFont.subhead))
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(StrandPalette.textPrimary)
             if showsTrend, let trend {
                 Sparkline(
                     values: trend,
@@ -2860,10 +3057,20 @@ struct LiquidTodayView: View {
             if let metric = detailMetric ?? key.flatMap({ key in
                 MetricCatalog.all.first(where: { $0.key == key })
             }) {
-                NavigationLink(value: TabRoute.metricSourced(key: metric.key, source: metric.source)) {
-                    tile
-                }
+                let route = TabRoute.metricSourced(key: metric.key, source: metric.source)
+                if allowsLocalMutations {
+                    NavigationLink(value: route) {
+                        tile
+                    }
                     .buttonStyle(.plain)
+                } else {
+                    NavigationLink {
+                        readOnlyDestination(for: route)
+                    } label: {
+                        tile
+                    }
+                    .buttonStyle(.plain)
+                }
             } else {
                 tile
             }
@@ -2880,22 +3087,20 @@ struct LiquidTodayView: View {
                     trendDirectionBadge(trend)
                 }
                 Text(label.uppercased())
-                    .font(StrandFont.overlineScaled(9.5))
+                    .font(StrandFont.metricLabel)
                     .tracking(0)
                     .foregroundStyle(StrandPalette.textSecondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.62)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
             HStack(alignment: .center, spacing: NoopMetrics.space2) {
                 MetricGlyph(symbol, size: 28)
                 Text(label.uppercased())
-                    .font(StrandFont.overlineScaled(9.5))
+                    .font(StrandFont.metricLabel)
                     .tracking(0)
                     .foregroundStyle(StrandPalette.textSecondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 Spacer(minLength: 0)
             }
         }
@@ -2991,19 +3196,16 @@ struct LiquidTodayView: View {
             record(.rest, day: point.day, value: point.value)
         }
 
-        // Calibrated motion is the lowest-priority steps source.
-        for point in stepEstimates {
-            record(.steps, day: point.day, value: point.value)
-        }
+        // Gravity-only calibration remains an inspectable motion estimate, not a primary Steps source.
+        _ = stepEstimates
 
-        // The merged daily cache owns physiological history. A direct band step count replaces the
-        // calibrated estimate for that day, matching `MetricCatalog.todayStepsValue`.
+        // The merged daily cache owns physiological history. Its legacy `steps` field may contain
+        // reverse-engineered wrist motion, so it cannot populate the primary Steps trend.
         for day in days {
             record(.hrv, day: day.day, value: day.avgHrv)
             record(.restingHr, day: day.day, value: day.restingHr.map(Double.init))
             record(.bloodOxygen, day: day.day, value: day.spo2Pct)
             record(.respiratory, day: day.day, value: day.respRateBpm)
-            record(.steps, day: day.day, value: day.steps.map(Double.init))
         }
 
         // The resolver contributes only calibrated daily percentages from compatible sources. It can
@@ -3012,8 +3214,8 @@ struct LiquidTodayView: View {
             record(.bloodOxygen, day: point.day, value: point.value)
         }
 
-        // Apple Health is measured and therefore wins the per-day steps slot. Weight is naturally
-        // sparse; it only draws once two actual weigh-ins fall inside the selected window.
+        // Apple Health pedometer rows are the only primary Steps source. Weight is naturally sparse; it
+        // only draws once two actual weigh-ins fall inside the selected window.
         for day in appleRows {
             record(.steps, day: day.day, value: day.steps.map(Double.init))
             record(.weight, day: day.day, value: day.weightKg)
@@ -3044,35 +3246,49 @@ struct LiquidTodayView: View {
                 // source + sport is unique per session in practice (one device cannot start two sessions of
                 // the same sport in the same second) and is stable across refetches.
                 ForEach(workouts, id: \.workoutRowIdentity) { workout in
-                    NavigationLink(value: TabRoute.workouts) { workoutCard(workout) }
-                        .buttonStyle(LiquidPressStyle())
-                }
-            } else {
-                NavigationLink(value: TabRoute.workouts) {
-                    card {
-                        HStack(spacing: NoopMetrics.space3) {
-                            MetricGlyph("figure.run", size: 36)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(selectedDayOffset == 0
-                                     ? String(localized: "No workout today")
-                                     : String(localized: "No workout logged that day"))
-                                    .font(StrandFont.subhead)
-                                    .foregroundStyle(StrandPalette.textPrimary)
-                                Text(selectedDayOffset == 0
-                                     ? String(localized: "A tracked or imported session will appear here automatically.")
-                                     : String(localized: "Choose another day or open Workouts to browse your log."))
-                                    .font(StrandFont.footnote)
-                                    .foregroundStyle(StrandPalette.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer(minLength: 4)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(StrandPalette.textTertiary)
-                        }
+                    if allowsLocalMutations {
+                        NavigationLink(value: TabRoute.workouts) { workoutCard(workout) }
+                            .buttonStyle(LiquidPressStyle())
+                    } else {
+                        workoutCard(workout)
                     }
                 }
-                .buttonStyle(LiquidPressStyle())
+            } else {
+                if allowsLocalMutations {
+                    NavigationLink(value: TabRoute.workouts) {
+                        noWorkoutCard(showsChevron: true)
+                    }
+                    .buttonStyle(LiquidPressStyle())
+                } else {
+                    noWorkoutCard(showsChevron: false)
+                }
+            }
+        }
+    }
+
+    private func noWorkoutCard(showsChevron: Bool) -> some View {
+        card {
+            HStack(spacing: NoopMetrics.space3) {
+                MetricGlyph("figure.run", size: 36)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(selectedDayOffset == 0
+                         ? String(localized: "No workout today")
+                         : String(localized: "No workout logged that day"))
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(selectedDayOffset == 0
+                         ? String(localized: "A tracked or imported session will appear here automatically.")
+                         : String(localized: "Choose another day or open Workouts to browse your log."))
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
             }
         }
     }
@@ -3105,38 +3321,50 @@ struct LiquidTodayView: View {
     private var dataSourcesSection: some View {
         VStack(spacing: 8) {
             sectionHead("DATA SOURCES", trailing: "Provenance")
-            NavigationLink(value: TabRoute.dataSources) {
-                card {
-                    VStack(spacing: 12) {
-                        if dynamicTypeSize.isAccessibilitySize {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Synced from").font(StrandFont.subhead)
-                                    .foregroundStyle(StrandPalette.textSecondary)
-                                Label("View sources", systemImage: "chevron.right")
-                                    .font(StrandFont.subhead)
+            if allowsLocalMutations {
+                NavigationLink(value: TabRoute.dataSources) {
+                    dataSourcesCard(showsNavigation: true)
+                }
+                .buttonStyle(LiquidPressStyle())
+            } else {
+                dataSourcesCard(showsNavigation: false)
+            }
+        }
+    }
+
+    private func dataSourcesCard(showsNavigation: Bool) -> some View {
+        card {
+            VStack(spacing: 12) {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Synced from").font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        if showsNavigation {
+                            Label("View sources", systemImage: "chevron.right")
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    HStack {
+                        Text("Synced from").font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        Spacer()
+                        if showsNavigation {
+                            HStack(spacing: 4) {
+                                Text("View sources").font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(StrandPalette.textTertiary)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            HStack {
-                                Text("Synced from").font(StrandFont.subhead)
-                                    .foregroundStyle(StrandPalette.textSecondary)
-                                Spacer()
-                                HStack(spacing: 4) {
-                                    Text("View sources").font(StrandFont.subhead)
-                                        .foregroundStyle(StrandPalette.textTertiary)
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(StrandPalette.textTertiary)
-                                }
-                            }
                         }
-                        LiquidStrapBatteryRow()
-                        LiquidSyncStatusRow()
                     }
                 }
+                LiquidStrapBatteryRow()
+                LiquidSyncStatusRow()
             }
-            .buttonStyle(LiquidPressStyle())
         }
     }
 
@@ -3368,6 +3596,7 @@ struct LiquidTodayView: View {
         cachedChargeDisplay = resolvedChargeDisplay
         if isToday,
            case .scored = resolvedChargeDisplay,
+           allowsLocalMutations,
            chargeLandingHapticDay != tkey {
             chargeLandingHapticDay = tkey
             chargeLandingHapticTrigger += 1
@@ -3506,9 +3735,8 @@ struct LiquidTodayView: View {
         // Never let the history tail pose as today's count. An exact-day row may be absent while an
         // older estimate exists; Today must stay empty until this selected day actually has a point.
         let stepsEstLocal = stepsByDay[requestedDayKey]
-        // Imported Apple Health steps for the SELECTED day (max across rows), the middle tier between the
-        // measured strap count and the motion estimate. Health Connect is Android-only, so apple-health is
-        // the sole import source on iOS. Mirrors Android `stepsForDay` (#377).
+        // Imported Apple Health steps for the selected day (max across rows). Health Connect is
+        // Android-only, so Apple Health is the sole primary Steps source on iOS.
         let importedStepsLocal = appleRows.filter { $0.day == requestedDayKey }.compactMap { $0.steps }.max()
         // Weight is not expected every day. Use the freshest measured Apple Health value no later than
         // the day being viewed; never borrow from a future day when navigating backwards.
@@ -3783,7 +4011,7 @@ struct LiquidTodayView: View {
     }
 
     private func setDailyActionCheckIn(_ value: DailyActionPlanner.CheckIn) {
-        guard selectedDayOffset == 0 else { return }
+        guard allowsLocalMutations, selectedDayOffset == 0 else { return }
         behavior.setDailyActionCheckIn(value, for: selectedDayKey)
         dailyActionCheckInDay = selectedDayKey
         dailyActionCheckInValue = value.rawValue
@@ -3903,8 +4131,8 @@ struct LiquidTodayView: View {
         )
     }
 
-    // Measured Apple Health count first, then WHOOP 5/MG @57 motion estimate, then calibrated fallback.
-    // The route and source caption below share this precedence so detail always matches the number shown.
+    // Primary Steps requires a measured Apple Health pedometer count. Band motion and calibration remain
+    // separate research/diagnostic series.
     private var stepCount: Double? {
         MetricCatalog.todayStepsValue(imported: importedStepsDay.map(Double.init),
                                       motionDerived: displayDay?.steps.map(Double.init),
@@ -3916,12 +4144,9 @@ struct LiquidTodayView: View {
                                        hasImportedSteps: importedStepsDay != nil)
     }
 
-    /// Truthful source caption for the number on the Liquid Steps card. Apple Health remains an imported
-    /// pedometer count; both local strap paths are clearly labelled as motion-derived estimates.
+    /// Truthful source caption for the number on the Liquid Steps card.
     private var stepsSourceCaption: String {
         if importedStepsDay != nil { return String(localized: "Imported · Apple Health") }
-        if displayDay?.steps != nil { return String(localized: "Motion-derived estimate · Noop Band") }
-        if stepsEst != nil { return String(localized: "Motion-derived estimate · calibrated") }
         return String(localized: "No step source for this day")
     }
 
@@ -3950,9 +4175,6 @@ struct LiquidTodayView: View {
     private func weightText(_ kilograms: Double) -> String {
         UnitFormatter.massFromKilograms(kilograms, unit: massUnit)
     }
-
-    private var stepsDetailKey: String { stepsDetailMetric?.key ?? "steps_est" }
-    private var stepsDetailSource: String { stepsDetailMetric?.source ?? "my-whoop" }
 
     private var energyBreakdown: DailyEnergyBreakdown {
         DailyEnergyBreakdown.resolve(

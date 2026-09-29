@@ -2936,11 +2936,11 @@ private data class VitalDetailModel(
 }
 
 /** Metric-detail keys that are NOT plain DailyMetric columns but series the engines/importers persist
- *  (Fitness Age + Vitality under the computed strap, Steps estimate, Apple active energy). Each Today
+ *  (Fitness Age + Vitality under the computed strap, primary/estimated Steps, Apple active energy). Each Today
  *  dashboard card taps through to ITS OWN focused trend here (2026-07-03), so these load their
  *  series from the repo on demand rather than off the cached `days` columns. Mirrors iOS metricDetail. */
 private val SERIES_BACKED_VITAL_KEYS = setOf(
-    "fitness_age", "vitality", "steps_est", "active_kcal", "rest",
+    "fitness_age", "vitality", "steps", "steps_est", "active_kcal", "rest",
     "weight", "hrv", "rhr", "body_fat", "lean_mass", "vo2max",
 )
 
@@ -3456,46 +3456,46 @@ private suspend fun buildSeriesVitalDetail(
             format = format,
         )
     }
-    "steps_est" -> {
-        // #377: the Today Steps tile resolves an imported measured Health Connect / Apple Health count
-        // first, then WHOOP 5/MG's @57 motion estimate, then the calibrated motion-model fallback.
-        // detail read the calibrated estimate ALONE, so a WHOOP 5.0 with an @57 value saw that history —
-        // clamped flat at StepsEstimateEngine.MAX_DAILY_STEPS = 60,000 when the motion fit over-shoots —
-        // instead of its direct motion estimate. Resolve per day with the SAME precedence so graph + Readings
-        // match the card. iOS routes the @57 path through its explicitly motion-estimate descriptor.
-        // Strap estimates live in DailyMetric.steps; imported measured steps in AppleDaily; the calibrated
-        // estimate in the "steps_est" series - three disjoint stores, so the
-        // per-day `?:` chain never double-counts.
-        val motionDerived = vm.repo.resolvedSeries("steps", "my-whoop", "0000-00-00", "9999-99-99",
-            strapDeviceId = activeDeviceId)
-            .points.associateBy({ it.day }, {
-                VitalReading(it.day, it.value, MOTION_DERIVED_STEPS_SOURCE)
-            })
+    "steps" -> {
+        // Primary Steps mirrors Today exactly: only measured Health Connect / Apple Health values qualify.
+        // Do not query the legacy band-motion series, so a stale 4,000-count wrist-motion row cannot
+        // reappear after tapping a blank Steps card.
         val imported = LinkedHashMap<String, VitalReading>()
         for (r in vm.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31") +
             vm.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31")) {
-            val s = r.steps
-            if (s != null && s > 0) {
+            val s = validImportedStepCount(r.steps)
+            if (s != null) {
                 val candidate = VitalReading(r.day, s.toDouble(), r.deviceId)
                 if (candidate.value > (imported[r.day]?.value ?: Double.NEGATIVE_INFINITY)) {
                     imported[r.day] = candidate
                 }
             }
         }
-        val calibratedEstimate = vm.repo.resolvedSeries("steps_est", "my-whoop", "0000-00-00", "9999-99-99",
-            strapDeviceId = activeDeviceId)
-            .points.associateBy({ it.day }, {
-                VitalReading(it.day, it.value, CALIBRATED_MOTION_STEPS_SOURCE)
-            })
         VitalDetailModel(
             key = key,
             title = uiString(R.string.l10n_health_screen_steps_cdde4f20),
             unit = "steps",
             color = Palette.metricCyan,
-            readings = mergeStepsReadings(motionDerived, imported, calibratedEstimate),
+            readings = mergeStepsReadings(emptyMap(), imported),
             format = { it.roundToInt().toString() },
         )
     }
+    "steps_est" -> VitalDetailModel(
+        key = key,
+        title = uiString(R.string.l10n_settings_screen_steps_estimate_ce7a604d),
+        unit = "steps",
+        color = Palette.metricCyan,
+        readings = vm.repo.resolvedSeries(
+            "steps_est",
+            "my-whoop",
+            "0000-00-00",
+            "9999-99-99",
+            strapDeviceId = activeDeviceId,
+        ).points.map {
+            VitalReading(it.day, it.value, CALIBRATED_MOTION_STEPS_SOURCE)
+        },
+        format = { it.roundToInt().toString() },
+    )
     "active_kcal" -> {
         // #616: calories, like steps (#377), come from TWO disjoint stores — the on-device HR estimate
         // (DailyMetric.activeKcalEst, exposed by resolvedSeries("active_kcal")) and imported Apple/Health-

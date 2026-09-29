@@ -20,11 +20,6 @@ final class IPhonePrimaryTabTests: XCTestCase {
         )
     }
 
-    func testInvitationNamesTheFriendsEntryPointInMore() {
-        XCTAssertTrue(FriendsNavigationCopy.invitationInstruction.contains("More → Friends"))
-        XCTAssertFalse(FriendsNavigationCopy.invitationInstruction.contains("Friends tab"))
-    }
-
     @MainActor
     func testFriendsSummaryDefaultsAreBoundedAndOptInForVitals() {
         let visibility = FriendsService.Visibility()

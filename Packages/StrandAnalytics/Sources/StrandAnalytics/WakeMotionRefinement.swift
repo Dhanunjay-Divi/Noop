@@ -19,12 +19,9 @@ import WhoopProtocol
 // THE FIX. A POST-PASS over the already-staged `[StageSegment]` output of either stager (V1 or V2 — this
 // file never touches their HR-led emission models). For each scored wake segment of at least
 // `minWakeSegmentSeconds`, look at the SAME two signals a human reviewer used above: per-minute
-// step-motion-counter cadence (`StepSample.counter`, wrap-aware, `activityClass` 1=walk/2=run only — see
-// `walkClassTicksPerMinute`) and per-minute gravity posture variance (`postureVariance`). A segment with NO
-// locomotion evidence (`hasNoLocomotion`) and posture stable outside a minority of isolated burst minutes
-// (`isPostureStable`) is a hot-but-still wake call: every non-burst minute is reclassified to `light`,
-// while burst minutes (plus a ±`burstPadMinutes` buffer) are KEPT as wake — the pass only ever shrinks
-// wake time, it never invents wake the incumbent stager didn't already call.
+// step-motion-counter cadence and per-minute gravity posture variance. That cadence interpretation was
+// later withdrawn because @63 is also wear/contact quality. Production therefore returns the incumbent
+// staging byte-for-byte; the old branch remains reachable only from explicit synthetic/research tests.
 //
 // THE DENSITY SELF-GATE (#345). `SleepStagerV2`'s own header notes the WHOOP 4.0 gravity stream is often
 // too sparse to tell "restless in bed" from "out of bed" - the same limitation applies here even harder,
@@ -40,11 +37,9 @@ import WhoopProtocol
 // exactly as a synthetically-sparse 5.0/MG night would; a real 5.0/MG night — which streams both channels
 // densely — is this refinement's expected beneficiary and clears the gate on its own merits.
 //
-// SAFETY POSTURE. Default-off `Experimental` toggle (`PuffinExperiment.motionAwareWakeEnabled` /
-// `Strand/Screens/SettingsView.swift`), consistent with CLAUDE.md's rule for a derived physiological
-// signal: land it as an opt-in refinement, never the default, until it has more than this one reference
-// night behind it. All thresholds below are NAMED CONSTANTS fixed a-priori from that reference night, not
-// fit to labels. Pure, deterministic, no I/O — the Kotlin twin is `WakeMotionRefinement.kt`.
+// SAFETY POSTURE. The user-facing toggle is retired. A stale preference cannot reactivate the algorithm;
+// callers must pass `allowLegacyActivityClassForResearch` explicitly from synthetic/research code. All
+// thresholds remain for reproducible comparison, not production inference.
 public enum WakeMotionRefinement {
 
     // MARK: - Tunables (named, documented constants — see the header for where each one comes from)
@@ -89,25 +84,29 @@ public enum WakeMotionRefinement {
     /// stream, never on strap family/model — see the header.
     public static let minDenseMinuteCoverageFraction: Double = 0.80
 
-    /// WHOOP StepSample `activityClass` codes (community finding #316) that count as locomotion.
-    /// 0 = still (a turn-over, NOT ambulation) is deliberately excluded; nil (unknown/invalid byte) is
-    /// also excluded — unattributed ticks feed the posture-variance half of the gate instead.
-    private static let locomotionActivityClasses: Set<Int> = [1 /* walk */, 2 /* run */]
-
     // MARK: - Public entry points
 
     /// The core pass: reclassify non-burst minutes of eligible wake segments to `light`. `segments` must
     /// tile a single contiguous window in order (as every `stageSession` in this module returns); `grav`/
     /// `steps` should cover at least that window. Byte-identical passthrough when `segments` is empty, the
     /// window is degenerate, or the density self-gate declines.
-    public static func refine(_ segments: [StageSegment], grav: [GravitySample], steps: [StepSample]) -> [StageSegment] {
+    public static func refine(
+        _ segments: [StageSegment],
+        grav: [GravitySample],
+        steps: [StepSample],
+        allowLegacyActivityClassForResearch: Bool = false
+    ) -> [StageSegment] {
+        // @63 has conflicting wear/contact and activity interpretations. Production therefore preserves
+        // the incumbent sleep staging byte-for-byte. The legacy algorithm remains callable only by
+        // explicit synthetic/research tests until a validated gait stream is wired.
+        guard allowLegacyActivityClassForResearch else { return segments }
         guard let windowStart = segments.first?.start, let windowEnd = segments.last?.end, windowEnd > windowStart else {
             return segments
         }
         guard isMotionDense(start: windowStart, end: windowEnd, grav: grav, steps: steps) else { return segments }
 
         let gravByMinute = bucketByMinute(grav) { $0.ts }
-        let ticksByMinute = walkClassTicksPerMinute(steps)
+        let ticksByMinute = legacyWalkClassTicksPerMinute(steps)
 
         var out: [StageSegment] = []
         out.reserveCapacity(segments.count)
@@ -119,8 +118,8 @@ public enum WakeMotionRefinement {
         return out
     }
 
-    /// Toggle-shaped convenience: `enabled = false` is a guaranteed byte-identical passthrough (the
-    /// `PuffinExperiment.motionAwareWakeEnabled` off-path), `enabled = true` runs `refine`.
+    /// Compatibility-shaped convenience. Even `enabled = true` remains a passthrough because `refine`
+    /// requires explicit research authorization that production callers never supply.
     public static func apply(_ segments: [StageSegment], grav: [GravitySample], steps: [StepSample],
                              enabled: Bool) -> [StageSegment] {
         enabled ? refine(segments, grav: grav, steps: steps) : segments
@@ -131,8 +130,18 @@ public enum WakeMotionRefinement {
     /// `avgHRV` are independent of stage labels and are carried over unchanged. Identity passthrough
     /// (same instance's fields, no allocation of a changed copy beyond the equality check) when `refine`
     /// makes no change to the stages.
-    public static func refine(_ session: SleepSession, grav: [GravitySample], steps: [StepSample]) -> SleepSession {
-        let newStages = refine(session.stages, grav: grav, steps: steps)
+    public static func refine(
+        _ session: SleepSession,
+        grav: [GravitySample],
+        steps: [StepSample],
+        allowLegacyActivityClassForResearch: Bool = false
+    ) -> SleepSession {
+        let newStages = refine(
+            session.stages,
+            grav: grav,
+            steps: steps,
+            allowLegacyActivityClassForResearch: allowLegacyActivityClassForResearch
+        )
         guard newStages != session.stages else { return session }
         let newEfficiency = SleepStager.efficiency(start: session.start, end: session.end, stages: newStages)
         return SleepSession(start: session.start, end: session.end, efficiency: newEfficiency,
@@ -274,21 +283,17 @@ public enum WakeMotionRefinement {
         return sumSq / n
     }
 
-    /// Per-minute walk-class tick cadence: the wrap-aware u16 counter delta between consecutive
-    /// `StepSample`s, attributed to the LATER sample's minute, kept only when that later sample's
-    /// `activityClass` is walk (1) or run (2) — see `locomotionActivityClasses`. A still-class (0) or
-    /// unknown-class (nil) delta is real counter movement (a turn-over jostles the accelerometer too) but
-    /// is deliberately NOT counted as locomotion; it still shows up in `postureVariance` instead. Minutes
-    /// with no qualifying tick are simply absent from the result (callers read `?? 0`).
-    static func walkClassTicksPerMinute(_ steps: [StepSample]) -> [Int: Int] {
+    /// Preserves the withdrawn @63 interpretation only for explicit synthetic/research comparisons.
+    /// Production entry points return before this helper is reachable.
+    static func legacyWalkClassTicksPerMinute(_ steps: [StepSample]) -> [Int: Int] {
         let sorted = steps.sorted { $0.ts < $1.ts }
         guard sorted.count >= 2 else { return [:] }
         var out: [Int: Int] = [:]
         for i in 1..<sorted.count {
-            let cur = sorted[i]
-            guard let cls = cur.activityClass, locomotionActivityClasses.contains(cls) else { continue }
-            let delta = (cur.counter - sorted[i - 1].counter) & 0xFFFF   // wrap-aware u16 increment
-            out[cur.ts / 60, default: 0] += delta
+            let current = sorted[i]
+            guard current.activityClass == 1 || current.activityClass == 2 else { continue }
+            let delta = (current.counter - sorted[i - 1].counter) & 0xFFFF
+            out[current.ts / 60, default: 0] += delta
         }
         return out
     }

@@ -1,10 +1,10 @@
 # NOOP — Android Port Guide
 
-NOOP is a standalone, fully **offline** companion app for WHOOP straps (4.0 and 5.0). It pairs
-directly with the strap over Bluetooth Low Energy, stores everything on-device in SQLite, imports
-WHOOP CSV exports and Apple Health exports, and computes recovery / strain / HRV / sleep locally.
-There is no cloud, no account — the app talks only to **your own device** and
-works only with **your own data**.
+NOOP is the Android collector and companion client for supported bands. It
+retains a bounded local working set for responsive collection and offline
+continuity, while account, managed synchronization, Friends, and NOOP+ flows
+use NOOP-operated services when configured. WHOOP remains the comparison
+transport until the exact supplier adapter and physical-device gates pass.
 
 This document covers the **Android client** under [`android/`](../android). The macOS app is the
 reference implementation; the Android app is a native re-implementation of the same wire protocol
@@ -19,16 +19,16 @@ the same analytics so results match macOS.)
 > approximations and are **not** clinically validated. See [`../DISCLAIMER.md`](../DISCLAIMER.md)
 > and [`../ATTRIBUTION.md`](../ATTRIBUTION.md).
 
-> ### Status: shipping platform — builds, releases, and validated on WHOOP 4.0
+> ### Status: launch candidate — software gates verified, physical release gates open
 >
-> The Android client is a **fully shipping** part of NOOP. It builds and releases as two APK
+> The Android client builds as two APK
 > flavours — **full** (`./gradlew assembleFullRelease`) and **demo** (`./gradlew
-> assembleDemoRelease`) — and is sideloaded by users (with features such as a **Sync-now** button).
-> The BLE pipeline, Compose UI, Room database, and importers are all present and working. It is
-> validated against a real **WHOOP 4.0** strap, and **live HR** is validated on **WHOOP 5.0 / MG**;
-> deeper 5.0/MG scores are still being reverse-engineered from offload data. The
+> assembleDemoRelease`). The BLE pipeline, Compose UI, bounded Room cache, account
+> surfaces, and importers are present. Simulator and deterministic tests do not prove
+> signed installation, supplier-band compatibility, background execution, history
+> retention, battery, haptics, firmware, or physiological accuracy. The
 > [verification checklist](#verification-checklist) below tracks what's confirmed versus the
-> genuinely-open items (chiefly full 5.0/MG deep-score validation).
+> physical, signing, store, credential, legal, and elapsed-production gates.
 
 ---
 
@@ -220,7 +220,7 @@ cd android
 
 # Install the full debug flavour onto a connected device and launch it.
 ./gradlew :app:installFullDebug
-adb shell am start -n com.noop.whoop.debug/com.noop.ui.MainActivity
+adb shell am start -W -n com.noop.whoop.debug/com.noop.IconDefault
 
 # Staging release (separate app ID; still requires private signing credentials).
 ./gradlew -PstagingRelease assembleFullRelease

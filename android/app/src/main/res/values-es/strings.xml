@@ -1518,6 +1518,7 @@
     <string name="key_metrics_selection_count">%1$d de %2$d fijadas</string>
     <string name="key_metrics_show_selected">Mostrar métricas seleccionadas</string>
     <string name="key_metrics_show_all_count">Mostrar todas las métricas (%1$d)</string>
+    <string name="key_metrics_open_history">Abrir todo el historial de métricas</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
     <string name="l10n_today_screen_data_unit_c768ef8c">%1$s</string>
     <string name="l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96">%1$s, %2$s. Toca para elegir un día, gira para cambiar el día.</string>
@@ -1613,7 +1614,8 @@
     <string name="nav_safety">Seguridad</string>
     <string name="nav_devices">Dispositivos</string>
     <string name="nav_data_sources">Fuentes de datos</string>
-    <string name="nav_backup_sync">Copia y sincronización</string>
+    <string name="nav_backup_sync">Datos y sincronización</string>
+    <string name="data_sync_subtitle">Consulta dónde se guarda tu historial, protege los datos locales y gestiona la continuidad opcional de tu cuenta.</string>
     <string name="nav_fused_record">Tus datos, fusionados</string>
     <string name="nav_notifications">Notificaciones</string>
     <string name="nav_support">Soporte</string>
@@ -2527,6 +2529,7 @@
     <string name="managed_cloud_error_not_found">El recurso de NOOP+ solicitado ya no existe.</string>
     <string name="managed_cloud_error_quota">El espacio de almacenamiento de NOOP+ está lleno.</string>
     <string name="managed_cloud_error_conflict">NOOP+ rechazó un estado de sincronización incompatible.</string>
+    <string name="managed_cloud_error_document_conflict">NOOP conservó tus datos actuales. Revisa tus últimos cambios y toca «Sincronizar ahora» para volver a intentarlo.</string>
     <string name="managed_cloud_error_server">NOOP+ no está disponible temporalmente.</string>
     <string name="managed_cloud_error_digest">Un objeto de la nube no superó la comprobación de integridad.</string>
     <string name="managed_cloud_error_generic">NOOP+ no pudo completar la solicitud. Inténtalo de nuevo.</string>
@@ -2751,6 +2754,7 @@
     <string name="ownership_checking">Comprobando…</string>
     <string name="ownership_email_verified_action">Ya verifiqué mi correo</string>
     <string name="ownership_resend_verification">Reenviar verificación</string>
+    <string name="ownership_resend_verification_countdown">Reenviar en %1$d s</string>
     <string name="ownership_terms_title">Revisar términos de propiedad</string>
     <string name="ownership_terms_detail">El documento inmutable exacto se obtiene del almacenamiento controlado por NOOP y se verifica antes de aceptarlo.</string>
     <string name="ownership_terms_before_account">Revisa y acepta la política de propiedad antes de crear una cuenta.</string>
@@ -2780,6 +2784,7 @@
     <string name="ownership_phone_verified_label">Número de móvil verificado</string>
     <string name="ownership_phone">Número de móvil con código de país</string>
     <string name="ownership_send_code">Enviar código de verificación</string>
+    <string name="ownership_send_code_countdown">Volver a enviar en %1$d s</string>
     <string name="ownership_code">Código de verificación</string>
     <string name="ownership_verify_phone">Verificar número opcional</string>
     <string name="ownership_installations_title">Teléfonos autorizados</string>
@@ -2865,11 +2870,15 @@
     <string name="ownership_terms_reload">Vuelve a cargar y revisar los términos actuales de propiedad.</string>
     <string name="ownership_invalid_phone">Introduce un número de móvil con código de país.</string>
     <string name="ownership_invalid_code">Introduce el código actual de seis dígitos.</string>
+    <string name="ownership_verification_code_invalid">Ese código de verificación es incorrecto. Compruébalo e inténtalo de nuevo.</string>
+    <string name="ownership_verification_session_expired">Esa sesión de verificación ha caducado. Solicita un código nuevo.</string>
+    <string name="ownership_verification_rate_limited">Demasiadas solicitudes de verificación. Espera antes de intentarlo de nuevo.</string>
+    <string name="ownership_verification_cooldown_active">Espera a que termine la cuenta atrás antes de solicitar otro mensaje de verificación.</string>
     <string name="ownership_sign_in_again">Vuelve a iniciar sesión para continuar.</string>
     <string name="ownership_confirmation_inactive">Esa confirmación de la pulsera ya no está activa. Inicia la confirmación de nuevo.</string>
     <string name="ownership_confirmation_rejected">No se aceptó la confirmación de la pulsera. Mantén la pulsera puesta e inténtalo de nuevo.</string>
     <string name="ownership_band_unavailable">Esta banda no está disponible para la activación.</string>
-    <string name="ownership_network_unavailable">No se pudo contactar con el servicio de propiedad.</string>
+    <string name="ownership_network_unavailable">Vuelve a conectarte a Internet e inténtalo de nuevo.</string>
     <string name="ownership_service_unavailable">El servicio de propiedad no está disponible temporalmente.</string>
     <string name="ownership_cannot_continue">NOOP no pudo continuar de forma segura con la configuración de propiedad.</string>
     <string name="ownership_action_failed">NOOP no pudo completar esa acción de cuenta. Inténtalo de nuevo o restablece la contraseña.</string>
@@ -2965,4 +2974,6 @@
     <string name="managed_friends_delete_account_title">¿Eliminar la cuenta de NOOP?</string>
     <string name="managed_friends_delete_account_detail">Friends, los datos gestionados en la nube y la cuenta de NOOP se programarán para eliminarse tras un periodo de espera de 24 horas. Los datos de salud locales de este teléfono no se eliminarán.</string>
     <string name="managed_friends_deletion_scheduled_detail">Friends y los servicios de la cuenta están en pausa durante el periodo de espera de 24 horas. Los datos de salud locales permanecen en este teléfono.</string>
+    <string name="ownership_progress_step">Paso %1$d de %2$d</string>
+    <string name="ownership_setup_complete">Configuración de propiedad completada.</string>
 </resources>

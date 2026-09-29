@@ -163,6 +163,56 @@ final class ExperimentalDriversTests: XCTestCase {
     }
 
     @MainActor
+    func testOuraOwnsLivePublicationImmediatelyAfterActivation() async throws {
+        let store = try await WhoopStore.inMemory()
+        let registry = DeviceRegistry(
+            store: DeviceRegistryStore(dbQueue: store.registryWriter)
+        )
+        registry.reload()
+        let ringID = "oura-owner-generation"
+        registry.add(
+            PairedDevice(
+                id: ringID,
+                brand: "Oura",
+                model: "Oura Ring 4",
+                peripheralId: UUID().uuidString,
+                sourceKind: .oura,
+                capabilities: [.hr, .hrv, .sleep],
+                status: .paired,
+                addedAt: 1,
+                lastSeenAt: 1
+            )
+        )
+        registry.setActive(ringID)
+
+        let coordinator = SourceCoordinator(
+            registry: registry,
+            live: LiveState(),
+            storeHandle: { nil },
+            startWhoop: {},
+            stopWhoop: {},
+            setWhoopPreferredPeripheral: { _ in },
+            setWhoopActiveDeviceId: { _ in },
+            connectedPeripheralUUID:
+                Empty<String?, Never>().eraseToAnyPublisher()
+        )
+
+        coordinator.activeDeviceChanged(to: ringID)
+        let firstSource = try XCTUnwrap(coordinator.ouraSource)
+        XCTAssertTrue(
+            firstSource.ownsLivePublicationForTesting,
+            "The newly constructed Oura source must capture the current owner generation"
+        )
+
+        registry.setActive("my-whoop")
+        coordinator.activeDeviceChanged(to: "my-whoop")
+        XCTAssertFalse(
+            firstSource.ownsLivePublicationForTesting,
+            "A replaced Oura source must lose shared live-state publication ownership"
+        )
+    }
+
+    @MainActor
     func testSwitchingBackToSeededBandKeepsPersistedRowsVisibleAndScoreable() async throws {
         let store = try await WhoopStore.inMemory()
         let registry = DeviceRegistry(store: DeviceRegistryStore(dbQueue: store.registryWriter))

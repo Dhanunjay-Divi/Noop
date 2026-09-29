@@ -480,7 +480,16 @@ sealed class ManagedStorageException(message: String, cause: Throwable? = null) 
     class Forbidden : ManagedStorageException("NOOP+ did not allow that action.")
     class NotFound : ManagedStorageException("The requested NOOP+ resource no longer exists.")
     class QuotaExceeded : ManagedStorageException("This NOOP+ storage allowance is full.")
-    class Conflict : ManagedStorageException("NOOP+ rejected conflicting sync state.")
+    class Conflict(
+        val documentKind: ManagedDocumentKind? = null,
+        val remoteRevision: Long? = null,
+    ) : ManagedStorageException(
+        if (documentKind == null) {
+            "NOOP+ rejected conflicting sync state."
+        } else {
+            "NOOP kept your current data. Review your latest changes, then tap Sync now to retry."
+        },
+    )
     class Server(
         val statusCode: Int,
         val retryAfterMillis: Long? = null,

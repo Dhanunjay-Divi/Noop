@@ -88,6 +88,10 @@ public enum SourceKind: String, Sendable, CaseIterable {
     /// signal can't be read it stays "-" (Huami precedent), never faked. Additive (no DB migration): only
     /// the experimental add-device wizard's Oura path writes it.
     case oura
+    /// Optional owner-supplied Veepoo transport. The adapter is compiled only
+    /// into an explicitly enabled physical-iPhone build and exposes live HR
+    /// plus battery only. Existing rows never carry this free-text value.
+    case veepoo
     /// A GPX/TCX/FIT activity file imported under the `activity-file` device (#137). Distinct from
     /// `fileImport` (a whole-day WHOOP CSV export) so the day-owner resolver can rank it BELOW day-spanning
     /// imports: a 90-minute ride must never displace a full-day source that has HR for the same day. It

@@ -111,6 +111,91 @@ final class ReadTests: XCTestCase {
         XCTAssertEqual(other, [HRBucket(ts: 200, bpm: 99)])
     }
 
+    func testOrderedSourceReadsAreGloballyBoundedAndAggregateOverlap()
+        async throws
+    {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertDevice(id: "older", mac: nil, name: nil)
+        try await store.upsertDevice(id: "newer", mac: nil, name: nil)
+        _ = try await store.insert(
+            Streams(
+                hr: [
+                    HRSample(ts: 100, bpm: 60),
+                    HRSample(ts: 300, bpm: 70),
+                ],
+                rr: [
+                    RRInterval(ts: 100, rrMs: 800),
+                    RRInterval(ts: 100, rrMs: 800),
+                ],
+                gravity: [
+                    GravitySample(ts: 100, x: 1, y: 1, z: 1),
+                    GravitySample(ts: 300, x: 3, y: 3, z: 3),
+                ]
+            ),
+            deviceId: "older"
+        )
+        _ = try await store.insert(
+            Streams(
+                hr: [
+                    HRSample(ts: 100, bpm: 90),
+                    HRSample(ts: 200, bpm: 80),
+                ],
+                rr: [
+                    RRInterval(ts: 100, rrMs: 800),
+                    RRInterval(ts: 200, rrMs: 900),
+                ],
+                gravity: [
+                    GravitySample(ts: 100, x: 9, y: 9, z: 9),
+                    GravitySample(ts: 200, x: 2, y: 2, z: 2),
+                ]
+            ),
+            deviceId: "newer"
+        )
+
+        let hr = try await store.hrSamples(
+            deviceIds: ["newer", "older"],
+            from: 0,
+            to: 1_000,
+            limit: 2
+        )
+        XCTAssertEqual(hr, [
+            HRSample(ts: 100, bpm: 90),
+            HRSample(ts: 200, bpm: 80),
+        ])
+
+        let buckets = try await store.hrBuckets(
+            deviceIds: ["newer", "older"],
+            from: 0,
+            to: 1_000,
+            bucketSeconds: 500
+        )
+        XCTAssertEqual(buckets, [
+            HRBucket(ts: 0, bpm: 80),
+        ])
+
+        let rr = try await store.rrIntervals(
+            deviceIds: ["newer", "older"],
+            from: 0,
+            to: 1_000,
+            limit: 2
+        )
+        XCTAssertEqual(rr, [
+            RRInterval(ts: 100, rrMs: 800),
+            RRInterval(ts: 100, rrMs: 800),
+        ])
+
+        let gravity = try await store.gravitySamples(
+            deviceIds: ["newer", "older"],
+            from: 0,
+            to: 1_000,
+            limit: 2
+        )
+        XCTAssertEqual(gravity, [
+            GravitySample(ts: 100, x: 9, y: 9, z: 9),
+            GravitySample(ts: 200, x: 2, y: 2, z: 2),
+        ])
+    }
+
     func testRrIntervalsReturnsBothTiedRows() async throws {
         let store = try await seeded()
         let rr = try await store.rrIntervals(deviceId: "dev1", from: 0, to: 1000, limit: 100)
