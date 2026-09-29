@@ -25862,9 +25862,9 @@
       "category": "core",
       "lineNumbers": [
         119,
-        1917,
-        1919,
-        1998
+        1922,
+        1924,
+        2003
       ],
       "occurrenceCount": 4,
       "path": "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
@@ -25878,7 +25878,7 @@
     {
       "category": "customer",
       "lineNumbers": [
-        2001
+        2006
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
