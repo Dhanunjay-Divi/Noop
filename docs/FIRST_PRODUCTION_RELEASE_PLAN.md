@@ -135,9 +135,10 @@ remains manual until the final go/no-go review.
 
 ### Current mainline health
 
-The current protected integrated baseline is `main` at
-`9c5141754f65d46eb69dcea8807ba3bdb29ca3a1`. The remote branch head was
-reverified on 2026-09-24:
+The current protected product baseline is `main` product commit
+`7488283c3c21e794eaa8d6a7d08889f18b933bfa`, integrated normally through
+pull request `#18` on 2026-09-29. Reviewed candidate
+`91e20504eb824572becfe6dcc440b5a6d5ecc8f2` has the identical source tree:
 
 - `main` uses strict up-to-date status checks, administrator enforcement, and
   linear history; force pushes and branch deletion are disabled. Release work
@@ -147,8 +148,11 @@ reverified on 2026-09-24:
   `apple-ci-required`, `health-claims`, `i18n-coverage`, `operations-record`,
   `release-controls`, `runtime-license-required`, `server-ci-required`,
   `swift-packages-required`, and `trusted-release-controls`.
-- All ten contexts completed successfully on the protected baseline, and each
-  was published by GitHub Actions application `15368`.
+- All ten contexts completed successfully on the reviewed pull-request
+  candidate and were published by GitHub Actions application `15368`.
+  Post-merge exact-main verification also passed all ten contexts, including
+  the exact iOS production shell; the strict verifier reports `10/10` for
+  `7488283c3c21e794eaa8d6a7d08889f18b933bfa`.
 - `trusted-release-controls` is an exact-head trust-root check. For a pull
   request it executes protected-base code, treats the candidate checkout as
   isolated untrusted data, restricts release-authority changes to an
@@ -160,11 +164,11 @@ reverified on 2026-09-24:
 - Historical exact-main evidence at `1443acb1` and `b5caec52` remains valid for
   those exact trees, including the retained commit/tree-bound SBOM manifest.
   It is not evidence for the active September 17-19 branch.
-- App PR `#17` on `codex/noop-band-sdk-app-integration-20260921` carries the
-  current source-only SDK/UI replacement. Focused local Apple, Android,
-  simulator, and artifact evidence is green; its final exact-tree control wall,
-  consolidated push, exact-head checks, merge, and protected-main result remain
-  authoritative pending gates.
+- App PR `#18` carried the source-only SDK/UI/readiness replacement and is
+  merged. Its exact-head hosted graph, seven evidence-backed review-thread
+  closures, local Apple/Android/server/policy walls, and source-tree identity
+  are recorded. The 2026-09-29 documentation and release-evidence closeout
+  finalizes this software round without changing product runtime behavior.
 - Reviewed deployment environments, production credentials and rotation,
   signed artifacts, physical-device evidence, supplier inputs, legal and
   certification approvals, store records, production operations, and final
