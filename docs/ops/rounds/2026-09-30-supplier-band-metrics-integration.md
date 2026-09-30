@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `implementation and local verification complete; protected integration pending`
+- State: `implementation and local verification complete; PR #22 protected integration in progress; physical validation pending`
 - Owner: project team
 - Branch: `codex/supplier-metrics-integration-20260930`
 - Start commit: `fd2f0f8165742c328767add904d69a74d67c0d81`
@@ -12,8 +12,7 @@
   `0b99aca0c40680c19bb1a29b798b42cb1229146d`
 - End implementation commit:
   `719b724a6a084c07a384a34c789fcfe2406ab1d6`
-- Record commit or PR: closeout commit containing this record; pull request
-  intentionally pending an approved required-check runner path
+- Record commit or PR: pull request `#22`
 
 ## Objective
 
@@ -119,6 +118,7 @@ branch.
 | Default-off macOS build | pass | Apple graph compiles without supplier artifact | Physical pairing |
 | Default-off iOS Simulator graph | pass | iPhone app embeds Watch/widgets/complications | Background or BLE |
 | Diff hygiene and raw-log search | pass | no whitespace defect or raw supplier logging found | Runtime operations |
+| Initial PR #22 hosted wall | Seven required contexts passed; release-controls failed only because the reviewed terminology inventory had not yet been regenerated and repinned | The hosted controls fail closed on stale generated evidence | Replacement exact-head result |
 
 The first Android attempt failed only because this isolated worktree had no
 `android/local.properties`; the exact rerun with explicit
@@ -163,7 +163,8 @@ The first Android attempt failed only because this isolated worktree had no
 - The owner subsequently authorized the required hosted validation and normal
   protected merge for this integration once. No release workflow is part of
   that authorization.
-- Protected main is unchanged.
+- Pull request `#22` is the protected integration record. Its exact check and
+  merge state is authoritative in GitHub; no release workflow was dispatched.
 
 ## Resource cleanup
 
@@ -185,19 +186,16 @@ The first Android attempt failed only because this isolated worktree had no
 ## Open risks and honest limitations
 
 - Simulator/build evidence cannot prove supplier or WHOOP physical behavior.
-- No approved online self-hosted runner currently emits the required protected
-  contexts.
 - Supplier artifact rights, firmware compatibility, signed installation,
   background collection, battery, retention, haptics, and accuracy remain
   external gates.
 
 ## Next round
 
-1. Complete final post-change Apple builds and repository policy controls.
-2. Commit and push the reviewed branch without triggering hosted workflows.
-3. Obtain an approved required-check runner path, open/review the replacement
-   pull request, merge through protected main, and verify exact main.
-4. Run the signed physical-device matrix on clean iPhone and Android hardware.
+1. Push the reviewed terminology inventory and exact trust digest to PR `#22`.
+2. Require every exact-head context to pass, merge through protected `main`,
+   and verify the resulting exact main commit.
+3. Run the signed physical-device matrix on clean iPhone and Android hardware.
 
 ## Privacy check
 

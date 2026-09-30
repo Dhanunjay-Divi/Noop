@@ -28,8 +28,9 @@ Last updated: **2026-09-30**
   zero workflow runs. On 2026-09-30 the owner authorized one GitHub-hosted
   required-check run and normal protected merge for this integration. That
   authorization excludes manual release, signing, firmware, store, and
-  production-traffic workflows. Protected merge/main verification and the
-  signed physical matrix remain.
+  production-traffic workflows. Pull request `#22` is the protected integration
+  record; its exact check and merge state is authoritative in GitHub. The signed
+  physical matrix remains.
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Protected branch: `main`
