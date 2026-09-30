@@ -23,9 +23,10 @@ Last updated: **2026-09-30**
   retention, signed installation, and firmware remain external. The owner
   requested no GitHub-hosted runner use; all three registered self-hosted
   runners are offline and protected checks are GitHub-Actions-app-bound, so no
-  protection weakening or forged integration is authorized. The approved
-  required-check runner path, protected merge/main verification, and the signed
-  physical matrix remain.
+  protection weakening or forged integration is authorized. The reviewed branch
+  has been pushed without a pull request, and the immediate Actions query
+  returned zero workflow runs. The approved required-check runner path,
+  protected merge/main verification, and the signed physical matrix remain.
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Protected branch: `main`

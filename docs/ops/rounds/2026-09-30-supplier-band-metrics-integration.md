@@ -155,10 +155,19 @@ The first Android attempt failed only because this isolated worktree had no
 - Local implementation and verification are complete on
   `codex/supplier-metrics-integration-20260930` at implementation commit
   `719b724a6a084c07a384a34c789fcfe2406ab1d6`.
-- The reviewed branch is prepared for one no-pull-request push. No pull request
-  is opened because the current required workflows would spend GitHub-hosted
-  runners.
+- The reviewed branch was pushed without opening a pull request. The immediate
+  post-push Actions query returned zero workflow runs, so no GitHub-hosted
+  runner was used.
 - Protected main is unchanged.
+
+## Resource cleanup
+
+- Removed round-owned `/tmp/noop-supplier-20260930`, the isolated temporary
+  skill-validation environment, Android build output, and the two package
+  `.build` directories after their outcomes became durable.
+- No process or open file handle owned the temporary paths before deletion.
+- Every listed path is absent afterward. Data-volume free space increased from
+  about 95 GiB to 108 GiB, with zero throttled VM pages.
 
 ## Decisions
 
