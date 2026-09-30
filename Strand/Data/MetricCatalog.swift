@@ -117,6 +117,8 @@ struct MetricDescriptor: Identifiable, Hashable {
             return "NOOP"
         case "whoop", "whoop-official-reference":
             return String(localized: "Imported")
+        case let s where s.hasPrefix("veepoo-"):
+            return String(localized: "Compatible band")
         default:
             return source
         }
@@ -371,26 +373,51 @@ enum MetricCatalog {
         visible(allowsBMI: allowsBMI).first { $0.key == key && $0.source == source }
     }
 
-    /// The source the Today steps tile taps through to, matching the value it displays. Primary Steps
-    /// requires an imported pedometer count. The reverse-engineered band motion counter and the calibrated
-    /// gravity estimate remain available only as separately labelled research/diagnostic series.
-    static func todayStepsMetric(hasMotionDerivedSteps: Bool, hasImportedSteps: Bool = false) -> MetricDescriptor? {
+    /// The source the Today steps tile taps through to, matching the value it displays. Apple Health
+    /// measured steps win. A supplier-native day total is accepted only when the caller supplies the exact
+    /// active supplier source id after checking the paired-device registry. Reverse-engineered wrist motion
+    /// and the calibrated gravity estimate remain separately labelled research/diagnostic series.
+    static func todayStepsMetric(
+        hasMotionDerivedSteps: Bool,
+        hasImportedSteps: Bool = false,
+        supplierMeasuredSource: String? = nil
+    ) -> MetricDescriptor? {
         _ = hasMotionDerivedSteps
         if hasImportedSteps { return metric(key: "steps", source: "apple-health") }
+        if let source = normalizedSupplierSource(supplierMeasuredSource) {
+            return d(
+                "steps",
+                String(localized: "Steps"),
+                "Effort",
+                "",
+                source,
+                "figure.walk",
+                0,
+                true
+            )
+        }
         return nil
     }
 
-    /// One-value form of the primary Steps contract. The legacy parameters remain for source compatibility,
-    /// but wrist motion cannot prove gait and therefore cannot fill a missing imported pedometer value.
-    static func todayStepsValue<T>(imported: T?, motionDerived: T?, calibratedEstimate: T?) -> T? {
+    /// One-value form of the primary Steps contract. Wrist motion cannot prove gait and therefore cannot
+    /// fill a missing measured value. The supplier value must already have passed the exact active-source
+    /// registry gate at the call site.
+    static func todayStepsValue<T>(
+        imported: T?,
+        supplierMeasured: T? = nil,
+        motionDerived: T?,
+        calibratedEstimate: T?
+    ) -> T? {
         _ = motionDerived
         _ = calibratedEstimate
-        return imported
+        return imported ?? supplierMeasured
     }
 
-    /// Per-day form used by Today sparklines. Only imported pedometer days enter the primary Steps series.
+    /// Per-day form used by Today sparklines. Apple Health wins per day, while a registry-qualified
+    /// supplier-native total can fill an otherwise missing day. Motion-derived estimates stay excluded.
     static func todayStepsSeries(
         imported: [(day: String, value: Double)],
+        supplierMeasured: [(day: String, value: Double)] = [],
         motionDerived: [(day: String, value: Double)],
         calibratedEstimate: [(day: String, value: Double)]
     ) -> [(day: String, value: Double)] {
@@ -399,11 +426,21 @@ enum MetricCatalog {
                 .map { ($0.day, $0.value) }, uniquingKeysWith: { _, newer in newer })
         }
         let importedByDay = byDay(imported)
+        let supplierByDay = byDay(supplierMeasured)
         _ = motionDerived
         _ = calibratedEstimate
-        return importedByDay.keys.sorted().compactMap { day in
-            importedByDay[day].map { (day, $0) }
+        return Set(importedByDay.keys).union(supplierByDay.keys).sorted().compactMap { day in
+            (importedByDay[day] ?? supplierByDay[day]).map { (day, $0) }
         }
+    }
+
+    private static func normalizedSupplierSource(_ source: String?) -> String? {
+        guard let source else { return nil }
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("veepoo-"), trimmed.count > "veepoo-".count else {
+            return nil
+        }
+        return trimmed
     }
 
     /// #616: the calorie twin of `todayStepsMetric` — route the tapped detail to the source that MATCHES

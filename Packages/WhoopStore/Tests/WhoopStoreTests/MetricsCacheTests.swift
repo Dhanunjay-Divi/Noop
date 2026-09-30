@@ -1639,6 +1639,112 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertEqual(saved.respRateBpm, 14.1)
     }
 
+    func testDeviceStepTotalUpdatesOnlyStepsAndAcceptsMeasuredZero() async throws {
+        let store = try await WhoopStore.inMemory()
+        let day = "2026-09-30"
+        let existing = DailyMetric(
+            day: day,
+            totalSleepMin: 420,
+            efficiency: 0.91,
+            deepMin: 80,
+            remMin: 100,
+            lightMin: 240,
+            disturbances: 2,
+            restingHr: 52,
+            avgHrv: 61,
+            recovery: 0.74,
+            strain: 8.5,
+            exerciseCount: 1,
+            steps: 4_000,
+            activeKcalEst: 520,
+            hrvMethod: .rmssd
+        )
+        try await store.upsertDailyMetrics([existing], deviceId: "supplier")
+
+        try await store.upsertDeviceStepTotal(
+            day: day,
+            steps: 0,
+            deviceId: "supplier"
+        )
+
+        let rows = try await store.dailyMetrics(
+            deviceId: "supplier",
+            from: day,
+            to: day
+        )
+        let saved = try XCTUnwrap(rows.first)
+        XCTAssertEqual(saved.steps, 0)
+        XCTAssertEqual(saved.totalSleepMin, 420)
+        XCTAssertEqual(saved.avgHrv, 61)
+        XCTAssertEqual(saved.recovery, 0.74)
+        XCTAssertEqual(saved.activeKcalEst, 520)
+    }
+
+    func testDeviceSleepSummaryPreservesUnrelatedAndAbsentFields() async throws {
+        let store = try await WhoopStore.inMemory()
+        let day = "2026-09-30"
+        let existing = DailyMetric(
+            day: day,
+            totalSleepMin: 390,
+            efficiency: 0.84,
+            deepMin: 75,
+            remMin: 95,
+            lightMin: 220,
+            disturbances: 3,
+            restingHr: 53,
+            avgHrv: 58,
+            recovery: 0.68,
+            strain: 9.2,
+            exerciseCount: 1,
+            steps: 6_500,
+            activeKcalEst: 610,
+            hrvMethod: .rmssd
+        )
+        try await store.upsertDailyMetrics([existing], deviceId: "supplier")
+
+        try await store.upsertDeviceSleepReport(
+            day: day,
+            totalSleepMin: 425,
+            efficiency: nil,
+            deepMin: 82,
+            lightMin: nil,
+            disturbances: 1,
+            session: CachedSleepSession(
+                startTs: 1_000,
+                endTs: 26_500,
+                efficiency: nil,
+                restingHr: nil,
+                avgHrv: nil,
+                stagesJSON: nil
+            ),
+            deviceId: "supplier"
+        )
+
+        let rows = try await store.dailyMetrics(
+            deviceId: "supplier",
+            from: day,
+            to: day
+        )
+        let saved = try XCTUnwrap(rows.first)
+        XCTAssertEqual(saved.totalSleepMin, 425)
+        XCTAssertEqual(saved.efficiency, 0.84)
+        XCTAssertEqual(saved.deepMin, 82)
+        XCTAssertEqual(saved.lightMin, 220)
+        XCTAssertEqual(saved.disturbances, 1)
+        XCTAssertEqual(saved.remMin, 95)
+        XCTAssertEqual(saved.avgHrv, 58)
+        XCTAssertEqual(saved.steps, 6_500)
+        let sessions = try await store.sleepSessions(
+            deviceId: "supplier",
+            from: 0,
+            to: 100_000,
+            limit: 10
+        )
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions.first?.startTs, 1_000)
+        XCTAssertEqual(sessions.first?.endTs, 26_500)
+    }
+
     // MARK: - read highwater cursor (distinct prefix from upload highwater)
 
     func testReadHighwaterRoundTripsUnderDistinctPrefix() async throws {

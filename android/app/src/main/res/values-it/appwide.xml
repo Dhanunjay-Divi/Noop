@@ -191,6 +191,9 @@
     <string name="appwide_devices_empty_body">Collega una NOOP Band o una fascia compatibile 4.0 o 5.0/MG. Vengono mostrate solo le fasce che questa build può associare.</string>
     <string name="appwide_devices_empty_title">Collega la tua prima fascia</string>
     <string name="appwide_devices_pair_again">Abbina di nuovo</string>
+    <string name="appwide_devices_supplier_apple_captures">Frequenza cardiaca · Passi del dispositivo · Sonno valutato dalla fascia · Batteria</string>
+    <string name="appwide_devices_supplier_apple_footnote">I passi e il sonno sono segnalati dalla fascia. NOOP misura la frequenza cardiaca a riposo dai dati salvati durante l’intervallo di sonno segnalato. HRV, ossigeno nel sangue, frequenza respiratoria e segnali non supportati restano non disponibili.</string>
+    <string name="appwide_devices_supplier_apple_powers">Crea la cronologia della frequenza cardiaca in tempo reale, il movimento giornaliero, le calorie, lo Sforzo e i riepiloghi del sonno.</string>
     <string name="appwide_devices_supplier_captures">Frequenza cardiaca (solo visualizzazione in tempo reale) · Batteria</string>
     <string name="appwide_devices_supplier_display_model">NOOP Band</string>
     <string name="appwide_devices_supplier_footnote">La frequenza cardiaca scompare quando gli aggiornamenti si interrompono. La batteria viene mostrata solo mentre la fascia è connessa.</string>
@@ -658,7 +661,7 @@
     <string name="appwide_onboarding_device_wizard_supplier_progress_battery">Controllo della capacità della batteria</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_connecting">Connessione alla fascia selezionata</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_live_heart_rate">Controllo della frequenza cardiaca in tempo reale</string>
-    <string name="appwide_onboarding_device_wizard_supplier_ready_body">La frequenza cardiaca in tempo reale usa l’ora di ricezione del telefono solo per indicare l’aggiornamento della visualizzazione. Questo flusso del fornitore non viene aggiunto alla cronologia sanitaria permanente né alle formule.</string>
+    <string name="appwide_onboarding_device_wizard_supplier_ready_body">La frequenza cardiaca in tempo reale viene salvata usando l’ora di ricezione del telefono perché il flusso del fornitore non include l’ora del campione. Dopo l’abbinamento, NOOP legge anche i passi del dispositivo e il sonno valutato dalla fascia quando disponibili. HRV, ossigeno nel sangue, frequenza respiratoria, temperatura cutanea e segnali non supportati restano non disponibili.</string>
     <string name="appwide_onboarding_device_wizard_supplier_ready_title">Batteria e frequenza cardiaca in tempo reale confermate</string>
     <string name="appwide_onboarding_device_wizard_supplier_registration_failed">Non è stato possibile salvare la fascia. La registrazione non è stata segnalata come completata.</string>
     <string name="appwide_onboarding_device_wizard_supplier_subtitle">Usa l’identificatore stampato sulla fascia e una password del dispositivo di quattro cifre. Sperimentale.</string>

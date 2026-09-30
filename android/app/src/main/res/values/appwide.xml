@@ -191,6 +191,9 @@
     <string name="appwide_devices_empty_body">Connect a NOOP Band or a compatible 4.0 or 5.0/MG band. Only bands this build can pair with are shown.</string>
     <string name="appwide_devices_empty_title">Connect your first band</string>
     <string name="appwide_devices_pair_again">Pair again</string>
+    <string name="appwide_devices_supplier_apple_captures">Heart rate · Device steps · Band-scored sleep · Battery</string>
+    <string name="appwide_devices_supplier_apple_footnote">Steps and sleep are reported by the band. NOOP measures resting HR from saved heart rate inside the reported sleep span. HRV, blood oxygen, respiratory rate, and unsupported signals stay unavailable.</string>
+    <string name="appwide_devices_supplier_apple_powers">Builds live heart rate history, daily movement, calories, Effort, and sleep summaries.</string>
     <string name="appwide_devices_supplier_captures">Heart rate (live display only) · Battery</string>
     <string name="appwide_devices_supplier_display_model">NOOP Band</string>
     <string name="appwide_devices_supplier_footnote">Heart rate expires when updates stop. Battery is shown only while the band is connected.</string>
@@ -658,7 +661,7 @@
     <string name="appwide_onboarding_device_wizard_supplier_progress_battery">Checking battery capability</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_connecting">Connecting to the selected band</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_live_heart_rate">Checking live heart rate</string>
-    <string name="appwide_onboarding_device_wizard_supplier_ready_body">Live heart rate uses the phone receipt time for display freshness only. This supplier stream is not added to durable health history or formulas.</string>
+    <string name="appwide_onboarding_device_wizard_supplier_ready_body">Live heart rate is saved using phone receipt time because the supplier stream has no sample timestamp. After pairing, NOOP also reads device steps and band-scored sleep when available. HRV, blood oxygen, respiratory rate, skin temperature, and unsupported signals remain unavailable.</string>
     <string name="appwide_onboarding_device_wizard_supplier_ready_title">Battery and live heart rate confirmed</string>
     <string name="appwide_onboarding_device_wizard_supplier_registration_failed">The band could not be saved. Registration was not reported as complete.</string>
     <string name="appwide_onboarding_device_wizard_supplier_subtitle">Uses the printed band identifier and four-digit device password. Experimental.</string>

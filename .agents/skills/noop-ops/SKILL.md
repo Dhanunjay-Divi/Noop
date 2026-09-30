@@ -21,6 +21,9 @@ old chat, a passing build, or a UI state.
   handing the round to another agent. Also read its resource-pressure procedure
   before heavy local builds or whenever macOS reports low application memory,
   swap growth, or low disk.
+- Read [supplier band integration](references/supplier-band-integration.md)
+  before changing the quarantined supplier adapter, source-qualified supplier
+  metrics, SDK wiring, or physical-band handoff.
 - Run `scripts/context_snapshot.sh [repo-root]` when resuming a stale,
   interrupted, compacted, or transferred session. The snapshot is
   privacy-safe scaffolding, not proof that any feature works.

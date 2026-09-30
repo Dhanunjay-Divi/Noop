@@ -324,7 +324,13 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
 
     def test_only_proven_registry_capability_is_exposed(self) -> None:
         source = self.read("Strand/BLE/VeepooBandSource.swift")
-        device = source[source.index("let device = PairedDevice(") :]
+        device_start = source.index("let device = PairedDevice(")
+        device = source[
+            device_start : source.index(
+                "guard credentials.save(",
+                device_start,
+            )
+        ]
         self.assertIn("capabilities: [.hr]", device)
         profile = self.read("Strand/Screens/DevicesView.swift")
         veepoo_profile = profile[
@@ -332,17 +338,21 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
             profile.index("if d.sourceKind == .oura")
         ]
         self.assertIn(
-            'localized: "appwide.devices.supplier_captures"',
+            'localized: "appwide.devices.supplier_apple_captures"',
             veepoo_profile,
         )
         self.assertIn(
-            'localized: "appwide.devices.supplier_powers"',
+            'localized: "appwide.devices.supplier_apple_powers"',
             veepoo_profile,
         )
         localized = self.read("Tools/AppWideLocalization/appwide_strings.json")
-        self.assertIn("Heart rate (live display only) · Battery", localized)
         self.assertIn(
-            "Live display only. No history or scores are stored from this source.",
+            "Heart rate · Device steps · Band-scored sleep · Battery",
+            localized,
+        )
+        self.assertIn(
+            "Builds live heart rate history, daily movement, calories, Effort, "
+            "and sleep summaries.",
             localized,
         )
         for unsupported in (
@@ -354,12 +364,8 @@ class VeepooIOSAppSliceTests(unittest.TestCase):
             ".strainLoad",
         ):
             self.assertNotIn(unsupported, device)
-        for unsupported_copy in (
-            "Powers Effort",
-            "Powers Recovery",
-            "Powers Sleep",
-        ):
-            self.assertNotIn(unsupported_copy, veepoo_profile)
+        self.assertNotIn("HRV ·", veepoo_profile)
+        self.assertNotIn("Blood oxygen ·", veepoo_profile)
 
 
 if __name__ == "__main__":

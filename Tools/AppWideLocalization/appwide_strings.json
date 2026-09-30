@@ -8227,6 +8227,39 @@
     "zh-Hans": "心率（仅实时显示）· 电池",
     "zh-Hant": "心率（僅即時顯示）· 電池"
   },
+  "appwide.devices.supplier_apple_captures": {
+    "de": "Herzfrequenz · Geräteschritte · Vom Band bewerteter Schlaf · Akku",
+    "en": "Heart rate · Device steps · Band-scored sleep · Battery",
+    "es": "Frecuencia cardiaca · Pasos del dispositivo · Sueño evaluado por la banda · Batería",
+    "fr": "Fréquence cardiaque · Pas mesurés par l’appareil · Sommeil évalué par le bracelet · Batterie",
+    "it": "Frequenza cardiaca · Passi del dispositivo · Sonno valutato dalla fascia · Batteria",
+    "pt-PT": "Frequência cardíaca · Passos do dispositivo · Sono avaliado pela pulseira · Bateria",
+    "ru": "Пульс · Шаги с устройства · Сон по оценке браслета · Заряд",
+    "zh-Hans": "心率 · 设备步数 · 手环评估的睡眠 · 电池",
+    "zh-Hant": "心率 · 裝置步數 · 手環評估的睡眠 · 電池"
+  },
+  "appwide.devices.supplier_apple_footnote": {
+    "de": "Schritte und Schlaf werden vom Band gemeldet. NOOP misst den Ruhepuls aus der gespeicherten Herzfrequenz innerhalb des gemeldeten Schlafzeitraums. HRV, Blutsauerstoff, Atemfrequenz und nicht unterstützte Signale bleiben nicht verfügbar.",
+    "en": "Steps and sleep are reported by the band. NOOP measures resting HR from saved heart rate inside the reported sleep span. HRV, blood oxygen, respiratory rate, and unsupported signals stay unavailable.",
+    "es": "Los pasos y el sueño los informa la banda. NOOP mide la frecuencia cardiaca en reposo a partir de la frecuencia guardada dentro del periodo de sueño informado. La VFC, el oxígeno en sangre, la frecuencia respiratoria y las señales no compatibles siguen sin estar disponibles.",
+    "fr": "Les pas et le sommeil sont rapportés par le bracelet. NOOP mesure la fréquence cardiaque au repos à partir de la fréquence enregistrée pendant la période de sommeil rapportée. La VFC, l’oxygène sanguin, la fréquence respiratoire et les signaux non pris en charge restent indisponibles.",
+    "it": "I passi e il sonno sono segnalati dalla fascia. NOOP misura la frequenza cardiaca a riposo dai dati salvati durante l’intervallo di sonno segnalato. HRV, ossigeno nel sangue, frequenza respiratoria e segnali non supportati restano non disponibili.",
+    "pt-PT": "Os passos e o sono são comunicados pela pulseira. O NOOP mede a frequência cardíaca em repouso a partir da frequência guardada durante o período de sono comunicado. A VFC, o oxigénio no sangue, a frequência respiratória e os sinais não suportados continuam indisponíveis.",
+    "ru": "Шаги и сон сообщает браслет. NOOP измеряет пульс в покое по сохранённым данным пульса в пределах указанного периода сна. ВСР, кислород в крови, частота дыхания и неподдерживаемые сигналы остаются недоступными.",
+    "zh-Hans": "步数和睡眠由手环报告。NOOP 使用所报告睡眠时段内保存的心率测量静息心率。HRV、血氧、呼吸频率和不受支持的信号仍不可用。",
+    "zh-Hant": "步數和睡眠由手環回報。NOOP 使用所回報睡眠時段內儲存的心率測量靜息心率。HRV、血氧、呼吸頻率和不支援的訊號仍不可用。"
+  },
+  "appwide.devices.supplier_apple_powers": {
+    "de": "Erstellt Live-Herzfrequenzverlauf, tägliche Bewegung, Kalorien, Anstrengung und Schlafzusammenfassungen.",
+    "en": "Builds live heart rate history, daily movement, calories, Effort, and sleep summaries.",
+    "es": "Crea historial de frecuencia cardiaca en directo, movimiento diario, calorías, Esfuerzo y resúmenes de sueño.",
+    "fr": "Crée un historique de fréquence cardiaque en direct, le mouvement quotidien, les calories, l’Effort et des résumés du sommeil.",
+    "it": "Crea la cronologia della frequenza cardiaca in tempo reale, il movimento giornaliero, le calorie, lo Sforzo e i riepiloghi del sonno.",
+    "pt-PT": "Cria o histórico de frequência cardíaca em direto, movimento diário, calorias, Esforço e resumos do sono.",
+    "ru": "Формирует историю пульса в реальном времени, ежедневную активность, калории, Нагрузку и сводки сна.",
+    "zh-Hans": "生成实时心率历史、每日活动、卡路里、负荷和睡眠摘要。",
+    "zh-Hant": "建立即時心率歷史、每日活動、卡路里、負荷和睡眠摘要。"
+  },
   "appwide.devices.supplier_display_model": {
     "de": "NOOP Band",
     "en": "NOOP Band",
@@ -9075,15 +9108,15 @@
     "zh-Hant": "正在檢查即時心率"
   },
   "appwide.onboarding.device_wizard.supplier_ready_body": {
-    "de": "Die Live-Herzfrequenz verwendet die Empfangszeit des Telefons nur zur Anzeigeaktualität. Dieser Anbieter-Datenstrom wird weder dem dauerhaften Gesundheitsverlauf noch Formeln hinzugefügt.",
-    "en": "Live heart rate uses the phone receipt time for display freshness only. This supplier stream is not added to durable health history or formulas.",
-    "es": "La frecuencia cardiaca en directo usa la hora de recepción del teléfono solo para mostrar la actualización. Este flujo del proveedor no se añade al historial de salud permanente ni a las fórmulas.",
-    "fr": "La fréquence cardiaque en direct utilise l’heure de réception du téléphone uniquement pour indiquer la fraîcheur de l’affichage. Ce flux fournisseur n’est pas ajouté à l’historique de santé durable ni aux formules.",
-    "it": "La frequenza cardiaca in tempo reale usa l’ora di ricezione del telefono solo per indicare l’aggiornamento della visualizzazione. Questo flusso del fornitore non viene aggiunto alla cronologia sanitaria permanente né alle formule.",
-    "pt-PT": "A frequência cardíaca em direto usa a hora de receção do telemóvel apenas para indicar a atualidade da apresentação. Este fluxo do fornecedor não é adicionado ao histórico de saúde duradouro nem às fórmulas.",
-    "ru": "Для актуальности отображения пульса в реальном времени используется только время получения данных телефоном. Этот поток поставщика не добавляется в постоянную историю здоровья или формулы.",
-    "zh-Hans": "实时心率仅使用手机接收时间来表示显示内容的新鲜度。此供应商数据流不会添加到持久健康历史记录或公式中。",
-    "zh-Hant": "即時心率僅使用手機接收時間來表示顯示內容的新鮮度。此供應商資料串流不會加入持久健康歷史記錄或公式中。"
+    "de": "Die Live-Herzfrequenz wird mit der Empfangszeit des Telefons gespeichert, da der Anbieter-Datenstrom keinen Messzeitpunkt enthält. Nach dem Koppeln liest NOOP auch Geräteschritte und den vom Band bewerteten Schlaf, wenn verfügbar. HRV, Blutsauerstoff, Atemfrequenz, Hauttemperatur und nicht unterstützte Signale bleiben nicht verfügbar.",
+    "en": "Live heart rate is saved using phone receipt time because the supplier stream has no sample timestamp. After pairing, NOOP also reads device steps and band-scored sleep when available. HRV, blood oxygen, respiratory rate, skin temperature, and unsupported signals remain unavailable.",
+    "es": "La frecuencia cardiaca en directo se guarda con la hora de recepción del teléfono porque el flujo del proveedor no incluye la hora de la muestra. Tras enlazar, NOOP también lee los pasos del dispositivo y el sueño evaluado por la banda cuando están disponibles. La VFC, el oxígeno en sangre, la frecuencia respiratoria, la temperatura de la piel y las señales no compatibles siguen sin estar disponibles.",
+    "fr": "La fréquence cardiaque en direct est enregistrée avec l’heure de réception du téléphone, car le flux fournisseur ne contient pas d’horodatage d’échantillon. Après l’association, NOOP lit aussi les pas de l’appareil et le sommeil évalué par le bracelet lorsqu’ils sont disponibles. La VFC, l’oxygène sanguin, la fréquence respiratoire, la température cutanée et les signaux non pris en charge restent indisponibles.",
+    "it": "La frequenza cardiaca in tempo reale viene salvata usando l’ora di ricezione del telefono perché il flusso del fornitore non include l’ora del campione. Dopo l’abbinamento, NOOP legge anche i passi del dispositivo e il sonno valutato dalla fascia quando disponibili. HRV, ossigeno nel sangue, frequenza respiratoria, temperatura cutanea e segnali non supportati restano non disponibili.",
+    "pt-PT": "A frequência cardíaca em direto é guardada com a hora de receção do telemóvel porque o fluxo do fornecedor não inclui a hora da amostra. Após o emparelhamento, o NOOP também lê os passos do dispositivo e o sono avaliado pela pulseira quando disponíveis. A VFC, o oxigénio no sangue, a frequência respiratória, a temperatura da pele e os sinais não suportados continuam indisponíveis.",
+    "ru": "Пульс в реальном времени сохраняется со временем получения телефоном, так как поток поставщика не содержит времени измерения. После сопряжения NOOP также считывает шаги с устройства и оценённый браслетом сон, когда они доступны. ВСР, кислород в крови, частота дыхания, температура кожи и неподдерживаемые сигналы остаются недоступными.",
+    "zh-Hans": "由于供应商数据流不包含样本时间戳，实时心率会使用手机接收时间保存。配对后，NOOP 还会在可用时读取设备步数和手环评估的睡眠。HRV、血氧、呼吸频率、皮肤温度和不受支持的信号仍不可用。",
+    "zh-Hant": "由於供應商資料串流不包含樣本時間戳記，即時心率會使用手機接收時間儲存。配對後，NOOP 也會在可用時讀取裝置步數和手環評估的睡眠。HRV、血氧、呼吸頻率、皮膚溫度和不支援的訊號仍不可用。"
   },
   "appwide.onboarding.device_wizard.supplier_ready_title": {
     "de": "Akku und Live-Herzfrequenz bestätigt",

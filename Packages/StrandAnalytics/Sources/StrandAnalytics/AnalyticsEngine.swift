@@ -453,6 +453,10 @@ public enum AnalyticsEngine {
                                   daySteps: [StepSample]? = nil,
                                   stepClassificationPolicy: StepsCounter.ClassificationPolicy = .rejectUnverifiedBandMotion,
                                   dayGravity: [GravitySample]? = nil,
+                                  // Whole-day total reported by the device's own pedometer. This has
+                                  // already crossed the supplier adapter's range/provenance gate, so it
+                                  // must not be scaled as a raw motion counter.
+                                  deviceDayStepTotal: Int? = nil,
                                   // Wear-gated nightly skin-temp mean is harvested here
                                   // (baseline-independent); IntelligenceEngine seeds a personal
                                   // baseline from these means across nights and re-derives
@@ -528,6 +532,10 @@ public enum AnalyticsEngine {
                                   // pure-function callers/tests free of it; IntelligenceEngine threads the
                                   // night window's persisted band state. (#531 / H8 consume)
                                   bandSleepState: [(ts: Int, state: Int)] = [],
+                                  // Device-reported in-bed spans for hardware that does not expose a
+                                  // usable gravity stream. The span selects NOOP-owned HR samples only;
+                                  // it does not make device sleep stages or duration NOOP-derived.
+                                  deviceSleepWindows: [(start: Int, end: Int)] = [],
                                   // Opt-in experimental sleep staging (V2). When true, detected nights are
                                   // staged by `SleepStagerV2` instead of V1. Default false keeps V1 the
                                   // byte-identical default for pure-function callers/tests; IntelligenceEngine
@@ -752,7 +760,26 @@ public enum AnalyticsEngine {
         // negligible shift. The Rest/sleep-quality term is main-night; the recovery physiology is
         // day-best-resting, night-dominated. Keep these two definitions distinct on purpose.
         // Daily resting HR = lowest per-session resting HR across matched sessions.
-        let restingHRDaily = matched.compactMap { $0.restingHR }.min()
+        // If NOOP cannot stage this hardware, a device-reported in-bed span may
+        // select a sufficiently dense window of NOOP-owned HR samples.
+        let restingHRDaily: Int? = matched.compactMap { $0.restingHR }.min()
+            ?? deviceSleepWindows.compactMap { window -> Int? in
+                guard window.end > window.start else { return nil }
+                let worn = hr.lazy
+                    .filter {
+                        $0.ts >= window.start
+                            && $0.ts <= window.end
+                            && $0.bpm > 0
+                    }
+                    .prefix(StrainScorer.minSparseReadings)
+                    .count == StrainScorer.minSparseReadings
+                guard worn else { return nil }
+                return SleepStager.sessionRestingHR(
+                    start: window.start,
+                    end: window.end,
+                    hr: hr
+                )
+            }.min()
         // Daily avg HRV = in-bed-weighted mean of per-session avg HRV.
         let avgHRVDaily: Double? = {
             if deepHrvWindow {
@@ -937,6 +964,9 @@ public enum AnalyticsEngine {
             )
         }()
         let stepsTotal: Int? = {
+            if let total = deviceDayStepTotal, total >= 0 {
+                return total
+            }
             guard let ticks = stepAnalysis.steps else { return nil }
             return StepsCounter.scaledSteps(
                 rawTicks: ticks,

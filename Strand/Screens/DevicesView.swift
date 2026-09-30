@@ -1054,13 +1054,13 @@ struct DeviceCapabilityProfile {
                     localized: "appwide.devices.supplier_display_model"
                 ),
                 captures: String(
-                    localized: "appwide.devices.supplier_captures"
+                    localized: "appwide.devices.supplier_apple_captures"
                 ),
                 powers: String(
-                    localized: "appwide.devices.supplier_powers"
+                    localized: "appwide.devices.supplier_apple_powers"
                 ),
                 footnote: String(
-                    localized: "appwide.devices.supplier_footnote"
+                    localized: "appwide.devices.supplier_apple_footnote"
                 ))
         }
         // EXPERIMENTAL locally-adopted Oura ring (gen 3/4/5). The gen is carried on `model` ("Oura Ring

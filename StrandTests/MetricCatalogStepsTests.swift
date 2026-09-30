@@ -31,9 +31,43 @@ final class MetricCatalogStepsTests: XCTestCase {
         XCTAssertEqual(metric?.title, "Steps")
     }
 
-    func testTodayStepsValueRequiresImportedPedometerEvidence() {
+    func testSupplierNativeStepsRequireExactSupplierSource() {
+        let source = "veepoo-00000000-0000-0000-0000-000000000001"
+        let metric = MetricCatalog.todayStepsMetric(
+            hasMotionDerivedSteps: true,
+            supplierMeasuredSource: source
+        )
+
+        XCTAssertEqual(metric?.key, "steps")
+        XCTAssertEqual(metric?.source, source)
+        XCTAssertEqual(metric?.sourceLabel, "Compatible band")
+        XCTAssertNil(MetricCatalog.todayStepsMetric(
+            hasMotionDerivedSteps: true,
+            supplierMeasuredSource: "generic-band"
+        ))
+    }
+
+    func testTodayStepsValueUsesOnlyMeasuredSources() {
         XCTAssertEqual(MetricCatalog.todayStepsValue(imported: 8_400, motionDerived: 7_100,
                                                      calibratedEstimate: 6_900), 8_400)
+        XCTAssertEqual(MetricCatalog.todayStepsValue(
+            imported: nil,
+            supplierMeasured: 7_250,
+            motionDerived: 7_100,
+            calibratedEstimate: 6_900
+        ), 7_250)
+        XCTAssertEqual(MetricCatalog.todayStepsValue(
+            imported: 8_400,
+            supplierMeasured: 7_250,
+            motionDerived: 7_100,
+            calibratedEstimate: 6_900
+        ), 8_400)
+        XCTAssertEqual(MetricCatalog.todayStepsValue(
+            imported: nil,
+            supplierMeasured: 0,
+            motionDerived: 7_100,
+            calibratedEstimate: 6_900
+        ), 0)
         XCTAssertNil(MetricCatalog.todayStepsValue(imported: nil, motionDerived: 7_100,
                                                    calibratedEstimate: 6_900) as Int?)
         XCTAssertNil(MetricCatalog.todayStepsValue(imported: nil, motionDerived: nil,
@@ -49,6 +83,22 @@ final class MetricCatalogStepsTests: XCTestCase {
         )
         XCTAssertEqual(merged.map(\.day), ["2026-08-10"])
         XCTAssertEqual(merged.map(\.value), [8_400])
+    }
+
+    func testTodayStepsSeriesFillsFromSupplierButAppleWinsPerDay() {
+        let merged = MetricCatalog.todayStepsSeries(
+            imported: [("2026-08-10", 8_400)],
+            supplierMeasured: [
+                ("2026-08-10", 7_100),
+                ("2026-08-11", 7_500),
+                ("2026-08-12", 0),
+            ],
+            motionDerived: [("2026-08-13", 9_999)],
+            calibratedEstimate: [("2026-08-14", 8_888)]
+        )
+
+        XCTAssertEqual(merged.map(\.day), ["2026-08-10", "2026-08-11", "2026-08-12"])
+        XCTAssertEqual(merged.map(\.value), [8_400, 7_500, 0])
     }
 
     func testAppleHealthStepsRemainsAnIndependentCatalogMetric() {

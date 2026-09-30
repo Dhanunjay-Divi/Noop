@@ -183,37 +183,11 @@ extension WhoopStore {
         try syncWrite { db in
             var n = 0
             for s in sessions {
-                try db.execute(sql: """
-                    INSERT INTO sleepSession
-                        (deviceId, startTs, endTs, efficiency, restingHr, avgHrv, stagesJSON,
-                         userEdited, startTsAdjusted, gravitySparse,
-                         rrEligibleWindowCount, rrValidWindowCount)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(deviceId, startTs) DO UPDATE SET
-                        -- A user-corrected night keeps its hand-set bed/wake times and stage breakdown;
-                        -- a recompute/import refresh (this path) updates only the derived vitals. The
-                        -- `userEdited` flag is preserved, never cleared here, so a later strap re-sync
-                        -- can't revert a correction (the dedicated edit path is `applySleepEdit`).
-                        endTs = CASE WHEN sleepSession.userEdited THEN sleepSession.endTs ELSE excluded.endTs END,
-                        efficiency = excluded.efficiency,
-                        restingHr = excluded.restingHr,
-                        avgHrv = excluded.avgHrv,
-                        stagesJSON = CASE WHEN sleepSession.userEdited THEN sleepSession.stagesJSON ELSE excluded.stagesJSON END,
-                        startTsAdjusted = CASE WHEN sleepSession.userEdited THEN sleepSession.startTsAdjusted ELSE excluded.startTsAdjusted END,
-                        gravitySparse = excluded.gravitySparse,
-                        -- Incoming detector evidence describes its incoming bounds. When a user edit
-                        -- preserves different bounds/stages, preserve the evidence explicitly written
-                        -- for that edited window. Unedited replacements take incoming values, including
-                        -- nil, so unsupported/legacy inputs clear stale evidence.
-                        rrEligibleWindowCount = CASE WHEN sleepSession.userEdited THEN sleepSession.rrEligibleWindowCount ELSE excluded.rrEligibleWindowCount END,
-                        rrValidWindowCount = CASE WHEN sleepSession.userEdited THEN sleepSession.rrValidWindowCount ELSE excluded.rrValidWindowCount END,
-                        userEdited = sleepSession.userEdited
-                    """, arguments: [deviceId, s.startTs, s.endTs, s.efficiency,
-                                     s.restingHr, s.avgHrv, s.stagesJSON, s.userEdited,
-                                     s.startTsAdjusted, s.gravitySparse,
-                                     s.rrEligibleWindowCount,
-                                     s.rrValidWindowCount])
-                n += db.changesCount
+                n += try Self.upsertSleepSession(
+                    s,
+                    deviceId: deviceId,
+                    in: db
+                )
             }
             return n
         }
@@ -476,6 +450,86 @@ extension WhoopStore {
                 n += try Self.upsertDailyMetric(d, deviceId: deviceId, in: db)
             }
             return n
+        }
+    }
+
+    /// Atomically publish a device-reported whole-day step total without
+    /// replacing unrelated fields already stored for the same source/day.
+    @discardableResult
+    public func upsertDeviceStepTotal(
+        day: String,
+        steps: Int,
+        deviceId: String
+    ) async throws -> Int {
+        try syncWrite { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO dailyMetric (deviceId, day, steps)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(deviceId, day) DO UPDATE SET
+                        steps = excluded.steps
+                    """,
+                arguments: [deviceId, day, steps]
+            )
+            return db.changesCount
+        }
+    }
+
+    /// Atomically publish the sleep summary reported by a device. Optional
+    /// fields only replace prior values when the device actually supplied them.
+    @discardableResult
+    public func upsertDeviceSleepReport(
+        day: String,
+        totalSleepMin: Double,
+        efficiency: Double?,
+        deepMin: Double?,
+        lightMin: Double?,
+        disturbances: Int?,
+        session: CachedSleepSession,
+        deviceId: String
+    ) async throws -> Int {
+        try syncWrite { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO dailyMetric
+                        (deviceId, day, totalSleepMin, efficiency, deepMin,
+                         lightMin, disturbances)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(deviceId, day) DO UPDATE SET
+                        totalSleepMin = excluded.totalSleepMin,
+                        efficiency = COALESCE(
+                            excluded.efficiency,
+                            dailyMetric.efficiency
+                        ),
+                        deepMin = COALESCE(
+                            excluded.deepMin,
+                            dailyMetric.deepMin
+                        ),
+                        lightMin = COALESCE(
+                            excluded.lightMin,
+                            dailyMetric.lightMin
+                        ),
+                        disturbances = COALESCE(
+                            excluded.disturbances,
+                            dailyMetric.disturbances
+                        )
+                    """,
+                arguments: [
+                    deviceId,
+                    day,
+                    totalSleepMin,
+                    efficiency,
+                    deepMin,
+                    lightMin,
+                    disturbances,
+                ]
+            )
+            let dailyChanges = db.changesCount
+            return dailyChanges + (try Self.upsertSleepSession(
+                session,
+                deviceId: deviceId,
+                in: db
+            ))
         }
     }
 
@@ -1082,6 +1136,65 @@ extension WhoopStore {
                              d.steps, d.activeKcalEst,
                              d.spo2Red, d.spo2Ir,
                              d.hrvMethod?.rawValue])
+        return db.changesCount
+    }
+
+    private static func upsertSleepSession(
+        _ s: CachedSleepSession,
+        deviceId: String,
+        in db: Database
+    ) throws -> Int {
+        try db.execute(sql: """
+            INSERT INTO sleepSession
+                (deviceId, startTs, endTs, efficiency, restingHr, avgHrv,
+                 stagesJSON, userEdited, startTsAdjusted, gravitySparse,
+                 rrEligibleWindowCount, rrValidWindowCount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(deviceId, startTs) DO UPDATE SET
+                endTs = CASE
+                    WHEN sleepSession.userEdited
+                    THEN sleepSession.endTs
+                    ELSE excluded.endTs
+                END,
+                efficiency = excluded.efficiency,
+                restingHr = excluded.restingHr,
+                avgHrv = excluded.avgHrv,
+                stagesJSON = CASE
+                    WHEN sleepSession.userEdited
+                    THEN sleepSession.stagesJSON
+                    ELSE excluded.stagesJSON
+                END,
+                startTsAdjusted = CASE
+                    WHEN sleepSession.userEdited
+                    THEN sleepSession.startTsAdjusted
+                    ELSE excluded.startTsAdjusted
+                END,
+                gravitySparse = excluded.gravitySparse,
+                rrEligibleWindowCount = CASE
+                    WHEN sleepSession.userEdited
+                    THEN sleepSession.rrEligibleWindowCount
+                    ELSE excluded.rrEligibleWindowCount
+                END,
+                rrValidWindowCount = CASE
+                    WHEN sleepSession.userEdited
+                    THEN sleepSession.rrValidWindowCount
+                    ELSE excluded.rrValidWindowCount
+                END,
+                userEdited = sleepSession.userEdited
+            """, arguments: [
+                deviceId,
+                s.startTs,
+                s.endTs,
+                s.efficiency,
+                s.restingHr,
+                s.avgHrv,
+                s.stagesJSON,
+                s.userEdited,
+                s.startTsAdjusted,
+                s.gravitySparse,
+                s.rrEligibleWindowCount,
+                s.rrValidWindowCount,
+            ])
         return db.changesCount
     }
 

@@ -2588,11 +2588,12 @@ struct TodayView: View {
         case .sleep:
             return sleepValue(d)
         case .steps:
-            // Primary Steps requires a same-day imported pedometer count. Wrist motion and heart rate
-            // can describe movement or effort, but neither proves footfalls.
+            // Apple Health measured steps win. A supplier-native total may fill the day only when the
+            // authoritative active-device row identifies the quarantined supplier source.
             let appleStepsForDay = appleDays.last(where: { $0.day == selectedDayKey })?.steps
             return MetricCatalog.todayStepsValue(
                 imported: appleStepsForDay.map(Double.init),
+                supplierMeasured: selectedSupplierSteps,
                 motionDerived: d?.steps.map(Double.init),
                 calibratedEstimate: stepsEstByDay[selectedDayKey].map(Double.init)
             ).map(intString) ?? StrandFormat.missing
@@ -4193,6 +4194,7 @@ struct TodayView: View {
     /// backfill (see `loadAll`). Same reads, same derivations, same assignment order as before.
     private func loadHistoryWide() async -> Bool {
         let requestDeviceId = repo.deviceId
+        let requestSourceKind = repo.activeDeviceSourceKind
         let requestRefreshSeq = repo.refreshSeq
         let requestedAgeMetricState = profile.ageMetricStateToken
         let requestedProfileAge = profile.age
@@ -4251,9 +4253,18 @@ struct TodayView: View {
         let stepsEstByDayLocal = Dictionary(
             stepsEstSeries.map { ($0.day, Int($0.value.rounded())) },
             uniquingKeysWith: { _, last in last })
-        // The primary Steps trend uses the same imported-pedometer-only contract as the visible value.
+        let supplierStepsSpark = requestSourceKind == .veepoo
+            ? trailingWindow(
+                repo.days.compactMap { day in
+                    day.steps.map { (day: day.day, value: Double($0)) }
+                },
+                days: 14
+            )
+            : []
+        // The primary Steps trend uses the same measured-source contract as the visible value.
         let stepsSparkLocal = MetricCatalog.todayStepsSeries(
             imported: await stepsAppleSpark,
+            supplierMeasured: supplierStepsSpark,
             motionDerived: [],
             calibratedEstimate: []
         ).map(\.value)
@@ -4315,6 +4326,7 @@ struct TodayView: View {
 
         guard !Task.isCancelled,
               requestDeviceId == repo.deviceId,
+              requestSourceKind == repo.activeDeviceSourceKind,
               requestRefreshSeq == repo.refreshSeq,
               requestedAgeMetricState == profile.ageMetricStateToken,
               requestedHydrationDayKey == selectedDayKey else { return false }
@@ -4950,18 +4962,32 @@ struct TodayView: View {
         MetricCatalog.todayEnergyMetric(for: selectedEnergyBreakdown)
     }
 
+    private var selectedSupplierSteps: Double? {
+        guard repo.activeDeviceSourceKind == .veepoo else { return nil }
+        return displayDay?.steps.map(Double.init)
+    }
+
+    private var selectedSupplierStepSource: String? {
+        selectedSupplierSteps == nil ? nil : repo.deviceId
+    }
+
     /// Detail routing uses the same selected-day source as the visible Steps number. The legacy
     /// DailyMetric motion field and `steps_est` remain outside primary Steps.
     private var selectedStepsMetric: MetricDescriptor? {
         let appleSteps = appleDays.last(where: { $0.day == selectedDayKey })?.steps
         return MetricCatalog.todayStepsMetric(
             hasMotionDerivedSteps: displayDay?.steps != nil,
-            hasImportedSteps: appleSteps != nil)
+            hasImportedSteps: appleSteps != nil,
+            supplierMeasuredSource: selectedSupplierStepSource
+        )
     }
 
     private var stepsSourceCaption: String {
         if appleDays.last(where: { $0.day == selectedDayKey })?.steps != nil {
             return String(localized: "Measured · Apple Health")
+        }
+        if selectedSupplierSteps != nil {
+            return String(localized: "Compatible band")
         }
         return String(localized: "No step source for this day")
     }

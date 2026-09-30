@@ -191,6 +191,9 @@
     <string name="appwide_devices_empty_body">Подключите NOOP Band или совместимый браслет 4.0 либо 5.0/MG. Показаны только браслеты, с которыми эта сборка может выполнить сопряжение.</string>
     <string name="appwide_devices_empty_title">Подключите первый браслет</string>
     <string name="appwide_devices_pair_again">Подключить снова</string>
+    <string name="appwide_devices_supplier_apple_captures">Пульс · Шаги с устройства · Сон по оценке браслета · Заряд</string>
+    <string name="appwide_devices_supplier_apple_footnote">Шаги и сон сообщает браслет. NOOP измеряет пульс в покое по сохранённым данным пульса в пределах указанного периода сна. ВСР, кислород в крови, частота дыхания и неподдерживаемые сигналы остаются недоступными.</string>
+    <string name="appwide_devices_supplier_apple_powers">Формирует историю пульса в реальном времени, ежедневную активность, калории, Нагрузку и сводки сна.</string>
     <string name="appwide_devices_supplier_captures">Пульс (только отображение в реальном времени) · Заряд</string>
     <string name="appwide_devices_supplier_display_model">NOOP Band</string>
     <string name="appwide_devices_supplier_footnote">Пульс скрывается, когда обновления прекращаются. Заряд показывается только пока браслет подключён.</string>
@@ -658,7 +661,7 @@
     <string name="appwide_onboarding_device_wizard_supplier_progress_battery">Проверка функции батареи</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_connecting">Подключение к выбранному браслету</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_live_heart_rate">Проверка пульса в реальном времени</string>
-    <string name="appwide_onboarding_device_wizard_supplier_ready_body">Для актуальности отображения пульса в реальном времени используется только время получения данных телефоном. Этот поток поставщика не добавляется в постоянную историю здоровья или формулы.</string>
+    <string name="appwide_onboarding_device_wizard_supplier_ready_body">Пульс в реальном времени сохраняется со временем получения телефоном, так как поток поставщика не содержит времени измерения. После сопряжения NOOP также считывает шаги с устройства и оценённый браслетом сон, когда они доступны. ВСР, кислород в крови, частота дыхания, температура кожи и неподдерживаемые сигналы остаются недоступными.</string>
     <string name="appwide_onboarding_device_wizard_supplier_ready_title">Батарея и пульс в реальном времени подтверждены</string>
     <string name="appwide_onboarding_device_wizard_supplier_registration_failed">Не удалось сохранить браслет. Регистрация не была отмечена как завершённая.</string>
     <string name="appwide_onboarding_device_wizard_supplier_subtitle">Использует напечатанный идентификатор браслета и четырёхзначный пароль устройства. Экспериментальная функция.</string>

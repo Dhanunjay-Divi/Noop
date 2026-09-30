@@ -15,10 +15,35 @@ struct VeepooBandBatteryReading: Equatable, Sendable {
     let low: Bool?
 }
 
+/// A whole-day cumulative activity total read from the band. The band owns the
+/// step counter; NOOP never derives these from HR.
+struct VeepooBandStepsReading: Equatable, Sendable {
+    let steps: Int
+    let distanceKm: Double?
+    let kcal: Double?
+}
+
+/// A night of sleep as the BAND itself scored it. NOOP does not stage this from
+/// raw sensor data - the band has no accelerometer stream we can read - so these
+/// are the device's own totals, surfaced as such.
+struct VeepooBandSleepReading: Equatable, Sendable {
+    let startTs: Int
+    let endTs: Int
+    let totalMin: Double
+    let deepMin: Double?
+    let lightMin: Double?
+    let awakenings: Int?
+    /// Asleep epochs over total epochs, in [0,1], measured from the band's own
+    /// 5-minute staging curve. nil when the band reports no curve - Rest then
+    /// renders "-" rather than a made-up quality score.
+    let efficiency: Double?
+}
+
 struct VeepooBandHeartRateReading: Equatable, Sendable {
     let bpm: Int
-    /// Phone receipt time captured in the supplier callback. This is display
-    /// freshness only and must not become a durable health timestamp.
+    /// Phone receipt time captured in the supplier callback. The supplier live
+    /// API carries no sample timestamp, so this is both the display-freshness
+    /// time and the source-qualified observation time used for durable live HR.
     let receivedAt: Date
 }
 
@@ -53,6 +78,8 @@ enum VeepooBandAdapterStage: String, Equatable, Hashable, Sendable {
     case compatibility
     case battery
     case live
+    case steps
+    case sleep
     case disconnect
 }
 
@@ -76,6 +103,8 @@ enum VeepooBandAdapterEvent: Equatable, Sendable {
     case battery(VeepooBandBatteryReading)
     case liveStarted
     case heartRate(VeepooBandHeartRateReading)
+    case steps(VeepooBandStepsReading)
+    case sleep(VeepooBandSleepReading)
     case liveStopped
     case disconnected
     case failed(stage: VeepooBandAdapterStage, failure: VeepooBandAdapterFailure)
@@ -94,6 +123,8 @@ protocol VeepooBandAdapterControlling: AnyObject {
     func verifyPassword(_ password: String)
     func startLiveHeartRate()
     func stopLiveHeartRate()
+    func readSteps()
+    func readSleep()
 }
 
 enum VeepooBandSDKConnectionEvent: Equatable, Sendable {
@@ -134,6 +165,24 @@ enum VeepooBandSDKLiveEvent: Equatable, Sendable {
     case stopped
 }
 
+/// Raw day-cumulative activity totals as the supplier SDK reports them.
+struct VeepooBandSDKStepsEvent: Equatable, Sendable {
+    let steps: Int
+    let distanceKm: Double?
+    let kcal: Double?
+}
+
+/// Raw sleep totals as the supplier SDK reports them.
+struct VeepooBandSDKSleepEvent: Equatable, Sendable {
+    let startTs: Int
+    let endTs: Int
+    let totalMin: Double
+    let deepMin: Double?
+    let lightMin: Double?
+    let awakenings: Int?
+    let efficiency: Double?
+}
+
 enum VeepooBandSDKEvent: Equatable, Sendable {
     case candidate(
         generation: UInt64,
@@ -144,7 +193,21 @@ enum VeepooBandSDKEvent: Equatable, Sendable {
     case connection(generation: UInt64, VeepooBandSDKConnectionEvent)
     case password(generation: UInt64, VeepooBandSDKPasswordEvent)
     case battery(generation: UInt64, VeepooBandSDKBatteryEvent)
+    case batteryFailed(
+        generation: UInt64,
+        VeepooBandAdapterFailure
+    )
     case live(generation: UInt64, VeepooBandSDKLiveEvent)
+    case steps(generation: UInt64, VeepooBandSDKStepsEvent)
+    case stepsFailed(
+        generation: UInt64,
+        VeepooBandAdapterFailure
+    )
+    case sleep(generation: UInt64, VeepooBandSDKSleepEvent)
+    case sleepFailed(
+        generation: UInt64,
+        VeepooBandAdapterFailure
+    )
 
     var generation: UInt64 {
         switch self {
@@ -152,7 +215,12 @@ enum VeepooBandSDKEvent: Equatable, Sendable {
              .connection(let generation, _),
              .password(let generation, _),
              .battery(let generation, _),
-             .live(let generation, _):
+             .batteryFailed(let generation, _),
+             .live(let generation, _),
+             .steps(let generation, _),
+             .stepsFailed(let generation, _),
+             .sleep(let generation, _),
+             .sleepFailed(let generation, _):
             return generation
         }
     }
@@ -174,6 +242,8 @@ protocol VeepooBandSDKClient: AnyObject {
     func readBattery(generation: UInt64)
     func startLiveHeartRate(generation: UInt64)
     func stopLiveHeartRate()
+    func readSteps(generation: UInt64)
+    func readSleep(generation: UInt64)
 }
 
 enum VeepooBandDiagnosticOutcome: String, Equatable, Sendable {
@@ -368,6 +438,27 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
         client.startLiveHeartRate(generation: generation)
     }
 
+    /// Asks the band for its own scored sleep after authentication. The supplier
+    /// stack may drop commands issued while authentication is still settling.
+    func readSleep() {
+        guard state == .ready || state == .startingLive || state == .streaming else {
+            reject(.invalidState, stage: .sleep)
+            return
+        }
+        diagnostics.record(.init(stage: .sleep, outcome: .began))
+        client.readSleep(generation: generation)
+    }
+
+    /// Reads the band's own day-cumulative step total after authentication.
+    func readSteps() {
+        guard state == .ready || state == .startingLive || state == .streaming else {
+            reject(.invalidState, stage: .steps)
+            return
+        }
+        diagnostics.record(.init(stage: .steps, outcome: .began))
+        client.readSteps(generation: generation)
+    }
+
     func stopLiveHeartRate() {
         guard state == .startingLive || state == .streaming else { return }
         client.stopLiveHeartRate()
@@ -496,8 +587,24 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
             transition(to: .ready)
             eventHandler?(.battery(reading))
             diagnostics.record(.init(stage: .battery, outcome: .completed))
+        case .batteryFailed(_, let failure):
+            fail(failure, stage: .battery)
         case .live(_, let value):
             handle(value)
+        case .steps(_, let value):
+            handleSteps(value)
+        case .stepsFailed(_, let failure):
+            recordOptionalReadFailure(
+                stage: .steps,
+                failure: failure
+            )
+        case .sleep(_, let value):
+            handleSleep(value)
+        case .sleepFailed(_, let failure):
+            recordOptionalReadFailure(
+                stage: .sleep,
+                failure: failure
+            )
         }
     }
 
@@ -591,6 +698,82 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
             }
             stopLiveHeartRate()
         }
+    }
+
+    /// Accepts a night the band scored itself. Only sanity bounds are applied; a
+    /// value NOOP cannot verify is surfaced as the band's, never re-derived.
+    private func handleSleep(_ event: VeepooBandSDKSleepEvent) {
+        guard state == .ready || state == .startingLive || state == .streaming else {
+            recordStale(.sleep)
+            return
+        }
+        guard event.endTs > event.startTs,
+              event.totalMin > 0,
+              event.totalMin <= 24 * 60,
+              event.deepMin.map({ $0 >= 0 && $0 <= event.totalMin }) ?? true,
+              event.lightMin.map({ $0 >= 0 && $0 <= event.totalMin }) ?? true,
+              event.awakenings.map({ (0...100).contains($0) }) ?? true,
+              event.efficiency.map({ (0...1).contains($0) }) ?? true
+        else {
+            reject(.invalidSample, stage: .sleep)
+            return
+        }
+        eventHandler?(
+            .sleep(
+                .init(
+                    startTs: event.startTs,
+                    endTs: event.endTs,
+                    totalMin: event.totalMin,
+                    deepMin: event.deepMin,
+                    lightMin: event.lightMin,
+                    awakenings: event.awakenings,
+                    efficiency: event.efficiency
+                )
+            )
+        )
+        diagnostics.record(.init(stage: .sleep, outcome: .completed))
+    }
+
+    /// Accepts a day-cumulative activity total. A step counter only ever grows
+    /// within a day, and the band reports an absolute total, so the only validation
+    /// is a sane range. NOOP never fabricates or back-fills this value.
+    private func handleSteps(_ event: VeepooBandSDKStepsEvent) {
+        guard state == .ready || state == .startingLive || state == .streaming else {
+            recordStale(.steps)
+            return
+        }
+        guard (0...200_000).contains(event.steps) else {
+            reject(.invalidSample, stage: .steps)
+            return
+        }
+        eventHandler?(
+            .steps(
+                .init(
+                    steps: event.steps,
+                    distanceKm: event.distanceKm,
+                    kcal: event.kcal
+                )
+            )
+        )
+        diagnostics.record(.init(stage: .steps, outcome: .completed))
+    }
+
+    private func recordOptionalReadFailure(
+        stage: VeepooBandAdapterStage,
+        failure: VeepooBandAdapterFailure
+    ) {
+        guard state == .ready || state == .startingLive || state == .streaming else {
+            recordStale(stage)
+            return
+        }
+        diagnostics.record(
+            .init(
+                stage: stage,
+                outcome: .failed,
+                failure: failure
+            )
+        )
+        eventHandler?(.failed(stage: stage, failure: failure))
     }
 
     private func finishLive(failure: VeepooBandAdapterFailure) {
@@ -689,7 +872,12 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
         case .connection: return .connection
         case .password: return .authentication
         case .battery: return .battery
+        case .batteryFailed: return .battery
         case .live: return .live
+        case .steps: return .steps
+        case .stepsFailed: return .steps
+        case .sleep: return .sleep
+        case .sleepFailed: return .sleep
         }
     }
 

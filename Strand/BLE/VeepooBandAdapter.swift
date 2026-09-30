@@ -87,6 +87,14 @@ private final class VeepooBandAdapter: VeepooBandAdapterControlling {
     func stopLiveHeartRate() {
         core.stopLiveHeartRate()
     }
+
+    func readSteps() {
+        core.readSteps()
+    }
+
+    func readSleep() {
+        core.readSleep()
+    }
 }
 
 /// The only file that imports the restricted supplier framework.
@@ -98,6 +106,12 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
     private var candidates: [UInt64: VPPeripheralModel] = [:]
     private var handleByPeripheralID: [UUID: UInt64] = [:]
     private var nextCandidateHandle: UInt64 = 0
+    /// Bounded re-arm for a battery read the supplier stack drops when it is
+    /// issued while authentication is still settling.
+    private static let batteryAttemptLimit = 6
+    private static let batteryRetryInterval: TimeInterval = 2
+    private var batteryRetry: Timer?
+    private var batteryAttempts = 0
 
     init(manager: VPBleCentralManage = .sharedBleManager()) {
         self.manager = manager
@@ -149,6 +163,9 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
     }
 
     func disconnect() {
+        batteryRetry?.invalidate()
+        batteryRetry = nil
+        batteryAttempts = 0
         manager.vpBleConnectStateChangeBlock = nil
         manager.veepooSDKStopScanDevice()
         manager.peripheralManage?.veepooSDKTestHeartStart(
@@ -172,10 +189,54 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
     }
 
     func readBattery(generation: UInt64) {
-        guard let peripheral = manager.peripheralManage else {
-            emit(.connection(generation: generation, .failed))
-            return
+        batteryRetry?.invalidate()
+        batteryAttempts = 0
+        guard requestBattery(generation: generation) else { return }
+        batteryRetry = Timer.scheduledTimer(
+            withTimeInterval: Self.batteryRetryInterval,
+            repeats: true
+        ) { [weak self] timer in
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    timer.invalidate()
+                    return
+                }
+                guard self.batteryAttempts < Self.batteryAttemptLimit else {
+                    timer.invalidate()
+                    self.batteryRetry = nil
+                    self.emit(
+                        .batteryFailed(
+                            generation: generation,
+                            .timeout
+                        )
+                    )
+                    return
+                }
+                _ = self.requestBattery(generation: generation)
+            }
         }
+    }
+
+    /// Issues one battery read. The supplier stack delivers two password
+    /// callbacks, and a battery command issued from the first — 1ms in, while
+    /// authentication is still settling — is accepted and then silently
+    /// dropped. `readBattery` therefore re-arms this a bounded number of times
+    /// so the reading still lands instead of stranding the adapter in
+    /// `.readingBattery`, which is what kept live HR from ever starting.
+    @discardableResult
+    private func requestBattery(generation: UInt64) -> Bool {
+        guard let peripheral = manager.peripheralManage else {
+            batteryRetry?.invalidate()
+            batteryRetry = nil
+            emit(
+                .batteryFailed(
+                    generation: generation,
+                    .noResult
+                )
+            )
+            return false
+        }
+        batteryAttempts += 1
         peripheral.veepooSDKReadDeviceBatteryAndChargeInfo {
             [weak self] isPercent, chargeState, isLow, value in
             let event = VeepooBandSDKBatteryEvent(
@@ -185,9 +246,12 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
                 value: Int(value)
             )
             Task { @MainActor [weak self] in
+                self?.batteryRetry?.invalidate()
+                self?.batteryRetry = nil
                 self?.emit(.battery(generation: generation, event))
             }
         }
+        return true
     }
 
     func startLiveHeartRate(generation: UInt64) {
@@ -219,12 +283,252 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
         }
     }
 
+    /// Reads the band's day-cumulative step total for today.
+    ///
+    /// This goes through `VPDataBaseOperation`, NOT the
+    /// `veepooSDK_readStepDataWithDayNumber:` instance method: on this SDK the
+    /// instance method is a bare `ret` stub on `VPPeripheralBaseManage`, so the
+    /// completion block is never retained and never fires. The class method does
+    /// issue the supplier's own step command to the band for a same-day query and
+    /// calls back exactly once, on the main queue, about half a second later.
+    func readSteps(generation: UInt64) {
+        // The band's address may change across verification, so it is read from the
+        // live peripheral model rather than the scan-time candidate.
+        guard let model = manager.peripheralModel,
+              let address = model.deviceAddress,
+              !address.isEmpty
+        else {
+            emit(
+                .stepsFailed(
+                    generation: generation,
+                    .noResult
+                )
+            )
+            return
+        }
+        VPDataBaseOperation.veepooSDKGetStepData(
+            withDate: Self.supplierDayFormatter.string(from: Date()),
+            andTableID: address,
+            // The stature already configured on the band. It scales only the
+            // vendor's distance/calorie conversion, never the step count, and is
+            // read-only here: correcting it would be a BLE write to the device.
+            changeUserStature: model.deviceStature
+        ) { [weak self] stepDict in
+            guard let raw = stepDict else {
+                Task { @MainActor [weak self] in
+                    self?.emit(
+                        .stepsFailed(
+                            generation: generation,
+                            .noResult
+                        )
+                    )
+                }
+                return
+            }
+            // The documented keys are capitalised, but the SDK's own fallback path
+            // keys on lowercase, so both spellings are accepted.
+            guard let steps = Self.intValue(raw["Step"] ?? raw["step"]) else {
+                Task { @MainActor [weak self] in
+                    self?.emit(
+                        .stepsFailed(
+                            generation: generation,
+                            .invalidSample
+                        )
+                    )
+                }
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.emit(
+                    .steps(
+                        generation: generation,
+                        VeepooBandSDKStepsEvent(
+                            steps: steps,
+                            distanceKm: Self.doubleValue(
+                                raw["Dis"] ?? raw["dis"]
+                            ),
+                            kcal: Self.doubleValue(raw["Cal"] ?? raw["cal"])
+                        )
+                    )
+                )
+            }
+        }
+    }
+
+    /// The supplier hands these back as either NSNumber or NSString depending on
+    /// firmware, so both are accepted and anything else is dropped rather than
+    /// coerced into a wrong number.
+    private static func intValue(_ any: Any?) -> Int? {
+        if let n = any as? NSNumber { return n.intValue }
+        if let s = any as? String { return Int(s) ?? Double(s).map(Int.init) }
+        return nil
+    }
+
+    private static func doubleValue(_ any: Any?) -> Double? {
+        if let n = any as? NSNumber { return n.doubleValue }
+        if let s = any as? String { return Double(s) }
+        return nil
+    }
+
+    /// Asks the band for its own scored sleep for last night.
+    ///
+    /// Two steps, because the instance-level `veepooSDK_readSleepDataWithDayNumber:`
+    /// is a `ret` stub on the concrete manager exactly like the step one: first sync
+    /// the device's stored days (that selector IS implemented on `VPPeripheralManage`),
+    /// then read back only the sleep rows. NOOP reads sleep fields and nothing else -
+    /// the sync also populates vendor tables this app deliberately never touches.
+    func readSleep(generation: UInt64) {
+        guard let peripheral = manager.peripheralManage,
+              let model = manager.peripheralModel,
+              let address = model.deviceAddress,
+              !address.isEmpty
+        else {
+            emit(
+                .sleepFailed(
+                    generation: generation,
+                    .noResult
+                )
+            )
+            return
+        }
+        peripheral.veepooSdkStartReadDeviceAllData {
+            [weak self] state, _, _, _ in
+            // Only read once the device has finished handing over its days.
+            guard state == .complete else { return }
+            Task { @MainActor [weak self] in
+                self?.emitSleep(generation: generation, address: address)
+            }
+        }
+    }
+
+    /// Reads back the most recent scored night and maps it onto NOOP's own shape.
+    ///
+    /// Both today and yesterday are queried: the band files a night under a single
+    /// date key, and which one depends on when the session started, so a night that
+    /// began before midnight is not under today's key.
+    private func emitSleep(generation: UInt64, address: String) {
+        let today = Date()
+        let yesterday = today.addingTimeInterval(-86_400)
+        var rows: [[AnyHashable: Any]] = []
+        for date in [today, yesterday] {
+            let dayRows = (VPDataBaseOperation.veepooSDKGetSleepData(
+                withDate: Self.supplierDayFormatter.string(from: date),
+                andTableID: address
+            ) as? [[AnyHashable: Any]]) ?? []
+            rows.append(contentsOf: dayRows)
+        }
+        guard !rows.isEmpty else {
+            emit(
+                .sleepFailed(
+                    generation: generation,
+                    .noResult
+                )
+            )
+            return
+        }
+
+        // The band reports each sleep period separately; take the longest as the
+        // night rather than summing unrelated naps into one block.
+        var best: (total: Double, row: [AnyHashable: Any])?
+        for row in rows {
+            let hours = Self.doubleValue(row["SLE_HOUR"]) ?? 0
+            let minutes = Self.doubleValue(row["SLE_MINUTE"]) ?? 0
+            let total = hours * 60 + minutes
+            guard total > 0 else { continue }
+            if best == nil || total > best!.total { best = (total, row) }
+        }
+        guard let best else {
+            emit(
+                .sleepFailed(
+                    generation: generation,
+                    .invalidSample
+                )
+            )
+            return
+        }
+        guard let start = Self.sleepTimestamp(best.row["SLEEP_TIME"]),
+              let end = Self.sleepTimestamp(best.row["WAKE_TIME"]),
+              end > start
+        else {
+            emit(
+                .sleepFailed(
+                    generation: generation,
+                    .invalidSample
+                )
+            )
+            return
+        }
+
+        emit(
+            .sleep(
+                generation: generation,
+                VeepooBandSDKSleepEvent(
+                    startTs: start,
+                    endTs: end,
+                    totalMin: best.total,
+                    deepMin: Self.doubleValue(best.row["DEEP_HOUR"]).map { $0 * 60 },
+                    lightMin: Self.doubleValue(best.row["LIGHT_HOUR"]).map { $0 * 60 },
+                    awakenings: Self.intValue(best.row["WakeUpTime"]),
+                    efficiency: Self.sleepEfficiency(best.row["SLE_LINE"])
+                )
+            )
+        )
+    }
+
+    /// Measured sleep efficiency from the band's own staging curve: one character
+    /// per 5-minute epoch, 0=light, 1=deep, 2=awake. Efficiency is asleep epochs
+    /// over total epochs, a real ratio in [0,1].
+    ///
+    /// Deliberately NOT asleep-time over in-bed-span: the band derives both from
+    /// the same figures, so that ratio is a constant 1.0 and would present a
+    /// duration as a sleep-quality score. Absent or unparseable curve -> nil.
+    private static func sleepEfficiency(_ any: Any?) -> Double? {
+        guard let line = any as? String else { return nil }
+        var total = 0
+        var asleep = 0
+        for ch in line {
+            switch ch {
+            case "0", "1":
+                total += 1
+                asleep += 1
+            case "2":
+                total += 1
+            default:
+                continue
+            }
+        }
+        guard total > 0 else { return nil }
+        return Double(asleep) / Double(total)
+    }
+
+    /// The supplier stamps these as "yyyy/MM/dd HH:mm" in device-local time.
+    private static func sleepTimestamp(_ any: Any?) -> Int? {
+        guard let text = any as? String, !text.isEmpty else { return nil }
+        return sleepTimeFormatter.date(from: text)
+            .map { Int($0.timeIntervalSince1970) }
+    }
+
+    private static let sleepTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy/MM/dd HH:mm"
+        return f
+    }()
+
+    private static let supplierDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     func stopLiveHeartRate() {
         manager.peripheralManage?.veepooSDKTestHeartStart(
             false,
             testResult: nil
         )
     }
+
 
     private func accept(
         _ model: VPPeripheralModel,
@@ -331,9 +635,9 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
                     generation: generation,
                     .verified(
                         .init(
-                            modelCode: model.map {
-                                String($0.deviceNumber)
-                            } ?? "",
+                            modelCode: {
+                                return model.map { String($0.deviceNumber) } ?? ""
+                            }(),
                             hardwareRevision:
                                 model?.deviceTestVersion ?? "",
                             firmwareRevision: model?.deviceVersion ?? ""

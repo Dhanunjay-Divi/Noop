@@ -191,6 +191,9 @@
     <string name="appwide_devices_empty_body">Liga uma NOOP Band ou uma pulseira compatível 4.0 ou 5.0/MG. Só são apresentadas as pulseiras que esta versão consegue emparelhar.</string>
     <string name="appwide_devices_empty_title">Liga a tua primeira pulseira</string>
     <string name="appwide_devices_pair_again">Emparelhar novamente</string>
+    <string name="appwide_devices_supplier_apple_captures">Frequência cardíaca · Passos do dispositivo · Sono avaliado pela pulseira · Bateria</string>
+    <string name="appwide_devices_supplier_apple_footnote">Os passos e o sono são comunicados pela pulseira. O NOOP mede a frequência cardíaca em repouso a partir da frequência guardada durante o período de sono comunicado. A VFC, o oxigénio no sangue, a frequência respiratória e os sinais não suportados continuam indisponíveis.</string>
+    <string name="appwide_devices_supplier_apple_powers">Cria o histórico de frequência cardíaca em direto, movimento diário, calorias, Esforço e resumos do sono.</string>
     <string name="appwide_devices_supplier_captures">Frequência cardíaca (apenas apresentação em direto) · Bateria</string>
     <string name="appwide_devices_supplier_display_model">NOOP Band</string>
     <string name="appwide_devices_supplier_footnote">A frequência cardíaca desaparece quando as atualizações param. A bateria só é apresentada enquanto a pulseira está ligada.</string>
@@ -658,7 +661,7 @@
     <string name="appwide_onboarding_device_wizard_supplier_progress_battery">A verificar a capacidade da bateria</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_connecting">A ligar à pulseira selecionada</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_live_heart_rate">A verificar a frequência cardíaca em direto</string>
-    <string name="appwide_onboarding_device_wizard_supplier_ready_body">A frequência cardíaca em direto usa a hora de receção do telemóvel apenas para indicar a atualidade da apresentação. Este fluxo do fornecedor não é adicionado ao histórico de saúde duradouro nem às fórmulas.</string>
+    <string name="appwide_onboarding_device_wizard_supplier_ready_body">A frequência cardíaca em direto é guardada com a hora de receção do telemóvel porque o fluxo do fornecedor não inclui a hora da amostra. Após o emparelhamento, o NOOP também lê os passos do dispositivo e o sono avaliado pela pulseira quando disponíveis. A VFC, o oxigénio no sangue, a frequência respiratória, a temperatura da pele e os sinais não suportados continuam indisponíveis.</string>
     <string name="appwide_onboarding_device_wizard_supplier_ready_title">Bateria e frequência cardíaca em direto confirmadas</string>
     <string name="appwide_onboarding_device_wizard_supplier_registration_failed">Não foi possível guardar a pulseira. O registo não foi indicado como concluído.</string>
     <string name="appwide_onboarding_device_wizard_supplier_subtitle">Usa o identificador impresso na pulseira e uma palavra-passe do dispositivo de quatro dígitos. Experimental.</string>

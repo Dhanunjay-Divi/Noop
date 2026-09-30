@@ -1,8 +1,29 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-29**
+Last updated: **2026-09-30**
 
 ## Authoritative context
+
+- The current supplier-metrics replacement is branch
+  `codex/supplier-metrics-integration-20260930` from protected-main commit
+  `fd2f0f816`. It preserves the owner-validated connection/live-HR/native-step/
+  sleep baseline `7ca94bf8`, excludes development-only commit `0b99aca0`, and
+  retains current pairing, ownership, viewer, privacy, source-switching, and
+  release safeguards. Supplier HR is bounded and receipt-timed; native steps
+  and sleep persist atomically; optional reads do not tear down transport; and
+  Apple primary Steps accepts the native total only when the exact active
+  registry row is `.veepoo`, with Apple Health still winning per day and all
+  WHOOP wrist-motion estimates excluded. Local evidence passes Apple supplier
+  106/106 and source/provenance 101/101, complete StrandAnalytics 1,519 with
+  seven documented skips, WhoopStore 558/558, Android focused Full Debug 22/22,
+  supplier controls 65/65, and default-off macOS plus complete iOS Simulator
+  graphs. Physical BLE, accuracy, battery, history, background, haptics,
+  retention, signed installation, and firmware remain external. The owner
+  requested no GitHub-hosted runner use; all three registered self-hosted
+  runners are offline and protected checks are GitHub-Actions-app-bound, so no
+  protection weakening or forged integration is authorized. Final post-change
+  local gates, one branch push, an approved required-check runner path,
+  protected merge/main verification, and the signed physical matrix remain.
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Protected branch: `main`

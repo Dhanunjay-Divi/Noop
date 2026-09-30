@@ -200,6 +200,19 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         XCTAssertEqual(repo.deviceId, canonicalId)
     }
 
+    @MainActor
+    func testRegistryQualifiedSourceChangeInvalidatesSameDeviceReadSpine() {
+        let supplierID = "veepoo-00000000-0000-0000-0000-000000000001"
+        let repo = Repository(deviceId: supplierID)
+
+        XCTAssertTrue(repo.adoptActiveDevice(id: supplierID, sourceKind: .veepoo))
+        XCTAssertEqual(repo.deviceId, supplierID)
+        XCTAssertEqual(repo.activeDeviceSourceKind, .veepoo)
+        XCTAssertFalse(repo.adoptActiveDevice(id: supplierID, sourceKind: .veepoo))
+        XCTAssertTrue(repo.adoptActiveDevice(id: supplierID, sourceKind: .liveBLE))
+        XCTAssertEqual(repo.activeDeviceSourceKind, .liveBLE)
+    }
+
     /// The computed ("-noop") sibling: the union reads BOTH the active strap's computed sibling AND the
     /// canonical computed sibling, so a day scored under the canonical id before a re-add still surfaces, and
     /// a day scored under the re-added strap's sibling also surfaces.
