@@ -11,6 +11,30 @@ fi
 
 "$repository_root/Tools/local/configure-veepoo-ios-sdk.py" --build-check
 
+strip_verified_outer_quotes() {
+    value="$1"
+    case "$value" in
+        \"*\")
+            value=${value#\"}
+            value=${value%\"}
+            ;;
+    esac
+    printf '%s\n' "$value"
+}
+
+# Custom xcconfig values are exported to Run Script phases with their grouping
+# quotes intact. The verifier above has already matched these exact paths to
+# the approved SDK root, so remove only that generated outer pair before copy.
+NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR=$(
+    strip_verified_outer_quotes "${NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR:?}"
+)
+NOOP_VEEPOO_FMDB_FRAMEWORK_DIR=$(
+    strip_verified_outer_quotes "${NOOP_VEEPOO_FMDB_FRAMEWORK_DIR:?}"
+)
+NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR=$(
+    strip_verified_outer_quotes "${NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR:?}"
+)
+
 destination_root="${TARGET_BUILD_DIR:?}/${FRAMEWORKS_FOLDER_PATH:?}"
 mkdir -p "$destination_root"
 

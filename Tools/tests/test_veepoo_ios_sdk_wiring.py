@@ -527,6 +527,44 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             ),
             sdk_root,
         )
+        quoted_paths = dict(approved)
+        for name in (
+            "NOOP_VEEPOO_FRAMEWORK_DIR",
+            "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR",
+            "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR",
+            "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR",
+        ):
+            quoted_paths[name] = f'"{quoted_paths[name]}"'
+        MODULE.verify_build_environment(quoted_paths, sdk_root=sdk_root)
+        self.assertEqual(
+            MODULE._sdk_root_candidate(
+                argument=None,
+                build_check=True,
+                environment=quoted_paths,
+            ),
+            sdk_root,
+        )
+        with self.assertRaisesRegex(
+            MODULE.VerificationError,
+            "NOOP_VEEPOO_SDK_ENABLED",
+        ):
+            MODULE.verify_build_environment(
+                dict(approved, NOOP_VEEPOO_SDK_ENABLED='"YES"'),
+                sdk_root=sdk_root,
+            )
+        with self.assertRaisesRegex(
+            MODULE.VerificationError,
+            "NOOP_VEEPOO_FRAMEWORK_DIR",
+        ):
+            MODULE.verify_build_environment(
+                dict(
+                    approved,
+                    NOOP_VEEPOO_FRAMEWORK_DIR=(
+                        f'"{layout.framework_path.parent}'
+                    ),
+                ),
+                sdk_root=sdk_root,
+            )
         simulator = dict(approved, PLATFORM_NAME="iphonesimulator")
         with self.assertRaisesRegex(
             MODULE.VerificationError,
@@ -631,8 +669,20 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
         verification = embed.index(
             "configure-veepoo-ios-sdk.py\" --build-check"
         )
+        normalization = embed.index("strip_verified_outer_quotes")
         first_copy = embed.index("/usr/bin/ditto")
         self.assertLess(verification, first_copy)
+        self.assertLess(verification, normalization)
+        self.assertLess(normalization, first_copy)
+        for setting in (
+            "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR",
+            "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR",
+            "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR",
+        ):
+            self.assertIn(
+                f'strip_verified_outer_quotes "${{{setting}:?}}"',
+                embed,
+            )
         self.assertLess(
             embed.index('"${CONFIGURATION:-}" != "Debug"'),
             first_copy,
