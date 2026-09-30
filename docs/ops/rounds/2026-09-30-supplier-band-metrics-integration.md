@@ -10,8 +10,10 @@
   `7ca94bf8ab79375ce8bc363a2718aae2bebed710`
 - Development-only commit excluded:
   `0b99aca0c40680c19bb1a29b798b42cb1229146d`
-- End implementation commit: commit containing this record
-- Record commit or PR: pending
+- End implementation commit:
+  `719b724a6a084c07a384a34c789fcfe2406ab1d6`
+- Record commit or PR: closeout commit containing this record; pull request
+  intentionally pending an approved required-check runner path
 
 ## Objective
 
@@ -151,9 +153,11 @@ The first Android attempt failed only because this isolated worktree had no
 ## Git and release state
 
 - Local implementation and verification are complete on
-  `codex/supplier-metrics-integration-20260930`.
-- A final commit and branch push remain. No pull request is opened because the
-  current workflows would spend GitHub-hosted runners.
+  `codex/supplier-metrics-integration-20260930` at implementation commit
+  `719b724a6a084c07a384a34c789fcfe2406ab1d6`.
+- The reviewed branch is prepared for one no-pull-request push. No pull request
+  is opened because the current required workflows would spend GitHub-hosted
+  runners.
 - Protected main is unchanged.
 
 ## Decisions
