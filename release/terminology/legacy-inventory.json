@@ -5,7 +5,7 @@
     "customer": 888,
     "fixture": 5975,
     "generated": 21,
-    "historical": 3407,
+    "historical": 3408,
     "import": 870,
     "persisted": 695
   },
@@ -37178,26 +37178,26 @@
     {
       "category": "historical",
       "lineNumbers": [
-        17,
-        20,
-        79,
-        239,
-        294,
-        315,
-        317,
-        372,
-        380,
-        392,
-        398,
-        453,
-        498,
-        566,
-        614,
-        635,
-        779,
-        913,
-        1019,
-        1023
+        18,
+        21,
+        82,
+        242,
+        297,
+        318,
+        320,
+        375,
+        383,
+        395,
+        401,
+        456,
+        501,
+        569,
+        617,
+        638,
+        782,
+        916,
+        1022,
+        1026
       ],
       "occurrenceCount": 20,
       "path": "docs/ops/ACTIVE.md",
@@ -37821,17 +37821,18 @@
     {
       "category": "historical",
       "lineNumbers": [
-        61,
-        114,
-        115,
-        150,
-        201
+        65,
+        118,
+        119,
+        130,
+        156,
+        215
       ],
-      "occurrenceCount": 5,
+      "occurrenceCount": 6,
       "path": "docs/ops/rounds/2026-09-30-supplier-band-metrics-integration.md",
-      "sha256": "e848a9ad508e07153e003f486681a1ee1cf1ac2f6494ab4b0d6a6e4ff1425c5f",
+      "sha256": "dbe124c41f152fa9967df21c18886448c3445aaeba5913bd7c6803b295a1b40b",
       "tokenCounts": {
-        "whoop": 3,
+        "whoop": 4,
         "whoopstore": 2
       }
     },
@@ -40078,7 +40079,7 @@
       }
     }
   ],
-  "occurrenceCount": 18576,
+  "occurrenceCount": 18577,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

@@ -2,9 +2,9 @@
 
 ## Status
 
-- State: `implementation and local verification complete; PR #22 protected integration in progress; physical validation pending`
+- State: `merged through protected main; exact-main CI follow-up in progress; physical validation pending`
 - Owner: project team
-- Branch: `codex/supplier-metrics-integration-20260930`
+- Branch: `codex/supplier-metrics-main-verification-20260930`
 - Start commit: `fd2f0f8165742c328767add904d69a74d67c0d81`
 - Product baseline preserved:
   `7ca94bf8ab79375ce8bc363a2718aae2bebed710`
@@ -12,6 +12,10 @@
   `0b99aca0c40680c19bb1a29b798b42cb1229146d`
 - End implementation commit:
   `719b724a6a084c07a384a34c789fcfe2406ab1d6`
+- Final reviewed head:
+  `a16bbfac92bfe80945ff7c2a71a05a0940e88232`
+- Protected-main integration commit:
+  `23a0d491b8b4f30e9a26e35da7373422ed232470`
 - Record commit or PR: pull request `#22`
 
 ## Objective
@@ -123,6 +127,8 @@ branch.
 | Local Android localization correction | Focused contract 1/1; complete Full Debug unit wall 5,227 with seven skips and zero failures | The test now pins the canonical receipt-timed HR persistence plus qualified steps/sleep behavior and explicit unsupported metrics | Physical supplier transport |
 | PR #22 Apple run `36753704324` on `5719e9f3d` | Both app graphs built; the 2,405-case Strand wall had one failure and one skip | The only failing case was the mirrored stale supplier-ready localization expectation | Replacement exact-head result |
 | Local Apple localization correction | App-wide localization plus Bluetooth-consent contracts 10/10 | Both Swift contracts now pin canonical localized behavior without hard-coded UI copy | Physical supplier transport |
+| Final PR #22 exact head `a16bbfac9` | All ten protected required contexts pass; Android run `36757182137`, Apple run `36757181954`, Swift packages run `36757182321` | The reviewed supplier integration passes protected pull-request policy and its applicable hosted app/package walls | Physical supplier or WHOOP behavior |
+| Protected merge | PR `#22` merged normally at `23a0d491b8b4f30e9a26e35da7373422ed232470` on 2026-09-30 | The reviewed integration is present on protected `main` | Exact-main CI, release deployment, or physical behavior |
 
 The first Android attempt failed only because this isolated worktree had no
 `android/local.properties`; the exact rerun with explicit
@@ -176,8 +182,16 @@ The first Android attempt failed only because this isolated worktree had no
   and the complete 5,227-case Full Debug unit wall locally. The same old head's
   Apple wall built both app graphs and then exposed the mirrored stale
   localization expectation as its only Strand failure; the corrected Apple
-  localization and Bluetooth-consent contracts pass 10/10 locally. A
-  replacement commit, exact-head checks, and normal protected merge remain.
+  localization and Bluetooth-consent contracts pass 10/10 locally.
+- Replacement head `a16bbfac92bfe80945ff7c2a71a05a0940e88232`
+  passed all ten protected required contexts. PR `#22` then merged normally
+  into protected `main` as
+  `23a0d491b8b4f30e9a26e35da7373422ed232470`.
+- GitHub did not create post-merge push runs for `23a0d491...` because the
+  squash-generated commit body inherited `[skip ci]` text from two historical
+  intermediate commit subjects. No check was bypassed: this follow-up records
+  the merge with a clean commit message so the next protected-main SHA can
+  receive its automatic exact-main checks.
 
 ## Resource cleanup
 
@@ -206,10 +220,10 @@ The first Android attempt failed only because this isolated worktree had no
 ## Next round
 
 1. Regenerate and repin the reviewed terminology inventory after this evidence
-   update, run the complete repository-control wall, and push one replacement
-   commit to PR `#22`.
-2. Require every replacement exact-head context to pass, merge through protected `main`,
-   and verify the resulting exact main commit.
+   update, run the repository-control wall, and open one minimal protected
+   follow-up pull request with no CI-skip marker.
+2. Require its protected checks, merge normally, and verify all ten checks on
+   the resulting exact protected-main SHA.
 3. Run the signed physical-device matrix on clean iPhone and Android hardware.
 
 ## Privacy check
