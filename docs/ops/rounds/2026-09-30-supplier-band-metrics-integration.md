@@ -119,6 +119,10 @@ branch.
 | Default-off iOS Simulator graph | pass | iPhone app embeds Watch/widgets/complications | Background or BLE |
 | Diff hygiene and raw-log search | pass | no whitespace defect or raw supplier logging found | Runtime operations |
 | Initial PR #22 hosted wall | Seven required contexts passed; release-controls failed only because the reviewed terminology inventory had not yet been regenerated and repinned | The hosted controls fail closed on stale generated evidence | Replacement exact-head result |
+| PR #22 Android run `36753704191` on `5719e9f3d` | APK assembly, production shell, and Review Sample shell passed; the 5,227-case unit wall had one failure and seven skips | The only failing case was `AppWideLocalizationContractTest.appWideResourcesHaveExactNineLocaleParity`, whose expected supplier-ready copy still described the pre-integration non-persistence behavior | Replacement exact-head result |
+| Local Android localization correction | Focused contract 1/1; complete Full Debug unit wall 5,227 with seven skips and zero failures | The test now pins the canonical receipt-timed HR persistence plus qualified steps/sleep behavior and explicit unsupported metrics | Physical supplier transport |
+| PR #22 Apple run `36753704324` on `5719e9f3d` | Both app graphs built; the 2,405-case Strand wall had one failure and one skip | The only failing case was the mirrored stale supplier-ready localization expectation | Replacement exact-head result |
+| Local Apple localization correction | App-wide localization plus Bluetooth-consent contracts 10/10 | Both Swift contracts now pin canonical localized behavior without hard-coded UI copy | Physical supplier transport |
 
 The first Android attempt failed only because this isolated worktree had no
 `android/local.properties`; the exact rerun with explicit
@@ -165,6 +169,15 @@ The first Android attempt failed only because this isolated worktree had no
   that authorization.
 - Pull request `#22` is the protected integration record. Its exact check and
   merge state is authoritative in GitHub; no release workflow was dispatched.
+- Exact hosted head `5719e9f3db2d99c411d30e45fc4dcfa8adf8a675`
+  exposed one stale Android localization expectation after the product and
+  generated nine-locale resources had already moved to the reviewed
+  supplier-persistence contract. The narrow correction passes its focused case
+  and the complete 5,227-case Full Debug unit wall locally. The same old head's
+  Apple wall built both app graphs and then exposed the mirrored stale
+  localization expectation as its only Strand failure; the corrected Apple
+  localization and Bluetooth-consent contracts pass 10/10 locally. A
+  replacement commit, exact-head checks, and normal protected merge remain.
 
 ## Resource cleanup
 
@@ -192,8 +205,10 @@ The first Android attempt failed only because this isolated worktree had no
 
 ## Next round
 
-1. Push the reviewed terminology inventory and exact trust digest to PR `#22`.
-2. Require every exact-head context to pass, merge through protected `main`,
+1. Regenerate and repin the reviewed terminology inventory after this evidence
+   update, run the complete repository-control wall, and push one replacement
+   commit to PR `#22`.
+2. Require every replacement exact-head context to pass, merge through protected `main`,
    and verify the resulting exact main commit.
 3. Run the signed physical-device matrix on clean iPhone and Android hardware.
 

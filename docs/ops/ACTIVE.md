@@ -29,8 +29,18 @@ Last updated: **2026-09-30**
   required-check run and normal protected merge for this integration. That
   authorization excludes manual release, signing, firmware, store, and
   production-traffic workflows. Pull request `#22` is the protected integration
-  record; its exact check and merge state is authoritative in GitHub. The signed
-  physical matrix remains.
+  record; its exact check and merge state is authoritative in GitHub. Exact
+  hosted head `5719e9f3d` passed Android APK assembly, production shell, and
+  Review Sample shell, but its 5,227-case unit wall failed one stale
+  `AppWideLocalizationContractTest` expectation that still described the
+  pre-integration non-persistence behavior. The corrected contract passes its
+  focused case and the complete local Full Debug wall with 5,227 tests, seven
+  skips, and zero failures. The same old head built both Apple app graphs, then
+  its 2,405-case Strand wall exposed the mirrored stale expectation as the only
+  failure; the corrected Apple localization and Bluetooth-consent contracts
+  pass 10/10 locally. Terminology/trust regeneration, one replacement push,
+  exact-head checks, and protected merge remain. The signed physical matrix
+  remains.
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Protected branch: `main`

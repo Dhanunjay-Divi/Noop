@@ -120,8 +120,10 @@ class AppWideLocalizationContractTest {
             base["appwide_onboarding_device_wizard_supplier_prep_password_scope"],
         )
         assertEquals(
-            "Live heart rate uses the phone receipt time for display freshness only. " +
-                "This supplier stream is not added to durable health history or formulas.",
+            "Live heart rate is saved using phone receipt time because the supplier stream " +
+                "has no sample timestamp. After pairing, NOOP also reads device steps and " +
+                "band-scored sleep when available. HRV, blood oxygen, respiratory rate, " +
+                "skin temperature, and unsupported signals remain unavailable.",
             base["appwide_onboarding_device_wizard_supplier_ready_body"],
         )
         val onboardingNotificationKeys = listOf(
