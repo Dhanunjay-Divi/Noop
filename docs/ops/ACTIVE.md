@@ -5,9 +5,10 @@ Last updated: **2026-09-30**
 ## Authoritative context
 
 - The current supplier-metrics replacement is branch
-  `codex/supplier-metrics-integration-20260930` from protected-main commit
-  `fd2f0f816`, with reviewed implementation commit
-  `719b724a6a084c07a384a34c789fcfe2406ab1d6`. It preserves the
+  `codex/supplier-metrics-main-verification-20260930`. PR `#22` reviewed exact
+  head `a16bbfac92bfe80945ff7c2a71a05a0940e88232` and merged normally into
+  protected `main` as `23a0d491b8b4f30e9a26e35da7373422ed232470`.
+  It preserves the
   owner-validated connection/live-HR/native-step/sleep baseline `7ca94bf8`,
   excludes development-only commit `0b99aca0`, and retains current pairing,
   ownership, viewer, privacy, source-switching, and release safeguards.
@@ -21,16 +22,12 @@ Last updated: **2026-09-30**
   supplier controls 65/65, and default-off macOS plus complete iOS Simulator
   graphs. Physical BLE, accuracy, battery, history, background, haptics,
   retention, signed installation, and firmware remain external. The owner
-  requested no GitHub-hosted runner use; all three registered self-hosted
-  runners are offline and protected checks are GitHub-Actions-app-bound, so no
-  protection weakening or forged integration is authorized. The reviewed branch
-  was pushed without a pull request, and the immediate Actions query returned
-  zero workflow runs. On 2026-09-30 the owner authorized one GitHub-hosted
-  required-check run and normal protected merge for this integration. That
+  initially requested no GitHub-hosted runner use. On 2026-09-30 the owner
+  authorized the required hosted checks and normal protected merge for this
+  integration. That
   authorization excludes manual release, signing, firmware, store, and
   production-traffic workflows. Pull request `#22` is the protected integration
-  record; its exact check and merge state is authoritative in GitHub. Exact
-  hosted head `5719e9f3d` passed Android APK assembly, production shell, and
+  record. Exact hosted head `5719e9f3d` passed Android APK assembly, production shell, and
   Review Sample shell, but its 5,227-case unit wall failed one stale
   `AppWideLocalizationContractTest` expectation that still described the
   pre-integration non-persistence behavior. The corrected contract passes its
@@ -38,8 +35,14 @@ Last updated: **2026-09-30**
   skips, and zero failures. The same old head built both Apple app graphs, then
   its 2,405-case Strand wall exposed the mirrored stale expectation as the only
   failure; the corrected Apple localization and Bluetooth-consent contracts
-  pass 10/10 locally. Terminology/trust regeneration, one replacement push,
-  exact-head checks, and protected merge remain. The signed physical matrix
+  pass 10/10 locally. Replacement head `a16bbfac9` then passed all ten
+  protected contexts, including Android run `36757182137`, Apple run
+  `36757181954`, and Swift packages run `36757182321`. The squash merge body
+  inherited historical `[skip ci]` text, so GitHub created no push runs for
+  `23a0d491...`. A minimal documentation follow-up with a clean commit message
+  is in progress to obtain exact protected-main verification without changing
+  product runtime code. No release, signing, firmware, store, or
+  production-traffic workflow was dispatched. The signed physical matrix
   remains.
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
