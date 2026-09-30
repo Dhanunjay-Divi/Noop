@@ -126,17 +126,19 @@ The first Android attempt failed only because this isolated worktree had no
 
 ## GitHub and runner state
 
-- The owner requested no GitHub-hosted runner spend for this merge.
+- The owner initially requested no GitHub-hosted runner spend for this merge,
+  then explicitly authorized one hosted required-check run and protected merge
+  on 2026-09-30.
 - Three repository self-hosted runners exist, but all were offline during this
   round.
 - Every protected required context is bound to the GitHub Actions application,
   while current workflows target hosted labels such as `ubuntu-24.04`,
   `ubuntu-latest`, `macos-15`, and `macos-26`.
 - This round will not weaken branch protection, forge check identities, or
-  misstate local evidence as a hosted check. The reviewed branch may be pushed
-  without opening a pull request; protected merge remains blocked until an
-  approved runner path can emit the required contexts or the owner authorizes
-  hosted execution.
+  misstate local evidence as a hosted check. The authorization covers the
+  required pull-request and protected-main validation only. It does not
+  authorize dispatching release, testing-release, store, signing, firmware, or
+  production-traffic workflows.
 
 ## Physical device and deployment
 
@@ -158,6 +160,9 @@ The first Android attempt failed only because this isolated worktree had no
 - The reviewed branch was pushed without opening a pull request. The immediate
   post-push Actions query returned zero workflow runs, so no GitHub-hosted
   runner was used.
+- The owner subsequently authorized the required hosted validation and normal
+  protected merge for this integration once. No release workflow is part of
+  that authorization.
 - Protected main is unchanged.
 
 ## Resource cleanup
