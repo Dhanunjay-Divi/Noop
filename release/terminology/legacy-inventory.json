@@ -5,7 +5,7 @@
     "customer": 888,
     "fixture": 5973,
     "generated": 21,
-    "historical": 3397,
+    "historical": 3398,
     "import": 870,
     "persisted": 695
   },
@@ -37792,23 +37792,35 @@
     {
       "category": "historical",
       "lineNumbers": [
-        9,
-        16,
+        142
+      ],
+      "occurrenceCount": 1,
+      "path": "docs/ops/rounds/2026-09-30-github-pr-remediation.md",
+      "sha256": "0ae4e1b4a77e40a1c004c7c5421a1e1332b429024eebface1d4dcfebf04c1667",
+      "tokenCounts": {
+        "whoop": 1
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        10,
         17,
         18,
-        20,
-        20,
+        19,
+        21,
         21,
         22,
         23,
         24,
-        28,
+        25,
         29,
-        33,
-        38,
-        59,
-        95,
-        95
+        30,
+        34,
+        39,
+        60,
+        96,
+        96
       ],
       "occurrenceCount": 17,
       "path": "docs/ops/rounds/INDEX.md",
@@ -40032,7 +40044,7 @@
       }
     }
   ],
-  "occurrenceCount": 18564,
+  "occurrenceCount": 18565,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

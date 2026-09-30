@@ -2893,13 +2893,13 @@
       "license": "MIT",
       "licenseFiles": [
         {
-          "path": "ThirdPartyNotices/licenses/python/pyjwt-2.13.0.txt",
+          "path": "ThirdPartyNotices/licenses/python/pyjwt-2.14.0.txt",
           "sha256": "797a7a20231d4c433e9f1911db1731d06b5828b98f499819a034f7c0f56f5ce5"
         }
       ],
       "name": "pyjwt",
       "source": "https://github.com/jpadilla/pyjwt",
-      "version": "2.13.0"
+      "version": "2.14.0"
     },
     {
       "ecosystem": "pypi",
