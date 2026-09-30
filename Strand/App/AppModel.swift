@@ -86,6 +86,14 @@ final class AppModel: ObservableObject {
     private static let ageMetricReconciledProfileStateKey =
         "noop.ageMetrics.reconciledProfileState.v2"
 
+    /// Device-reported daily rows use the user's local civil day.
+    static let supplierDayKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     /// Timestamp formatter for the generic-HR strap-log lines routed through `straplog` into the shared
     /// log (issue #421). Mirrors `BLEManager.logTimeFormatter`'s `HH:mm:ss` so WHOOP and HR-strap lines
     /// read identically in the exported strap log.
@@ -322,6 +330,9 @@ final class AppModel: ObservableObject {
     /// Retain the bounded first-unlock/timed retry owner until cleanup either succeeds or the app exits.
     private var supplierCredentialCleanupReconciler:
         VeepooPendingCredentialCleanupReconciler?
+    /// First success/failure per supplier persistence class. This keeps report
+    /// evidence useful without logging every live sample or database write.
+    private var supplierPersistenceEvidence = Set<String>()
     /// Daily re-arm timer for the single-instant firmware smart alarm (see scheduleDailySmartAlarmRearm).
     private var smartAlarmRearmTimer: Timer?
     /// The temporary launch gate may construct the observable graph while deliberately leaving every
@@ -1042,6 +1053,147 @@ final class AppModel: ObservableObject {
         return registry
     }
 
+    private func recordSupplierPersistence(
+        dataClass: String,
+        outcome: String
+    ) {
+        let key = "\(dataClass).\(outcome)"
+        guard supplierPersistenceEvidence.insert(key).inserted else { return }
+        AppDiagnosticsRecorder.shared.record(
+            "band.supplier_persistence",
+            fields: [
+                "data_class": dataClass,
+                "outcome": outcome,
+            ]
+        )
+    }
+
+    private func persistSupplierHeartRateBatch(
+        _ readings: [VeepooBandHeartRateReading],
+        deviceID: String
+    ) {
+        guard !readings.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            guard let store = await repo.storeHandle() else {
+                recordSupplierPersistence(
+                    dataClass: "heart_rate",
+                    outcome: "store_unavailable"
+                )
+                return
+            }
+            do {
+                let streams = Streams(
+                    hr: readings.map {
+                        HRSample(
+                            ts: Int($0.receivedAt.timeIntervalSince1970),
+                            bpm: $0.bpm
+                        )
+                    }
+                )
+                _ = try await store.insert(
+                    streams,
+                    deviceId: deviceID
+                )
+                recordSupplierPersistence(
+                    dataClass: "heart_rate",
+                    outcome: "completed"
+                )
+            } catch {
+                recordSupplierPersistence(
+                    dataClass: "heart_rate",
+                    outcome: "failed"
+                )
+            }
+        }
+    }
+
+    private func persistSupplierSteps(
+        _ reading: VeepooBandStepsReading,
+        deviceID: String
+    ) {
+        Task { [weak self] in
+            guard let self else { return }
+            guard let store = await repo.storeHandle() else {
+                recordSupplierPersistence(
+                    dataClass: "steps",
+                    outcome: "store_unavailable"
+                )
+                return
+            }
+            let day = Self.supplierDayKeyFormatter.string(from: Date())
+            do {
+                _ = try await store.upsertDeviceStepTotal(
+                    day: day,
+                    steps: reading.steps,
+                    deviceId: deviceID
+                )
+                recordSupplierPersistence(
+                    dataClass: "steps",
+                    outcome: "completed"
+                )
+                await repo.refresh(days: 2)
+            } catch {
+                recordSupplierPersistence(
+                    dataClass: "steps",
+                    outcome: "failed"
+                )
+            }
+        }
+    }
+
+    private func persistSupplierSleep(
+        _ reading: VeepooBandSleepReading,
+        deviceID: String
+    ) {
+        Task { [weak self] in
+            guard let self else { return }
+            guard let store = await repo.storeHandle() else {
+                recordSupplierPersistence(
+                    dataClass: "sleep",
+                    outcome: "store_unavailable"
+                )
+                return
+            }
+            let day = Self.supplierDayKeyFormatter.string(
+                from: Date(
+                    timeIntervalSince1970: Double(reading.endTs)
+                )
+            )
+            let session = CachedSleepSession(
+                startTs: reading.startTs,
+                endTs: reading.endTs,
+                efficiency: reading.efficiency,
+                restingHr: nil,
+                avgHrv: nil,
+                stagesJSON: nil
+            )
+            do {
+                _ = try await store.upsertDeviceSleepReport(
+                    day: day,
+                    totalSleepMin: reading.totalMin,
+                    efficiency: reading.efficiency,
+                    deepMin: reading.deepMin,
+                    lightMin: reading.lightMin,
+                    disturbances: reading.awakenings,
+                    session: session,
+                    deviceId: deviceID
+                )
+                recordSupplierPersistence(
+                    dataClass: "sleep",
+                    outcome: "completed"
+                )
+                await intelligence.analyzeRecent()
+                await repo.refresh(days: 7)
+            } catch {
+                recordSupplierPersistence(
+                    dataClass: "sleep",
+                    outcome: "failed"
+                )
+            }
+        }
+    }
+
     private func wireSourceCoordinator() async {
         guard sourceCoordinator == nil,
               let registry = await wireDeviceRegistry() else { return }
@@ -1089,6 +1241,30 @@ final class AppModel: ObservableObject {
                     cleanupReconciler?.enqueueAuthenticationRejection(
                         deviceID: deviceID
                     )
+                },
+                persistFactory: { [weak self] deviceID in
+                    { [weak self] readings in
+                        self?.persistSupplierHeartRateBatch(
+                            readings,
+                            deviceID: deviceID
+                        )
+                    }
+                },
+                persistStepsFactory: { [weak self] deviceID in
+                    { [weak self] reading in
+                        self?.persistSupplierSteps(
+                            reading,
+                            deviceID: deviceID
+                        )
+                    }
+                },
+                persistSleepFactory: { [weak self] deviceID in
+                    { [weak self] reading in
+                        self?.persistSupplierSleep(
+                            reading,
+                            deviceID: deviceID
+                        )
+                    }
                 }
             ))
         coordinator.start()
@@ -1102,10 +1278,20 @@ final class AppModel: ObservableObject {
         // is idempotent, so the initial emission (the current active id) does the first adopt and any later
         // explicit `adoptActiveDevice` call (e.g. from `registerDevice`) is safely redundant. The import +
         // computed WRITE targets stay STABLE on the canonical id (see `adoptActiveDevice`'s union-model note).
-        readSpineCancellable = registry.$activeDeviceId
-            .removeDuplicates()
-            .sink { [weak self] id in
-                Task { await self?.adoptActiveDevice(id) }
+        readSpineCancellable = Publishers.CombineLatest(
+            registry.$activeDeviceId,
+            registry.$devices
+        )
+            .sink { [weak self] id, devices in
+                let sourceKind = id.flatMap { activeID in
+                    devices.first(where: { $0.id == activeID })?.sourceKind
+                }
+                Task {
+                    await self?.adoptActiveDevice(
+                        id,
+                        sourceKind: sourceKind
+                    )
+                }
             }
     }
 
@@ -1122,13 +1308,19 @@ final class AppModel: ObservableObject {
     /// already resolves the active strap per day via the registry's own active id (`resolveDayOwner`), so it
     /// reads + scores the re-added strap's raw and writes the computed result to the STABLE canonical
     /// `-noop` sibling, no engine re-point needed.
-    private func adoptActiveDevice(_ activeId: String?) async {
+    private func adoptActiveDevice(
+        _ activeId: String?,
+        sourceKind: SourceKind? = nil
+    ) async {
         let trimmed = activeId?
             .trimmingCharacters(in: .whitespaces) ?? ""
         let readDeviceID = trimmed.isEmpty
             ? deviceId
             : trimmed
-        let repoMoved = repo.adoptActiveDeviceId(readDeviceID)
+        let repoMoved = repo.adoptActiveDevice(
+            id: readDeviceID,
+            sourceKind: sourceKind
+        )
         guard repoMoved else { return }
         live.append(
             log: activeId == nil
@@ -2067,7 +2259,12 @@ final class AppModel: ObservableObject {
             // off, so the dashboard follows a re-add without a one-shot call here. The explicit adopt below
             // is kept as a belt-and-braces immediate re-point (idempotent, so it's a safe no-op once the
             // subscription has also fired).
-            Task { [weak self] in await self?.adoptActiveDevice(device.id) }
+            Task { [weak self] in
+                await self?.adoptActiveDevice(
+                    device.id,
+                    sourceKind: device.sourceKind
+                )
+            }
         }
         AppDiagnosticsRecorder.shared.record(
             "device.registration",
@@ -2115,10 +2312,16 @@ final class AppModel: ObservableObject {
         if AppleWatchDevice.shouldAutoActivate(
             current: current, currentHasRecentData: currentHasRecentData) {
             registry.setActive(AppleWatchDevice.deviceId)
-            await adoptActiveDevice(AppleWatchDevice.deviceId)
+            await adoptActiveDevice(
+                AppleWatchDevice.deviceId,
+                sourceKind: .liveAppleWatch
+            )
         } else if registry.activeDeviceId == AppleWatchDevice.deviceId {
             // On relaunch the registry may already be active while the Repository is still initializing.
-            await adoptActiveDevice(AppleWatchDevice.deviceId)
+            await adoptActiveDevice(
+                AppleWatchDevice.deviceId,
+                sourceKind: .liveAppleWatch
+            )
             await repo.refresh()
         } else {
             await repo.refresh()

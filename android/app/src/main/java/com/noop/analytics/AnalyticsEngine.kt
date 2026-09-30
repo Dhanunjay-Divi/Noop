@@ -395,6 +395,23 @@ object AnalyticsEngine {
         // empty keeps pure-function callers/tests free of it; IntelligenceEngine threads the night window's
         // persisted band state. Mirrors Swift. (#531 / H8 consume)
         bandSleepState: List<Pair<Long, Int>> = emptyList(),
+        /**
+         * Whole-day total reported by the device's own pedometer. This value has
+         * already crossed the source adapter's range and provenance gates, so it
+         * is used directly rather than scaled as a raw motion counter. A measured
+         * zero is valid and must remain zero.
+         */
+        deviceDayStepTotal: Int? = null,
+        /**
+         * In-bed spans reported by a DEVICE that scores its own sleep. SPAN ONLY: just
+         * the [start, end] comes from the device; every bpm measured inside it is
+         * NOOP's own HR. Sleep duration, staging and Rest are deliberately NOT derived
+         * from these — this exists so a band with no accelerometer stream can still
+         * yield a resting heart rate. Defaults to empty so every existing caller and
+         * parity fixture stays byte-identical. Twin of `deviceSleepWindows` in
+         * AnalyticsEngine.swift.
+         */
+        deviceSleepWindows: List<Pair<Long, Long>> = emptyList(),
         // Opt-in experimental sleep staging (V2). When true, detected nights are staged by [SleepStagerV2]
         // instead of V1. Default false keeps V1 the byte-identical default for pure-function callers/tests;
         // IntelligenceEngine threads PuffinExperiment.from(context).experimentalSleepV2. Mirrors Swift. (V7 / #690)
@@ -538,7 +555,23 @@ object AnalyticsEngine {
         // negligible shift. The Rest/sleep-quality term is main-night; the recovery physiology is
         // day-best-resting, night-dominated. Mirrors the Swift note in AnalyticsEngine.swift.
         // Daily resting HR = lowest per-session resting HR across matched sessions.
+        // Prefer NOOP's own staged sessions. Only when staging produced nothing —
+        // the case for a band that exposes no gravity stream — fall back to measuring
+        // the floor inside a device-reported in-bed span. The VALUE is still NOOP's:
+        // sessionRestingHR is pure HR over a window. Gated on wear evidence, because
+        // sessionRestingHR itself only guards that its segment is non-empty, so stray
+        // beats inside a span would otherwise publish a resting heart rate that moves
+        // Effort, Recovery and Calories. Twin of AnalyticsEngine.swift.
         val restingHRDaily: Int? = matched.mapNotNull { it.restingHR }.minOrNull()
+            ?: deviceSleepWindows.mapNotNull { (winStart, winEnd) ->
+                if (winEnd <= winStart) return@mapNotNull null
+                val worn = hr.asSequence()
+                    .filter { it.ts in winStart..winEnd && it.bpm > 0 }
+                    .take(StrainScorer.minSparseReadings)
+                    .count() == StrainScorer.minSparseReadings
+                if (!worn) return@mapNotNull null
+                SleepStager.sessionRestingHR(winStart, winEnd, hr)
+            }.minOrNull()
         // Daily avg HRV = in-bed-weighted mean of per-session avg HRV.
         val avgHRVDaily: Double? = if (deepHrvWindow) {
             // #141: WHOOP-style HRV — pool RMSSD over DEEP-stage 5-min windows only (slow-wave sleep),
@@ -764,6 +797,9 @@ object AnalyticsEngine {
             )
         }
         val stepsTotal: Int? = run {
+            if (deviceDayStepTotal != null && deviceDayStepTotal >= 0) {
+                return@run deviceDayStepTotal
+            }
             val ticks = stepAnalysis.steps ?: return@run null
             StepsCounter.scaledSteps(ticks, profile.stepTicksPerStep)
         }

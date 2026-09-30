@@ -191,6 +191,9 @@
     <string name="appwide_devices_empty_body">Connectez un NOOP Band ou un bracelet compatible 4.0 ou 5.0/MG. Seuls les bracelets que cette version peut associer sont affichés.</string>
     <string name="appwide_devices_empty_title">Connectez votre premier bracelet</string>
     <string name="appwide_devices_pair_again">Associer à nouveau</string>
+    <string name="appwide_devices_supplier_apple_captures">Fréquence cardiaque · Pas mesurés par l’appareil · Sommeil évalué par le bracelet · Batterie</string>
+    <string name="appwide_devices_supplier_apple_footnote">Les pas et le sommeil sont rapportés par le bracelet. NOOP mesure la fréquence cardiaque au repos à partir de la fréquence enregistrée pendant la période de sommeil rapportée. La VFC, l’oxygène sanguin, la fréquence respiratoire et les signaux non pris en charge restent indisponibles.</string>
+    <string name="appwide_devices_supplier_apple_powers">Crée un historique de fréquence cardiaque en direct, le mouvement quotidien, les calories, l’Effort et des résumés du sommeil.</string>
     <string name="appwide_devices_supplier_captures">Fréquence cardiaque (affichage en direct uniquement) · Batterie</string>
     <string name="appwide_devices_supplier_display_model">NOOP Band</string>
     <string name="appwide_devices_supplier_footnote">La fréquence cardiaque disparaît lorsque les mises à jour s’arrêtent. La batterie s’affiche uniquement lorsque le bracelet est connecté.</string>
@@ -658,7 +661,7 @@
     <string name="appwide_onboarding_device_wizard_supplier_progress_battery">Vérification de la capacité de la batterie</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_connecting">Connexion au bracelet sélectionné</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_live_heart_rate">Vérification de la fréquence cardiaque en direct</string>
-    <string name="appwide_onboarding_device_wizard_supplier_ready_body">La fréquence cardiaque en direct utilise l’heure de réception du téléphone uniquement pour indiquer la fraîcheur de l’affichage. Ce flux fournisseur n’est pas ajouté à l’historique de santé durable ni aux formules.</string>
+    <string name="appwide_onboarding_device_wizard_supplier_ready_body">La fréquence cardiaque en direct est enregistrée avec l’heure de réception du téléphone, car le flux fournisseur ne contient pas d’horodatage d’échantillon. Après l’association, NOOP lit aussi les pas de l’appareil et le sommeil évalué par le bracelet lorsqu’ils sont disponibles. La VFC, l’oxygène sanguin, la fréquence respiratoire, la température cutanée et les signaux non pris en charge restent indisponibles.</string>
     <string name="appwide_onboarding_device_wizard_supplier_ready_title">Batterie et fréquence cardiaque en direct confirmées</string>
     <string name="appwide_onboarding_device_wizard_supplier_registration_failed">Le bracelet n’a pas pu être enregistré. L’inscription n’a pas été signalée comme terminée.</string>
     <string name="appwide_onboarding_device_wizard_supplier_subtitle">Utilise l’identifiant imprimé du bracelet et un mot de passe d’appareil à quatre chiffres. Expérimental.</string>

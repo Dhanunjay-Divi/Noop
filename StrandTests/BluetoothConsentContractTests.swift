@@ -254,7 +254,7 @@ final class BluetoothConsentContractTests: XCTestCase {
         XCTAssertTrue(supplierFace.contains("session.registrationFailed"))
         XCTAssertFalse(
             supplierFace.contains(
-                "Live heart rate uses the phone receipt time for display freshness only."
+                "Live heart rate is saved using phone receipt time because the supplier stream has no sample timestamp."
             )
         )
         XCTAssertFalse(

@@ -89,8 +89,10 @@ public enum SourceKind: String, Sendable, CaseIterable {
     /// the experimental add-device wizard's Oura path writes it.
     case oura
     /// Optional owner-supplied Veepoo transport. The adapter is compiled only
-    /// into an explicitly enabled physical-iPhone build and exposes live HR
-    /// plus battery only. Existing rows never carry this free-text value.
+    /// into an explicitly enabled physical-iPhone build. It captures live HR,
+    /// day-cumulative steps, band-scored sleep, and battery when the approved
+    /// hardware/firmware wrapper supplies them. Existing rows never carry this
+    /// free-text value.
     case veepoo
     /// A GPX/TCX/FIT activity file imported under the `activity-file` device (#137). Distinct from
     /// `fileImport` (a whole-day WHOOP CSV export) so the day-owner resolver can rank it BELOW day-spanning

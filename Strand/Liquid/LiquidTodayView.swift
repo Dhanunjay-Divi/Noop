@@ -3170,6 +3170,7 @@ struct LiquidTodayView: View {
         days: [DailyMetric],
         restSeries: [(day: String, value: Double)],
         stepEstimates: [(day: String, value: Double)],
+        supplierSteps: [(day: String, value: Double)] = [],
         appleRows: [AppleDaily],
         endingAt endDay: String,
         resolvedSpo2: [(day: String, value: Double)] = [],
@@ -3200,12 +3201,17 @@ struct LiquidTodayView: View {
         _ = stepEstimates
 
         // The merged daily cache owns physiological history. Its legacy `steps` field may contain
-        // reverse-engineered wrist motion, so it cannot populate the primary Steps trend.
+        // reverse-engineered wrist motion, so it cannot populate the primary Steps trend without a
+        // registry-qualified supplier input.
         for day in days {
             record(.hrv, day: day.day, value: day.avgHrv)
             record(.restingHr, day: day.day, value: day.restingHr.map(Double.init))
             record(.bloodOxygen, day: day.day, value: day.spo2Pct)
             record(.respiratory, day: day.day, value: day.respRateBpm)
+        }
+
+        for point in supplierSteps {
+            record(.steps, day: point.day, value: point.value)
         }
 
         // The resolver contributes only calibrated daily percentages from compatible sources. It can
@@ -3214,8 +3220,8 @@ struct LiquidTodayView: View {
             record(.bloodOxygen, day: point.day, value: point.value)
         }
 
-        // Apple Health pedometer rows are the only primary Steps source. Weight is naturally sparse; it
-        // only draws once two actual weigh-ins fall inside the selected window.
+        // Apple Health pedometer rows override a supplier-native value on the same day. Weight is naturally
+        // sparse; it only draws once two actual weigh-ins fall inside the selected window.
         for day in appleRows {
             record(.steps, day: day.day, value: day.steps.map(Double.init))
             record(.weight, day: day.day, value: day.weightKg)
@@ -3436,6 +3442,7 @@ struct LiquidTodayView: View {
         requestKey: LiquidTodayQueryKey
     ) -> Bool {
         cachedKey.deviceId == requestKey.deviceId
+            && cachedKey.sourceKind == requestKey.sourceKind
             && cachedKey.dayKey == requestKey.dayKey
             && cachedKey.isToday == requestKey.isToday
             && cachedKey.profileState == requestKey.profileState
@@ -3468,6 +3475,7 @@ struct LiquidTodayView: View {
         let requestedOffset = selectedDayOffset
         let requestedDayKey = selectedDayKey
         let requestedLogicalDay = selectedLogicalDay
+        let requestedSourceKind = repo.activeDeviceSourceKind
         let requestedAgeMetricState = profile.ageMetricStateToken
         let isToday = requestedOffset == 0
         let requestKey = LiquidTodayQueryKey(
@@ -3475,6 +3483,7 @@ struct LiquidTodayView: View {
             ageMetricsSeq: repo.ageMetricsSeq,
             workoutsSeq: repo.workoutsSeq,
             deviceId: repo.deviceId,
+            sourceKind: requestedSourceKind,
             dayKey: requestedDayKey,
             isToday: isToday,
             profileState: requestedAgeMetricState
@@ -3521,6 +3530,7 @@ struct LiquidTodayView: View {
                 ageMetricsSeq: repo.ageMetricsSeq,
                 workoutsSeq: repo.workoutsSeq,
                 deviceId: repo.deviceId,
+                sourceKind: repo.activeDeviceSourceKind,
                 dayKey: selectedDayKey,
                 isToday: selectedDayOffset == 0,
                 profileState: profile.ageMetricStateToken
@@ -3751,10 +3761,16 @@ struct LiquidTodayView: View {
         if let day, !trendDays.contains(where: { $0.day == day.day }) {
             trendDays.append(day)
         }
+        let supplierStepPoints = requestedSourceKind == .veepoo
+            ? trendDays.compactMap { row in
+                row.steps.map { (day: row.day, value: Double($0)) }
+            }
+            : []
         let keyMetricTrendsLocal = Self.keyMetricTrendSeries(
             days: trendDays,
             restSeries: restSeries,
             stepEstimates: stepsSeries,
+            supplierSteps: supplierStepPoints,
             appleRows: appleRows,
             endingAt: requestedDayKey,
             resolvedSpo2: validSpo2Points
@@ -3784,6 +3800,7 @@ struct LiquidTodayView: View {
                 ageMetricsSeq: repo.ageMetricsSeq,
                 workoutsSeq: repo.workoutsSeq,
                 deviceId: repo.deviceId,
+                sourceKind: repo.activeDeviceSourceKind,
                 dayKey: selectedDayKey,
                 isToday: selectedDayOffset == 0,
                 profileState: profile.ageMetricStateToken
@@ -4131,22 +4148,36 @@ struct LiquidTodayView: View {
         )
     }
 
-    // Primary Steps requires a measured Apple Health pedometer count. Band motion and calibration remain
-    // separate research/diagnostic series.
+    private var supplierMeasuredSteps: Double? {
+        guard repo.activeDeviceSourceKind == .veepoo else { return nil }
+        return displayDay?.steps.map(Double.init)
+    }
+
+    private var supplierMeasuredStepSource: String? {
+        supplierMeasuredSteps == nil ? nil : repo.deviceId
+    }
+
+    // Apple Health measured steps win. A supplier-native day total is eligible only through the
+    // registry-qualified active source; band motion and calibration remain diagnostic series.
     private var stepCount: Double? {
         MetricCatalog.todayStepsValue(imported: importedStepsDay.map(Double.init),
+                                      supplierMeasured: supplierMeasuredSteps,
                                       motionDerived: displayDay?.steps.map(Double.init),
                                       calibratedEstimate: stepsEst)
     }
 
     private var stepsDetailMetric: MetricDescriptor? {
         MetricCatalog.todayStepsMetric(hasMotionDerivedSteps: displayDay?.steps != nil,
-                                       hasImportedSteps: importedStepsDay != nil)
+                                       hasImportedSteps: importedStepsDay != nil,
+                                       supplierMeasuredSource: supplierMeasuredStepSource)
     }
 
     /// Truthful source caption for the number on the Liquid Steps card.
     private var stepsSourceCaption: String {
         if importedStepsDay != nil { return String(localized: "Imported · Apple Health") }
+        if supplierMeasuredSteps != nil {
+            return String(localized: "Compatible band")
+        }
         return String(localized: "No step source for this day")
     }
 
@@ -4309,9 +4340,30 @@ struct LiquidTodayQueryKey: Equatable {
     let ageMetricsSeq: Int
     let workoutsSeq: Int
     let deviceId: String
+    let sourceKind: SourceKind?
     let dayKey: String
     let isToday: Bool
     let profileState: String
+
+    init(
+        refreshSeq: Int,
+        ageMetricsSeq: Int,
+        workoutsSeq: Int,
+        deviceId: String,
+        sourceKind: SourceKind? = nil,
+        dayKey: String,
+        isToday: Bool,
+        profileState: String
+    ) {
+        self.refreshSeq = refreshSeq
+        self.ageMetricsSeq = ageMetricsSeq
+        self.workoutsSeq = workoutsSeq
+        self.deviceId = deviceId
+        self.sourceKind = sourceKind
+        self.dayKey = dayKey
+        self.isToday = isToday
+        self.profileState = profileState
+    }
 }
 
 /// Query-backed Liquid Today outputs banked on the long-lived Repository. A view re-mount can repaint

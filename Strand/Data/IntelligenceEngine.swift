@@ -949,6 +949,7 @@ final class IntelligenceEngine: ObservableObject {
         case daytimeHeartRate = "daytime_heart_rate"
         case daytimeMotion = "daytime_motion"
         case bandSleepState = "band_sleep_state"
+        case deviceReportedSleep = "device_reported_sleep"
     }
 
     private enum AnalysisPassStage: String {
@@ -2421,6 +2422,55 @@ final class IntelligenceEngine: ObservableObject {
                     optionalEvidenceFailures.insert(.respiration)
                     resp = []
                 }
+                let supplierOwnsDay =
+                    regDevices.first(where: { $0.id == owner })?.sourceKind
+                        == .veepoo
+                let deviceDayStepTotal: Int?
+                if supplierOwnsDay {
+                    do {
+                        deviceDayStepTotal = try await store.dailyMetrics(
+                            deviceId: owner,
+                            from: day,
+                            to: day
+                        ).first?.steps
+                    } catch {
+                        if error is CancellationError || Task.isCancelled {
+                            throw CancellationError()
+                        }
+                        optionalEvidenceFailures.insert(.steps)
+                        deviceDayStepTotal = nil
+                    }
+                } else {
+                    deviceDayStepTotal = nil
+                }
+                let deviceSleepWindows: [(start: Int, end: Int)]
+                if supplierOwnsDay {
+                    do {
+                        deviceSleepWindows = try await store.sleepSessions(
+                            deviceId: owner,
+                            from: from,
+                            to: to,
+                            limit: 4_000
+                        )
+                        .filter { $0.endTs > $0.effectiveStartTs }
+                        .map {
+                            (
+                                start: $0.effectiveStartTs,
+                                end: $0.endTs
+                            )
+                        }
+                    } catch {
+                        if error is CancellationError || Task.isCancelled {
+                            throw CancellationError()
+                        }
+                        optionalEvidenceFailures.insert(
+                            .deviceReportedSleep
+                        )
+                        deviceSleepWindows = []
+                    }
+                } else {
+                    deviceSleepWindows = []
+                }
                 let skin: [SkinTempSample]
                 do {
                     skin = try await store.skinTempSamples(
@@ -2592,6 +2642,7 @@ final class IntelligenceEngine: ObservableObject {
                                                      steps: steps, dayHr: dayHr, daySteps: daySteps,
                                                      stepClassificationPolicy: .rejectUnverifiedBandMotion,
                                                      dayGravity: dayGrav,
+                                                     deviceDayStepTotal: deviceDayStepTotal,
                                                      skinTemp: skin,
                                                      skinTempFamily: skinFamily,   // #938
                                                      skinTempAnchorRaw: skinAnchorRaw,   // #938 second capture
@@ -2604,6 +2655,7 @@ final class IntelligenceEngine: ObservableObject {
                                                      wristOff: wristOff,
                                                      habitualMidsleepSec: habitualMidsleepSec,
                                                      bandSleepState: bandSleepState,
+                                                     deviceSleepWindows: deviceSleepWindows,
                                                      // #690: thread the V2 toggle into the NORMAL staging path so
                                                      // it affects detected nights, not just the self-heal restage.
                                                      useSleepStagerV2: useSleepStagerV2,

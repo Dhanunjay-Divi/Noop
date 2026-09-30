@@ -179,6 +179,24 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             now: now,
             isToday: false
         ))
+
+        let supplierSource = LiquidTodayQueryKey(
+            refreshSeq: 4,
+            ageMetricsSeq: 2,
+            workoutsSeq: 3,
+            deviceId: "device-a",
+            sourceKind: .veepoo,
+            dayKey: "2026-09-09",
+            isToday: true,
+            profileState: "profile-a"
+        )
+        XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: supplierSource,
+            bankedAt: now,
+            now: now,
+            isToday: true
+        ))
     }
 
     func testLiquidTodayDefersEveryQueryLoadDuringHistoryWrites() {
@@ -208,6 +226,19 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         XCTAssertTrue(LiquidTodayView.canRestoreDuringHistoryWrite(
             cachedKey: cached,
             requestKey: newer
+        ))
+        XCTAssertFalse(LiquidTodayView.canRestoreDuringHistoryWrite(
+            cachedKey: cached,
+            requestKey: LiquidTodayQueryKey(
+                refreshSeq: 9,
+                ageMetricsSeq: 5,
+                workoutsSeq: 6,
+                deviceId: "device-a",
+                sourceKind: .veepoo,
+                dayKey: "2026-09-09",
+                isToday: true,
+                profileState: "profile-a"
+            )
         ))
         XCTAssertFalse(LiquidTodayView.canRestoreDuringHistoryWrite(
             cachedKey: cached,

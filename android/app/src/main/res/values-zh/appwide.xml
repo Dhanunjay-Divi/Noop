@@ -191,6 +191,9 @@
     <string name="appwide_devices_empty_body">连接 NOOP Band 或兼容的 4.0、5.0/MG 手环。这里只显示此版本能够配对的手环。</string>
     <string name="appwide_devices_empty_title">连接你的第一个手环</string>
     <string name="appwide_devices_pair_again">重新配对</string>
+    <string name="appwide_devices_supplier_apple_captures">心率 · 设备步数 · 手环评估的睡眠 · 电池</string>
+    <string name="appwide_devices_supplier_apple_footnote">步数和睡眠由手环报告。NOOP 使用所报告睡眠时段内保存的心率测量静息心率。HRV、血氧、呼吸频率和不受支持的信号仍不可用。</string>
+    <string name="appwide_devices_supplier_apple_powers">生成实时心率历史、每日活动、卡路里、负荷和睡眠摘要。</string>
     <string name="appwide_devices_supplier_captures">心率（仅实时显示）· 电池</string>
     <string name="appwide_devices_supplier_display_model">NOOP Band</string>
     <string name="appwide_devices_supplier_footnote">更新停止后，心率会过期。仅在手环已连接时显示电池电量。</string>
@@ -658,7 +661,7 @@
     <string name="appwide_onboarding_device_wizard_supplier_progress_battery">正在检查电池功能</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_connecting">正在连接所选手环</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_live_heart_rate">正在检查实时心率</string>
-    <string name="appwide_onboarding_device_wizard_supplier_ready_body">实时心率仅使用手机接收时间来表示显示内容的新鲜度。此供应商数据流不会添加到持久健康历史记录或公式中。</string>
+    <string name="appwide_onboarding_device_wizard_supplier_ready_body">由于供应商数据流不包含样本时间戳，实时心率会使用手机接收时间保存。配对后，NOOP 还会在可用时读取设备步数和手环评估的睡眠。HRV、血氧、呼吸频率、皮肤温度和不受支持的信号仍不可用。</string>
     <string name="appwide_onboarding_device_wizard_supplier_ready_title">电池和实时心率已确认</string>
     <string name="appwide_onboarding_device_wizard_supplier_registration_failed">无法保存手环。注册未报告为已完成。</string>
     <string name="appwide_onboarding_device_wizard_supplier_subtitle">使用手环印刷标识符和四位设备密码。实验性功能。</string>

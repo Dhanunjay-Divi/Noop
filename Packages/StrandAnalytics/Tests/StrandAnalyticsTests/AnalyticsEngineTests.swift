@@ -914,3 +914,99 @@ final class AnalyticsEngineTests: XCTestCase {
         XCTAssertNotNil(result.daily.totalSleepMin)
     }
 }
+
+// MARK: - Device-reported in-bed span -> resting HR (supplier band, no gravity)
+
+/// A band that exposes no accelerometer stream cannot be staged by `SleepStager`, so
+/// `matched` is empty and resting HR is unconditionally nil. When such a band reports
+/// its own in-bed SPAN, NOOP measures the floor inside it from its OWN heart rate.
+/// These pin that the published number tracks a VARYING input and that it is gated on
+/// wear evidence rather than on the span merely existing.
+final class DeviceSleepWindowRestingHRTests: XCTestCase {
+    /// 1 Hz night, flat floor, zero gravity so detection genuinely returns nothing.
+    private func night(floor: Int, start: Int, minutes: Int) -> [HRSample] {
+        (0..<(minutes * 60)).map { HRSample(ts: start + $0, bpm: floor) }
+    }
+
+    /// Two nights whose floors differ by 10 bpm must publish resting HRs 10 apart.
+    /// One night that merely "looks plausible" is not validation.
+    func testRestingHRTracksAVaryingFloor() {
+        let start = 1_623_729_600
+        let window = (start: start, end: start + 6 * 3_600)
+
+        func rhr(floor: Int) -> Int? {
+            AnalyticsEngine.analyzeDay(
+                day: "2021-06-15",
+                hr: night(floor: floor, start: start, minutes: 360),
+                profile: UserProfile(age: 30),
+                deviceSleepWindows: [window]
+            ).daily.restingHr
+        }
+
+        let low = rhr(floor: 48)
+        let high = rhr(floor: 58)
+        XCTAssertEqual(low, 48)
+        XCTAssertEqual(high, 58)
+        XCTAssertEqual(high! - low!, 10, "must track the input, not a constant")
+    }
+
+    /// A span with only a handful of stray beats must publish NOTHING. Without the
+    /// wear floor a single beat would set a resting heart rate that then moves
+    /// Effort, Recovery and Calories.
+    func testStrayBeatsInsideASpanPublishNoRestingHR() {
+        let start = 1_623_729_600
+        let strays = (0..<5).map { HRSample(ts: start + $0 * 600, bpm: 44) }
+        let res = AnalyticsEngine.analyzeDay(
+            day: "2021-06-15",
+            hr: strays,
+            profile: UserProfile(age: 30),
+            deviceSleepWindows: [(start: start, end: start + 6 * 3_600)]
+        )
+        XCTAssertNil(res.daily.restingHr)
+    }
+
+    /// No span at all keeps the historic behaviour exactly: nil, never a guess.
+    func testNoDeviceWindowLeavesRestingHRNil() {
+        let start = 1_623_729_600
+        let res = AnalyticsEngine.analyzeDay(
+            day: "2021-06-15",
+            hr: night(floor: 50, start: start, minutes: 360),
+            profile: UserProfile(age: 30)
+        )
+        XCTAssertNil(res.daily.restingHr)
+    }
+}
+
+final class DeviceReportedStepTotalTests: XCTestCase {
+    private let day = "2026-01-02"
+
+    func testDeviceTotalTakesPrecedenceWithoutScaling() {
+        let result = AnalyticsEngine.analyzeDay(
+            day: day,
+            steps: [
+                StepSample(ts: 1_767_355_200, counter: 100),
+                StepSample(ts: 1_767_355_260, counter: 300),
+            ],
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            deviceDayStepTotal: 7_654,
+            profile: UserProfile(stepTicksPerStep: 2)
+        )
+
+        XCTAssertEqual(result.daily.steps, 7_654)
+    }
+
+    func testDeviceTotalPreservesMeasuredZero() {
+        let result = AnalyticsEngine.analyzeDay(
+            day: day,
+            steps: [
+                StepSample(ts: 1_767_355_200, counter: 100),
+                StepSample(ts: 1_767_355_260, counter: 300),
+            ],
+            stepClassificationPolicy: .allowLegacyRawMotion,
+            deviceDayStepTotal: 0,
+            profile: UserProfile()
+        )
+
+        XCTAssertEqual(result.daily.steps, 0)
+    }
+}

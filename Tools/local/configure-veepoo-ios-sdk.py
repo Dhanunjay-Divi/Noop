@@ -190,6 +190,20 @@ def xcconfig_path(path: Path) -> str:
     return f'"{value}"'
 
 
+def exported_xcconfig_path(value: str) -> str:
+    """Remove only the outer quotes emitted by ``xcconfig_path``."""
+    starts_quoted = value.startswith('"')
+    ends_quoted = value.endswith('"')
+    if starts_quoted != ends_quoted:
+        raise VerificationError("supplier SDK build path has malformed quotes")
+    if not starts_quoted:
+        return value
+    unquoted = value[1:-1]
+    if '"' in unquoted:
+        raise VerificationError("supplier SDK build path has malformed quotes")
+    return unquoted
+
+
 def _reject_symlinked_path(
     path: Path,
     label: str = "approved framework",
@@ -1086,8 +1100,22 @@ def verify_build_environment(
             "NOOP_SUPPLIER_VEEPOO NOOP_SUPPLIER_QUALIFICATION"
         ),
     }
+    path_settings = {
+        "NOOP_VEEPOO_FRAMEWORK_DIR",
+        "NOOP_VEEPOO_VENDOR_FRAMEWORK_DIR",
+        "NOOP_VEEPOO_FMDB_FRAMEWORK_DIR",
+        "NOOP_VEEPOO_MJEXTENSION_FRAMEWORK_DIR",
+    }
     for name, expected_value in required_values.items():
-        if environment.get(name) != expected_value:
+        actual_value = environment.get(name)
+        if name in path_settings and isinstance(actual_value, str):
+            try:
+                actual_value = exported_xcconfig_path(actual_value)
+            except VerificationError as error:
+                raise VerificationError(
+                    f"build setting {name} is not approved"
+                ) from error
+        if actual_value != expected_value:
             raise VerificationError(f"build setting {name} is not approved")
     if not environment.get("SDK_NAME", "").startswith("iphoneos"):
         raise VerificationError("build SDK is not physical iPhoneOS")
@@ -1114,6 +1142,12 @@ def _sdk_root_candidate(
             raise VerificationError(
                 "build setting NOOP_VEEPOO_FRAMEWORK_DIR is not approved"
             )
+        try:
+            framework_directory = exported_xcconfig_path(framework_directory)
+        except VerificationError as error:
+            raise VerificationError(
+                "build setting NOOP_VEEPOO_FRAMEWORK_DIR is not approved"
+            ) from error
         path = Path(framework_directory)
         if not path.is_absolute() or len(path.parents) < 2:
             raise VerificationError(

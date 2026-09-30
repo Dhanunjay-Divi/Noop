@@ -191,6 +191,9 @@
     <string name="appwide_devices_empty_body">Conecta una NOOP Band o una pulsera compatible 4.0 o 5.0/MG. Solo se muestran las pulseras que esta versión puede enlazar.</string>
     <string name="appwide_devices_empty_title">Conecta tu primera pulsera</string>
     <string name="appwide_devices_pair_again">Volver a enlazar</string>
+    <string name="appwide_devices_supplier_apple_captures">Frecuencia cardiaca · Pasos del dispositivo · Sueño evaluado por la banda · Batería</string>
+    <string name="appwide_devices_supplier_apple_footnote">Los pasos y el sueño los informa la banda. NOOP mide la frecuencia cardiaca en reposo a partir de la frecuencia guardada dentro del periodo de sueño informado. La VFC, el oxígeno en sangre, la frecuencia respiratoria y las señales no compatibles siguen sin estar disponibles.</string>
+    <string name="appwide_devices_supplier_apple_powers">Crea historial de frecuencia cardiaca en directo, movimiento diario, calorías, Esfuerzo y resúmenes de sueño.</string>
     <string name="appwide_devices_supplier_captures">Frecuencia cardiaca (solo visualización en directo) · Batería</string>
     <string name="appwide_devices_supplier_display_model">NOOP Band</string>
     <string name="appwide_devices_supplier_footnote">La frecuencia cardiaca desaparece cuando dejan de llegar datos. La batería solo se muestra mientras la banda está conectada.</string>
@@ -658,7 +661,7 @@
     <string name="appwide_onboarding_device_wizard_supplier_progress_battery">Comprobando la capacidad de la batería</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_connecting">Conectando con la banda seleccionada</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_live_heart_rate">Comprobando la frecuencia cardiaca en directo</string>
-    <string name="appwide_onboarding_device_wizard_supplier_ready_body">La frecuencia cardiaca en directo usa la hora de recepción del teléfono solo para mostrar la actualización. Este flujo del proveedor no se añade al historial de salud permanente ni a las fórmulas.</string>
+    <string name="appwide_onboarding_device_wizard_supplier_ready_body">La frecuencia cardiaca en directo se guarda con la hora de recepción del teléfono porque el flujo del proveedor no incluye la hora de la muestra. Tras enlazar, NOOP también lee los pasos del dispositivo y el sueño evaluado por la banda cuando están disponibles. La VFC, el oxígeno en sangre, la frecuencia respiratoria, la temperatura de la piel y las señales no compatibles siguen sin estar disponibles.</string>
     <string name="appwide_onboarding_device_wizard_supplier_ready_title">Batería y frecuencia cardiaca en directo confirmadas</string>
     <string name="appwide_onboarding_device_wizard_supplier_registration_failed">No se ha podido guardar la banda. El registro no se ha notificado como completado.</string>
     <string name="appwide_onboarding_device_wizard_supplier_subtitle">Usa el identificador impreso de la banda y una contraseña de dispositivo de cuatro dígitos. Experimental.</string>

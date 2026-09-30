@@ -1332,7 +1332,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             source[
                 "appwide.onboarding.device_wizard.supplier_ready_body"
             ]?["en"],
-            "Live heart rate uses the phone receipt time for display freshness only. This supplier stream is not added to durable health history or formulas."
+            "Live heart rate is saved using phone receipt time because the supplier stream has no sample timestamp. After pairing, NOOP also reads device steps and band-scored sleep when available. HRV, blood oxygen, respiratory rate, skin temperature, and unsupported signals remain unavailable."
         )
         let onboardingNotificationKeys = [
             "appwide.onboarding.notifications.background_status_body",

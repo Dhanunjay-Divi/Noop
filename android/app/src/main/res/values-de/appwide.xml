@@ -191,6 +191,9 @@
     <string name="appwide_devices_empty_body">Verbinde ein NOOP Band oder ein kompatibles Band der Version 4.0 oder 5.0/MG. Es werden nur Bänder angezeigt, die dieser Build koppeln kann.</string>
     <string name="appwide_devices_empty_title">Verbinde dein erstes Band</string>
     <string name="appwide_devices_pair_again">Erneut koppeln</string>
+    <string name="appwide_devices_supplier_apple_captures">Herzfrequenz · Geräteschritte · Vom Band bewerteter Schlaf · Akku</string>
+    <string name="appwide_devices_supplier_apple_footnote">Schritte und Schlaf werden vom Band gemeldet. NOOP misst den Ruhepuls aus der gespeicherten Herzfrequenz innerhalb des gemeldeten Schlafzeitraums. HRV, Blutsauerstoff, Atemfrequenz und nicht unterstützte Signale bleiben nicht verfügbar.</string>
+    <string name="appwide_devices_supplier_apple_powers">Erstellt Live-Herzfrequenzverlauf, tägliche Bewegung, Kalorien, Anstrengung und Schlafzusammenfassungen.</string>
     <string name="appwide_devices_supplier_captures">Herzfrequenz (nur Live-Anzeige) · Akku</string>
     <string name="appwide_devices_supplier_display_model">NOOP Band</string>
     <string name="appwide_devices_supplier_footnote">Die Herzfrequenz verschwindet, wenn keine neuen Werte eintreffen. Der Akkustand wird nur angezeigt, solange das Band verbunden ist.</string>
@@ -658,7 +661,7 @@
     <string name="appwide_onboarding_device_wizard_supplier_progress_battery">Akkufunktion wird geprüft</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_connecting">Verbindung mit dem ausgewählten Band wird hergestellt</string>
     <string name="appwide_onboarding_device_wizard_supplier_progress_live_heart_rate">Live-Herzfrequenz wird geprüft</string>
-    <string name="appwide_onboarding_device_wizard_supplier_ready_body">Die Live-Herzfrequenz verwendet die Empfangszeit des Telefons nur zur Anzeigeaktualität. Dieser Anbieter-Datenstrom wird weder dem dauerhaften Gesundheitsverlauf noch Formeln hinzugefügt.</string>
+    <string name="appwide_onboarding_device_wizard_supplier_ready_body">Die Live-Herzfrequenz wird mit der Empfangszeit des Telefons gespeichert, da der Anbieter-Datenstrom keinen Messzeitpunkt enthält. Nach dem Koppeln liest NOOP auch Geräteschritte und den vom Band bewerteten Schlaf, wenn verfügbar. HRV, Blutsauerstoff, Atemfrequenz, Hauttemperatur und nicht unterstützte Signale bleiben nicht verfügbar.</string>
     <string name="appwide_onboarding_device_wizard_supplier_ready_title">Akku und Live-Herzfrequenz bestätigt</string>
     <string name="appwide_onboarding_device_wizard_supplier_registration_failed">Das Band konnte nicht gespeichert werden. Die Registrierung wurde nicht als abgeschlossen gemeldet.</string>
     <string name="appwide_onboarding_device_wizard_supplier_subtitle">Verwendet die aufgedruckte Bandkennung und ein vierstelliges Gerätepasswort. Experimentell.</string>

@@ -1,8 +1,46 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-29**
+Last updated: **2026-09-30**
 
 ## Authoritative context
+
+- The current supplier-metrics replacement is branch
+  `codex/supplier-metrics-integration-20260930` from protected-main commit
+  `fd2f0f816`, with reviewed implementation commit
+  `719b724a6a084c07a384a34c789fcfe2406ab1d6`. It preserves the
+  owner-validated connection/live-HR/native-step/sleep baseline `7ca94bf8`,
+  excludes development-only commit `0b99aca0`, and retains current pairing,
+  ownership, viewer, privacy, source-switching, and release safeguards.
+  Supplier HR is bounded and receipt-timed; native steps and sleep persist
+  atomically; optional reads do not tear down transport; and Apple primary Steps
+  accepts the native total only when the exact active registry row is
+  `.veepoo`, with Apple Health still winning per day and all WHOOP wrist-motion
+  estimates excluded. Local evidence passes Apple supplier
+  106/106 and source/provenance 101/101, complete StrandAnalytics 1,519 with
+  seven documented skips, WhoopStore 558/558, Android focused Full Debug 22/22,
+  supplier controls 65/65, and default-off macOS plus complete iOS Simulator
+  graphs. Physical BLE, accuracy, battery, history, background, haptics,
+  retention, signed installation, and firmware remain external. The owner
+  requested no GitHub-hosted runner use; all three registered self-hosted
+  runners are offline and protected checks are GitHub-Actions-app-bound, so no
+  protection weakening or forged integration is authorized. The reviewed branch
+  was pushed without a pull request, and the immediate Actions query returned
+  zero workflow runs. On 2026-09-30 the owner authorized one GitHub-hosted
+  required-check run and normal protected merge for this integration. That
+  authorization excludes manual release, signing, firmware, store, and
+  production-traffic workflows. Pull request `#22` is the protected integration
+  record; its exact check and merge state is authoritative in GitHub. Exact
+  hosted head `5719e9f3d` passed Android APK assembly, production shell, and
+  Review Sample shell, but its 5,227-case unit wall failed one stale
+  `AppWideLocalizationContractTest` expectation that still described the
+  pre-integration non-persistence behavior. The corrected contract passes its
+  focused case and the complete local Full Debug wall with 5,227 tests, seven
+  skips, and zero failures. The same old head built both Apple app graphs, then
+  its 2,405-case Strand wall exposed the mirrored stale expectation as the only
+  failure; the corrected Apple localization and Bluetooth-consent contracts
+  pass 10/10 locally. Terminology/trust regeneration, one replacement push,
+  exact-head checks, and protected merge remain. The signed physical matrix
+  remains.
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Protected branch: `main`

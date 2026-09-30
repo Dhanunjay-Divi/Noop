@@ -161,6 +161,34 @@ class StepsAnalyticsTest {
         )
     }
 
+    @Test
+    fun deviceDayStepTotalTakesPrecedenceWithoutScaling() {
+        val total = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = listOf(step(0, 100), step(60, 300)),
+            deviceDayStepTotal = 7_654,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = UserProfile(stepTicksPerStep = 2.0),
+        ).daily.steps
+
+        assertEquals(7_654, total)
+    }
+
+    @Test
+    fun deviceDayStepTotalPreservesMeasuredZero() {
+        val total = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = listOf(step(0, 100), step(60, 300)),
+            deviceDayStepTotal = 0,
+            stepClassificationPolicy =
+                StepsCounter.ClassificationPolicy.allowLegacyRawMotion,
+            profile = profile,
+        ).daily.steps
+
+        assertEquals(0, total)
+    }
+
     // MARK: - Step-scale calibration (#139). Mirrors the Swift StepsDailyTests vectors.
 
     private fun stepsFor(samples: List<StepSample>, ticksPerStep: Double): Int? =

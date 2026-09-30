@@ -710,8 +710,9 @@ final class VeepooPendingCredentialCleanupReconciler {
     }
 }
 
-/// Registered-source bridge. Supplier live HR updates only `LiveState`; it is
-/// intentionally never mapped to `Streams` or inserted into durable history.
+/// Registered-source bridge for the supplier transport. Accepted live HR,
+/// device-reported steps, and device-reported sleep are persisted through
+/// injected sinks; unsupported signals remain absent.
 @MainActor
 final class VeepooBandSource: LiveHRSource {
     nonisolated static let displayFreshnessInterval: TimeInterval = 30
@@ -733,13 +734,25 @@ final class VeepooBandSource: LiveHRSource {
     private let reconnectTailDelayNanoseconds: UInt64
     private let liveRestartDelaysNanoseconds: [UInt64]
     private let liveRestartTailDelayNanoseconds: UInt64
+    private let persist: (([VeepooBandHeartRateReading]) -> Void)?
+    private let persistSteps: ((VeepooBandStepsReading) -> Void)?
+    private let persistSleep: ((VeepooBandSleepReading) -> Void)?
+    private let heartRatePersistBatchSize: Int
+    private let heartRatePersistInterval: TimeInterval
+    private let stepPollIntervalNanoseconds: UInt64
+    private let sleepReadDelayNanoseconds: UInt64
     private let now: () -> Date
     private var targetPeripheralID: UUID?
     private var reconnectTask: Task<Void, Never>?
     private var liveRestartTask: Task<Void, Never>?
+    private var stepPollTask: Task<Void, Never>?
+    private var sleepReadTask: Task<Void, Never>?
+    private var stepReadInFlight = false
+    private var sleepReadInFlight = false
     private var credentialRetryTask: Task<Void, Never>?
     private var protectedDataCancellable: AnyCancellable?
     private var displayFreshnessTask: Task<Void, Never>?
+    private var heartRatePersistFlushTask: Task<Void, Never>?
     private var reconnectAttempt = 0
     private var liveRestartAttempt = 0
     private var credentialRetryAttempt = 0
@@ -748,6 +761,8 @@ final class VeepooBandSource: LiveHRSource {
     private var permanentCredentialFailureHandled = false
     private var terminalCompatibilityFailureHandled = false
     private var terminalBatteryFailureHandled = false
+    private var heartRatePersistBuffer: [VeepooBandHeartRateReading] = []
+    private var lastHeartRatePersistFlushAt: Date
     private var stopped = false
 
     init(
@@ -771,6 +786,13 @@ final class VeepooBandSource: LiveHRSource {
             15_000_000_000,
         ],
         liveRestartTailDelayNanoseconds: UInt64 = 60_000_000_000,
+        persist: (([VeepooBandHeartRateReading]) -> Void)? = nil,
+        persistSteps: ((VeepooBandStepsReading) -> Void)? = nil,
+        persistSleep: ((VeepooBandSleepReading) -> Void)? = nil,
+        heartRatePersistBatchSize: Int = 30,
+        heartRatePersistInterval: TimeInterval = 30,
+        stepPollIntervalNanoseconds: UInt64 = 60_000_000_000,
+        sleepReadDelayNanoseconds: UInt64 = 20_000_000_000,
         now: @escaping () -> Date = Date.init
     ) {
         self.live = live
@@ -793,7 +815,15 @@ final class VeepooBandSource: LiveHRSource {
         self.liveRestartDelaysNanoseconds = liveRestartDelaysNanoseconds
         self.liveRestartTailDelayNanoseconds =
             liveRestartTailDelayNanoseconds
+        self.persist = persist
+        self.persistSteps = persistSteps
+        self.persistSleep = persistSleep
+        self.heartRatePersistBatchSize = max(1, heartRatePersistBatchSize)
+        self.heartRatePersistInterval = max(0.01, heartRatePersistInterval)
+        self.stepPollIntervalNanoseconds = stepPollIntervalNanoseconds
+        self.sleepReadDelayNanoseconds = sleepReadDelayNanoseconds
         self.now = now
+        self.lastHeartRatePersistFlushAt = now()
         adapter.eventHandler = { [weak self] event in self?.handle(event) }
     }
 
@@ -826,6 +856,13 @@ final class VeepooBandSource: LiveHRSource {
             15_000_000_000,
         ],
         liveRestartTailDelayNanoseconds: UInt64 = 60_000_000_000,
+        persist: (([VeepooBandHeartRateReading]) -> Void)? = nil,
+        persistSteps: ((VeepooBandStepsReading) -> Void)? = nil,
+        persistSleep: ((VeepooBandSleepReading) -> Void)? = nil,
+        heartRatePersistBatchSize: Int = 30,
+        heartRatePersistInterval: TimeInterval = 30,
+        stepPollIntervalNanoseconds: UInt64 = 60_000_000_000,
+        sleepReadDelayNanoseconds: UInt64 = 20_000_000_000,
         now: @escaping () -> Date = Date.init
     ) {
         self.live = live
@@ -852,7 +889,15 @@ final class VeepooBandSource: LiveHRSource {
         self.liveRestartDelaysNanoseconds = liveRestartDelaysNanoseconds
         self.liveRestartTailDelayNanoseconds =
             liveRestartTailDelayNanoseconds
+        self.persist = persist
+        self.persistSteps = persistSteps
+        self.persistSleep = persistSleep
+        self.heartRatePersistBatchSize = max(1, heartRatePersistBatchSize)
+        self.heartRatePersistInterval = max(0.01, heartRatePersistInterval)
+        self.stepPollIntervalNanoseconds = stepPollIntervalNanoseconds
+        self.sleepReadDelayNanoseconds = sleepReadDelayNanoseconds
         self.now = now
+        self.lastHeartRatePersistFlushAt = now()
         adapter.eventHandler = { [weak self] event in self?.handle(event) }
     }
 
@@ -867,6 +912,7 @@ final class VeepooBandSource: LiveHRSource {
         guard !stopped else { return }
         reconnectTask?.cancel()
         reconnectTask = nil
+        cancelMetricReads()
         targetPeripheralID = id
         reconnectAttempt = 0
         credentialRetryAttempt = 0
@@ -889,6 +935,8 @@ final class VeepooBandSource: LiveHRSource {
         protectedDataCancellable = nil
         displayFreshnessTask?.cancel()
         displayFreshnessTask = nil
+        cancelMetricReads()
+        flushHeartRatePersistence()
         adapter.disconnect()
         live.connected = false
         live.batteryPct = nil
@@ -925,8 +973,16 @@ final class VeepooBandSource: LiveHRSource {
             {
                 live.setBattery(Double(percent))
             }
+            startStepPolling()
+            scheduleSleepRead()
             cancelLiveRestart(resetAttempt: true)
             adapter.startLiveHeartRate()
+        case .steps(let reading):
+            stepReadInFlight = false
+            persistSteps?(reading)
+        case .sleep(let reading):
+            sleepReadInFlight = false
+            persistSleep?(reading)
         case .heartRate(let reading):
             guard Self.freshnessRemaining(
                 receivedAt: reading.receivedAt,
@@ -942,10 +998,13 @@ final class VeepooBandSource: LiveHRSource {
                 reading.bpm,
                 receivedAt: reading.receivedAt
             )
+            enqueueHeartRateForPersistence(reading)
             live.connected = true
             scheduleDisplayExpiry(for: reading.receivedAt)
         case .disconnected:
+            flushHeartRatePersistence()
             cancelLiveRestart(resetAttempt: true)
+            cancelMetricReads()
             displayFreshnessTask?.cancel()
             displayFreshnessTask = nil
             live.connected = false
@@ -962,7 +1021,9 @@ final class VeepooBandSource: LiveHRSource {
             if stage == .authentication && failure == .credentialRejected {
                 guard !credentialRejected else { return }
                 credentialRejected = true
+                flushHeartRatePersistence()
                 cancelLiveRestart(resetAttempt: true)
+                cancelMetricReads()
                 adapter.disconnect()
                 onCredentialRejected()
                 return
@@ -970,7 +1031,9 @@ final class VeepooBandSource: LiveHRSource {
             if stage == .compatibility {
                 guard !terminalCompatibilityFailureHandled else { return }
                 terminalCompatibilityFailureHandled = true
+                flushHeartRatePersistence()
                 cancelLiveRestart(resetAttempt: true)
+                cancelMetricReads()
                 reconnectTask?.cancel()
                 reconnectTask = nil
                 credentialRetryTask?.cancel()
@@ -987,7 +1050,9 @@ final class VeepooBandSource: LiveHRSource {
             if stage == .battery {
                 guard !terminalBatteryFailureHandled else { return }
                 terminalBatteryFailureHandled = true
+                flushHeartRatePersistence()
                 cancelLiveRestart(resetAttempt: true)
+                cancelMetricReads()
                 reconnectTask?.cancel()
                 reconnectTask = nil
                 live.batteryPct = nil
@@ -1008,12 +1073,20 @@ final class VeepooBandSource: LiveHRSource {
                 }
             }
             if stage == .connection || stage == .disconnect {
+                flushHeartRatePersistence()
                 cancelLiveRestart(resetAttempt: true)
+                cancelMetricReads()
                 reconnectTask?.cancel()
                 reconnectTask = nil
                 scheduleReconnect()
             }
+            if stage == .steps {
+                stepReadInFlight = false
+            } else if stage == .sleep {
+                sleepReadInFlight = false
+            }
         case .liveStopped:
+            flushHeartRatePersistence()
             publishNonStreamingDisplayState()
         case .liveStarted:
             cancelLiveRestart(resetAttempt: false)
@@ -1140,6 +1213,7 @@ final class VeepooBandSource: LiveHRSource {
         guard !permanentCredentialFailureHandled else { return }
         permanentCredentialFailureHandled = true
         cancelLiveRestart(resetAttempt: true)
+        cancelMetricReads()
         credentialRetryTask?.cancel()
         credentialRetryTask = nil
         protectedDataCancellable?.cancel()
@@ -1195,6 +1269,107 @@ final class VeepooBandSource: LiveHRSource {
         if resetAttempt {
             liveRestartAttempt = 0
         }
+    }
+
+    private func startStepPolling() {
+        guard !stopped,
+              persistSteps != nil,
+              stepPollTask == nil
+        else {
+            return
+        }
+        stepPollTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, !self.stopped {
+                if !self.stepReadInFlight {
+                    self.stepReadInFlight = true
+                    self.adapter.readSteps()
+                }
+                try? await Task.sleep(
+                    nanoseconds: self.stepPollIntervalNanoseconds
+                )
+            }
+        }
+    }
+
+    private func scheduleSleepRead() {
+        guard !stopped,
+              persistSleep != nil,
+              sleepReadTask == nil
+        else {
+            return
+        }
+        sleepReadTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            if self.sleepReadDelayNanoseconds > 0 {
+                try? await Task.sleep(
+                    nanoseconds: self.sleepReadDelayNanoseconds
+                )
+            }
+            guard !Task.isCancelled, !self.stopped else { return }
+            self.sleepReadInFlight = true
+            self.adapter.readSleep()
+        }
+    }
+
+    private func cancelMetricReads() {
+        stepPollTask?.cancel()
+        stepPollTask = nil
+        sleepReadTask?.cancel()
+        sleepReadTask = nil
+        stepReadInFlight = false
+        sleepReadInFlight = false
+    }
+
+    private func enqueueHeartRateForPersistence(
+        _ reading: VeepooBandHeartRateReading
+    ) {
+        guard persist != nil else { return }
+        let second = Int(reading.receivedAt.timeIntervalSince1970)
+        if let last = heartRatePersistBuffer.last,
+           Int(last.receivedAt.timeIntervalSince1970) == second
+        {
+            heartRatePersistBuffer[heartRatePersistBuffer.count - 1] = reading
+        } else {
+            heartRatePersistBuffer.append(reading)
+        }
+        if heartRatePersistBuffer.count >= heartRatePersistBatchSize
+            || now().timeIntervalSince(lastHeartRatePersistFlushAt)
+                >= heartRatePersistInterval
+        {
+            flushHeartRatePersistence()
+        } else {
+            scheduleHeartRatePersistFlush()
+        }
+    }
+
+    private func scheduleHeartRatePersistFlush() {
+        guard !stopped,
+              !heartRatePersistBuffer.isEmpty,
+              heartRatePersistFlushTask == nil
+        else {
+            return
+        }
+        let delay = UInt64(heartRatePersistInterval * 1_000_000_000)
+        heartRatePersistFlushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled, let self, !self.stopped else { return }
+            self.heartRatePersistFlushTask = nil
+            self.flushHeartRatePersistence()
+        }
+    }
+
+    private func flushHeartRatePersistence() {
+        heartRatePersistFlushTask?.cancel()
+        heartRatePersistFlushTask = nil
+        guard !heartRatePersistBuffer.isEmpty else {
+            lastHeartRatePersistFlushAt = now()
+            return
+        }
+        let batch = heartRatePersistBuffer
+        heartRatePersistBuffer.removeAll(keepingCapacity: true)
+        lastHeartRatePersistFlushAt = now()
+        persist?(batch)
     }
 
     private func startBoundedDiscovery(
@@ -1307,7 +1482,16 @@ enum VeepooBandSourceFactory {
         live: LiveState,
         credentials: (any VeepooCredentialAccess)? = nil,
         credentialCleanup: (any VeepooCredentialCleanupAccess)? = nil,
-        retryCredentialCleanup: @escaping (String) -> Void = { _ in }
+        retryCredentialCleanup: @escaping (String) -> Void = { _ in },
+        persistFactory: (
+            (String) -> (([VeepooBandHeartRateReading]) -> Void)
+        )? = nil,
+        persistStepsFactory: (
+            (String) -> ((VeepooBandStepsReading) -> Void)
+        )? = nil,
+        persistSleepFactory: (
+            (String) -> ((VeepooBandSleepReading) -> Void)
+        )? = nil
     ) -> ((String) -> (any LiveHRSource)?)? {
         guard VeepooBandAdapterFactory.productionEnabled else { return nil }
         let credentials = credentials ?? VeepooCredentialStore.shared
@@ -1376,7 +1560,10 @@ enum VeepooBandSourceFactory {
                     onCredentialRejected:
                         reconcileAuthenticationRejection,
                     onCompatibilityFailure: reconcileUnavailableSource,
-                    onTerminalBatteryFailure: reconcileBatteryFailure
+                    onTerminalBatteryFailure: reconcileBatteryFailure,
+                    persist: persistFactory?(deviceID),
+                    persistSteps: persistStepsFactory?(deviceID),
+                    persistSleep: persistSleepFactory?(deviceID)
                 )
             case .unavailable:
                 return VeepooBandSource(
@@ -1390,7 +1577,10 @@ enum VeepooBandSourceFactory {
                     onCredentialPermanentlyUnavailable:
                         reconcileUnavailableSource,
                     onCompatibilityFailure: reconcileUnavailableSource,
-                    onTerminalBatteryFailure: reconcileBatteryFailure
+                    onTerminalBatteryFailure: reconcileBatteryFailure,
+                    persist: persistFactory?(deviceID),
+                    persistSteps: persistStepsFactory?(deviceID),
+                    persistSleep: persistSleepFactory?(deviceID)
                 )
             case .available, .missing, .malformed:
                 return nil
@@ -1447,7 +1637,9 @@ final class VeepooBandPairingSession: ObservableObject {
     private let adapter: any VeepooBandAdapterControlling
     private let credentials: any VeepooCredentialAccess
     private let credentialCleanup: any VeepooCredentialCleanupAccess
-    private let deviceID = "veepoo-\(UUID().uuidString.lowercased())"
+    static let deviceIDPrefix = "veepoo-"
+    private let deviceID =
+        "\(VeepooBandPairingSession.deviceIDPrefix)\(UUID().uuidString.lowercased())"
     private var acceptedPassword = ""
     private var ignoringExpectedDisconnect = false
 
@@ -1679,7 +1871,7 @@ final class VeepooBandPairingSession: ObservableObject {
             if ignoringExpectedDisconnect { return }
             lastFailure = .disconnected
             if phase != .idle { phase = .failed(.disconnected) }
-        case .state, .liveStarted, .liveStopped:
+        case .state, .liveStarted, .liveStopped, .steps, .sleep:
             break
         }
     }

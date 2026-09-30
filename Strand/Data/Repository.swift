@@ -555,6 +555,10 @@ final class Repository: ObservableObject {
     /// read side follows the same active id the write side does. NOT a `let` for that reason; `private(set)`
     /// so only `adoptActiveDeviceId` can move it.
     @Published private(set) var deviceId: String
+    /// Registry-qualified kind for `deviceId`. This is deliberately separate from id-prefix routing:
+    /// customer-visible provenance may admit supplier-native metrics only when the authoritative paired
+    /// device row says the active source is `.veepoo`.
+    @Published private(set) var activeDeviceSourceKind: SourceKind?
     /// Source id for on-device computed scores (recovery/strain/sleep derived from the raw strap
     /// streams by IntelligenceEngine). Merged UNDER the imported `deviceId` rows at read time, so a
     /// real WHOOP import always wins and the strap-only user still gets a populated dashboard.
@@ -810,7 +814,10 @@ final class Repository: ObservableObject {
         workoutsLog(build())
     }
 
-    init(deviceId: String) { self.deviceId = deviceId }
+    init(deviceId: String, activeDeviceSourceKind: SourceKind? = nil) {
+        self.deviceId = deviceId
+        self.activeDeviceSourceKind = activeDeviceSourceKind
+    }
 
     #if os(macOS)
     /// Selects the isolated store for one authenticated managed-viewer account.
@@ -938,8 +945,19 @@ final class Repository: ObservableObject {
     /// Returns true when the id actually changed (so the caller can `refresh()` the now-restapped caches).
     @discardableResult
     func adoptActiveDeviceId(_ id: String) -> Bool {
+        adoptActiveDevice(id: id, sourceKind: activeDeviceSourceKind)
+    }
+
+    /// Re-point the read namespace and its registry-qualified producer together. A source-kind change with
+    /// the same id still invalidates Today caches because it changes which persisted fields are eligible
+    /// for primary presentation.
+    @discardableResult
+    func adoptActiveDevice(id: String, sourceKind: SourceKind?) -> Bool {
         let trimmed = id.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, trimmed != deviceId else { return false }
+        guard !trimmed.isEmpty else { return false }
+        let idChanged = trimmed != deviceId
+        let sourceChanged = sourceKind != activeDeviceSourceKind
+        guard idChanged || sourceChanged else { return false }
         todayHistoryWideLoadedSeq = -1
         todayHistoryWideCache = nil
         todayDayScopedLoadedSeq = -1
@@ -952,6 +970,7 @@ final class Repository: ObservableObject {
         autoDetectScanTask = nil
         autoDetectScanTaskKey = nil
         deviceId = trimmed
+        activeDeviceSourceKind = sourceKind
         return true
     }
 
