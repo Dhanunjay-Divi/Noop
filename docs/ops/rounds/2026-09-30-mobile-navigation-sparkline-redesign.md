@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `completed locally; superseded by the final brand-lens refinement on the same branch`
+- State: `integrated through protected main as part of the final brand-lens refinement`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `144e1bb904d4de1760a2d773e88d769bcf2f490d`
@@ -146,8 +146,11 @@ Success requires:
 - Changed paths: shared Apple/Android navigation shells, shared sparkline
   primitives, focused tests, and operations records
 - Commits: implementation candidate `d210b7ba6`
-- Branch and remote state: pushed branch under protected review in PR `#25`;
-  no deployment or release performed
+- Branch and remote state: final exact PR head
+  `3fb09d6093789a8939f075d4b9e36d026e61b76f` passed all ten required
+  contexts and merged normally as
+  `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`; no deployment or store
+  release performed
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
 - Release or distribution impact: none

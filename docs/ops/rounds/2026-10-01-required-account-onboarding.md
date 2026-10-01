@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `locally reverified after final hosted test-harness remediation; replacement exact-head verification, protected integration, and live-provider validation pending`
+- State: `integrated through protected main; live-provider and signed-device validation pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `4d034b92f6fcfd1dfe05fbe4c698c469f44e4f0a`
@@ -124,6 +124,7 @@ data class or formula is already cloud-authoritative.
 | Versioned shell-fixture remediation | Exact API 35 `AppShellInstrumentedTest` 8/8 pass | Existing-user shell tests now seed and restore the same versioned completion boundary enforced by production code | Production identity, physical BLE, or signed-phone behavior |
 | Fourth exact hosted head `06e064f42` | Every repository-policy, backend, Swift-package, Android, and macOS job passed. The iOS production-shell suite failed only `testConfiguredProviderAndSyntheticBandCompleteFullOnboarding`: three raw switch taps had not established their values before the test checked the fail-closed Accept button. | Hosted execution reached the current Terms and configured-provider journey; product code correctly kept acceptance disabled while any attestation remained off. | A green final exact head, production identity, or physical BLE |
 | Configured-provider UI-test hardening | Exact failing iOS Simulator case 1/1 pass locally in 59.436 seconds | The test now uses the existing retry-and-state switch helper and waits for the Accept transition, preserving the real three-attestation requirement without bypassing it. | Hosted execution on the replacement SHA, signed installation, or live-provider behavior |
+| Final exact hosted head and merge | Exact PR head `3fb09d6093789a8939f075d4b9e36d026e61b76f` passed all ten required hosted contexts, including the configured-provider iOS production-shell journey; PR `#25` squash-merged normally as `5f0a798d3aada03ee2999ca6e18b2984aa184a5f` | The required band-first account boundary and fail-closed unconfigured behavior are present on protected `main` without bypassing Terms or onboarding | Production identity credentials, signed installation, live recovery, or physical BLE |
 
 ## Physical device and deployment
 
@@ -151,12 +152,11 @@ data class or formula is already cloud-authoritative.
   Apple verification remediation `0d8bfbdbd1c3c93eb10cd9c8e1a1ee50024fe29b`;
   previous exact hosted candidate
   `06e064f4285a6d3590161158eb8be1be6329b956`;
-  the commit containing this record carries the final configured-provider
-  UI-test hardening plus the separately documented actionable-notification
-  audit remediation
-- Branch and remote state: PR `#25` is open; `06e064f42` is the last hosted
-  candidate, and the commit containing this record is the locally verified
-  replacement queued for one consolidated push
+  final exact PR head
+  `3fb09d6093789a8939f075d4b9e36d026e61b76f`; protected-main merge
+  `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`
+- Branch and remote state: PR `#25` passed all ten required contexts and merged
+  normally through protected policy
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
 - Release or distribution impact: first-run source correction only

@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `completed locally; consolidated protected integration pending`
+- State: `integrated through protected main; signed physical-phone validation pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `144e1bb904d4de1760a2d773e88d769bcf2f490d`
@@ -147,12 +147,16 @@ Success requires:
   icons, focused navigation/accessibility contracts, Android localized lens
   accessibility copy, and operations records; the preceding round also owns
   the shared sparkline changes on this branch
-- Commits: pending
-- Branch and remote state: isolated dirty local branch; no commit, push,
-  deployment, release, or production traffic action performed
+- Commits: implementation `d210b7ba6`; final exact PR head
+  `3fb09d6093789a8939f075d4b9e36d026e61b76f`; protected-main merge
+  `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`
+- Branch and remote state: PR `#25` passed all ten required contexts and merged
+  normally through protected policy; no deployment, store release, or
+  production traffic action was performed
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
-- Release or distribution impact: none
+- Release or distribution impact: source integrated on `main`; no store
+  distribution
 
 ## Decisions
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `locally reverified after independent cross-platform audit remediation; replacement exact-head verification, protected integration, and physical validation pending`
+- State: `integrated through protected main; signed physical notification and band validation pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `4d034b92f6fcfd1dfe05fbe4c698c469f44e4f0a`
@@ -181,6 +181,7 @@ rate-limited.
 | Post-audit Apple regression | 11/11 pass: the complete `ActionableWellnessPolicyTests` plus the derived-duration privacy contract; generic iOS Simulator build also passes | Explicit enable requests authorization only when undetermined, macOS hydration opens the confirmed flow once without intake, timers/routes remain bounded, and movement copy omits inferred duration | Signed-phone prompts, cold/locked notification delivery, or physical haptics |
 | Post-audit Android regression | Focused actionable-notification and app-wide localization tests pass; Full Debug Kotlin and unit-test source compile succeeds | Android keeps the same private action routes and generic movement copy across all nine locales without the removed duration key | OEM notification presentation or physical-device delivery |
 | Post-audit localization | Full all-platform i18n audit passes with zero translated-key gaps; the existing repository-wide literal backlog remains outside this slice | The removed duration string is absent and the remaining actionable copy stays generated and locale-complete | Human translation review on every physical locale/device combination |
+| Final exact hosted head and merge | Exact PR head `3fb09d6093789a8939f075d4b9e36d026e61b76f` passed all ten required hosted contexts, including iOS production-shell; PR `#25` squash-merged normally as `5f0a798d3aada03ee2999ca6e18b2984aa184a5f` | The actionable hydration, qualified-stress breathing, and inactivity movement routes are present on protected `main` without a policy bypass | Signed-phone delivery timing, cold/locked behavior, wrist or band haptics, battery, or sensor accuracy |
 | Diff hygiene | Pass | No whitespace/error-marker defect in the current working diff | Functional correctness beyond the listed gates |
 
 ## Physical device and deployment
@@ -211,14 +212,15 @@ rate-limited.
   Apple verification remediation `0d8bfbdbd1c3c93eb10cd9c8e1a1ee50024fe29b`;
   previous exact hosted candidate
   `06e064f4285a6d3590161158eb8be1be6329b956`;
-  the commit containing this record carries the final configured-provider
-  UI-test hardening and independent actionable-notification audit remediation
-- Branch and remote state: PR `#25` is open; `06e064f42` is the last hosted
-  candidate, and the commit containing this record is the locally verified
-  replacement queued for one consolidated push
+  final exact PR head
+  `3fb09d6093789a8939f075d4b9e36d026e61b76f`; protected-main merge
+  `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`
+- Branch and remote state: PR `#25` passed all ten required contexts and merged
+  normally through protected policy
 - Repository visibility verified: unchanged
 - Version/build impact: none planned
-- Release or distribution impact: none until protected integration
+- Release or distribution impact: source integrated on `main`; no store
+  distribution or production-traffic action
 
 ## Decisions
 
@@ -241,8 +243,7 @@ rate-limited.
 ## Next round
 
 1. Validate notification actions and haptic/background behavior on signed
-   supported iPhone and Android candidates with a compatible physical band
-   after the replacement exact head passes protected checks and integrates.
+   supported iPhone and Android candidates with a compatible physical band.
 
 ## Privacy check
 

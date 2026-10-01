@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `final local replacement verified; consolidated protected push pending`
+- State: `integrated through protected main; signed physical-phone validation pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `144e1bb904d4de1760a2d773e88d769bcf2f490d`
@@ -160,6 +160,7 @@ Success requires:
 | Final iOS Simulator graph | Build passed | The shared Today replacement compiles in the iPhone app with Watch and widget embeddings | Signed-device behavior |
 | macOS responsive Today review | Wide `3200x1880` and narrow `2000x1520` captures reviewed | Wide Today uses the full detail pane and three metric columns; the narrow fallback remains full-width and unclipped | Every window size, physical display, or assistive-technology traversal |
 | Repository controls | Operations 108/108, required-CI 10-context policy, nine release controls, terminology ratchet, full localization, app-report localization, private-data filename guard, health-claims scan of 1,312 files, and diff hygiene passed | The durable record and generated resources are coherent, required workflow ownership is pinned, and no private-data or unsafe-claim regression was introduced | Hosted protected checks or release approval |
+| Final protected integration | Exact PR head `3fb09d6093789a8939f075d4b9e36d026e61b76f` passed all ten required hosted contexts; PR `#25` squash-merged normally as `5f0a798d3aada03ee2999ca6e18b2984aa184a5f` | The verified UI, onboarding, and wellness-action source is present on protected `main` without bypassing policy | Signed-phone interaction, physical BLE, store distribution, or production traffic |
 
 ## Physical device and deployment
 
@@ -185,10 +186,11 @@ Success requires:
   tests/localization, and operations records
 - Commits: initial implementation `d210b7ba6`; metric-first and onboarding
   checkpoint `96fdef2c2`; final navigation, metric-grid, and responsive macOS
-  replacement `b8018ac5e`; documentation pin follows on the same PR branch
-- Branch and remote state: final locally verified replacement is two local
-  commits ahead of PR `#25`; one consolidated push, hosted checks, and protected
-  integration remain pending
+  replacement `b8018ac5e`; final exact PR head
+  `3fb09d6093789a8939f075d4b9e36d026e61b76f`; protected-main merge
+  `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`
+- Branch and remote state: PR `#25` merged normally through protected policy;
+  the source is present on `main`
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
 - Release or distribution impact: source integration only; no store release
@@ -212,9 +214,7 @@ Success requires:
 
 ## Next round
 
-1. Push the consolidated replacement, resolve exact-head hosted failures, merge
-   normally through protected `main`, and verify the exact integrated SHA.
-2. Run the signed physical-phone navigation, accessibility, and frame-pacing
+1. Run the signed physical-phone navigation, accessibility, and frame-pacing
    matrix from protected `main`.
 
 ## Privacy check
