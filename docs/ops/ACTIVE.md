@@ -18,8 +18,13 @@ Last updated: **2026-10-01**
   the neutral `your compatible band` footer without observed clipping.
   A versioned completion marker returns legacy account-free installs to the
   required Account boundary, and the final combined walls pass 57/57 Apple and
-  78/78 Android focused cases.
-  Protected integration, production identity credentials, signed installation,
+  78/78 Android focused cases. The first exact remote PR head
+  `294ff9b5a` exposed a scoped localization-policy miss and one stale Android
+  onboarding/Safety contract; the corrected tree passes the affected 9/9
+  Android cases and the complete Full Debug wall with 5,255 tests, seven
+  intentional skips, and zero failures. The commit containing this record is
+  the replacement candidate; exact-head hosted verification remains before
+  protected integration. Production identity credentials, signed installation,
   live provider recovery, and physical BLE remain pending.
 
 - Actionable wellness notifications are locally complete on
@@ -38,8 +43,15 @@ Last updated: **2026-10-01**
   focused tests, 108/108 Apple reminder regressions, 78/78 Android focused
   tests, Full/Demo Android compilation, all supported-locale generation,
   claims/privacy/brand gates, 110 operations records, and diff hygiene.
-  Protected integration and signed physical-device notification, background,
-  haptic, battery, and sensor validation remain pending.
+  The first exact remote PR head `294ff9b5a` exposed only release-policy,
+  localization, and stale Android contract failures, not a reminder-runtime
+  defect. The corrected tree passes the nine affected Android tests, the
+  complete 5,255-case Android wall with seven intentional skips, the i18n
+  audit, terminology checks, the 258-case release-control wall, and the iOS
+  Simulator graph. The commit containing this record is the replacement
+  candidate; exact-head hosted verification remains before protected
+  integration. Signed physical-device notification, background, haptic,
+  battery, and sensor validation remain pending.
 
 - The final PR `#25` replacement is locally verified on
   `codex/mobile-navigation-sparkline-redesign-20260930` at implementation

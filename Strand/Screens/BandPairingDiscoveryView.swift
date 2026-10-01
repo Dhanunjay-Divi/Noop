@@ -115,7 +115,7 @@ struct BandPairingDiscoveryView: View {
                 case .ready:
                     Text("appwide.onboarding.device_wizard.add_body")
                 case .searching:
-                    Text("Make sure it's awake and close to this device.")
+                    Text("Make sure it's awake and not connected elsewhere.")
                 case .connected:
                     Text("appwide.onboarding.device_ready_body")
                 }

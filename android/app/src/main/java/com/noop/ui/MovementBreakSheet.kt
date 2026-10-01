@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import android.os.SystemClock
+import android.text.format.DateUtils
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,7 +34,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.noop.R
-import java.util.Locale
 import kotlinx.coroutines.delay
 
 /**
@@ -131,12 +131,7 @@ internal fun MovementBreakSheet(
                 strokeWidth = 8.dp,
             )
             Text(
-                text = String.format(
-                    Locale.US,
-                    "%d:%02d",
-                    remainingSeconds / 60,
-                    remainingSeconds % 60,
-                ),
+                text = DateUtils.formatElapsedTime(remainingSeconds.toLong()),
                 style = NoopType.number(38f),
                 color = Palette.textPrimary,
             )

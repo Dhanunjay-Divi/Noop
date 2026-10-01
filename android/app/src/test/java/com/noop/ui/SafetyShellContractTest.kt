@@ -17,22 +17,24 @@ class SafetyShellContractTest {
     }
 
     @Test
-    fun safetySetupIsPartOfOnboardingBeforeAppearance() {
-        val onboarding = source(
-            "src/main/java/com/noop/ui/OnboardingScreen.kt",
-            "app/src/main/java/com/noop/ui/OnboardingScreen.kt",
-            "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
-        )
-        assumeTrue("Onboarding source unavailable", onboarding != null)
-        val text = onboarding!!
+    fun requiredAccountOnboardingKeepsOptionalSetupOutOfTheMandatoryFlow() {
+        val pages = onboardingPages(ownershipConfigured = true)
 
-        assertTrue(text.contains("SafetyContacts(\"Finish later\")"))
-        assertTrue(text.contains("OnboardingPage.SafetyContacts -> SafetyContactsStep()"))
-        assertTrue(text.contains("SafetyContactsSetup(controller = controller)"))
-        assertTrue(
-            text.indexOf("SafetyContacts(\"Finish later\")") <
-                text.indexOf("Appearance(\"Continue\")"),
+        assertEquals(
+            listOf(
+                OnboardingPage.Welcome,
+                OnboardingPage.Bluetooth,
+                OnboardingPage.Connect,
+                OnboardingPage.Account,
+                OnboardingPage.Ownership,
+                OnboardingPage.Profile,
+                OnboardingPage.Plan,
+                OnboardingPage.Done,
+            ),
+            pages,
         )
+        assertFalse(pages.contains(OnboardingPage.SafetyContacts))
+        assertFalse(pages.contains(OnboardingPage.Appearance))
     }
 
     @Test

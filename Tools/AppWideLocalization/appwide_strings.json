@@ -8766,6 +8766,17 @@
     "zh-Hans": "名称",
     "zh-Hant": "名稱"
   },
+  "appwide.onboarding.device_wizard.other_sources": {
+    "de": "Weitere Quellen",
+    "en": "Other sources",
+    "es": "Otras fuentes",
+    "fr": "Autres sources",
+    "it": "Altre fonti",
+    "pt-PT": "Outras fontes",
+    "ru": "Другие источники",
+    "zh-Hans": "其他来源",
+    "zh-Hant": "其他來源"
+  },
   "appwide.onboarding.device_wizard.pick_body": {
     "de": "Tippe auf dein Gerät.",
     "en": "Tap the device that is yours.",

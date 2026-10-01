@@ -2437,7 +2437,7 @@ struct SettingsView: View {
                 }
                 .accessibilityLabel("Project home and source code on GitHub")
 
-                Text("NOOP pairs with supported bands through the phone. A managed NOOP account is required for setup and access. The phone keeps a bounded offline working set, while durable history and canonical metrics move to managed services only after their release, consent, security, migration, and validation gates pass.")
+                Text("appwide.onboarding.bluetooth.account_boundary_body")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

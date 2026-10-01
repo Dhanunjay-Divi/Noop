@@ -96,6 +96,7 @@ class AndroidLocalizationPolicyTest {
         val allowed = Regex(
                 """string:(wind_down_|sleep_planner_|strength_|key_metrics_(selection_|show_)|hydration_(adaptive_timing_|base_interval_label)).*|""" +
                 """string:key_metrics_open_history|""" +
+                """string:onboarding_bluetooth_permission_prompt|""" +
                 """string:noop_command_lens_.*|""" +
                 """string:(profile_(bmi_|target_weight_)|vital_range_summary_).*|""" +
                 """string:ownership_(delete_|deletion_).*|""" +

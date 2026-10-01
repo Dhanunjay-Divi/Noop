@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `implemented and locally verified; protected integration and physical validation pending`
+- State: `locally reverified after first hosted-head remediation; replacement exact-head verification, protected integration, and physical validation pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `4d034b92f6fcfd1dfe05fbe4c698c469f44e4f0a`
@@ -157,6 +157,8 @@ rate-limited.
 | All-platform localization audit | Pass with 237 Android and 131 Apple pre-existing UI-literal warnings outside this slice | Generated action/timer keys are present and Apple translated-key coverage has no gaps | Resolution of the repository-wide pre-existing literal backlog |
 | Brand, claims, privacy, and operations gates | Pass: 14 brand phrases across eight non-English locales; health-claims clear across 1,324 files; private-data filename guard clear; 110 operations records valid | The final copy and evidence retain current release-policy boundaries | Physical delivery or external launch approval |
 | Notification route inventory | Pass | Existing user-facing wellness/Safety notification producers retain trusted destinations; the three formerly incomplete lanes now open exact actions | Human usefulness or delivery cadence on physical devices |
+| First exact hosted head `294ff9b5a` | Failed scoped i18n, terminology-pin, and Android aggregate checks; Swift packages, server, health claims, operations, runtime licenses, and trusted release controls passed | The remote candidate reached hosted verification and isolated repository-policy and stale-test defects | A green exact-head candidate or protected integration |
+| Hosted-head remediation | Pass locally: affected Android 9/9; complete Full Debug 5,255 tests with seven intentional skips; i18n audit; terminology check; 258 release-control tests; required-CI and trusted self-verification; iOS Simulator graph | The replacement tree fixes the hosted failures without changing notification eligibility, delivery semantics, or action runtime | Hosted execution on the replacement SHA or physical notification behavior |
 | Diff hygiene | Pass | No whitespace/error-marker defect in the current working diff | Functional correctness beyond the listed gates |
 
 ## Physical device and deployment
@@ -175,9 +177,11 @@ rate-limited.
   producers, localization source/generated resources, focused tests, decision
   log, and operations records
 - Commits: implementation `dc9d7efef4561e854bb5c0504335e442a8a7696f`;
-  this record carries the separate verification pin
-- Branch and remote state: committed locally on the isolated PR branch;
-  consolidated push pending
+  first remote verification pin `294ff9b5ae6dd81310b0fc372af1473ba43027ac`;
+  the commit containing this record carries the hosted-failure remediation
+- Branch and remote state: PR `#25` is open at remote head `294ff9b5a`;
+  the commit containing this record is the locally verified replacement
+  candidate
 - Repository visibility verified: unchanged
 - Version/build impact: none planned
 - Release or distribution impact: none until protected integration
@@ -203,7 +207,8 @@ rate-limited.
 ## Next round
 
 1. Validate notification actions and haptic/background behavior on signed
-   supported iPhone and Android candidates with a compatible physical band.
+   supported iPhone and Android candidates with a compatible physical band
+   after the replacement exact head passes protected checks and integrates.
 
 ## Privacy check
 

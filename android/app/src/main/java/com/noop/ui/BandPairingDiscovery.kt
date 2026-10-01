@@ -146,25 +146,25 @@ internal fun BandPairingDiscoveryStage(
 ) {
     val motionSuppressed = rememberPoseStill()
     val animate = shouldAnimateBandPairingDiscovery(searching, motionSuppressed)
+    val statusTitle = if (searching) {
+        uiString(R.string.appwide_onboarding_device_wizard_searching)
+    } else {
+        uiString(R.string.appwide_onboarding_device_wizard_idle)
+    }
     val sweep = if (animate) {
-        val transition = rememberInfiniteTransition(label = "band discovery")
+        val transition = rememberInfiniteTransition(label = statusTitle)
         transition.animateFloat(
             initialValue = 0f,
             targetValue = 360f,
             animationSpec = infiniteRepeatable(
                 animation = tween(durationMillis = 3_200, easing = LinearEasing),
             ),
-            label = "scan sweep",
+            label = statusTitle,
         )
     } else {
         null
     }
     val shape = RoundedCornerShape(8.dp)
-    val statusTitle = if (searching) {
-        uiString(R.string.appwide_onboarding_device_wizard_searching)
-    } else {
-        uiString(R.string.appwide_onboarding_device_wizard_idle)
-    }
     val statusBody = if (searching) {
         uiString(R.string.l10n_add_device_wizard_make_sure_it_s_awake_and_8c40e59f)
     } else {

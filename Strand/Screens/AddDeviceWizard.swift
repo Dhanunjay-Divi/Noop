@@ -518,7 +518,7 @@ struct AddDeviceWizard: View {
             .frostedCardSurface(cornerRadius: 8)
 
             if selectionScope == .allDevices {
-                Text("Other sources")
+                Text("appwide.onboarding.device_wizard.other_sources")
                     .strandOverline()
                     .padding(.top, 4)
                 VStack(spacing: 0) {

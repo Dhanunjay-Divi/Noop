@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `implemented and locally verified; protected integration and live-provider validation pending`
+- State: `locally reverified after first hosted-head remediation; replacement exact-head verification, protected integration, and live-provider validation pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `4d034b92f6fcfd1dfe05fbe4c698c469f44e4f0a`
@@ -118,6 +118,8 @@ data class or formula is already cloud-authoritative.
 | Final cross-slice focused wall | Apple 57/57 and Android 78/78 pass | The versioned legacy-account migration and band-first account boundary remain green beside the final actionable-notification contracts | Live identity provider, signed phone, or physical band |
 | Copy and repository policy gates | App-wide nine-locale generation, brand check, claims gate, private-data filename guard, 110-record operations validation, and diff hygiene pass | Active onboarding copy and configuration boundaries remain internally coherent | Production account credentials or public traffic |
 | Visual and OCR review | Pass at 1206x2622 | Terms, Bluetooth, supported-band picker, Account, ownership, and completion captures have no observed clipping or overlap; current Bluetooth copy matches the account-required direction | Dynamic Type and physical-device rendering outside the tested simulator |
+| First exact hosted head `294ff9b5a` | Failed a scoped localization-policy check and an obsolete Android test that still required Safety and Appearance inside onboarding | Hosted verification reached the current band-first implementation and isolated stale repository contracts | A green replacement SHA, live identity provider, or signed phone |
+| Hosted-head remediation | Pass locally: localization 6/6, Safety shell 3/3, complete Full Debug 5,255 tests with seven intentional skips, i18n audit, release-control wall, and iOS Simulator graph | The exact eight-page required-account sequence remains enforced while Safety stays reachable from the persistent shell | Hosted replacement execution, production identity, or physical BLE |
 
 ## Physical device and deployment
 
@@ -133,9 +135,11 @@ data class or formula is already cloud-authoritative.
   discovery components, order-link boundary, active copy/localization,
   configured test harnesses, and cross-platform first-run tests
 - Commits: implementation `dc9d7efef4561e854bb5c0504335e442a8a7696f`;
-  this record carries the separate verification pin
-- Branch and remote state: committed locally on the isolated PR branch;
-  consolidated push pending
+  first remote verification pin `294ff9b5ae6dd81310b0fc372af1473ba43027ac`;
+  the commit containing this record carries the hosted-failure remediation
+- Branch and remote state: PR `#25` is open at remote head `294ff9b5a`;
+  the commit containing this record is the locally verified replacement
+  candidate
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
 - Release or distribution impact: first-run source correction only
