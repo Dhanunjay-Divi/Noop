@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `final local candidate verified; protected review pending`
+- State: `final local replacement verified; consolidated protected push pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `144e1bb904d4de1760a2d773e88d769bcf2f490d`
-- End implementation commit: `96fdef2c2`
+- End implementation commit: `b8018ac5e`
 - Record commit or PR: PR `#25`
 
 ## Objective
@@ -102,6 +102,17 @@ Success requires:
 - Corrected the remaining Android Key Metrics label from the legacy visible
   word `Strain` to the same localized `Effort` vocabulary used by the hero,
   iPhone, and metric detail surfaces; a source contract prevents regression.
+- Refined compact iPhone navigation so the collapsed `More` endpoint is an
+  icon, label, and chevron without a decorative outer pill. Its invisible
+  `48x52` interaction footprint, expansion behavior, endpoint clearing, and
+  accessibility preferences remain intact.
+- Expanded the selected Today metric set to six without exposing the full
+  catalog, retained one explicit route to all metric history, and made partial
+  final rows consume the available width instead of leaving a fake empty tile.
+- Removed macOS Today's nested `960`-point page cap. Wide windows now use the
+  full split-view detail pane with the number-first Daily Signal beside the
+  plan disclosure and a three-column Key Metrics grid; narrow windows and
+  accessibility text fall back to the original full-width stacked order.
 
 ## Data, privacy, and medical truth
 
@@ -144,6 +155,10 @@ Success requires:
 | iPhone configured full-onboarding UI automation | 1/1 passed; enclosing `xcodebuild` exited with `TEST SUCCEEDED` | A DEBUG-only hermetic lane proves Terms -> welcome -> create/sign in -> Bluetooth -> supported simulated band -> ownership -> profile -> plan -> completion -> tabs, with tabs unavailable before completion | Release builds cannot invoke the harness; no live provider, BLE discovery, signed install, or physical claim occurred |
 | Android complete app wall | Full and Demo each passed 5,242 unit tests with seven intentional skips; both Kotlin variants, lint variants, APKs, and the Full instrumentation APK passed | The changed production source, mirrored tests, localization, and shipped variants compile and pass together | OEM rendering, physical TalkBack, or physical band behavior |
 | Android configured full-onboarding instrumentation | 1/1 passed on API 35 with every mutated preference restored; the corrected Recovery-detail shell case also passed 1/1 | A hermetic configured-provider lane proves the same gated sequence before a lightweight test shell, while a separate real-shell test proves the compact Recovery detail opens without changing tabs | Physical permissions, BLE discovery, live-provider registration, or OEM behavior |
+| Final Android replacement checks | 69/69 focused tests passed; Full and Demo Kotlin compilation passed | The final key-metric, shell, Safety, and Today changes compile and agree in the Android mirror | Full hosted CI, OEM rendering, TalkBack traversal, or band behavior |
+| Final Apple replacement contracts | 134/134 affected app contracts passed | The final shell, metric, onboarding, Safety, screen-state, performance, and responsive macOS source contracts pass together | Physical VoiceOver, frame pacing, or BLE behavior |
+| Final iOS Simulator graph | Build passed | The shared Today replacement compiles in the iPhone app with Watch and widget embeddings | Signed-device behavior |
+| macOS responsive Today review | Wide `3200x1880` and narrow `2000x1520` captures reviewed | Wide Today uses the full detail pane and three metric columns; the narrow fallback remains full-width and unclipped | Every window size, physical display, or assistive-technology traversal |
 | Repository controls | Operations 108/108, required-CI 10-context policy, nine release controls, terminology ratchet, full localization, app-report localization, private-data filename guard, health-claims scan of 1,312 files, and diff hygiene passed | The durable record and generated resources are coherent, required workflow ownership is pinned, and no private-data or unsafe-claim regression was introduced | Hosted protected checks or release approval |
 
 ## Physical device and deployment
@@ -168,12 +183,12 @@ Success requires:
 - Changed paths: shared Apple Today hierarchy and sparkline primitives, iPhone
   shell/review sample, Android Today/shell/review sample/charts, mirrored
   tests/localization, and operations records
-- Commits: initial implementation `d210b7ba6`; final metric-first and
-  onboarding-proof implementation `96fdef2c2`; documentation pin follows on the
-  same PR branch
-- Branch and remote state: final locally verified branch is one consolidated
-  push ahead of PR `#25`; hosted checks and protected integration remain
-  pending
+- Commits: initial implementation `d210b7ba6`; metric-first and onboarding
+  checkpoint `96fdef2c2`; final navigation, metric-grid, and responsive macOS
+  replacement `b8018ac5e`; documentation pin follows on the same PR branch
+- Branch and remote state: final locally verified replacement is two local
+  commits ahead of PR `#25`; one consolidated push, hosted checks, and protected
+  integration remain pending
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
 - Release or distribution impact: source integration only; no store release
@@ -197,7 +212,9 @@ Success requires:
 
 ## Next round
 
-1. Run the signed physical-phone navigation, accessibility, and frame-pacing
+1. Push the consolidated replacement, resolve exact-head hosted failures, merge
+   normally through protected `main`, and verify the exact integrated SHA.
+2. Run the signed physical-phone navigation, accessibility, and frame-pacing
    matrix from protected `main`.
 
 ## Privacy check

@@ -4,34 +4,26 @@ Last updated: **2026-10-01**
 
 ## Authoritative context
 
-- The final mobile brand-lens integration is locally verified on
-  `codex/mobile-navigation-sparkline-redesign-20260930`. It replaces the
-  speech-bubble/ECG action glyph with a matched compact NOOP `N`, makes Today
-  number-first by replacing the oversized ring and duplicate lower defaults
-  with an equal Recovery/Sleep/Effort summary followed by HRV, Resting HR, and
-  Blood Oxygen. Evidence and explanation remain behind detail, weekly Fitness
-  Age remains in the customizable catalog, Trends retains distinct
-  longitudinal value, and Android ordinary first launch enters Terms and
-  onboarding instead of Review Sample. The final evidence passes 46/46 Android
-  focused contracts, 5,242 Full and 5,242 Demo tests with seven intentional
-  skips each, both Android compile/lint/APK variants and the instrumentation
-  APK, 81/81 Apple focused contracts, 27/27 configured-account/discovery
-  contracts, 58/58 StrandDesign tests, and the complete iPhone Simulator
-  graph. Paired current Today captures were reviewed at 1206x2622 and
-  1080x2424. Hermetic configured-provider automation passes 1/1 per platform
-  and proves Terms -> welcome -> create/sign in -> Bluetooth -> supported
-  simulated band -> ownership -> profile -> plan -> completion before the tab
-  shell; it does not contact the live provider or prove BLE. Implementation
-  commit `96fdef2c2` is the locally verified candidate for PR `#25`; one
-  consolidated push, hosted checks, and protected integration remain.
-  Operations 108/108, required-CI, release-control, terminology, localization,
-  app-report localization, private-data, health-claims, and diff hygiene gates
-  pass. Exact round-owned build outputs were removed after evidence became
-  durable, reducing the round directory from about 10 GiB to 13 MiB and
-  leaving about 57 GiB free. Signed physical-phone accessibility/frame-pacing
-  and all physical-band behavior remain external. No formula, source
-  selection, storage, account-provider, network, BLE, release, or production
-  behavior changed.
+- The final PR `#25` replacement is locally verified on
+  `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
+  commit `b8018ac5e`. Mobile Today is number-first, the compact iPhone `More`
+  endpoint no longer has a decorative outer pill, selected metrics support six
+  focused cards plus one explicit all-history route, and macOS Today no longer
+  sits inside a nested `960`-point phone column. Wide Mac windows use the full
+  detail pane with Daily Signal beside the plan disclosure and a three-column
+  metric grid; narrow windows and accessibility text retain a full-width
+  stacked fallback. Final replacement evidence passes 69/69 Android focused
+  tests with Full/Demo Kotlin compilation, 134/134 affected Apple contracts,
+  and the complete iPhone Simulator graph. Wide `3200x1880` and narrow
+  `2000x1520` macOS captures were reviewed without observed clipping or overlap.
+  Earlier complete Android walls, configured onboarding automation, paired
+  phone review, StrandDesign, localization, claims, release-control, and
+  repository-policy evidence remain applicable. One documentation pin and one
+  consolidated push are pending before exact-head hosted checks and protected
+  integration. Signed physical-phone accessibility/frame-pacing and all
+  physical-band behavior remain external. No formula, source selection,
+  storage, account-provider, network, BLE, release, or production behavior
+  changed.
 
 - The mobile liquid-navigation refinement is locally complete on
   `codex/mobile-navigation-sparkline-redesign-20260930`. The five-tab dock now
