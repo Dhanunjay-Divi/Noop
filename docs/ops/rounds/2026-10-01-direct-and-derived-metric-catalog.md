@@ -157,6 +157,22 @@ insights.
 3. Record Apple Watch, WHOOP, supplier-band, HealthKit, and Health Connect
    availability and missing-data behavior without weakening source gates.
 
+## Hosted check follow-up
+
+- Exact head `ed7d991d829d1b7ce78306daa76687233e63df47` reached 111 of 125
+  production-shell instrumentation cases with zero earlier failures. The
+  large-font primary-tab case then failed while closing its first
+  `ActivityScenario`; the activity remained paused instead of reaching
+  destroyed state, and the remaining wall hit its ten-minute bound.
+- The remediation sets the 200% font scale before the case's single activity
+  launch and retains the same five tab visibility, accessibility-label, click,
+  and selection assertions. Teardown still restores the exact prior font
+  scale.
+- `compileFullDebugAndroidTestKotlin` passed after the change. The existing
+  local API 35 AVD did not reach a usable boot state within three minutes and
+  is not runtime evidence. Replacement exact-head hosted checks remain
+  required.
+
 ## Privacy check
 
 - [x] No credentials, emails, raw biometric exports, personal names, device
