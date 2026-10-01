@@ -1119,7 +1119,7 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(classic.contains("ForEach(visibleKeyMetrics)"))
         XCTAssertTrue(classic.contains("{ enabledKeyMetrics }"))
         XCTAssertTrue(liquid.contains("private var visibleKeyMetrics: [KeyMetric]"))
-        XCTAssertTrue(liquid.contains("ForEach(visibleKeyMetrics)"))
+        XCTAssertTrue(liquid.contains("to: visibleKeyMetrics.count") && liquid.contains("ForEach(rowMetrics)"))
         XCTAssertTrue(liquid.contains("{ enabledKeyMetrics }"))
         XCTAssertTrue(liquid.contains("Open all metric history"))
         XCTAssertTrue(androidToday.contains("val tiles = enabledMetrics"))
@@ -1131,7 +1131,7 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(androidRoot.contains(
             "onOpenMetricHistory = { openTopLevel(Destination.Explore.route) }"
         ))
-        XCTAssertTrue(liquid.contains(".frame(maxWidth: .infinity, minHeight: 44)"))
+        XCTAssertTrue(liquid.contains("noop.today.key-metrics.open-history") && liquid.contains("minHeight: 48"))
         XCTAssertTrue(classic.contains("StrandPalette.recoveryGaugeColors(s).base"))
         XCTAssertTrue(liquid.contains("RecoveryBandPresentation.gaugeColors(for: score)"))
         XCTAssertTrue(recoveryRing.contains("StrandPalette.recoveryGaugeStops(score)"))
