@@ -1194,58 +1194,44 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         var persistedSteps: [VeepooBandStepsReading] = []
         var persistedSleep: [VeepooBandSleepReading] = []
         let source = VeepooBandSource(
-            live: LiveState(),
-            adapter: adapter,
-            password: "2468",
+            live: LiveState(), adapter: adapter, password: "2468",
             onCredentialRejected: {},
             persistSteps: { persistedSteps.append($0) },
             persistSleep: { persistedSleep.append($0) },
             stepPollIntervalNanoseconds: 1_000_000,
-            sleepReadDelayNanoseconds: 0
+            sleepReadDelayNanoseconds: 1_000_000
         )
-
-        adapter.emit(
-            .battery(
-                .init(
-                    percent: 80,
-                    level: nil,
-                    charging: false,
-                    low: false
-                )
-            )
-        )
-        for _ in 0..<100
-        where adapter.readStepsCount < 1 || adapter.readSleepCount < 1 {
+        adapter.emit(.battery(.init(
+            percent: 80, level: nil, charging: false, low: false
+        )))
+        for _ in 0..<100 where adapter.readStepsCount < 1 {
             await Task.yield()
         }
-        XCTAssertEqual(adapter.readStepsCount, 1)
-        XCTAssertEqual(adapter.readSleepCount, 1)
-
         try? await Task.sleep(nanoseconds: 10_000_000)
         XCTAssertEqual(adapter.readStepsCount, 1)
+        XCTAssertEqual(adapter.readSleepCount, 0,
+                       "Sleep must wait for the outstanding step command")
 
         adapter.emit(.failed(stage: .steps, failure: .noResult))
+        XCTAssertEqual(adapter.readSleepCount, 1,
+                       "An optional step failure must release the command lane")
+        try? await Task.sleep(nanoseconds: 10_000_000)
+        XCTAssertEqual(adapter.readStepsCount, 1,
+                       "Step polling must wait for the outstanding sleep command")
+
+        let sleep = VeepooBandSleepReading(
+            startTs: 1_000, endTs: 26_200, totalMin: 420,
+            deepMin: 80, lightMin: 260, awakenings: 2, efficiency: 0.91
+        )
+        adapter.emit(.sleep(sleep))
         for _ in 0..<100 where adapter.readStepsCount < 2 {
-            await Task.yield()
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
         XCTAssertEqual(adapter.readStepsCount, 2)
-
         let step = VeepooBandStepsReading(
-            steps: 4_321,
-            distanceKm: 3.2,
-            kcal: 240
-        )
-        let sleep = VeepooBandSleepReading(
-            startTs: 1_000,
-            endTs: 26_200,
-            totalMin: 420,
-            deepMin: 80,
-            lightMin: 260,
-            awakenings: 2,
-            efficiency: 0.91
+            steps: 4_321, distanceKm: 3.2, kcal: 240
         )
         adapter.emit(.steps(step))
-        adapter.emit(.sleep(sleep))
         XCTAssertEqual(persistedSteps, [step])
         XCTAssertEqual(persistedSleep, [sleep])
 
@@ -1254,6 +1240,40 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 10_000_000)
         XCTAssertEqual(adapter.readStepsCount, readsAtStop)
         XCTAssertEqual(adapter.readSleepCount, 1)
+    }
+
+    @MainActor
+    func testSourceCancelsQueuedSleepAndIgnoresUnrequestedMetricResults() async {
+        let adapter = FakeAdapter()
+        var stepResults = 0
+        var sleepResults = 0
+        let source = VeepooBandSource(
+            live: LiveState(), adapter: adapter, password: "2468",
+            onCredentialRejected: {},
+            persistSteps: { _ in stepResults += 1 },
+            persistSleep: { _ in sleepResults += 1 },
+            stepPollIntervalNanoseconds: 1_000_000,
+            sleepReadDelayNanoseconds: 1_000_000
+        )
+        adapter.emit(.battery(.init(
+            percent: 80, level: nil, charging: false, low: false
+        )))
+        for _ in 0..<100 where adapter.readStepsCount < 1 {
+            await Task.yield()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+        XCTAssertEqual(adapter.readSleepCount, 0)
+        adapter.emit(.disconnected)
+        adapter.emit(.steps(.init(steps: 20, distanceKm: nil, kcal: nil)))
+        adapter.emit(.sleep(.init(
+            startTs: 1_000, endTs: 26_200, totalMin: 420,
+            deepMin: nil, lightMin: nil, awakenings: nil, efficiency: nil
+        )))
+        try? await Task.sleep(nanoseconds: 10_000_000)
+        XCTAssertEqual(adapter.readSleepCount, 0)
+        XCTAssertEqual(stepResults, 0)
+        XCTAssertEqual(sleepResults, 0)
+        source.stop()
     }
 
     @MainActor
