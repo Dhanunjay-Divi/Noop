@@ -95,8 +95,9 @@ dashboard:
 |---|---|---|---|
 | Apple macOS dual-architecture app build | Pass | The shared Apple Today surface and editor compile for both macOS architectures | Signed iPhone behavior or physical touch ergonomics |
 | Apple focused contracts | Pass: Key Metric preference/progress, Daily Signal, and settings-disclosure cases | Catalog membership, bounds, Fitness Age placement, and editor source contracts remain coherent | Every app regression or physical accessibility traversal |
-| Android Demo focused contracts | Pass: Key Metric preferences and Today metric catalog | Stable identifiers, ordering, bounds, hydration gate, routes, and Fitness Age parity compile and pass in the Demo flavor | Full physical-device runtime behavior |
-| i18n and health-claims local gates | Health-claims pass; final exact i18n remediation in progress after hosted audit identified newly authored literals | No new unsafe health claim; the exact remaining localization scope is known | Hosted-green localization until the replacement head runs |
+| Android Demo focused contracts | Pass after the localization test correction: Key Metric preferences and Today metric catalog | Stable identifiers, ordering, bounds, hydration gate, routes, localized composed copy, and Fitness Age parity compile and pass in the Demo flavor | Full physical-device runtime behavior |
+| i18n and health-claims local gates | Pass: no new hardcoded or unextracted UI copy, complete focus-locale coverage, valid JSON/XML resources, and health-claims clear across 1,324 files | The new editor and accessibility copy is resource-backed without adding an unsafe health claim | Hosted execution on the replacement SHA or human translation review |
+| Operations and terminology remediation | Pass: 111 operations records; 18,579 classified legacy occurrences across 1,641 groups; zero forbidden mappings; reviewed inventory SHA-256 `cc522262e0b22d54bfdb9eb3bce9038aff0086ecbd68cb01a6b2e2ad731ba1dd`; 54 terminology/required-CI tests | The round uses the complete required structure, and the generated terminology snapshot plus pinned digest match the rebased tree | Hosted-green release controls until the replacement head runs |
 | Initial hosted PR `#27` policy checks | Operations record, terminology snapshot, and i18n failed narrowly; applicability, health claims, runtime licenses, server, Swift packages, and trusted release controls passed; Apple and Android app jobs continued | The remote candidate reached exact-head verification and isolated evidence/localization defects rather than a hidden gate bypass | A green replacement SHA or protected integration |
 | Visual review | Reviewed phone and desktop Today/editor captures without observed clipping or overlap | The selected grid remains glanceable, the full catalog is discoverable, and Fitness Age is visually subordinate to daily scores | Every viewport, locale, Dynamic Type size, or physical display |
 | Diff hygiene | Pass | No whitespace or merge-marker defect in the current change | Runtime correctness beyond the listed gates |
@@ -120,10 +121,14 @@ dashboard:
 - Changed paths: Apple and Android Key Metric registries, Today rendering,
   metric editors, focused tests, localization resources, terminology inventory,
   and operations records.
-- Implementation commit: `82e71db8b0de23fafe3e365a7aac416eb8467ce0`.
+- Rebased implementation commits:
+  `2ccee6bd7` (metric catalog and Fitness Age) and
+  `0592900f2` (localization); the commit containing this record carries the
+  terminology, digest, and final focused-test correction.
 - Branch and remote state: PR `#27` is open from
-  `codex/today-metric-catalog-fitness-age-20261001`; initial hosted policy
-  failures are being corrected on the same branch.
+  `codex/today-metric-catalog-fitness-age-20261001`, rebased on protected-main
+  closeout `08ad0f472a577e66fd612281550f549fa09c7703`; initial hosted
+  policy failures are corrected locally and one replacement push remains.
 - Repository visibility verified: unchanged.
 - Version/build impact: none planned.
 - Release or distribution impact: source integration only after all protected
@@ -144,10 +149,8 @@ dashboard:
 
 ## Next round
 
-1. Complete localization and terminology remediation, push one replacement,
-   and require all protected contexts to pass.
-2. Rebase after the protected PR `#26` documentation closeout if it merges
-   first, then merge PR `#27` normally through protected `main`.
+1. Push one replacement and require all protected contexts to pass.
+2. Merge PR `#27` normally through protected `main`.
 3. Re-run exact-main verification and retain signed-phone, physical-band,
    battery, background, haptic, and sensor-accuracy work as external gates.
 

@@ -69,7 +69,11 @@ class TodayMetricCatalogContractTest {
         assertTrue(source.contains("R.string.key_metrics_fitness_age_accessibility"))
         assertTrue(source.contains("R.string.key_metrics_remove_from_today"))
         assertTrue(source.contains("R.string.key_metrics_hydration_tracking_off"))
-        assertFalse(source.contains("\"\\$title, \\$spokenValue, \\$weekly, \\$detail\""))
+        assertFalse(
+            source.contains(
+                "\"${'$'}title, ${'$'}spokenValue, ${'$'}weekly, ${'$'}detail\"",
+            ),
+        )
 
         for (folder in listOf(
             "values",
