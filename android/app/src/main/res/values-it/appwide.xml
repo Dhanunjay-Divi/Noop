@@ -931,7 +931,6 @@
     <string name="appwide_wellness_action_move_now">Muoviti ora</string>
     <string name="appwide_wellness_action_start_breathing">Inizia a respirare</string>
     <string name="appwide_wellness_inactivity_body">È ora di muoverti. Sei seduto da un po\'.</string>
-    <string name="appwide_wellness_inactivity_body_minutes">Sei seduto da circa %1$d min. È ora di muoverti.</string>
     <string name="appwide_wellness_inactivity_channel_description">Un promemoria per muoverti dopo un lungo periodo di inattività.</string>
     <string name="appwide_wellness_inactivity_channel_name">Promemoria di movimento</string>
     <string name="appwide_wellness_inactivity_title">È ora di muoverti</string>

@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `locally reverified after final hosted-head remediation; replacement exact-head verification, protected integration, and physical validation pending`
+- State: `locally reverified after independent cross-platform audit remediation; replacement exact-head verification, protected integration, and physical validation pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `4d034b92f6fcfd1dfe05fbe4c698c469f44e4f0a`
@@ -91,7 +91,17 @@ rate-limited.
 - Existing morning review, Journal, wind-down, metric-review, strain, planned
   workout, and Safety notification sources were inventoried and retain their
   existing trusted destination routes.
-- Twelve concise action, timer, and inactivity strings were generated for all
+- A clean iPhone now requests notification authorization only when the user
+  explicitly enables the inactivity lane. Disabling the lane or revisiting an
+  already resolved system permission does not prompt again; denial keeps the
+  preference visible and offers the existing Settings recovery path.
+- A trusted hydration notification on macOS now presents the existing
+  `HydrationView` confirmation flow instead of stopping at Today. It still
+  consumes the request once and never records intake automatically.
+- Apple and Android movement notifications no longer expose the detector's
+  inferred seated-minute count. Duration remains internal eligibility and
+  cooldown evidence; visible copy stays the concise `Time to move`.
+- Eleven concise action, timer, and inactivity strings were generated for all
   nine supported app-wide locales. The movement title is the direct
   `Time to move`, while the private action remains `Move now`.
 
@@ -119,6 +129,8 @@ rate-limited.
 - Source/provenance or formula impact: no stress, hydration, or inactivity
   formula change planned.
 - Permissions/network disclosure impact: no new permission or network lane.
+  The existing notification permission prompt is now correctly attached to the
+  explicit iPhone inactivity-enable action.
 - Health/medical claim impact and limitations: prompts remain optional wellness
   actions and do not state that the user is stressed or dehydrated.
 
@@ -163,6 +175,12 @@ rate-limited.
 | App-shell fixture remediation | Exact API 35 managed-device class 8/8 pass | The fixture now seeds and restores both the legacy onboarded flag and the required-account onboarding version, so shell tests reach the operational app | Physical notification delivery or hosted execution on the final SHA |
 | Third exact hosted head `0c5cfafca` | Android and all repository-policy jobs passed. Apple exposed stale source-contract assertions after onboarding policy extraction, one stale launch-band UI expectation, and two iOS Simulator launch timeouts. | The exact replacement reached both app graphs and isolated verification-contract drift from the wellness runtime. | A green replacement SHA or physical notification behavior |
 | Final Apple remediation | 97/97 affected macOS tests, complete macOS 2,418 with one intentional skip, and the exact launch-band iOS UI case 1/1 pass locally | Current tests pin the eight-step band-first route, versioned shell gate, disabled unavailable account-linked row, and deferred Safety/appearance reachability | Hosted rerun stability, signed-device delivery, or physical-band behavior |
+| Fourth exact hosted head `06e064f42` | Health claims, i18n, operations, release controls, runtime licenses, trusted release controls, server, Swift packages, Android, and macOS all passed. The iOS suite failed only the configured-provider onboarding test because its raw switch taps did not verify the three Terms values before checking Accept. | The actionable-notification implementation and all of its hosted policy/app dependencies remained green; the sole failure was unrelated test interaction with the fail-closed Terms gate. | A green final exact head or physical notification behavior |
+| Final UI-test hardening | Exact failing configured-provider iOS Simulator case 1/1 pass locally in 59.436 seconds | The test deterministically turns on and verifies all three required Terms switches before waiting for Accept; no notification eligibility, route, consent, copy, or action runtime changed. | Hosted execution on the replacement SHA, signed-device delivery, background wake, or wrist feedback |
+| Independent final source audit | Android: no findings. Apple: one clean-install permission gap, one macOS hydration-route gap, and one lock-screen privacy issue from the inferred seated-minute count | A fresh platform-by-platform review checked the concrete user action, permission, privacy, rate-limit, and multi-signal stress contracts instead of relying only on prior tests | Physical delivery, OEM scheduling, real-band false positives, or battery behavior |
+| Post-audit Apple regression | 11/11 pass: the complete `ActionableWellnessPolicyTests` plus the derived-duration privacy contract; generic iOS Simulator build also passes | Explicit enable requests authorization only when undetermined, macOS hydration opens the confirmed flow once without intake, timers/routes remain bounded, and movement copy omits inferred duration | Signed-phone prompts, cold/locked notification delivery, or physical haptics |
+| Post-audit Android regression | Focused actionable-notification and app-wide localization tests pass; Full Debug Kotlin and unit-test source compile succeeds | Android keeps the same private action routes and generic movement copy across all nine locales without the removed duration key | OEM notification presentation or physical-device delivery |
+| Post-audit localization | Full all-platform i18n audit passes with zero translated-key gaps; the existing repository-wide literal backlog remains outside this slice | The removed duration string is absent and the remaining actionable copy stays generated and locale-complete | Human translation review on every physical locale/device combination |
 | Diff hygiene | Pass | No whitespace/error-marker defect in the current working diff | Functional correctness beyond the listed gates |
 
 ## Physical device and deployment
@@ -173,21 +191,31 @@ rate-limited.
 - BLE/background/haptic/battery scenarios exercised: not run
 - Unrun hardware gates: all physical notification, haptic, background, and
   sensor-dependent cases
+- Resource cleanup: after evidence was recorded, the earlier round-owned
+  15 GiB Apple DerivedData and 616 MiB Android build output were removed.
+  Post-audit verification then produced 3.3 GiB of Apple DerivedData and
+  277 MiB of Android build output; both were exact-owned and removed before
+  the final push. No active build process or open handle owned those paths.
 
 ## Git and release state
 
 - Changed paths: shared notification route/category handling, Apple and Android
   breathing presentation, new movement surfaces and timer policies, reminder
-  producers, localization source/generated resources, focused tests, decision
-  log, and operations records
+  producers, explicit iPhone permission handling, macOS hydration presentation,
+  privacy-minimized copy, localization source/generated resources, focused
+  tests, decision log, and operations records
 - Commits: implementation `dc9d7efef4561e854bb5c0504335e442a8a7696f`;
   first remote verification pin `294ff9b5ae6dd81310b0fc372af1473ba43027ac`;
   first hosted remediation `45731f8780e2c0593a0b9ed14a04914bc002bf10`;
   shell-fixture remediation `0c5cfafca9c1856590a965c780684fbac2c761b7`;
-  the commit containing this record carries the final Apple verification remediation
-- Branch and remote state: PR `#25` is open at remote head `0c5cfafca`;
-  the commit containing this record is the locally verified replacement
-  candidate
+  Apple verification remediation `0d8bfbdbd1c3c93eb10cd9c8e1a1ee50024fe29b`;
+  previous exact hosted candidate
+  `06e064f4285a6d3590161158eb8be1be6329b956`;
+  the commit containing this record carries the final configured-provider
+  UI-test hardening and independent actionable-notification audit remediation
+- Branch and remote state: PR `#25` is open; `06e064f42` is the last hosted
+  candidate, and the commit containing this record is the locally verified
+  replacement queued for one consolidated push
 - Repository visibility verified: unchanged
 - Version/build impact: none planned
 - Release or distribution impact: none until protected integration

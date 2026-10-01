@@ -931,7 +931,6 @@
     <string name="appwide_wellness_action_move_now">Bouger maintenant</string>
     <string name="appwide_wellness_action_start_breathing">Commencer à respirer</string>
     <string name="appwide_wellness_inactivity_body">Il est temps de bouger. Vous êtes assis depuis un moment.</string>
-    <string name="appwide_wellness_inactivity_body_minutes">Vous êtes assis depuis environ %1$d min. Il est temps de bouger.</string>
     <string name="appwide_wellness_inactivity_channel_description">Un rappel pour bouger après une longue période d\'inactivité.</string>
     <string name="appwide_wellness_inactivity_channel_name">Rappels de mouvement</string>
     <string name="appwide_wellness_inactivity_title">Il est temps de bouger</string>

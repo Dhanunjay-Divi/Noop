@@ -5,6 +5,60 @@ import UserNotifications
 import UIKit
 #endif
 
+@MainActor
+enum InactivityNotificationPermission {
+    enum Outcome: Equatable {
+        case permissionAvailable
+        case permissionDenied
+        case preferenceOnly
+    }
+
+    struct NotificationClient {
+        let authorizationStatus: () async -> UNAuthorizationStatus
+        let requestAuthorization: () async -> Bool
+
+        static var system: NotificationClient {
+            NotificationClient(
+                authorizationStatus: {
+                    await UNUserNotificationCenter.current()
+                        .notificationSettings()
+                        .authorizationStatus
+                },
+                requestAuthorization: {
+                    (try? await UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.alert, .sound])) ?? false
+                }
+            )
+        }
+    }
+
+    /// Notification permission follows the explicit inactivity enable action. Disabling the feature or
+    /// revisiting an already-resolved OS permission remains a preference-only operation.
+    static func resolveExplicitPreferenceChange(
+        enabled: Bool,
+        client: NotificationClient = .system
+    ) async -> Outcome {
+        guard enabled else { return .preferenceOnly }
+
+        switch await client.authorizationStatus() {
+        case .authorized, .provisional:
+            return .permissionAvailable
+        #if os(iOS)
+        case .ephemeral:
+            return .permissionAvailable
+        #endif
+        case .notDetermined:
+            return await client.requestAuthorization()
+                ? .permissionAvailable
+                : .permissionDenied
+        case .denied:
+            return .permissionDenied
+        @unknown default:
+            return .preferenceOnly
+        }
+    }
+}
+
 /// Automations — turn the strap's physical inputs (double-tap, wrist on/off) and live biometrics
 /// into actions (Shortcuts, and Mac-only screen lock) and haptic coaching. All on-device.
 struct AutomationsView: View {
@@ -1278,6 +1332,33 @@ struct AutomationsView: View {
 
     // MARK: - Inactivity reminder (#419)
 
+    private var inactivityEnabledToggle: Binding<Bool> {
+        Binding(
+            get: { inactivity.enabled },
+            set: { on in
+                inactivity.enabled = on
+                #if os(iOS)
+                guard on else { return }
+                Task { @MainActor in
+                    let outcome = await InactivityNotificationPermission
+                        .resolveExplicitPreferenceChange(enabled: true)
+                    guard inactivity.enabled else { return }
+                    switch outcome {
+                    case .permissionAvailable:
+                        notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
+                    case .permissionDenied:
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .preferenceOnly:
+                        break
+                    }
+                }
+                #endif
+            }
+        )
+    }
+
     private var inactivityCard: some View {
         Section2(icon: "timer", title: String(localized: "Inactivity reminder"),
                  blurb: String(localized: "A gentle wrist vibration when you've been sitting too long, a nudge to get up and move. Inferred from Noop Band motion on each history sync, so it can lag real time by a sync or two."),
@@ -1285,7 +1366,7 @@ struct AutomationsView: View {
             VStack(spacing: 0) {
                 ToggleRow(label: String(localized: "Enable inactivity reminder"),
                           help: String(localized: "Buzzes after you've been sitting past your threshold."),
-                          isOn: $inactivity.enabled)
+                          isOn: inactivityEnabledToggle)
                 if inactivity.enabled {
                     if !notifMasterOn {
                         Text("Notifications are off, so this can't buzz yet. Turn on the master switch in Notifications to let it through.")

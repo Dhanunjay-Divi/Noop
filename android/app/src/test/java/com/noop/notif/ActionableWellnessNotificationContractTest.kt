@@ -43,6 +43,16 @@ class ActionableWellnessNotificationContractTest {
                 "R.string.appwide_wellness_action_move_now",
             ),
         )
+        assertTrue(
+            inactivity.contains(
+                "R.string.appwide_wellness_inactivity_body",
+            ),
+        )
+        assertFalse(
+            inactivity.contains(
+                "appwide_wellness_inactivity_body_minutes",
+            ),
+        )
         assertTrue(inactivity.contains(".protectPrivateContent("))
         assertFalse(hydration.contains("HydrationStore.log("))
         assertFalse(inactivity.contains("saveWorkout"))
@@ -141,7 +151,6 @@ class ActionableWellnessNotificationContractTest {
             "appwide_wellness_action_move_now",
             "appwide_wellness_action_start_breathing",
             "appwide_wellness_inactivity_body",
-            "appwide_wellness_inactivity_body_minutes",
             "appwide_wellness_inactivity_channel_description",
             "appwide_wellness_inactivity_channel_name",
             "appwide_wellness_inactivity_title",
@@ -158,6 +167,12 @@ class ActionableWellnessNotificationContractTest {
                     text.contains("name=\"$name\""),
                 )
             }
+            assertFalse(
+                "$locale still exposes inferred sedentary duration",
+                text.contains(
+                    "name=\"appwide_wellness_inactivity_body_minutes\"",
+                ),
+            )
         }
     }
 

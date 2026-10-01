@@ -931,7 +931,6 @@
     <string name="appwide_wellness_action_move_now">Jetzt bewegen</string>
     <string name="appwide_wellness_action_start_breathing">Atmung starten</string>
     <string name="appwide_wellness_inactivity_body">Zeit für Bewegung. Du sitzt schon eine Weile.</string>
-    <string name="appwide_wellness_inactivity_body_minutes">Du sitzt seit etwa %1$d Min. Zeit für Bewegung.</string>
     <string name="appwide_wellness_inactivity_channel_description">Erinnert nach einer längeren Sitzphase an Bewegung.</string>
     <string name="appwide_wellness_inactivity_channel_name">Bewegungserinnerungen</string>
     <string name="appwide_wellness_inactivity_title">Zeit für Bewegung</string>

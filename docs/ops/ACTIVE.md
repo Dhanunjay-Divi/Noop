@@ -18,19 +18,20 @@ Last updated: **2026-10-01**
   the neutral `your compatible band` footer without observed clipping.
   A versioned completion marker returns legacy account-free installs to the
   required Account boundary, and the final combined walls pass 57/57 Apple and
-  78/78 Android focused cases. The first exact remote PR head
-  `294ff9b5a` exposed a scoped localization-policy miss and one stale Android
-  onboarding/Safety contract; the corrected tree passes the affected 9/9
-  Android cases and the complete Full Debug wall with 5,255 tests, seven
-  intentional skips, and zero failures. The commit containing this record is
-  the replacement candidate; exact-head hosted verification remains before
-  protected integration. Production identity credentials, signed installation,
-  live provider recovery, and physical BLE remain pending.
-  Remote head `45731f878` then passed the repository-policy, backend, Swift
-  package, and Android review-sample jobs but exposed one instrumentation
-  fixture that still set only the legacy onboarding Boolean. The fixture now
-  also seeds and restores the required-account onboarding version; its exact
-  API 35 `AppShellInstrumentedTest` class passes 8/8 locally.
+  78/78 Android focused cases. Earlier hosted heads isolated stale localization,
+  Android shell-fixture, and Apple source-contract expectations without
+  weakening the required flow. Exact hosted head `06e064f42` passed every
+  repository-policy, backend, Swift-package, Android, and macOS job. The iOS
+  production-shell suite failed only its configured-provider onboarding case
+  because three raw Terms switch taps did not verify their resulting values
+  before checking the fail-closed Accept button. The repaired test uses the
+  existing retry-and-state helper and passes that exact case 1/1 locally in
+  59.436 seconds. The onboarding repair itself changed no product, consent,
+  account, or health behavior; the subsequent notification audit remediation
+  is recorded below. One final consolidated push and exact-head hosted
+  verification remain before protected integration. Production identity
+  credentials, signed installation, live provider recovery, and physical BLE
+  remain pending.
 
 - Actionable wellness notifications are locally complete on
   `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
@@ -48,27 +49,24 @@ Last updated: **2026-10-01**
   focused tests, 108/108 Apple reminder regressions, 78/78 Android focused
   tests, Full/Demo Android compilation, all supported-locale generation,
   claims/privacy/brand gates, 110 operations records, and diff hygiene.
-  The first exact remote PR head `294ff9b5a` exposed only release-policy,
-  localization, and stale Android contract failures, not a reminder-runtime
-  defect. The corrected tree passes the nine affected Android tests, the
-  complete 5,255-case Android wall with seven intentional skips, the i18n
-  audit, terminology checks, the 258-case release-control wall, and the iOS
-  Simulator graph. The commit containing this record is the replacement
-  candidate; exact-head hosted verification remains before protected
-  integration. Signed physical-device notification, background, haptic,
-  battery, and sensor validation remain pending.
-  Remote head `45731f878` passed all completed policy, backend, and Swift
-  package workflows; Android production-shell alone failed eight app-shell
-  tests because their shared fixture omitted the new versioned onboarding
-  completion marker. No wellness runtime assertion failed. The corrected
-  fixture passes the exact eight-test API 35 class locally.
-  Remote head `0c5cfafca` then passed Android and all repository-policy jobs.
-  Apple exposed stale source-contract assertions after onboarding policy
-  extraction, one stale launch-band UI expectation, and two simulator launch
-  timeouts. The corrected verification layer passes 97/97 affected macOS
-  tests, the complete 2,418-case macOS wall with one intentional skip, and the
-  exact launch-band iOS UI case 1/1 locally. A replacement push and exact-head
-  hosted verification remain before protected integration.
+  Earlier hosted heads isolated release-policy and onboarding verification
+  drift rather than a reminder-runtime defect. Exact hosted head `06e064f42`
+  passed health claims, i18n, operations, release controls, runtime licenses,
+  trusted release controls, server, Swift packages, Android, and macOS. The
+  only iOS failure was the unrelated configured-provider onboarding test
+  interacting nondeterministically with the fail-closed Terms switches. Its
+  deterministic helper-based repair passes the exact case 1/1 locally in
+  59.436 seconds. A final independent audit then found and fixed three Apple
+  gaps: clean-install inactivity enable now requests notification permission,
+  macOS hydration notifications open the confirmed water-log flow, and Apple
+  plus Android movement copy no longer exposes inferred seated minutes. The
+  combined Apple regression passes 11/11, the generic iOS Simulator build
+  passes, Android focused notification/localization tests pass, and the full
+  all-platform i18n audit has zero translated-key gaps. Stress remains
+  multi-signal and never heart-rate-only; no action silently logs behavior.
+  One final consolidated push and exact-head hosted verification remain before
+  protected integration. Signed physical-device notification, background,
+  haptic, battery, and sensor validation remain pending.
 
 - The final PR `#25` replacement is locally verified on
   `codex/mobile-navigation-sparkline-redesign-20260930` at implementation

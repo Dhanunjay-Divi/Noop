@@ -4,6 +4,15 @@ import XCTest
 
 @MainActor
 final class ActionableWellnessPolicyTests: XCTestCase {
+    private func sourceText(_ relativePath: String) throws -> String {
+        let here = URL(fileURLWithPath: #filePath)
+        let repoRoot = here.deletingLastPathComponent().deletingLastPathComponent()
+        return try String(
+            contentsOf: repoRoot.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
     func testBreathingSessionCompletesOnlyAtBoundedMinute() {
         XCTAssertEqual(
             ActionableWellnessPolicy.elapsedSeconds(
@@ -138,6 +147,58 @@ final class ActionableWellnessPolicyTests: XCTestCase {
         )
     }
 
+    func testInactivityEnableRequestsAuthorizationWhenNotDetermined() async {
+        let notifications = InactivityNotificationClientSpy(
+            status: .notDetermined,
+            authorizationResult: true
+        )
+
+        let outcome = await InactivityNotificationPermission
+            .resolveExplicitPreferenceChange(
+                enabled: true,
+                client: notifications.client
+            )
+
+        XCTAssertEqual(outcome, .permissionAvailable)
+        XCTAssertEqual(notifications.authorizationStatusReadCount, 1)
+        XCTAssertEqual(notifications.authorizationRequestCount, 1)
+    }
+
+    func testInactivityPermissionRemainsPreferenceOnlyWhenNoPromptIsNeeded() async {
+        for status in [
+            UNAuthorizationStatus.authorized,
+            .provisional,
+            .denied,
+        ] {
+            let notifications = InactivityNotificationClientSpy(status: status)
+            let outcome = await InactivityNotificationPermission
+                .resolveExplicitPreferenceChange(
+                    enabled: true,
+                    client: notifications.client
+                )
+
+            XCTAssertEqual(
+                outcome,
+                status == .denied ? .permissionDenied : .permissionAvailable
+            )
+            XCTAssertEqual(notifications.authorizationStatusReadCount, 1)
+            XCTAssertEqual(notifications.authorizationRequestCount, 0)
+        }
+
+        let disabledNotifications = InactivityNotificationClientSpy(
+            status: .notDetermined
+        )
+        let disabledOutcome = await InactivityNotificationPermission
+            .resolveExplicitPreferenceChange(
+                enabled: false,
+                client: disabledNotifications.client
+            )
+
+        XCTAssertEqual(disabledOutcome, .preferenceOnly)
+        XCTAssertEqual(disabledNotifications.authorizationStatusReadCount, 0)
+        XCTAssertEqual(disabledNotifications.authorizationRequestCount, 0)
+    }
+
     func testWellnessCategoriesExposeOnePrivateForegroundAction() {
         let categories: [
             (
@@ -204,6 +265,87 @@ final class ActionableWellnessPolicyTests: XCTestCase {
                 from: request.content.userInfo
             ),
             .logHydration
+        )
+    }
+
+    func testMacHydrationNotificationPresentsConfirmedFlowWithoutAutomaticIntake() throws {
+        let root = try sourceText("Strand/App/RootView.swift")
+        let hydration = try sourceText("Strand/Screens/HydrationView.swift")
+        let routeStart = try XCTUnwrap(
+            root.range(of: "private func consumePendingNotificationRoute()")
+        )
+        let routeTail = root[routeStart.lowerBound...]
+        let routeEnd = try XCTUnwrap(
+            routeTail.range(of: "\n    private func select")
+        )
+        let routeHandler = String(routeTail[..<routeEnd.lowerBound])
+        let sheetStart = try XCTUnwrap(
+            root.range(of: ".sheet(isPresented: $showHydrationLog)")
+        )
+        let sheetTail = root[sheetStart.lowerBound...]
+        let sheetEnd = try XCTUnwrap(
+            sheetTail.range(of: ".sheet(isPresented: $showMovementBreak)")
+        )
+        let sheet = String(sheetTail[..<sheetEnd.lowerBound])
+
+        XCTAssertTrue(routeHandler.contains("case .hydration: showHydrationLog = true"))
+        XCTAssertTrue(routeHandler.contains("case .logHydration:"))
+        XCTAssertTrue(
+            routeHandler.contains("\"wellness_notification.action_started\"")
+        )
+        XCTAssertFalse(routeHandler.contains("repo.logHydration"))
+        XCTAssertTrue(sheet.contains("HydrationView()"))
+        XCTAssertTrue(sheet.contains("Button(\"Done\")"))
+        XCTAssertTrue(
+            hydration.contains("NoopButton(title, systemImage: systemImage")
+        )
+        XCTAssertTrue(hydration.contains("Task { await add(ml: ml) }"))
+    }
+
+    func testMacHydrationNotificationRequestIsConsumedOnce() throws {
+        _ = NotificationRouteBridge.consumePendingRequest()
+        NotificationRouteBridge.recordPending(
+            .hydration,
+            presentation: .logHydration
+        )
+
+        let request = try XCTUnwrap(
+            NotificationRouteBridge.consumePendingRequest()
+        )
+
+        XCTAssertEqual(request.route, .hydration)
+        XCTAssertEqual(request.presentation, .logHydration)
+        XCTAssertNil(NotificationRouteBridge.consumePendingRequest())
+    }
+}
+
+@MainActor
+private final class InactivityNotificationClientSpy {
+    var status: UNAuthorizationStatus
+    var authorizationResult: Bool
+    private(set) var authorizationStatusReadCount = 0
+    private(set) var authorizationRequestCount = 0
+
+    init(
+        status: UNAuthorizationStatus,
+        authorizationResult: Bool = false
+    ) {
+        self.status = status
+        self.authorizationResult = authorizationResult
+    }
+
+    var client: InactivityNotificationPermission.NotificationClient {
+        InactivityNotificationPermission.NotificationClient(
+            authorizationStatus: { [weak self] in
+                guard let self else { return .denied }
+                self.authorizationStatusReadCount += 1
+                return self.status
+            },
+            requestAuthorization: { [weak self] in
+                guard let self else { return false }
+                self.authorizationRequestCount += 1
+                return self.authorizationResult
+            }
         )
     }
 }

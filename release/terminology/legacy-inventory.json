@@ -692,16 +692,16 @@
       "lineNumbers": [
         154,
         157,
-        1090,
-        1092,
-        1114,
-        1114,
-        1115,
-        1115,
-        1118,
+        1095,
+        1097,
         1119,
-        1121,
-        1122
+        1119,
+        1120,
+        1120,
+        1123,
+        1124,
+        1126,
+        1127
       ],
       "occurrenceCount": 12,
       "path": "NOOPiOSUITests/NOOPiOSUITests.swift",
@@ -9798,22 +9798,22 @@
         2500,
         2502,
         2505,
-        3610,
-        3694,
-        3711,
-        3772,
+        3599,
+        3683,
+        3700,
+        3761,
+        3851,
+        3857,
         3862,
-        3868,
+        3863,
         3873,
-        3874,
-        3884,
-        3886,
-        4186,
-        4187,
-        4188,
-        4201,
-        4202,
-        4203
+        3875,
+        4175,
+        4176,
+        4177,
+        4190,
+        4191,
+        4192
       ],
       "occurrenceCount": 74,
       "path": "Strand/App/AppModel.swift",
@@ -9848,8 +9848,8 @@
         408,
         1042,
         1305,
-        3337,
-        3342
+        3326,
+        3331
       ],
       "occurrenceCount": 10,
       "path": "Strand/App/AppModel.swift",
@@ -9893,7 +9893,7 @@
     {
       "category": "core",
       "lineNumbers": [
-        328
+        329
       ],
       "occurrenceCount": 1,
       "path": "Strand/App/RootView.swift",
@@ -16472,12 +16472,12 @@
       "category": "historical",
       "lineNumbers": [
         3,
-        661,
-        661,
-        664,
-        664,
-        1262,
-        1402
+        681,
+        681,
+        684,
+        684,
+        1282,
+        1422
       ],
       "occurrenceCount": 7,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -16490,8 +16490,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        996,
-        1685
+        1016,
+        1705
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -17657,13 +17657,13 @@
     {
       "category": "core",
       "lineNumbers": [
+        9352,
         9363,
         9374,
         9385,
         9396,
         9407,
-        9418,
-        9429
+        9418
       ],
       "occurrenceCount": 7,
       "path": "Tools/AppWideLocalization/appwide_strings.json",
@@ -37196,26 +37196,26 @@
     {
       "category": "historical",
       "lineNumbers": [
-        143,
-        146,
-        207,
-        367,
-        422,
+        141,
+        144,
+        205,
+        365,
+        420,
+        441,
         443,
-        445,
-        500,
-        508,
-        520,
-        526,
-        581,
-        626,
-        694,
-        742,
-        763,
-        907,
-        1042,
-        1148,
-        1152
+        498,
+        506,
+        518,
+        524,
+        579,
+        624,
+        692,
+        740,
+        761,
+        905,
+        1040,
+        1146,
+        1150
       ],
       "occurrenceCount": 20,
       "path": "docs/ops/ACTIVE.md",
@@ -37857,7 +37857,7 @@
     {
       "category": "historical",
       "lineNumbers": [
-        210
+        238
       ],
       "occurrenceCount": 1,
       "path": "docs/ops/rounds/2026-10-01-actionable-wellness-notifications.md",

@@ -183,12 +183,17 @@ final class NOOPiOSUITests: XCTestCase {
             let attestation =
                 app.switches["noop.terms.attestation.\(index)"]
             XCTAssertTrue(attestation.waitForExistence(timeout: 5))
-            XCTAssertTrue(scrollToHittable(attestation, in: app))
-            attestation.tap()
+            XCTAssertTrue(
+                setSwitch(attestation, on: true, in: app),
+                "Terms attestation \(index) must be confirmed before continuing."
+            )
         }
         let accept = app.buttons["noop.terms.accept"]
         XCTAssertTrue(scrollToHittable(accept, in: app))
-        XCTAssertTrue(accept.isEnabled)
+        XCTAssertTrue(
+            waitUntil(timeout: 5) { accept.isEnabled },
+            "Terms acceptance must enable after every attestation is on."
+        )
         accept.tap()
 
         let primary = app.buttons["noop.onboarding.primary"]

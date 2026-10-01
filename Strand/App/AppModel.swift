@@ -2523,26 +2523,15 @@ final class AppModel: ObservableObject {
     static let wristAlertsMasterKey = "notif.masterEnabled"
 
     /// Post the local notification mirroring the inactivity (sedentary) wrist nudge. Called right after
-    /// `BLEManager.maybeBuzzInactivity` fires its buzz (see crossLaneNotes). `minutes` = the seated bout
-    /// length the detector reported. No-op on macOS and when wrist alerts are off.
-    static func postInactivity(minutes: Int) {
+    /// `BLEManager.maybeBuzzInactivity` fires its buzz (see crossLaneNotes). The seated duration remains
+    /// internal eligibility evidence and is not exposed in lock-screen copy. No-op on macOS and when
+    /// wrist alerts are off.
+    static func postInactivity(minutes _: Int) {
         #if os(iOS)
-        let body = minutes > 0
-            ? String(
-                format: String(
-                    localized:
-                        "appwide.wellness.inactivity.body_minutes"
-                ),
-                minutes
-            )
-            : String(
-                localized:
-                    "appwide.wellness.inactivity.body"
-            )
         postWristAlert(
             identifier: "inactivity-nudge",
             title: String(localized: "appwide.wellness.inactivity.title"),
-            body: body,
+            body: String(localized: "appwide.wellness.inactivity.body"),
             route: .today,
             presentation: .movementBreak,
             categoryIdentifier: DailyReviewNotifications.inactivityCategoryID

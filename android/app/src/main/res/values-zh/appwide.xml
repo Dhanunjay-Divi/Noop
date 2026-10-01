@@ -931,7 +931,6 @@
     <string name="appwide_wellness_action_move_now">现在活动</string>
     <string name="appwide_wellness_action_start_breathing">开始呼吸练习</string>
     <string name="appwide_wellness_inactivity_body">该活动一下了。你已经坐了一段时间。</string>
-    <string name="appwide_wellness_inactivity_body_minutes">你已经坐了约 %1$d 分钟。该活动一下了。</string>
     <string name="appwide_wellness_inactivity_channel_description">久坐一段时间后提醒你活动。</string>
     <string name="appwide_wellness_inactivity_channel_name">活动提醒</string>
     <string name="appwide_wellness_inactivity_title">该活动一下了</string>

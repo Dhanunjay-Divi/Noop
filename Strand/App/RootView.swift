@@ -252,6 +252,7 @@ struct RootView: View {
     @State private var showLighterWorkoutOptions = false
     @State private var showStrengthTrainer = false
     @State private var breathingNotificationStartRequest = 0
+    @State private var showHydrationLog = false
     @State private var showMovementBreak = false
 
     /// The groups expanded at rest: every single-item group (so its lone row is visible) plus the group
@@ -429,6 +430,7 @@ struct RootView: View {
             expandedGroups = Self.initialExpandedGroups(for: .today)
             showLighterWorkoutOptions = false
             showStrengthTrainer = false
+            showHydrationLog = false
         }
         // Sidebar filter transitions (#915). Entering a search (trimmed query going empty to
         // non-empty) snapshots the user's expand/collapse state ONCE, then every keystroke
@@ -521,6 +523,22 @@ struct RootView: View {
                 .environmentObject(repo)
                 .frame(minWidth: 760, minHeight: 720)
         }
+        .sheet(isPresented: $showHydrationLog) {
+            NavigationStack {
+                HydrationView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showHydrationLog = false }
+                        }
+                    }
+            }
+            .frame(
+                minWidth: 640,
+                idealWidth: 760,
+                minHeight: 680,
+                idealHeight: 820
+            )
+        }
         .sheet(isPresented: $showMovementBreak) {
             MovementBreakView()
                 .frame(minWidth: 420, minHeight: 460)
@@ -541,7 +559,7 @@ struct RootView: View {
         switch request.route {
         case .sleep: select(.sleep)
         case .journal: select(.insights)
-        case .hydration: select(.today)
+        case .hydration: showHydrationLog = true
         case .breathe: select(.breathe)
         case .today: select(.today)
         case .trends: select(.trends)

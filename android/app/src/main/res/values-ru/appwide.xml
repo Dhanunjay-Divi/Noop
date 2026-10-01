@@ -931,7 +931,6 @@
     <string name="appwide_wellness_action_move_now">Подвигаться</string>
     <string name="appwide_wellness_action_start_breathing">Начать дыхание</string>
     <string name="appwide_wellness_inactivity_body">Пора подвигаться. Вы уже некоторое время сидите.</string>
-    <string name="appwide_wellness_inactivity_body_minutes">Вы сидите около %1$d мин. Пора подвигаться.</string>
     <string name="appwide_wellness_inactivity_channel_description">Напоминание подвигаться после долгого периода без активности.</string>
     <string name="appwide_wellness_inactivity_channel_name">Напоминания о движении</string>
     <string name="appwide_wellness_inactivity_title">Пора подвигаться</string>

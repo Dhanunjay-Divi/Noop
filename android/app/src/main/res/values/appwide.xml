@@ -931,7 +931,6 @@
     <string name="appwide_wellness_action_move_now">Move now</string>
     <string name="appwide_wellness_action_start_breathing">Start breathing</string>
     <string name="appwide_wellness_inactivity_body">Time to move. You\'ve been seated a while.</string>
-    <string name="appwide_wellness_inactivity_body_minutes">You\'ve been seated for about %1$d min. Time to move.</string>
     <string name="appwide_wellness_inactivity_channel_description">A nudge to move after a long sedentary stretch.</string>
     <string name="appwide_wellness_inactivity_channel_name">Movement reminders</string>
     <string name="appwide_wellness_inactivity_title">Time to move</string>

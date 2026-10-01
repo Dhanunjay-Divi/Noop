@@ -27,17 +27,13 @@ object InactivityNotifier {
     private const val CHANNEL_ID = "noop_inactivity"
 
     @SuppressLint("MissingPermission") // guarded by areNotificationsEnabled() + runCatching
-    fun onNudged(context: Context, minutes: Int) {
+    fun onNudged(
+        context: Context,
+        @Suppress("UNUSED_PARAMETER") minutes: Int,
+    ) {
         // Mirror the iOS master gate: the engine already honours it before buzzing, re-check anyway.
         if (!NotifPrefs.getBool(context, NotifPrefs.MASTER, false)) return
-        val body = if (minutes > 0) {
-            context.getString(
-                R.string.appwide_wellness_inactivity_body_minutes,
-                minutes,
-            )
-        } else {
-            context.getString(R.string.appwide_wellness_inactivity_body)
-        }
+        val body = context.getString(R.string.appwide_wellness_inactivity_body)
         // Defensive: never let a notify() throw (revoked POST_NOTIFICATIONS, OEM quirk) crash the offload.
         runCatching {
             if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {

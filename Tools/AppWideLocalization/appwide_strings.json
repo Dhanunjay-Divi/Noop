@@ -1451,17 +1451,6 @@
     "zh-Hans": "该活动一下了。你已经坐了一段时间。",
     "zh-Hant": "該活動一下了。你已經坐了一段時間。"
   },
-  "appwide.wellness.inactivity.body_minutes": {
-    "de": "Du sitzt seit etwa %1$d Min. Zeit für Bewegung.",
-    "en": "You've been seated for about %1$d min. Time to move.",
-    "es": "Llevas sentado unos %1$d min. Es hora de moverte.",
-    "fr": "Vous êtes assis depuis environ %1$d min. Il est temps de bouger.",
-    "it": "Sei seduto da circa %1$d min. È ora di muoverti.",
-    "pt-PT": "Estás sentado há cerca de %1$d min. Está na hora de te moveres.",
-    "ru": "Вы сидите около %1$d мин. Пора подвигаться.",
-    "zh-Hans": "你已经坐了约 %1$d 分钟。该活动一下了。",
-    "zh-Hant": "你已經坐了約 %1$d 分鐘。該活動一下了。"
-  },
   "appwide.wellness.inactivity.channel_description": {
     "de": "Erinnert nach einer längeren Sitzphase an Bewegung.",
     "en": "A nudge to move after a long sedentary stretch.",

@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `locally reverified after first hosted-head remediation; replacement exact-head verification, protected integration, and live-provider validation pending`
+- State: `locally reverified after final hosted test-harness remediation; replacement exact-head verification, protected integration, and live-provider validation pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `4d034b92f6fcfd1dfe05fbe4c698c469f44e4f0a`
@@ -122,6 +122,8 @@ data class or formula is already cloud-authoritative.
 | Hosted-head remediation | Pass locally: localization 6/6, Safety shell 3/3, complete Full Debug 5,255 tests with seven intentional skips, i18n audit, release-control wall, and iOS Simulator graph | The exact eight-page required-account sequence remains enforced while Safety stays reachable from the persistent shell | Hosted replacement execution, production identity, or physical BLE |
 | Second exact hosted head `45731f878` | Android production-shell failed eight app-shell setup timeouts after 110 instrumentation tests had passed; all failures were at the fixture wait for `noop.today.list` | The shared fixture set `KEY_ONBOARDED` but omitted `REQUIRED_ACCOUNT_ONBOARDING_VERSION_KEY`, so the app correctly redirected it to required onboarding | A green final exact head or live-provider behavior |
 | Versioned shell-fixture remediation | Exact API 35 `AppShellInstrumentedTest` 8/8 pass | Existing-user shell tests now seed and restore the same versioned completion boundary enforced by production code | Production identity, physical BLE, or signed-phone behavior |
+| Fourth exact hosted head `06e064f42` | Every repository-policy, backend, Swift-package, Android, and macOS job passed. The iOS production-shell suite failed only `testConfiguredProviderAndSyntheticBandCompleteFullOnboarding`: three raw switch taps had not established their values before the test checked the fail-closed Accept button. | Hosted execution reached the current Terms and configured-provider journey; product code correctly kept acceptance disabled while any attestation remained off. | A green final exact head, production identity, or physical BLE |
+| Configured-provider UI-test hardening | Exact failing iOS Simulator case 1/1 pass locally in 59.436 seconds | The test now uses the existing retry-and-state switch helper and waits for the Accept transition, preserving the real three-attestation requirement without bypassing it. | Hosted execution on the replacement SHA, signed installation, or live-provider behavior |
 
 ## Physical device and deployment
 
@@ -130,6 +132,12 @@ data class or formula is already cloud-authoritative.
 - Data-preservation result: no data-path change planned
 - BLE/background/haptic/battery scenarios exercised: not run
 - Unrun hardware gates: all signed physical-device and band-dependent cases
+- Resource cleanup: after evidence was recorded, the earlier round-owned
+  15 GiB Apple DerivedData and 616 MiB Android build output were removed.
+  The later actionable-notification audit produced 3.3 GiB of Apple
+  DerivedData and 277 MiB of Android build output; both remained exact-owned
+  and were removed before the final push. No active build process or open
+  handle owned those paths.
 
 ## Git and release state
 
@@ -139,10 +147,16 @@ data class or formula is already cloud-authoritative.
 - Commits: implementation `dc9d7efef4561e854bb5c0504335e442a8a7696f`;
   first remote verification pin `294ff9b5ae6dd81310b0fc372af1473ba43027ac`;
   first hosted remediation `45731f8780e2c0593a0b9ed14a04914bc002bf10`;
-  the commit containing this record carries the final shell-fixture remediation
-- Branch and remote state: PR `#25` is open at remote head `45731f878`;
-  the commit containing this record is the locally verified replacement
-  candidate
+  shell-fixture remediation `0c5cfafca9c1856590a965c780684fbac2c761b7`;
+  Apple verification remediation `0d8bfbdbd1c3c93eb10cd9c8e1a1ee50024fe29b`;
+  previous exact hosted candidate
+  `06e064f4285a6d3590161158eb8be1be6329b956`;
+  the commit containing this record carries the final configured-provider
+  UI-test hardening plus the separately documented actionable-notification
+  audit remediation
+- Branch and remote state: PR `#25` is open; `06e064f42` is the last hosted
+  candidate, and the commit containing this record is the locally verified
+  replacement queued for one consolidated push
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
 - Release or distribution impact: first-run source correction only

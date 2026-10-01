@@ -197,6 +197,26 @@ final class ScreenStateContractTests: XCTestCase {
         XCTAssertTrue(androidWorker.contains("\"source\" to \"external_health\""))
     }
 
+    func testInactivityNotificationKeepsDerivedDurationPrivate() throws {
+        let appModel = try sourceText("Strand/App/AppModel.swift")
+        let section = try XCTUnwrap(
+            appModel
+                .components(separatedBy: "static func postInactivity")
+                .dropFirst()
+                .first?
+                .components(separatedBy: "static func postSmartAlarm")
+                .first
+        )
+
+        XCTAssertTrue(
+            section.contains("appwide.wellness.inactivity.body")
+        )
+        XCTAssertFalse(
+            section.contains("appwide.wellness.inactivity.body_minutes")
+        )
+        XCTAssertTrue(section.contains("minutes _: Int"))
+    }
+
     func testAuditedCoreSurfacesUseTheSharedMissingValueToken() throws {
         let auditedPaths = [
             "Strand/Liquid/LiquidTodayView.swift",
