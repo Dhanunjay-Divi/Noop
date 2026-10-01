@@ -1291,38 +1291,69 @@ final class NOOPiOSUITests: XCTestCase {
 
     func testKeyMetricSelectionEnforcesAccessibleThreeToSixBoundaries() {
         let app = launchDemoScreen("keymetricseditor")
-        let recovery = app.switches["noop.key-metric.toggle.charge"]
-        let hrv = app.switches["noop.key-metric.toggle.hrv"]
-        let restingHR = app.switches["noop.key-metric.toggle.restingHr"]
-        let bloodOxygen = app.switches["noop.key-metric.toggle.bloodOxygen"]
-        let respiratory = app.switches["noop.key-metric.toggle.respiratory"]
-        let calories = app.switches["noop.key-metric.toggle.calories"]
+        let count = app.descendants(matching: .any)["noop.key-metric.selection-count"]
+        let selectedHRV = app.descendants(matching: .any)["noop.key-metric.selected.hrv"]
+        let addRecovery = app.buttons["noop.key-metric.add.charge"]
 
-        XCTAssertTrue(recovery.waitForExistence(timeout: 20))
-        XCTAssertTrue(hrv.exists)
-        XCTAssertEqual(hrv.value as? String, "1")
-        XCTAssertTrue(hrv.isEnabled)
-        XCTAssertEqual(recovery.value as? String, "0")
-        XCTAssertFalse(recovery.isEnabled)
+        XCTAssertTrue(count.waitForExistence(timeout: 20))
+        XCTAssertEqual(count.label, "6 of 6 selected")
+        XCTAssertTrue(selectedHRV.exists)
 
-        hrv.tap()
-        XCTAssertTrue(app.staticTexts["5 of 6 pinned"].waitForExistence(timeout: 3))
-        XCTAssertEqual(hrv.value as? String, "0")
-        XCTAssertTrue(recovery.isEnabled)
+        for _ in 0..<10 where !addRecovery.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(addRecovery.exists)
+        XCTAssertFalse(addRecovery.isEnabled)
 
-        recovery.tap()
-        XCTAssertTrue(app.staticTexts["6 of 6 pinned"].waitForExistence(timeout: 3))
-        XCTAssertEqual(recovery.value as? String, "1")
-        XCTAssertFalse(calories.isEnabled)
+        let removeHRV = app.buttons["noop.key-metric.remove.hrv"]
+        for _ in 0..<10 where !removeHRV.isHittable {
+            app.swipeDown()
+        }
+        XCTAssertTrue(removeHRV.isHittable)
+        removeHRV.tap()
+        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "5 of 6 selected" })
+        XCTAssertFalse(selectedHRV.exists)
 
-        restingHR.tap()
-        XCTAssertTrue(app.staticTexts["5 of 6 pinned"].waitForExistence(timeout: 3))
-        bloodOxygen.tap()
-        XCTAssertTrue(app.staticTexts["4 of 6 pinned"].waitForExistence(timeout: 3))
-        respiratory.tap()
-        XCTAssertTrue(app.staticTexts["3 of 6 pinned"].waitForExistence(timeout: 3))
-        XCTAssertFalse(recovery.isEnabled)
-        XCTAssertTrue(hrv.isEnabled)
+        for _ in 0..<10 where !addRecovery.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(addRecovery.isHittable)
+        addRecovery.tap()
+        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "6 of 6 selected" })
+        XCTAssertTrue(
+            app.descendants(matching: .any)["noop.key-metric.selected.charge"].exists
+        )
+
+        let addCalories = app.buttons["noop.key-metric.add.calories"]
+        for _ in 0..<10 where !addCalories.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(addCalories.exists)
+        XCTAssertFalse(addCalories.isEnabled)
+
+        for metric in ["restingHr", "bloodOxygen", "respiratory"] {
+            let remove = app.buttons["noop.key-metric.remove.\(metric)"]
+            for _ in 0..<10 where !remove.isHittable {
+                app.swipeDown()
+            }
+            XCTAssertTrue(remove.isHittable)
+            remove.tap()
+        }
+
+        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "3 of 6 selected" })
+        let removeRecovery = app.buttons["noop.key-metric.remove.charge"]
+        for _ in 0..<10 where !removeRecovery.exists {
+            app.swipeDown()
+        }
+        XCTAssertTrue(removeRecovery.exists)
+        XCTAssertFalse(removeRecovery.isEnabled)
+
+        let addHRV = app.buttons["noop.key-metric.add.hrv"]
+        for _ in 0..<10 where !addHRV.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(addHRV.exists)
+        XCTAssertTrue(addHRV.isEnabled)
         keepScreenshot(app, name: "key-metrics-accessible-color-boundaries")
     }
 
@@ -1572,39 +1603,53 @@ final class NOOPiOSUITests: XCTestCase {
         // concrete element so the gesture lands in the plot instead of matching both elements.
         let chart = app.otherElements[chartIdentifier].firstMatch
         XCTAssertTrue(chart.waitForExistence(timeout: 20))
-        let quickActions = app.buttons["noop.quick-actions"]
-        XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
-        for _ in 0..<6 where chart.frame.maxY + 12 > quickActions.frame.minY {
-            app.swipeUp()
+        let scroll = app.scrollViews["noop.trends.scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        for _ in 0..<6 where !chart.isHittable {
+            scroll.swipeUp()
         }
         XCTAssertTrue(chart.isHittable)
-        XCTAssertLessThanOrEqual(chart.frame.maxY + 12, quickActions.frame.minY)
+        let quickActions = app.buttons["noop.quick-actions"]
+        XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
         let chartFrame = chart.frame
 
-        let summary = String(describing: chart.value)
-        XCTAssertTrue(summary.localizedCaseInsensitiveContains("points"))
+        let chartNodes = app.descendants(matching: .any)
+            .matching(identifier: chartIdentifier)
+        let summaryNode = chartNodes.matching(
+            NSPredicate(format: "value CONTAINS[c] %@", "points")
+        ).firstMatch
+        XCTAssertTrue(summaryNode.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            String(describing: summaryNode.value)
+                .localizedCaseInsensitiveContains("points")
+        )
 
         let july29Area = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.71, dy: 0.50))
         let nearby = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.50))
+        let scrubStart = CGPoint(
+            x: chartFrame.minX + chartFrame.width * 0.71,
+            y: chartFrame.midY
+        )
+        let scrubEnd = CGPoint(
+            x: chartFrame.minX + chartFrame.width * 0.76,
+            y: chartFrame.midY
+        )
+        XCTAssertFalse(
+            quickActions.frame.contains(scrubStart),
+            "The date-scrub start must remain clear of the movable action lens."
+        )
+        XCTAssertFalse(
+            quickActions.frame.contains(scrubEnd),
+            "The date-scrub path must remain clear of the movable action lens."
+        )
         july29Area.press(forDuration: 0.35, thenDragTo: nearby)
 
-        // SwiftUI may replace the chart's accessibility node after its value changes. Xcode 26.6
-        // classifies the replacement as StaticText even though the stable identifier and semantics
-        // are unchanged, so re-query without pinning the stale pre-scrub `Other` element type.
-        let selectedChart = app.descendants(matching: .any)[chartIdentifier].firstMatch
-        XCTAssertTrue(selectedChart.waitForExistence(timeout: 5))
+        let selectedChart = app.otherElements[chartIdentifier].firstMatch
         XCTAssertTrue(waitUntil(timeout: 5) {
-            String(describing: selectedChart.value) != summary
+            selectedChart.exists && selectedChart.value as? String == "Mon 7 Sep, 65"
         })
-        let selected = String(describing: selectedChart.value)
-        XCTAssertNotEqual(selected, summary)
-        XCTAssertFalse(selected.localizedCaseInsensitiveContains("points"))
+        XCTAssertFalse(app.navigationBars["Recovery"].exists)
         keepScreenshot(app, name: "trends-recovery-date-selection")
-
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-            .withOffset(CGVector(dx: chartFrame.midX, dy: chartFrame.midY))
-            .tap()
-        XCTAssertTrue(app.navigationBars["Recovery"].waitForExistence(timeout: 5))
     }
 
     func testTrendsRangeCopyStaysClearAtCompactWidths() {

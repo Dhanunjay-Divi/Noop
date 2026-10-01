@@ -86,7 +86,7 @@ final class DailyActionTodayContractTests: XCTestCase {
             "compactAdjustment = dailyActionPlan.workoutAdjustment"
         ))
         XCTAssertFalse(today.contains("if (!expanded && compactAdjustment != null)"))
-        XCTAssertTrue(today.contains("FitnessAgeHeroLane("))
+        XCTAssertTrue(today.contains("FitnessAgeCompactLane("))
         XCTAssertTrue(today.contains("if (selectedDayOffset == 0)"))
         XCTAssertTrue(today.contains("DashboardCard.FITNESS_AGE"))
         XCTAssertTrue(today.contains("localizedReadinessSummary(readiness)"))

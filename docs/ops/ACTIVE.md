@@ -4,19 +4,24 @@ Last updated: **2026-10-01**
 
 ## Authoritative context
 
-- The Today metric-catalog refinement is locally verified after a complete
-  Android Full unit-wall repair on
+- The Today metric-catalog refinement is locally verified after complete
+  Android Full and Apple hosted-contract repair on
   `codex/today-metric-catalog-fitness-age-20261001`. Apple and Android now
   expose the same 14 Today-ready metrics in a selected-first, searchable,
   grouped editor while keeping the dashboard bounded to three through six
   cards. Fitness Age is a compact today-only weekly lane under Daily Signal.
   Apple dual-architecture build and focused contracts pass; Android focused
   contracts and all 5,262 Full-flavor unit tests pass; visual review found no
-  observed clipping or overlap. Hosted replacement `6980dc324` isolated three
-  deterministic Android contract mismatches, now repaired locally without
-  changing health behavior. Protected integration remains pending. No formula,
-  source, storage, account, BLE, notification, or physical-device behavior
-  changed or was claimed.
+  observed clipping or overlap. Hosted head `30524ac09` passed every non-Apple
+  required context, including the complete Android wall. Apple run
+  `36899526468` isolated only stale source/UI contracts for the renamed compact
+  Fitness Age lane, the replaced Key Metric switches, and Recovery-chart
+  interaction around the movable action lens. The macOS repair wall passes
+  5/5; the repaired iOS Key Metric boundary and exact-date Recovery scrub cases
+  pass independently on a dedicated iPhone 17 Pro simulator. Protected
+  integration remains pending one replacement push and exact-head checks. No
+  formula, source, storage, account, BLE, notification, or physical-device
+  behavior changed or was claimed.
 
 - Band-first required-account onboarding is integrated on protected `main`
   through PR `#25` at merge commit

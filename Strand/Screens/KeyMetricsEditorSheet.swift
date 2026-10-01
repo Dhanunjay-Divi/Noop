@@ -105,6 +105,7 @@ struct KeyMetricsEditorSheet: View {
                 .accessibilityLabel(
                     String(localized: "\(selected.count) of \(KeyMetricPrefs.maximumSelectionCount) selected")
                 )
+                .accessibilityIdentifier("noop.key-metric.selection-count")
         }
     }
 
@@ -212,6 +213,8 @@ struct KeyMetricsEditorSheet: View {
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("noop.key-metric.selected.\(metric.rawValue)")
             Spacer(minLength: NoopMetrics.space2)
             Button {
                 move(from: index, to: index - 1)
@@ -255,11 +258,11 @@ struct KeyMetricsEditorSheet: View {
                     ? "At least three metrics must remain."
                     : "Removes this metric from the Today snapshot."
             )
+            .accessibilityIdentifier("noop.key-metric.remove.\(metric.rawValue)")
         }
         .padding(.horizontal, 12)
         .frame(minHeight: 58)
         .background(rowBackground(tint: accent(for: metric), selected: true))
-        .accessibilityIdentifier("noop.key-metric.selected.\(metric.rawValue)")
     }
 
     private func availableRow(_ metric: KeyMetric) -> some View {
