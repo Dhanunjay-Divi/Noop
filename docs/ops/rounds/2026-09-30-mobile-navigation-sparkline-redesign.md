@@ -6,8 +6,8 @@
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `144e1bb904d4de1760a2d773e88d769bcf2f490d`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: `d210b7ba6`
+- Record commit or PR: PR `#25`
 
 ## Objective
 
@@ -145,9 +145,9 @@ Success requires:
 
 - Changed paths: shared Apple/Android navigation shells, shared sparkline
   primitives, focused tests, and operations records
-- Commits: pending
-- Branch and remote state: isolated local branch; no push or deployment
-  requested or performed
+- Commits: implementation candidate `d210b7ba6`
+- Branch and remote state: pushed branch under protected review in PR `#25`;
+  no deployment or release performed
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
 - Release or distribution impact: none

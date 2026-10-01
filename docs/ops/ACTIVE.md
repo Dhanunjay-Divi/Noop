@@ -26,7 +26,8 @@ Last updated: **2026-10-01**
   focused contract and Full/Demo compilation pass. The follow-up hermetic
   Apple run's exact 5,538,976 KiB DerivedData was removed after evidence
   capture with no owning process or open handle, leaving about 72 GiB free.
-  Hosted checks remain required.
+  Implementation candidate `d210b7ba6` is pushed in protected-review PR `#25`;
+  hosted checks and protected integration remain required.
   Operations 108/108, localization, private-data, health-claims, and diff
   hygiene gates pass. Protected integration and signed physical-phone
   accessibility/frame-pacing validation remain. No formula, source, storage,

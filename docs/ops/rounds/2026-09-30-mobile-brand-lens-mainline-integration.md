@@ -2,12 +2,12 @@
 
 ## Status
 
-- State: `final local verification complete; protected integration pending`
+- State: `final candidate committed and under protected review`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `144e1bb904d4de1760a2d773e88d769bcf2f490d`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: `d210b7ba6`
+- Record commit or PR: PR `#25`
 
 ## Objective
 
@@ -156,10 +156,10 @@ Success requires:
 - Changed paths: shared Apple Today hierarchy and sparkline primitives, iPhone
   shell/review sample, Android Today/shell/review sample/charts, mirrored
   tests/localization, and operations records
-- Commits: pending
-- Branch and remote state: final locally verified isolated branch based on
-  exact protected `main`; commit, push, hosted checks, and protected
-  integration pending
+- Commits: implementation candidate `d210b7ba6`; documentation pin follows on
+  the same PR branch
+- Branch and remote state: final locally verified branch pushed from exact
+  protected `main`; PR `#25`, hosted checks, and protected integration pending
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
 - Release or distribution impact: source integration only; no store release
