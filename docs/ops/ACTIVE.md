@@ -4,9 +4,9 @@ Last updated: **2026-10-01**
 
 ## Authoritative context
 
-- Band-first required-account onboarding is locally complete on
-  `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
-  commit `dc9d7efef`. A reset customer
+- Band-first required-account onboarding is integrated on protected `main`
+  through PR `#25` at merge commit
+  `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`. A reset customer
   installation now proceeds through Terms, Welcome, Bluetooth, supported-band
   setup, Create account or Sign in, required ownership confirmation, profile,
   plan, and app entry. Unconfigured account builds fail closed at Account and
@@ -21,21 +21,17 @@ Last updated: **2026-10-01**
   78/78 Android focused cases. Earlier hosted heads isolated stale localization,
   Android shell-fixture, and Apple source-contract expectations without
   weakening the required flow. Exact hosted head `06e064f42` passed every
-  repository-policy, backend, Swift-package, Android, and macOS job. The iOS
-  production-shell suite failed only its configured-provider onboarding case
-  because three raw Terms switch taps did not verify their resulting values
-  before checking the fail-closed Accept button. The repaired test uses the
-  existing retry-and-state helper and passes that exact case 1/1 locally in
-  59.436 seconds. The onboarding repair itself changed no product, consent,
-  account, or health behavior; the subsequent notification audit remediation
-  is recorded below. One final consolidated push and exact-head hosted
-  verification remain before protected integration. Production identity
-  credentials, signed installation, live provider recovery, and physical BLE
-  remain pending.
+  repository-policy, backend, Swift-package, Android, and macOS job. The final
+  exact PR head `3fb09d6093789a8939f075d4b9e36d026e61b76f` then passed all
+  ten required hosted contexts, including the repaired iOS production-shell
+  onboarding case, before the normal protected merge. The onboarding repair
+  changed no product, consent, account, or health behavior. Production
+  identity credentials, signed installation, live provider recovery, and
+  physical BLE remain pending.
 
-- Actionable wellness notifications are locally complete on
-  `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
-  commit `dc9d7efef`. Hydration opens a
+- Actionable wellness notifications are integrated on protected `main`
+  through PR `#25` at merge commit
+  `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`. Hydration opens a
   user-confirmed water-log flow, qualified stress opens a visible one-minute
   paced-breathing session, and inactivity opens a dismissible two-minute
   movement break; notification delivery never silently logs behavior. Stress
@@ -53,24 +49,24 @@ Last updated: **2026-10-01**
   drift rather than a reminder-runtime defect. Exact hosted head `06e064f42`
   passed health claims, i18n, operations, release controls, runtime licenses,
   trusted release controls, server, Swift packages, Android, and macOS. The
-  only iOS failure was the unrelated configured-provider onboarding test
-  interacting nondeterministically with the fail-closed Terms switches. Its
-  deterministic helper-based repair passes the exact case 1/1 locally in
-  59.436 seconds. A final independent audit then found and fixed three Apple
+  only earlier iOS failure was the unrelated configured-provider onboarding
+  test interacting nondeterministically with the fail-closed Terms switches.
+  A final independent audit then found and fixed three Apple
   gaps: clean-install inactivity enable now requests notification permission,
   macOS hydration notifications open the confirmed water-log flow, and Apple
   plus Android movement copy no longer exposes inferred seated minutes. The
   combined Apple regression passes 11/11, the generic iOS Simulator build
   passes, Android focused notification/localization tests pass, and the full
-  all-platform i18n audit has zero translated-key gaps. Stress remains
-  multi-signal and never heart-rate-only; no action silently logs behavior.
-  One final consolidated push and exact-head hosted verification remain before
-  protected integration. Signed physical-device notification, background,
-  haptic, battery, and sensor validation remain pending.
+  all-platform i18n audit has zero translated-key gaps. The final exact PR head
+  `3fb09d6093789a8939f075d4b9e36d026e61b76f` passed all ten required
+  hosted contexts before merge. Stress remains multi-signal and never
+  heart-rate-only; no action silently logs behavior. Signed physical-device
+  notification, background, haptic, battery, and sensor validation remain
+  pending.
 
-- The final PR `#25` replacement is locally verified on
-  `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
-  commit `b8018ac5e`. Mobile Today is number-first, the compact iPhone `More`
+- The final mobile UI replacement is integrated through PR `#25` on protected
+  `main` at `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`. Mobile Today is
+  number-first, the compact iPhone `More`
   endpoint no longer has a decorative outer pill, selected metrics support six
   focused cards plus one explicit all-history route, and macOS Today no longer
   sits inside a nested `960`-point phone column. Wide Mac windows use the full
@@ -82,15 +78,15 @@ Last updated: **2026-10-01**
   `2000x1520` macOS captures were reviewed without observed clipping or overlap.
   Earlier complete Android walls, configured onboarding automation, paired
   phone review, StrandDesign, localization, claims, release-control, and
-  repository-policy evidence remain applicable. One documentation pin and one
-  consolidated push are pending before exact-head hosted checks and protected
-  integration. Signed physical-phone accessibility/frame-pacing and all
-  physical-band behavior remain external. No formula, source selection,
-  storage, account-provider, network, BLE, release, or production behavior
-  changed.
+  repository-policy evidence remain applicable. Exact PR head
+  `3fb09d6093789a8939f075d4b9e36d026e61b76f` passed all ten required
+  hosted contexts before normal protected integration. Signed physical-phone
+  accessibility/frame-pacing and all physical-band behavior remain external.
+  No formula, source selection, storage, account-provider, network, BLE,
+  store-release, or production-traffic behavior changed.
 
-- The mobile liquid-navigation refinement is locally complete on
-  `codex/mobile-navigation-sparkline-redesign-20260930`. The five-tab dock now
+- The mobile liquid-navigation refinement is integrated in PR `#25`. The
+  five-tab dock now
   remains structurally separate from a compact `28x38` visible, `48x52`
   interactive edge lens with bounded drag, nearest-edge snap, persisted side
   and height, and accessibility movement alternatives. Android Trends now uses
@@ -102,9 +98,9 @@ Last updated: **2026-10-01**
   nine-action-center screenshots were reviewed at 1206x2622 and 1080x2424;
   Android drag persistence survived relaunch and its recent log sample had zero
   matching fatal/ANR signatures. No formula, health data, network, BLE,
-  account, deployment, release, commit, or push behavior changed. Owner review,
-  normal protected integration, and signed physical-phone navigation,
-  accessibility, and frame-pacing checks remain. Full all-platform
+  account, deployment, store-release, or production-traffic behavior changed.
+  Signed physical-phone navigation, accessibility, and frame-pacing checks
+  remain. Full all-platform
   localization, 107 operations records, and diff hygiene pass. After evidence
   became durable, the exact 5.7 GiB iOS DerivedData, 623 MiB Android app build
   output, and 170 MiB StrandDesign build output were removed; installed
