@@ -232,6 +232,9 @@
     <string name="key_metrics_show_selected">Показать выбранные метрики</string>
     <string name="key_metrics_show_all_count">Показать все метрики (%1$d)</string>
     <string name="key_metrics_open_history">Открыть всю историю показателей</string>
+    <string name="key_metrics_fitness_age_accessibility">%1$s, %2$s, %3$s, %4$s</string>
+    <string name="key_metrics_remove_from_today">Удалить %1$s из раздела «Сегодня»</string>
+    <string name="key_metrics_hydration_tracking_off">Отслеживание гидратации · Выкл.</string>
     <string name="hydration_adaptive_timing_label">Адаптивное расписание</string>
     <string name="hydration_adaptive_timing_help">Корректирует сегодняшний интервал по Нагрузке и подтверждённому потреблению воды. Недостающие данные не оцениваются.</string>
     <string name="hydration_adaptive_timing_status">Сейчас каждые %1$d мин. Расписание меняется только при наличии подтверждающих данных за сегодня.</string>

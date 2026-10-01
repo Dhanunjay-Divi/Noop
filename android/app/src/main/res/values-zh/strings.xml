@@ -1670,6 +1670,9 @@
     <string name="key_metrics_show_selected">显示已选指标</string>
     <string name="key_metrics_show_all_count">显示全部指标（%1$d）</string>
     <string name="key_metrics_open_history">打开全部指标历史记录</string>
+    <string name="key_metrics_fitness_age_accessibility">%1$s，%2$s，%3$s，%4$s</string>
+    <string name="key_metrics_remove_from_today">从“今天”中移除 %1$s</string>
+    <string name="key_metrics_hydration_tracking_off">饮水追踪 · 关闭</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
     <string name="l10n_today_screen_data_unit_c768ef8c">%1$s</string>
     <string name="l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96">%1$s, %2$s。点击选择日期，左右滑动切换前/后一天。</string>

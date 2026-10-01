@@ -2,18 +2,29 @@ package com.noop.ui
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TodayMetricCatalogContractTest {
+    private fun root(): File = File(System.getProperty("user.dir") ?: ".")
+
     private fun todaySource(): String {
-        val root = File(System.getProperty("user.dir") ?: ".")
         return listOf(
-            File(root, "src/main/java/com/noop/ui/TodayScreen.kt"),
-            File(root, "app/src/main/java/com/noop/ui/TodayScreen.kt"),
-            File(root, "android/app/src/main/java/com/noop/ui/TodayScreen.kt"),
+            File(root(), "src/main/java/com/noop/ui/TodayScreen.kt"),
+            File(root(), "app/src/main/java/com/noop/ui/TodayScreen.kt"),
+            File(root(), "android/app/src/main/java/com/noop/ui/TodayScreen.kt"),
         ).firstOrNull(File::isFile)?.readText()
             ?: error("TodayScreen.kt source root is unavailable")
+    }
+
+    private fun stringsResource(folder: String): String {
+        return listOf(
+            File(root(), "src/main/res/$folder/strings.xml"),
+            File(root(), "app/src/main/res/$folder/strings.xml"),
+            File(root(), "android/app/src/main/res/$folder/strings.xml"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("$folder/strings.xml is unavailable")
     }
 
     @Test
@@ -45,6 +56,37 @@ class TodayMetricCatalogContractTest {
         assertTrue(source.contains("FitnessAgePresentation::localizedSpokenValue"))
         assertTrue(source.contains("onClick = { onOpenMetric(\"fitness_age\") }"))
         assertTrue(source.contains("noop.today.fitnessAgeHero"))
+    }
+
+    @Test
+    fun composedEditorCopyUsesFormattedResourcesInEverySupportedLocale() {
+        val source = todaySource()
+        val keys = setOf(
+            "key_metrics_fitness_age_accessibility",
+            "key_metrics_remove_from_today",
+            "key_metrics_hydration_tracking_off",
+        )
+        assertTrue(source.contains("R.string.key_metrics_fitness_age_accessibility"))
+        assertTrue(source.contains("R.string.key_metrics_remove_from_today"))
+        assertTrue(source.contains("R.string.key_metrics_hydration_tracking_off"))
+        assertFalse(source.contains("\"\\$title, \\$spokenValue, \\$weekly, \\$detail\""))
+
+        for (folder in listOf(
+            "values",
+            "values-de",
+            "values-es",
+            "values-fr",
+            "values-it",
+            "values-pt-rPT",
+            "values-ru",
+            "values-zh",
+            "values-zh-rTW",
+        )) {
+            val resource = stringsResource(folder)
+            for (key in keys) {
+                assertTrue("$folder is missing $key", resource.contains("name=\"$key\""))
+            }
+        }
     }
 
     @Test

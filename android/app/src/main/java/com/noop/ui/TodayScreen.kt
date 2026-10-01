@@ -5991,7 +5991,13 @@ private fun FitnessAgeHeroLane(
                 onClick = onClick,
             )
             .clearAndSetSemantics {
-                contentDescription = "$title, $spokenValue, $weekly, $detail"
+                contentDescription = uiString(
+                    R.string.key_metrics_fitness_age_accessibility,
+                    title,
+                    spokenValue,
+                    weekly,
+                    detail,
+                )
                 role = Role.Button
             }
             .padding(horizontal = Metrics.space16, vertical = Metrics.space10),
@@ -9885,8 +9891,10 @@ private fun KeyMetricSelectedEditorRow(
             modifier = Modifier
                 .size(Metrics.iconButton)
                 .semantics {
-                    contentDescription =
-                        "${uiString(R.string.l10n_data_sources_screen_remove_e963907d)} $title"
+                    contentDescription = uiString(
+                        R.string.key_metrics_remove_from_today,
+                        title,
+                    )
                 },
         ) {
             Icon(
@@ -9930,8 +9938,7 @@ private fun KeyMetricAvailableEditorRow(
             )
             if (metric == KeyMetric.HYDRATION && !hydrationEnabled) {
                 Text(
-                    "${uiString(R.string.l10n_settings_screen_hydration_tracking_579a2b32)} · " +
-                        uiString(R.string.l10n_data_sources_screen_off_e3de5ab0),
+                    uiString(R.string.key_metrics_hydration_tracking_off),
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )

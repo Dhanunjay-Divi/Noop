@@ -42,6 +42,49 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
             "enabled ? StrandPalette.statusPositive : StrandPalette.textTertiary"
         ))
     }
+
+    func testEditorCopyIsLocalizedAcrossEverySupportedLocale() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let editor = try String(
+            contentsOf: root.appendingPathComponent("Strand/Screens/KeyMetricsEditorSheet.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(editor.contains(#"String(localized: "Choose your snapshot")"#))
+        XCTAssertTrue(editor.contains(#"String(localized: "All supported metrics are selected.")"#))
+        XCTAssertTrue(editor.contains(#"String(localized: "Remove \(metric.title) from Today")"#))
+
+        let data = try Data(
+            contentsOf: root.appendingPathComponent("Strand/Resources/Localizable.xcstrings")
+        )
+        let catalog = try XCTUnwrap(
+            (JSONSerialization.jsonObject(with: data) as? [String: Any])?["strings"]
+                as? [String: Any]
+        )
+        let requiredKeys = [
+            "Choose your snapshot",
+            "Show 3 to 6 metrics on Today. Every other supported metric stays available here and in history.",
+            "%lld/%lld",
+            "%lld of %lld selected",
+            "Clear metric search",
+            "All supported metrics are selected.",
+            "No metrics match this search.",
+            "Remove %@ from Today",
+            "Enable hydration tracking in Settings",
+            "Add %@ to Today",
+        ]
+        let locales = Set(["de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
+
+        for key in requiredKeys {
+            let entry = try XCTUnwrap(catalog[key] as? [String: Any], key)
+            let localizations = try XCTUnwrap(
+                entry["localizations"] as? [String: Any],
+                key
+            )
+            XCTAssertEqual(Set(localizations.keys), locales, key)
+        }
+    }
 }
 
 final class KeyMetricPrefsTests: XCTestCase {

@@ -79,16 +79,16 @@ struct KeyMetricsEditorSheet: View {
                     .font(StrandFont.overline)
                     .tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.textTertiary)
-                Text("Choose your snapshot")
+                Text(String(localized: "Choose your snapshot"))
                     .font(StrandFont.rounded(24, weight: .bold))
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text("Show 3 to 6 metrics on Today. Every other supported metric stays available here and in history.")
+                Text(String(localized: "Show 3 to 6 metrics on Today. Every other supported metric stays available here and in history."))
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: NoopMetrics.space2)
-            Text("\(selected.count)/\(KeyMetricPrefs.maximumSelectionCount)")
+            Text(String(localized: "\(selected.count)/\(KeyMetricPrefs.maximumSelectionCount)"))
                 .font(StrandFont.captionNumber)
                 .foregroundStyle(
                     selected.count == KeyMetricPrefs.maximumSelectionCount
@@ -102,7 +102,9 @@ struct KeyMetricsEditorSheet: View {
                         .fill(StrandPalette.surfaceRaised)
                         .overlay(Capsule().strokeBorder(StrandPalette.hairline, lineWidth: 1))
                 )
-                .accessibilityLabel("\(selected.count) of \(KeyMetricPrefs.maximumSelectionCount) selected")
+                .accessibilityLabel(
+                    String(localized: "\(selected.count) of \(KeyMetricPrefs.maximumSelectionCount) selected")
+                )
         }
     }
 
@@ -125,7 +127,7 @@ struct KeyMetricsEditorSheet: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Clear metric search")
+                .accessibilityLabel(String(localized: "Clear metric search"))
             }
         }
         .padding(.horizontal, 12)
@@ -156,7 +158,11 @@ struct KeyMetricsEditorSheet: View {
             sectionHeader("AVAILABLE METRICS", trailing: "\(KeyMetric.allCases.count) supported")
 
             if availableMetrics.isEmpty {
-                Text(searchText.isEmpty ? "All supported metrics are selected." : "No metrics match this search.")
+                Text(
+                    searchText.isEmpty
+                        ? String(localized: "All supported metrics are selected.")
+                        : String(localized: "No metrics match this search.")
+                )
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
@@ -243,7 +249,7 @@ struct KeyMetricsEditorSheet: View {
                     : StrandPalette.metricRose
             )
             .disabled(selected.count <= KeyMetricPrefs.minimumSelectionCount)
-            .accessibilityLabel("Remove \(metric.title) from Today")
+            .accessibilityLabel(String(localized: "Remove \(metric.title) from Today"))
             .accessibilityHint(
                 selected.count <= KeyMetricPrefs.minimumSelectionCount
                     ? "At least three metrics must remain."
@@ -272,7 +278,7 @@ struct KeyMetricsEditorSheet: View {
                         .font(StrandFont.body)
                         .foregroundStyle(canAdd ? StrandPalette.textPrimary : StrandPalette.textTertiary)
                     if hydrationBlocked {
-                        Text("Enable hydration tracking in Settings")
+                        Text(String(localized: "Enable hydration tracking in Settings"))
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
@@ -290,7 +296,7 @@ struct KeyMetricsEditorSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(!canAdd)
-        .accessibilityLabel("Add \(metric.title) to Today")
+        .accessibilityLabel(String(localized: "Add \(metric.title) to Today"))
         .accessibilityHint(availableHint(hydrationBlocked: hydrationBlocked, atLimit: atLimit))
         .accessibilityIdentifier("noop.key-metric.add.\(metric.rawValue)")
     }
