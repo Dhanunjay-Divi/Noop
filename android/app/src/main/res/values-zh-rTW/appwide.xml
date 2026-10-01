@@ -81,6 +81,7 @@
     <string name="appwide_calendar_summary_overline">本月</string>
     <string name="appwide_calendar_summary_scored_format">已記錄 %1$d 天 · 平均 %2$s</string>
     <string name="appwide_calendar_your_month">你的本月概覽</string>
+    <string name="appwide_charge_confidence_baseline_ready">基線已就緒</string>
     <string name="appwide_charge_confidence_calibrating">校準中</string>
     <string name="appwide_charge_confidence_estimate">估算</string>
     <string name="appwide_charge_confidence_reliable">可靠</string>

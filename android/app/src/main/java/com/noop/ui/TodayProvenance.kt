@@ -104,7 +104,13 @@ internal fun provenanceDisplayLabel(
 ): String {
     if (rawSource == MOTION_DERIVED_STEPS_SOURCE) return "Motion-derived estimate"
     if (rawSource == CALIBRATED_MOTION_STEPS_SOURCE) return "Calibrated motion estimate"
-    if (rawSource.endsWith("-noop")) return "On-device"
+    if (
+        rawSource.endsWith("-noop") ||
+        rawSource == "noop-computed" ||
+        rawSource == "noop_computed"
+    ) {
+        return "On-device"
+    }
     if (rawSource == deviceId || rawSource == WhoopRepository.WHOOP_SOURCE) return "Imported"
     if (rawSource == WhoopRepository.APPLE_HEALTH_SOURCE) return "Apple Health"
     // Fall back to the FusionSource display name for any other known source; else the raw id verbatim.

@@ -6,12 +6,21 @@ import org.junit.Test
 class KeyMetricPrefsTest {
 
     @Test
-    fun freshInstallDefaultsToRecoveryEffortAndSleep() {
-        val expected = listOf(KeyMetric.CHARGE, KeyMetric.EFFORT, KeyMetric.REST)
+    fun freshInstallDefaultsToSecondarySignalsWithoutRepeatingTheHero() {
+        val expected = listOf(KeyMetric.HRV, KeyMetric.RESTING_HR, KeyMetric.BLOOD_OXYGEN)
+        val heroMetrics = setOf(KeyMetric.CHARGE, KeyMetric.REST, KeyMetric.EFFORT)
         assertEquals(expected, KeyMetric.defaultSelection)
         assertEquals(expected, KeyMetricPrefs.decodeEnabled(null))
         assertEquals(expected, KeyMetricPrefs.decodeEnabled(""))
         assertEquals(expected, KeyMetricPrefs.decodeEnabled("   "))
+        assertEquals(emptySet<KeyMetric>(), expected.toSet().intersect(heroMetrics))
+    }
+
+    @Test
+    fun explicitExistingCoreSelectionRemainsUnchanged() {
+        val existing = listOf(KeyMetric.CHARGE, KeyMetric.EFFORT, KeyMetric.REST)
+        assertEquals(existing, KeyMetricPrefs.decodeEnabled("charge,effort,rest"))
+        assertEquals("charge,effort,rest", KeyMetricPrefs.encode(existing))
     }
 
     @Test
@@ -24,11 +33,11 @@ class KeyMetricPrefsTest {
     @Test
     fun shortLegacySelectionKeepsUserOrderAndFillsToThree() {
         assertEquals(
-            listOf(KeyMetric.STEPS, KeyMetric.HRV, KeyMetric.CHARGE),
+            listOf(KeyMetric.STEPS, KeyMetric.HRV, KeyMetric.RESTING_HR),
             KeyMetricPrefs.decodeEnabled("steps,hrv"),
         )
         assertEquals(
-            "bloodOxygen,charge,effort",
+            "bloodOxygen,hrv,restingHr",
             KeyMetricPrefs.encode(listOf(KeyMetric.BLOOD_OXYGEN)),
         )
     }
@@ -63,7 +72,7 @@ class KeyMetricPrefsTest {
     }
 
     @Test
-    fun decodeAllUnknownFallsBackToCoreDefaults() {
+    fun decodeAllUnknownFallsBackToFreshDefaults() {
         assertEquals(
             KeyMetric.defaultSelection,
             KeyMetricPrefs.decodeEnabled("retiredMetric,unknown"),
@@ -86,6 +95,6 @@ class KeyMetricPrefsTest {
                 ),
             ),
         )
-        assertEquals("charge,effort,rest", KeyMetricPrefs.encode(emptyList()))
+        assertEquals("hrv,restingHr,bloodOxygen", KeyMetricPrefs.encode(emptyList()))
     }
 }

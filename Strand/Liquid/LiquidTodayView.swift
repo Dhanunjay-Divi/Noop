@@ -242,8 +242,6 @@ struct LiquidTodayView: View {
     static func shouldUseCompactTodayLayout(compactWidth: Bool, largeText: Bool) -> Bool {
         compactWidth && !largeText
     }
-    private var todayHeroArcSize: CGFloat { usesCompactPhoneTodayLayout ? 136 : 156 }
-    private var todaySatelliteSize: CGFloat { usesCompactPhoneTodayLayout ? 54 : 60 }
     private var todayHeroRadius: CGFloat { usesCompactPhoneTodayLayout ? 24 : 26 }
     private var todayHeroSpacing: CGFloat { usesCompactPhoneTodayLayout ? 10 : NoopMetrics.space3 }
     private var todayHeroVerticalPadding: CGFloat { usesCompactPhoneTodayLayout ? 10 : NoopMetrics.space3 }
@@ -1226,65 +1224,15 @@ struct LiquidTodayView: View {
     }
 
     private var heroCard: some View {
-        VStack(alignment: .leading, spacing: todayHeroSpacing) {
+        return VStack(alignment: .leading, spacing: todayHeroSpacing) {
             DailySignalHeader(
                 readiness: readiness,
                 includesCurrentWellnessSignal: selectedDayOffset == 0,
-                sourceLabel: heroSourceLabel
+                sourceLabel: heroSourceLabel,
+                accessibilitySourceLabel: heroAccessibilitySourceLabel
             )
 
-            Button { openHeroMetric("recovery") } label: {
-                V2HeroArc(
-                    label: String(localized: "Recovery"),
-                    value: chargeDisplay.pct,
-                    base: recoveryHeroTone,
-                    tip: recoveryHeroTip,
-                    caption: recoveryHeroCaption,
-                    size: todayHeroArcSize
-                )
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.plain)
-            .simultaneousGesture(
-                TapGesture(count: 2).onEnded { explainHeroMetric("recovery") }
-            )
-
-            HStack(spacing: usesCompactPhoneTodayLayout ? 24 : 28) {
-                Button { openHeroMetric("sleep_performance") } label: {
-                    V2SatelliteRing(
-                        label: String(localized: "Sleep"),
-                        value: restScore,
-                        base: sleepHeroTone,
-                        tip: sleepHeroTip,
-                        size: todaySatelliteSize
-                    )
-                }
-                .buttonStyle(.plain)
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded { explainHeroMetric("sleep_performance") }
-                )
-
-                let effortValue = displayDay?.strain.map {
-                    UnitFormatter.effortValue($0, scale: effortScale)
-                }
-                Button { openHeroMetric("strain") } label: {
-                    V2SatelliteRing(
-                        label: String(localized: "Effort"),
-                        value: effortValue,
-                        max: effortScale == .whoop ? 21 : 100,
-                        base: StrandPalette.effortColor,
-                        tip: StrandPalette.effortBright,
-                        size: todaySatelliteSize,
-                        decimals: effortScale == .whoop ? 1 : 0
-                    )
-                }
-                .buttonStyle(.plain)
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded { explainHeroMetric("strain") }
-                )
-            }
-            .frame(maxWidth: .infinity)
-
+            heroMetricSummary
         }
         .padding(.vertical, todayHeroVerticalPadding)
         .padding(.horizontal, todayHeroHorizontalPadding)
@@ -1296,8 +1244,8 @@ struct LiquidTodayView: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    recoveryHeroTone.opacity(0.16),
-                                    recoveryHeroTone.opacity(0.045),
+                                    .white.opacity(0.055),
+                                    .white.opacity(0.018),
                                     .clear,
                                 ],
                                 startPoint: .topLeading,
@@ -1320,7 +1268,7 @@ struct LiquidTodayView: View {
                         .strokeBorder(
                             LinearGradient(
                                 colors: [
-                                    recoveryHeroTone.opacity(0.34),
+                                    .white.opacity(0.16),
                                     .white.opacity(0.08),
                                     .black.opacity(0.86),
                                 ],
@@ -1337,6 +1285,82 @@ struct LiquidTodayView: View {
                 )
                 .opacity(cardOpacity)
         )
+    }
+
+    @ViewBuilder
+    private var heroMetricSummary: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: 0) {
+                recoveryHeroMetric
+                heroMetricDivider
+                sleepHeroMetric
+                heroMetricDivider
+                effortHeroMetric
+            }
+        } else {
+            HStack(alignment: .top, spacing: 0) {
+                recoveryHeroMetric
+                heroMetricDivider
+                sleepHeroMetric
+                heroMetricDivider
+                effortHeroMetric
+            }
+        }
+    }
+
+    private var recoveryHeroMetric: some View {
+        CompactDailyMetricCell(
+            label: String(localized: "Recovery"),
+            value: chargeDisplay.pct,
+            maximum: 100,
+            unit: "%",
+            tint: recoveryHeroTone,
+            context: recoveryHeroContext,
+            decimals: 0,
+            progressOverride: chargeDisplay.calibrationFraction,
+            emptyText: recoveryHeroEmptyText,
+            onOpen: { openHeroMetric("recovery") },
+            onExplain: { explainHeroMetric("recovery") }
+        )
+    }
+
+    private var sleepHeroMetric: some View {
+        CompactDailyMetricCell(
+            label: String(localized: "Sleep"),
+            value: restScore,
+            maximum: 100,
+            unit: "%",
+            tint: sleepHeroTone,
+            context: restScore == nil ? String(localized: "No data") : nil,
+            decimals: 0,
+            onOpen: { openHeroMetric("sleep_performance") },
+            onExplain: { explainHeroMetric("sleep_performance") }
+        )
+    }
+
+    private var effortHeroMetric: some View {
+        let value = displayDay?.strain.map {
+            UnitFormatter.effortValue($0, scale: effortScale)
+        }
+        let maximum = effortScale == .whoop ? Double(21) : Double(100)
+        return CompactDailyMetricCell(
+            label: String(localized: "Effort"),
+            value: value,
+            maximum: maximum,
+            unit: effortScale == .whoop ? "/ 21" : "/ 100",
+            tint: StrandPalette.effortColor,
+            context: value == nil ? String(localized: "No data") : nil,
+            decimals: effortScale == .whoop ? 1 : 0,
+            onOpen: { openHeroMetric("strain") },
+            onExplain: { explainHeroMetric("strain") }
+        )
+    }
+
+    private var heroMetricDivider: some View {
+        Divider()
+            .overlay(StrandPalette.onDarkSecondary.opacity(0.14))
+            .padding(.vertical, 4)
+            .accessibilityHidden(true)
     }
 
     private var recoveryHeroColors: (base: Color, tip: Color) {
@@ -1362,16 +1386,29 @@ struct LiquidTodayView: View {
         recoveryHeroColors.base
     }
 
-    private var recoveryHeroTip: Color {
-        recoveryHeroColors.tip
+    private var recoveryHeroContext: String {
+        switch chargeDisplay {
+        case .scored(let score):
+            return RecoveryBandPresentation.label(for: score)
+        case .carried(_, let caption):
+            return caption
+        case .calibrating, .baselineReady:
+            return chargeDisplay.calibrationCaption ?? chargeDisplay.stateLabel
+        case .noData:
+            return chargeDisplay.stateLabel
+        }
     }
 
-    private var recoveryHeroCaption: String {
-        if let score = chargeDisplay.pct {
-            return RecoveryBandPresentation.label(for: score)
+    private var recoveryHeroEmptyText: String {
+        let required = max(1, Baselines.minNightsSeed)
+        switch chargeDisplay {
+        case .calibrating(let nights):
+            return "\(max(0, min(nights, required)))/\(required)"
+        case .baselineReady:
+            return "\(required)/\(required)"
+        case .scored, .carried, .noData:
+            return StrandFormat.missing
         }
-        return chargeDisplay.calibrationCaption
-            ?? chargeDisplay.stateLabel
     }
 
     private var sleepHeroTone: Color {
@@ -1379,13 +1416,6 @@ struct LiquidTodayView: View {
         if score < 50 { return StrandPalette.recovery000 }
         if score < 70 { return StrandPalette.statusWarning }
         return StrandPalette.restColor
-    }
-
-    private var sleepHeroTip: Color {
-        guard let score = restScore else { return StrandPalette.restBright }
-        if score < 50 { return StrandPalette.recovery030 }
-        if score < 70 { return StrandPalette.recovery055 }
-        return StrandPalette.restBright
     }
 
     private func openHeroMetric(_ key: String) {
@@ -3989,35 +4019,43 @@ struct LiquidTodayView: View {
         )
     }
 
-    /// One card-level provenance label. Identical winners collapse to one name; mixed scores show at most
-    /// two distinct winners in Charge / Effort / Rest order so the compact badge stays readable.
+    /// One card-level provenance label. Identical winners collapse to one name; mixed scores expose at most
+    /// two distinct winners in Recovery / Effort / Sleep order through the compact inline label and the
+    /// header's untruncated spoken summary.
     private var heroSourceLabel: String? {
         Self.heroSourceLabel(
             rawSources: ["recovery", "strain", "sleep_performance"].compactMap { heroProvenanceByMetric[$0] },
             deviceId: repo.deviceId)
     }
 
+    private var heroAccessibilitySourceLabel: String? {
+        Self.heroSourceLabel(
+            rawSources: ["recovery", "strain", "sleep_performance"].compactMap { heroProvenanceByMetric[$0] },
+            deviceId: repo.deviceId,
+            maximumDistinctLabels: nil
+        )
+    }
+
     /// Pure aggregation seam for the Liquid hero. The existing Today mapper turns computed siblings into
     /// "On-device", the Apple Health source into "Apple Watch", and imported strap rows into
     /// "Compatible band".
-    static func heroSourceLabel(rawSources: [String], deviceId: String) -> String? {
+    static func heroSourceLabel(
+        rawSources: [String],
+        deviceId: String,
+        maximumDistinctLabels: Int? = 2
+    ) -> String? {
         var seen = Set<String>()
         var labels: [String] = []
         for raw in rawSources {
             let label = TodayView.todayProvenanceChipLabel(
                 rawSource: raw, deviceId: deviceId, appleHealthSource: Repository.appleHealthSource)
             if seen.insert(label).inserted { labels.append(label) }
-            if labels.count == 2 { break }
+            if let maximumDistinctLabels,
+               labels.count == maximumDistinctLabels {
+                break
+            }
         }
         return labels.isEmpty ? nil : labels.joined(separator: " + ")
-    }
-
-    /// A mixed hero provenance label still includes the live band and must retain sync feedback.
-    static func sourceLabelIncludesCompatibleBand(_ label: String) -> Bool {
-        label.split(separator: "+").contains { component in
-            component.trimmingCharacters(in: .whitespacesAndNewlines)
-                .caseInsensitiveCompare(WhoopModel.customerName) == .orderedSame
-        }
     }
 
     /// A stopped transfer is not evidence of success. Only a completion timestamp that appeared or advanced
@@ -4817,135 +4855,127 @@ private struct LiquidWordmark: View {
     }
 }
 
-// MARK: - Hero score cell (count-up number over a filling vessel, tap-to-splash)
+// MARK: - Compact Daily Signal metrics
 
-/// One of the three hero scores (Charge / Effort / Rest). A normal tap opens the dossier; a physical
-/// double tap is an optional explanation shortcut. The separate 44pt information control keeps that
-/// explanation discoverable and accessible without relying on a hidden gesture.
-private struct HeroScoreCell: View {
-
-    static let vesselDiameter: CGFloat = 84
+/// One equal-width readout in the Daily Signal summary. The metric stays number-first and uses only a
+/// quiet bounded line for magnitude, while the short context row preserves calibration, carry, and
+/// missing-data meaning. A normal tap opens the dossier; a physical double tap opens its explanation.
+private struct CompactDailyMetricCell: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .title2) private var metricValueSize: CGFloat = 34
 
     let label: String
-    let score: Double?            // on whatever scale the caller passes (nil = no data yet)
+    let value: Double?
+    let maximum: Double
+    let unit: String
     let tint: Color
-    let animated: Bool
+    let context: String?
+    let decimals: Int
+    var progressOverride: Double? = nil
+    var emptyText: String = StrandFormat.missing
     let onOpen: () -> Void
     let onExplain: () -> Void
-    // The scale `score` is already expressed on — 100 for Charge/Rest, or the user's chosen Effort scale
-    // max (100 or 21, #45) — so the vessel fill matches the displayed number.
-    var maxValue: Double = 100
-    // Decimal places for the displayed number. 0 keeps the whole-number scores; the WHOOP 0–21 Effort
-    // scale passes 1 to match the app-wide one-decimal `effortDisplay` convention (#45).
-    var decimals: Int = 0
-    /// A real bounded progress value used when no score exists yet (currently baseline calibration).
-    /// This fills the vessel without inventing a provisional Recovery number.
-    var fillFraction: Double? = nil
-    /// Honest non-score readout shown inside the vessel, e.g. "2/4" calibration nights.
-    var emptyText: String = StrandFormat.missing
-    var accessibilityValueOverride: String? = nil
 
-    @State private var shown: Double = 0
-
-    private var frac: Double? {
-        if let fillFraction { return max(0, min(1, fillFraction)) }
-        return score.map { max(0, min(1, $0 / maxValue)) }
-    }
-
-    /// Extracted so the compiler doesn't have to type-check the whole hero body as one expression
-    /// (it started timing out once this file grew — the compiler's own suggested remedy).
-    private var vesselLayer: some View {
-        ZStack {
-            LiquidVessel(value: frac, tint: tint, animated: animated)
-                .frame(width: Self.vesselDiameter, height: Self.vesselDiameter)
-            readout
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .allowsHitTesting(false)
+    private var progress: Double? {
+        if let progressOverride {
+            return max(0, min(1, progressOverride))
         }
+        guard let value, maximum > 0 else { return nil }
+        return max(0, min(1, value / maximum))
     }
 
-    @ViewBuilder
-    private var readout: some View {
-        if score != nil {
-            CountUpNumber(value: shown, font: StrandFont.rounded(26), decimals: decimals)
-        } else {
-            let size: CGFloat = emptyText == StrandFormat.missing ? 26 : 19
-            Text(emptyText).font(StrandFont.rounded(size))
-        }
-    }
-
-    /// The spoken value, extracted for the same type-check reason.
-    private var accessibilityValueText: String {
-        if let override = accessibilityValueOverride { return override }
-        guard let s = score else { return String(localized: "No data yet") }
+    private var displayValue: String {
+        guard let value else { return emptyText }
         if decimals > 0 {
-            return String(format: "%.\(decimals)f of %.0f", s, maxValue)
+            return value.formatted(
+                .number.precision(.fractionLength(decimals))
+            )
         }
-        return String(localized: "\(Int(s.rounded())) of \(Int(maxValue.rounded()))")
+        return "\(Int(value.rounded()))"
+    }
+
+    private var accessibilityValueText: String {
+        V2HeroArc.accessibilityReadout(
+            value: value,
+            maximum: maximum,
+            caption: context,
+            decimals: decimals
+        )
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(spacing: 7) {
-                vesselLayer
-                HStack(spacing: 3) {
-                    // #74: one line, shrink-to-fit rather than wrap under large Dynamic Type (mirrors
-                    // the score number above) so labels never grow the hero card to two lines.
-                    Text(label.uppercased()).font(StrandFont.overline).tracking(0)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .opacity(0.6)
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(displayValue)
+                        .font(NoopV2.number(metricValueSize, .bold))
+                        .foregroundStyle(NoopV2.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.62)
+                    if value != nil, !unit.isEmpty {
+                        Text(unit)
+                            .font(StrandFont.caption.weight(.semibold))
+                            .foregroundStyle(NoopV2.inkTertiary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                    }
                 }
-                // The hero card is pinned dark in both themes, so use scheme-invariant on-dark ink.
-                .foregroundStyle(StrandPalette.onDarkSecondary)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            .gesture(
-                TapGesture(count: 2)
-                    .exclusively(before: TapGesture(count: 1))
-                    .onEnded { value in
-                        switch value {
-                        case .first: onExplain()
-                        case .second: onOpen()
+
+                Text(label.uppercased())
+                    .font(StrandFont.metricLabel)
+                    .tracking(0)
+                    .foregroundStyle(NoopV2.inkSecondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .minimumScaleFactor(0.72)
+
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(NoopV2.decorationFaint.opacity(0.18))
+                        if let progress {
+                            Capsule()
+                                .fill(tint.opacity(0.86))
+                                .frame(
+                                    width: max(
+                                        progress > 0 ? 3 : 0,
+                                        proxy.size.width * CGFloat(progress)
+                                    )
+                                )
                         }
                     }
-            )
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(Text(label))
-            .accessibilityValue(Text(accessibilityValueText))
-            .accessibilityHint("Opens the detailed trend. An About button explains the metric.")
-            .accessibilityAction { onOpen() }
-            .accessibilityAction(named: Text("Explain \(label)")) { onExplain() }
-            .accessibilitySortPriority(1)
+                }
+                .frame(height: 3)
+                .accessibilityHidden(true)
 
-            MetricInfoButton(
-                title: String(localized: "About \(label)"),
-                tint: tint,
-                visualSize: 22,
-                action: onExplain
-            )
-            .offset(x: 2, y: -3)
+                Group {
+                    if let context {
+                        Text(context)
+                            .foregroundStyle(value == nil ? NoopV2.inkTertiary : tint)
+                    } else {
+                        Text(verbatim: " ")
+                            .hidden()
+                    }
+                }
+                .font(StrandFont.caption)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .minimumScaleFactor(0.68)
+            }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity)
-        .onAppear { rollTo(score) }
-        .onChangeCompat(of: score) { v in rollTo(v) }
-    }
-
-    private func rollTo(_ v: Double?) {
-        guard let v else { shown = 0; return }
-        withAnimation(.easeOut(duration: 0.9)) { shown = v }   // counts up in step with the vessel filling
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text(accessibilityValueText))
+        .accessibilityHint("Opens the detailed trend")
+        .accessibilityAction(named: Text("Explain \(label)")) { onExplain() }
     }
 }
 
 /// The Daily Signal header uses the same audited readiness and illness results as the rest of Today.
 /// It deliberately lives in a small AppModel-observing leaf so the live ~1 Hz heart-rate stream does not
-/// invalidate the score vessels or the rest of the dashboard.
+/// invalidate the compact metric row or the rest of the dashboard.
 enum DailySignalPillLabel: Equatable {
     case building
     case aligned
@@ -5021,6 +5051,7 @@ private struct DailySignalHeader: View {
     let readiness: ReadinessEngine.Readiness
     let includesCurrentWellnessSignal: Bool
     let sourceLabel: String?
+    let accessibilitySourceLabel: String?
 
     private var illness: IllnessSignalEngine.Result? {
         includesCurrentWellnessSignal ? model.illnessSignal : nil
@@ -5071,18 +5102,39 @@ private struct DailySignalHeader: View {
             String(localized: "appwide.daily_signal.label"),
             label
         )
-        return String.localizedStringWithFormat(
+        let signalSummary = String.localizedStringWithFormat(
             String(localized: "appwide.a11y.state_format"),
             state,
             summary
+        )
+        guard let sourceLabel = accessibilitySourceLabel ?? sourceLabel else {
+            return signalSummary
+        }
+        return String.localizedStringWithFormat(
+            String(localized: "appwide.a11y.state_format"),
+            signalSummary,
+            sourceLabel
         )
     }
 
     var body: some View {
         NavigationLink(value: TabRoute.health) {
             ViewThatFits(in: .horizontal) {
-                wideRow
-                compactRow
+                HStack(spacing: NoopMetrics.space2) {
+                    signalLabel
+                    sourceText
+                    Spacer(minLength: NoopMetrics.space2)
+                    statusChip
+                }
+
+                VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                    HStack(spacing: NoopMetrics.space2) {
+                        signalLabel
+                        Spacer(minLength: NoopMetrics.space2)
+                        statusChip
+                    }
+                    sourceText
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -5094,46 +5146,16 @@ private struct DailySignalHeader: View {
         .buttonStyle(.plain)
     }
 
-    private var wideRow: some View {
-        HStack(spacing: NoopMetrics.space2) {
-            signalLabel
-            Spacer(minLength: NoopMetrics.space4)
-            if let sourceLabel {
-                DailySignalSourceChip(text: sourceLabel)
-                    .fixedSize()
-            }
-            V2Chip(text: label, tone: tint)
-                .fixedSize()
-        }
-    }
-
-    private var compactRow: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.space1) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: NoopMetrics.space2) {
-                    signalLabel
-                    Spacer(minLength: NoopMetrics.space2)
-                    statusChip
-                }
-
-                VStack(alignment: .leading, spacing: NoopMetrics.space1) {
-                    signalLabel
-                    statusChip
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            }
-            if sourceLabel != nil {
-                sourceChip
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-    }
-
     @ViewBuilder
-    private var sourceChip: some View {
+    private var sourceText: some View {
         if let sourceLabel {
-            DailySignalSourceChip(text: sourceLabel)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(sourceLabel)
+                .font(NoopV2.caption)
+                .foregroundStyle(StrandPalette.onDarkTertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(-1)
+                .accessibilityHidden(true)
         }
     }
 
@@ -5158,154 +5180,6 @@ private struct DailySignalHeader: View {
                 .foregroundStyle(StrandPalette.onDarkSecondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-        }
-    }
-}
-
-/// Score provenance stays neutral at rest. During a real band-history offload, the compatible-band source gets
-/// an indeterminate sweep because the protocol exposes chunks pulled but no total; a percentage would lie.
-/// Completion turns the label green briefly, then returns it to the same quiet provenance treatment.
-///
-/// LiveState observation is isolated here so its ~1 Hz heart-rate stream never invalidates the header,
-/// score vessels, or the rest of Today.
-private struct DailySignalSourceChip: View {
-    @EnvironmentObject private var live: LiveState
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.liquidInteractionInProgress) private var interactionInProgress
-
-    let text: String
-
-    @State private var sweep: CGFloat = 0
-    @State private var presentingSync = false
-    @State private var justSynced = false
-    @State private var syncStartedAt: TimeInterval?
-    @State private var completionTask: Task<Void, Never>?
-    private static let interChunkDelayNanoseconds: UInt64 = 3_000_000_000
-    private static let demoSyncing = CommandLine.arguments.contains("--demo-band-syncing")
-
-    private var isBand: Bool {
-        LiquidTodayView.sourceLabelIncludesCompatibleBand(text)
-    }
-
-    private var syncingRaw: Bool {
-        isBand && (live.backfilling || Self.demoSyncing)
-    }
-
-    private var syncing: Bool { isBand && presentingSync }
-
-    private var tone: Color {
-        syncing || justSynced ? StrandPalette.statusPositive : StrandPalette.onDarkSecondary
-    }
-
-    private var accessibilityText: String {
-        if syncing {
-            return live.syncChunksThisSession > 0
-                ? String.localizedStringWithFormat(
-                    String(localized: "appwide.today.band_sync.progress_format"),
-                    live.syncChunksThisSession
-                )
-                : String(localized: "appwide.today.band_sync.syncing")
-        }
-        return justSynced ? String(localized: "appwide.today.band_sync.synced") : text
-    }
-
-    var body: some View {
-        Text(text.uppercased())
-            .font(NoopV2.overline)
-            .tracking(0)
-            .lineLimit(1)
-            .minimumScaleFactor(0.72)
-            .foregroundStyle(tone)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background {
-                ZStack {
-                    RoundedRectangle(cornerRadius: NoopV2.chipRadius, style: .continuous)
-                        .fill(StrandPalette.onDarkSecondary.opacity(0.13))
-                    if syncing && !reduceMotion && !interactionInProgress {
-                        GeometryReader { proxy in
-                            let width = max(CGFloat(22), proxy.size.width * 0.48)
-                            LinearGradient(
-                                colors: [.clear, StrandPalette.statusPositive.opacity(0.30), .clear],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                            .frame(width: width)
-                            .offset(x: -width + (proxy.size.width + width) * sweep)
-                        }
-                        .clipShape(
-                            RoundedRectangle(cornerRadius: NoopV2.chipRadius, style: .continuous)
-                        )
-                    }
-                }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: NoopV2.chipRadius, style: .continuous)
-                    .stroke(StrandPalette.onDarkSecondary.opacity(0.16), lineWidth: 0.75)
-            }
-            .accessibilityLabel(accessibilityText)
-            .onAppear {
-                updateSyncPresentation()
-            }
-            .onChangeCompat(of: live.backfilling) { _ in
-                updateSyncPresentation()
-            }
-            .onChangeCompat(of: text) { _ in
-                updateSyncPresentation()
-            }
-            .onChangeCompat(of: reduceMotion) { _ in
-                updateSweep()
-            }
-            .onChangeCompat(of: interactionInProgress) { _ in
-                updateSweep()
-            }
-            .onDisappear {
-                completionTask?.cancel()
-            }
-    }
-
-    private func updateSyncPresentation() {
-        completionTask?.cancel()
-        if syncingRaw {
-            if !presentingSync {
-                syncStartedAt = live.lastSyncedAt
-            }
-            presentingSync = true
-            justSynced = false
-            updateSweep()
-        } else if isBand && presentingSync {
-            // A deep offload briefly drops backfilling between chunks. Keep the sweep continuous and only
-            // settle after a quiet interval. A timestamp advance, not silence, decides whether this succeeded.
-            completionTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: Self.interChunkDelayNanoseconds)
-                guard !Task.isCancelled else { return }
-                let completed = LiquidTodayView.bandSyncCompletionAdvanced(
-                    from: syncStartedAt,
-                    to: live.lastSyncedAt
-                )
-                presentingSync = false
-                justSynced = completed
-                syncStartedAt = nil
-                updateSweep()
-                guard completed else { return }
-                try? await Task.sleep(nanoseconds: 1_800_000_000)
-                if !Task.isCancelled { justSynced = false }
-            }
-        } else {
-            presentingSync = false
-            justSynced = false
-            syncStartedAt = nil
-            updateSweep()
-        }
-    }
-
-    private func updateSweep() {
-        withAnimation(.none) { sweep = 0 }
-        guard syncing, !reduceMotion, !interactionInProgress else { return }
-        DispatchQueue.main.async {
-            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
-                sweep = 1
-            }
         }
     }
 }

@@ -43,10 +43,14 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
 }
 
 final class KeyMetricPrefsTests: XCTestCase {
-    func testFreshInstallDefaultsToRecoveryEffortAndSleep() {
-        XCTAssertEqual(KeyMetric.defaultSelection, [.charge, .effort, .rest])
-        XCTAssertEqual(KeyMetricPrefs.decodeEnabled(""), [.charge, .effort, .rest])
-        XCTAssertEqual(KeyMetricPrefs.decodeEnabled("   "), [.charge, .effort, .rest])
+    func testFreshInstallDefaultsComplementDailySignalSummary() {
+        let secondaryDefaults: [KeyMetric] = [.hrv, .restingHr, .bloodOxygen]
+        XCTAssertEqual(KeyMetric.defaultSelection, secondaryDefaults)
+        XCTAssertEqual(KeyMetricPrefs.decodeEnabled(""), secondaryDefaults)
+        XCTAssertEqual(KeyMetricPrefs.decodeEnabled("   "), secondaryDefaults)
+        XCTAssertTrue(
+            Set(secondaryDefaults).isDisjoint(with: Set([.charge, .effort, .rest]))
+        )
     }
 
     func testSelectionContractMatchesProductLimit() {
@@ -58,11 +62,18 @@ final class KeyMetricPrefsTests: XCTestCase {
     func testShortLegacySelectionKeepsUserOrderAndFillsToThree() {
         XCTAssertEqual(
             KeyMetricPrefs.decodeEnabled("steps,hrv"),
-            [.steps, .hrv, .charge]
+            [.steps, .hrv, .restingHr]
         )
         XCTAssertEqual(
             KeyMetricPrefs.encode([.bloodOxygen]),
-            "bloodOxygen,charge,effort"
+            "bloodOxygen,hrv,restingHr"
+        )
+    }
+
+    func testExistingDailySignalSelectionIsNotSilentlyReplaced() {
+        XCTAssertEqual(
+            KeyMetricPrefs.decodeEnabled("charge,effort,rest"),
+            [.charge, .effort, .rest]
         )
     }
 
@@ -96,6 +107,6 @@ final class KeyMetricPrefsTests: XCTestCase {
             ]),
             "steps,hrv,bloodOxygen,restingHr,calories"
         )
-        XCTAssertEqual(KeyMetricPrefs.encode([]), "charge,effort,rest")
+        XCTAssertEqual(KeyMetricPrefs.encode([]), "hrv,restingHr,bloodOxygen")
     }
 }

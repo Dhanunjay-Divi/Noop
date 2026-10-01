@@ -1548,6 +1548,14 @@ fun NoopRoot(
         return
     }
 
+    val onboardingInstrumentationHarness = remember {
+        OnboardingInstrumentationHarnessRegistry.current()
+    }
+    if (onboardingInstrumentationHarness != null) {
+        onboardingInstrumentationHarness.OperationalShellBoundary()
+        return
+    }
+
     // Existing, onboarded user: render the app, and if they've updated since last launch
     // (stored version behind current), show "What's New" once over the top.
     AppRoot(

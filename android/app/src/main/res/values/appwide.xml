@@ -81,6 +81,7 @@
     <string name="appwide_calendar_summary_overline">THIS MONTH</string>
     <string name="appwide_calendar_summary_scored_format">%1$d recorded days · average %2$s</string>
     <string name="appwide_calendar_your_month">Your month</string>
+    <string name="appwide_charge_confidence_baseline_ready">Baseline ready</string>
     <string name="appwide_charge_confidence_calibrating">Calibrating</string>
     <string name="appwide_charge_confidence_estimate">Estimate</string>
     <string name="appwide_charge_confidence_reliable">Reliable</string>

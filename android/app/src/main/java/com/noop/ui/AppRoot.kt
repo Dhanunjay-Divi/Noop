@@ -1574,7 +1574,7 @@ internal object NoopCommandLensPrefs {
     const val FILE = "noop.commandLens"
     const val EDGE = "edge"
     const val VERTICAL_FRACTION = "verticalFraction"
-    const val DEFAULT_VERTICAL_FRACTION = 0.76f
+    const val DEFAULT_VERTICAL_FRACTION = 0.90f
 
     fun readEdge(prefs: android.content.SharedPreferences): NoopCommandLensEdge =
         runCatching {

@@ -3,6 +3,36 @@ import XCTest
 import WhoopStore
 
 final class OnboardingOwnershipStepSelectionTests: XCTestCase {
+    #if DEBUG
+    func testConfiguredProviderUITestRequiresExactExplicitArgument() {
+        XCTAssertTrue(
+            OnboardingWizard.configuredProviderUITestRequested(
+                arguments: [
+                    "NOOP",
+                    OnboardingWizard
+                        .configuredProviderUITestLaunchArgument,
+                ]
+            )
+        )
+        XCTAssertFalse(
+            OnboardingWizard.configuredProviderUITestRequested(
+                arguments: [
+                    "NOOP",
+                    "--ui-test-reset-first-run",
+                ]
+            )
+        )
+        XCTAssertFalse(
+            OnboardingWizard.configuredProviderUITestRequested(
+                arguments: [
+                    "NOOP",
+                    "--ui-test-configured-provider-onboarding-near-match",
+                ]
+            )
+        )
+    }
+    #endif
+
     func testFirstRunUsesConciseAccountFirstSequence() {
         let steps = OnboardingWizard.onboardingSteps(
             ownershipConfigured: true

@@ -8128,6 +8128,17 @@
     "zh-Hans": "校准中",
     "zh-Hant": "校準中"
   },
+  "appwide.charge.confidence.baseline.ready": {
+    "de": "Baseline bereit",
+    "en": "Baseline ready",
+    "es": "Referencia lista",
+    "fr": "Référence prête",
+    "it": "Baseline pronta",
+    "pt-PT": "Referência pronta",
+    "ru": "Базовая линия готова",
+    "zh-Hans": "基线已就绪",
+    "zh-Hant": "基線已就緒"
+  },
   "appwide.charge.confidence.estimate": {
     "de": "Schätzung",
     "en": "Estimate",

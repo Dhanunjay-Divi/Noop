@@ -294,7 +294,7 @@ class PrimaryNavigationContractTest {
         assertTrue(lens.contains("(-9).dp else 9.dp"))
         assertTrue(lens.contains("val touchWidth = 48.dp"))
         assertTrue(lens.contains("val touchHeight = 52.dp"))
-        assertTrue(text.contains("DEFAULT_VERTICAL_FRACTION = 0.76f"))
+        assertTrue(text.contains("DEFAULT_VERTICAL_FRACTION = 0.90f"))
     }
 
     @Test

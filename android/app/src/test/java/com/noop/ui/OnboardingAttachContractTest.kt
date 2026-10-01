@@ -169,9 +169,22 @@ class OnboardingAttachContractTest {
         }
         assertTrue(onboarding.contains("OnboardingPage.Account -> AccountAvailabilityStep()"))
         assertTrue(
-            onboarding.contains(
-                "targetPage == OnboardingPage.Account && ownershipConfigured",
+            onboarding.contains("targetPage == OnboardingPage.Account &&"),
+        )
+        assertTrue(
+            onboarding.contains("instrumentationHarness != null"),
+        )
+        assertTrue(
+            onboarding.contains("OnboardingInstrumentationHarnessRegistry.current()"),
+        )
+        val mainActivity = source(userDir, "MainActivity.kt").readText()
+        assertTrue(
+            mainActivity.contains(
+                "onboardingInstrumentationHarness.OperationalShellBoundary()",
             ),
+        )
+        assertTrue(
+            onboarding.contains("OwnershipAccountScreen()"),
         )
         assertTrue(
             onboarding.contains(
@@ -342,7 +355,8 @@ class OnboardingAttachContractTest {
         assertTrue(
             onboarding.contains(
                 "OnboardingPage.Plan ->\n" +
-                    "                        !ownershipState.busy && postClaimOwnershipReady",
+                    "                        ownershipReconciliationComplete &&\n" +
+                    "                            postClaimOwnershipReady",
             ),
         )
         assertTrue(

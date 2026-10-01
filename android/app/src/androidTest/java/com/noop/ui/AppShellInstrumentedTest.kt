@@ -191,20 +191,23 @@ class AppShellInstrumentedTest {
     }
 
     @Test
-    fun todayMetricDetailKeepsTodaySelectedAndReselectReturnsToRoot() {
-        val metricTag = "noop.today.metric.charge"
-        compose.onNodeWithTag("noop.today.list")
-            .performScrollToNode(hasTestTag(metricTag))
+    fun todayHeroRecoveryOpensDetailWithoutChangingSelectedTab() {
+        val metricTag = "noop.today.hero.recovery"
         compose.onNodeWithTag(metricTag).performClick()
         compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodesWithTag("noop.today.list").fetchSemanticsNodes().isEmpty()
+            compose.onAllNodesWithTag("noop.today.recovery-breakdown")
+                .fetchSemanticsNodes()
+                .isNotEmpty()
         }
         assertSelected("noop.tab.today")
 
-        compose.onNodeWithTag("noop.tab.today").performClick()
+        compose.onNodeWithTag("noop.today.recovery-breakdown.close").performClick()
         compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodesWithTag("noop.today.list").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithTag("noop.today.recovery-breakdown")
+                .fetchSemanticsNodes()
+                .isEmpty()
         }
+        compose.onNodeWithTag("noop.today.list").assertIsDisplayed()
     }
 
     @Test

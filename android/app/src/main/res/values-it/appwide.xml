@@ -81,6 +81,7 @@
     <string name="appwide_calendar_summary_overline">QUESTO MESE</string>
     <string name="appwide_calendar_summary_scored_format">%1$d giorni registrati · media %2$s</string>
     <string name="appwide_calendar_your_month">Il tuo mese</string>
+    <string name="appwide_charge_confidence_baseline_ready">Baseline pronta</string>
     <string name="appwide_charge_confidence_calibrating">Calibrazione</string>
     <string name="appwide_charge_confidence_estimate">Stima</string>
     <string name="appwide_charge_confidence_reliable">Affidabile</string>

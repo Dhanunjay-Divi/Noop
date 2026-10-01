@@ -1903,7 +1903,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(shell.contains("static let touchSize = CGSize(width: 48, height: 52)"))
         XCTAssertTrue(commandLens.contains(".frame(width: 28, height: 38)"))
         XCTAssertTrue(commandLens.contains(".offset(x: edge == .leading ? -9 : 9)"))
-        XCTAssertTrue(commandLens.contains("private var verticalFraction = 0.76"))
+        XCTAssertTrue(commandLens.contains("private var verticalFraction = 0.90"))
         XCTAssertFalse(commandLens.contains(#"Image(systemName: "plus")"#))
         XCTAssertTrue(shell.contains("--demo-quick-actions"))
 

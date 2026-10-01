@@ -81,6 +81,7 @@
     <string name="appwide_calendar_summary_overline">ЭТОТ МЕСЯЦ</string>
     <string name="appwide_calendar_summary_scored_format">Дней с данными: %1$d · среднее: %2$s</string>
     <string name="appwide_calendar_your_month">Ваш месяц</string>
+    <string name="appwide_charge_confidence_baseline_ready">Базовая линия готова</string>
     <string name="appwide_charge_confidence_calibrating">Калибровка</string>
     <string name="appwide_charge_confidence_estimate">Оценка</string>
     <string name="appwide_charge_confidence_reliable">Надёжно</string>

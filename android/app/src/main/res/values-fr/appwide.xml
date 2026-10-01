@@ -81,6 +81,7 @@
     <string name="appwide_calendar_summary_overline">CE MOIS-CI</string>
     <string name="appwide_calendar_summary_scored_format">%1$d jours enregistrés · moyenne %2$s</string>
     <string name="appwide_calendar_your_month">Votre mois</string>
+    <string name="appwide_charge_confidence_baseline_ready">Référence prête</string>
     <string name="appwide_charge_confidence_calibrating">Étalonnage</string>
     <string name="appwide_charge_confidence_estimate">Estimation</string>
     <string name="appwide_charge_confidence_reliable">Fiable</string>

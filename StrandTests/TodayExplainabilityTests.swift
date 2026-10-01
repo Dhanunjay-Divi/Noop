@@ -441,10 +441,61 @@ final class TodayExplainabilityTests: XCTestCase {
         XCTAssertNil(LiquidTodayView.heroSourceLabel(rawSources: [], deviceId: "my-whoop"))
     }
 
-    func testMixedCompatibleBandSourceStillQualifiesForSyncFeedback() {
-        XCTAssertTrue(LiquidTodayView.sourceLabelIncludesCompatibleBand("Compatible band"))
-        XCTAssertTrue(LiquidTodayView.sourceLabelIncludesCompatibleBand("Compatible band + Apple Watch"))
-        XCTAssertFalse(LiquidTodayView.sourceLabelIncludesCompatibleBand("Apple Watch"))
+    func testHeroAccessibilityProvenanceCanRetainAllDistinctSources() {
+        let raw = [
+            "my-whoop",
+            Repository.appleHealthSource,
+            "noop-computed",
+        ]
+        XCTAssertEqual(
+            LiquidTodayView.heroSourceLabel(
+                rawSources: raw,
+                deviceId: "my-whoop"
+            ),
+            "Compatible band + Apple Watch"
+        )
+        XCTAssertEqual(
+            LiquidTodayView.heroSourceLabel(
+                rawSources: raw,
+                deviceId: "my-whoop",
+                maximumDistinctLabels: nil
+            ),
+            "Compatible band + Apple Watch + On-device"
+        )
+    }
+
+    func testLiquidHeroUsesThreeCompactEqualMetricsAndQuietInlineProvenance() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let source = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("Strand/Liquid/LiquidTodayView.swift"),
+            encoding: .utf8
+        )
+        guard let heroStart = source.range(of: "    private var heroMetricSummary: some View {"),
+              let heroEnd = source.range(
+                of: "    private var heroMetricDivider: some View {",
+                range: heroStart.upperBound..<source.endIndex
+              ) else {
+            return XCTFail("Could not isolate the Liquid Today hero")
+        }
+        let hero = String(source[heroStart.lowerBound..<heroEnd.lowerBound])
+
+        XCTAssertEqual(
+            hero.components(separatedBy: "CompactDailyMetricCell(").count - 1,
+            3
+        )
+        XCTAssertFalse(hero.contains("V2HeroArc("))
+        XCTAssertFalse(hero.contains("V2SatelliteRing("))
+        XCTAssertTrue(hero.contains("dynamicTypeSize.isAccessibilitySize"))
+        XCTAssertTrue(hero.contains("VStack(spacing: 0)"))
+        XCTAssertTrue(source.contains("Button(action: onOpen)"))
+        XCTAssertTrue(source.contains("@ScaledMetric(relativeTo: .title2)"))
+        XCTAssertTrue(source.contains("accessibilitySourceLabel: heroAccessibilitySourceLabel"))
+        XCTAssertFalse(source.contains("private struct DailySignalSourceChip"))
+        XCTAssertTrue(source.contains("Text(sourceLabel)"))
+        XCTAssertTrue(source.contains(".truncationMode(.tail)"))
+        XCTAssertTrue(source.contains("accessibilitySourceLabel ?? sourceLabel"))
     }
 
     func testBandSyncConfirmationRequiresAdvancedCompletionEvidence() {

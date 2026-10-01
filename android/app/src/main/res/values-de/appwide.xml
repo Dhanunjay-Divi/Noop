@@ -81,6 +81,7 @@
     <string name="appwide_calendar_summary_overline">DIESER MONAT</string>
     <string name="appwide_calendar_summary_scored_format">%1$d erfasste Tage · Durchschnitt %2$s</string>
     <string name="appwide_calendar_your_month">Dein Monat</string>
+    <string name="appwide_charge_confidence_baseline_ready">Baseline bereit</string>
     <string name="appwide_charge_confidence_calibrating">Kalibrierung</string>
     <string name="appwide_charge_confidence_estimate">Schätzung</string>
     <string name="appwide_charge_confidence_reliable">Zuverlässig</string>

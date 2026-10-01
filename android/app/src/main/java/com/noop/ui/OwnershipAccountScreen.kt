@@ -698,7 +698,7 @@ private fun OwnershipLocalRecoveryCard(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OwnershipAuthenticationCard(
+internal fun OwnershipAuthenticationCard(
     createMode: Boolean,
     onCreateModeChange: (Boolean) -> Unit,
     terms: String?,
@@ -737,6 +737,13 @@ private fun OwnershipAuthenticationCard(
                         onClick = { onCreateModeChange(create) },
                         enabled = !busy,
                         shape = SegmentedButtonDefaults.itemShape(index, 2),
+                        modifier = Modifier.testTag(
+                            if (create) {
+                                "noop.ownership.mode.create"
+                            } else {
+                                "noop.ownership.mode.sign-in"
+                            },
+                        ),
                         label = {
                             Text(
                                 stringResource(
@@ -797,6 +804,9 @@ private fun OwnershipAuthenticationCard(
                             checked = acceptedTerms,
                             onCheckedChange = onAcceptedTermsChange,
                             enabled = !busy,
+                            modifier = Modifier.testTag(
+                                "noop.ownership.pre-account-terms-agree",
+                            ),
                             colors = CheckboxDefaults.colors(
                                 checkedColor = Palette.accent,
                                 uncheckedColor = Palette.textTertiary,

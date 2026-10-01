@@ -2278,7 +2278,7 @@ private struct MovableNoopCommandLens: View {
     let action: () -> Void
 
     @AppStorage("noop.commandLens.edge") private var storedEdge = NoopCommandLensEdge.trailing.rawValue
-    @AppStorage("noop.commandLens.verticalFraction") private var verticalFraction = 0.76
+    @AppStorage("noop.commandLens.verticalFraction") private var verticalFraction = 0.90
     @GestureState private var dragTranslation = CGSize.zero
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency

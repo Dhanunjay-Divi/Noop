@@ -96,6 +96,7 @@ class AndroidLocalizationPolicyTest {
         val allowed = Regex(
                 """string:(wind_down_|sleep_planner_|strength_|key_metrics_(selection_|show_)|hydration_(adaptive_timing_|base_interval_label)).*|""" +
                 """string:key_metrics_open_history|""" +
+                """string:noop_command_lens_.*|""" +
                 """string:(profile_(bmi_|target_weight_)|vital_range_summary_).*|""" +
                 """string:ownership_(delete_|deletion_).*|""" +
                 """string:(nav_backup_sync|data_sync_subtitle|ownership_(resend_verification_countdown|send_code_countdown|verification_code_invalid|verification_session_expired|verification_rate_limited|verification_cooldown_active|network_unavailable|progress_step|setup_complete)|managed_cloud_error_document_conflict)|""" +

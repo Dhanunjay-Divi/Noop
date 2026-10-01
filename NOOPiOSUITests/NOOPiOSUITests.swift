@@ -165,6 +165,208 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "fresh-install-supported-bands")
     }
 
+    func testConfiguredProviderAndSyntheticBandCompleteFullOnboarding() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--ui-test-reset-first-run",
+            "--ui-test-configured-provider-onboarding",
+        ]
+        app.launch()
+
+        let trialContinue = app.buttons["noop.trial.continue"]
+        if trialContinue.waitForExistence(timeout: 5) {
+            trialContinue.tap()
+        }
+
+        XCTAssertTrue(
+            app.staticTexts["noop.terms.title"]
+                .waitForExistence(timeout: 15)
+        )
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        for index in 0..<3 {
+            let attestation =
+                app.switches["noop.terms.attestation.\(index)"]
+            XCTAssertTrue(attestation.waitForExistence(timeout: 5))
+            XCTAssertTrue(scrollToHittable(attestation, in: app))
+            attestation.tap()
+        }
+        let accept = app.buttons["noop.terms.accept"]
+        XCTAssertTrue(scrollToHittable(accept, in: app))
+        XCTAssertTrue(accept.isEnabled)
+        accept.tap()
+
+        let primary = app.buttons["noop.onboarding.primary"]
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.welcome"
+            ].waitForExistence(timeout: 20)
+        )
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        XCTAssertTrue(primary.waitForExistence(timeout: 5))
+        primary.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.account"
+            ].waitForExistence(timeout: 10)
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)[
+                "noop.onboarding.account-unconfigured"
+            ].exists
+        )
+        XCTAssertFalse(primary.isEnabled)
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+
+        let accountMode =
+            app.segmentedControls["noop.ui-test.ownership.mode"]
+        XCTAssertTrue(accountMode.waitForExistence(timeout: 5))
+        XCTAssertTrue(accountMode.buttons["Create"].exists)
+        XCTAssertTrue(accountMode.buttons["Sign in"].exists)
+        XCTAssertTrue(
+            app.secureTextFields[
+                "noop.ownership.password-confirmation"
+            ].exists
+        )
+        XCTAssertTrue(
+            app.switches["noop.ui-test.ownership.terms"].exists
+        )
+        keepScreenshot(app, name: "configured-onboarding-account")
+        accountMode.buttons["Sign in"].tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 5) {
+                !app.secureTextFields[
+                    "noop.ownership.password-confirmation"
+                ].exists
+            }
+        )
+
+        let email = app.textFields["noop.ownership.email"]
+        let password =
+            app.secureTextFields["noop.ownership.password"]
+        focusAndType(
+            "configured-ui-test@example.invalid",
+            into: email,
+            in: app
+        )
+        focusAndTypeSecure(
+            "synthetic-passphrase",
+            into: password,
+            in: app
+        )
+        let authenticate =
+            app.buttons["noop.ownership.authenticate"]
+        XCTAssertTrue(scrollToHittable(authenticate, in: app))
+        XCTAssertTrue(authenticate.isEnabled)
+        authenticate.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.ui-test.account.success"
+            ].waitForExistence(timeout: 10)
+        )
+        XCTAssertTrue(waitUntil(timeout: 5) { primary.isEnabled })
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        primary.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.bluetooth"
+            ].waitForExistence(timeout: 10)
+        )
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        primary.tap()
+
+        let systemAlert = app.alerts.firstMatch
+        if systemAlert.waitForExistence(timeout: 3) {
+            let allow = systemAlert.buttons["Allow"]
+            if allow.exists {
+                allow.tap()
+            } else {
+                systemAlert.buttons.firstMatch.tap()
+            }
+        }
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.scan"
+            ].waitForExistence(timeout: 15)
+        )
+        XCTAssertFalse(primary.isEnabled)
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        let chooseDevice =
+            app.buttons["noop.onboarding.choose-device"]
+        XCTAssertTrue(chooseDevice.waitForExistence(timeout: 5))
+        chooseDevice.tap()
+
+        let syntheticBand =
+            app.buttons["noop.device-wizard.type.supplier-band"]
+        XCTAssertTrue(syntheticBand.waitForExistence(timeout: 10))
+        keepScreenshot(app, name: "configured-onboarding-supported-band")
+        syntheticBand.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.ownership"
+            ].waitForExistence(timeout: 10)
+        )
+        XCTAssertFalse(primary.isEnabled)
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        let claim =
+            app.buttons["noop.ui-test.ownership.claim"]
+        XCTAssertTrue(claim.waitForExistence(timeout: 5))
+        claim.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.ui-test.ownership.success"
+            ].waitForExistence(timeout: 10)
+        )
+        keepScreenshot(app, name: "configured-onboarding-ownership")
+        XCTAssertTrue(waitUntil(timeout: 5) { primary.isEnabled })
+        primary.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.profile"
+            ].waitForExistence(timeout: 10)
+        )
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        XCTAssertTrue(scrollToHittable(primary, in: app))
+        primary.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.plan"
+            ].waitForExistence(timeout: 10)
+        )
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        XCTAssertTrue(scrollToHittable(primary, in: app))
+        primary.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.done"
+            ].waitForExistence(timeout: 10)
+        )
+        XCTAssertTrue(
+            app.staticTexts["noop.onboarding.done.title"].exists
+        )
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        XCTAssertTrue(scrollToHittable(primary, in: app))
+        XCTAssertEqual(primary.label, "Enter NOOP")
+        keepScreenshot(app, name: "configured-onboarding-complete")
+        primary.tap()
+
+        XCTAssertTrue(
+            app.buttons["noop.tab.0"].waitForExistence(timeout: 20)
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.done"
+            ].exists
+        )
+    }
+
     private func attachScreenshot(named name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
@@ -1686,6 +1888,49 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(
             focusedField.exists,
             "Text field never acquired keyboard focus.",
+            file: file,
+            line: line
+        )
+        focusedField.typeText(value)
+    }
+
+    private func focusAndTypeSecure(
+        _ value: String,
+        into field: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(
+            field.waitForExistence(timeout: 10),
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            scrollToHittable(field, in: app),
+            "Secure field never became hittable.",
+            file: file,
+            line: line
+        )
+        let focusedField = app.secureTextFields.matching(
+            NSPredicate(
+                format: "identifier == %@ AND hasKeyboardFocus == true",
+                field.identifier
+            )
+        ).firstMatch
+        for attempt in 0..<8 where !focusedField.exists {
+            if attempt.isMultiple(of: 2) {
+                field.tap()
+            } else {
+                field.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+                ).tap()
+            }
+            _ = focusedField.waitForExistence(timeout: 1)
+        }
+        XCTAssertTrue(
+            focusedField.exists,
+            "Secure field never acquired keyboard focus.",
             file: file,
             line: line
         )

@@ -18,8 +18,9 @@ import com.noop.R
 // MARK: - Editable Key-Metrics layout (#251)
 //
 // The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to five in
-// their preferred order. A fresh install starts with NOOP's three core daily signals — Recovery, Effort,
-// and Sleep — while every other metric remains available in the editor and full history.
+// their preferred order. Recovery, Sleep, and Effort already lead the Today hero, so a fresh install starts
+// with three secondary overnight signals instead: HRV, resting heart rate, and blood oxygen. Every
+// metric remains available in the editor and full history.
 // Persistence is display-only.
 //
 // Stored as a single comma-joined string of metric keys in SharedPreferences ("today.keyMetrics"), the
@@ -60,8 +61,8 @@ enum class KeyMetric(
             BLOOD_OXYGEN, RESPIRATORY, STEPS, WEIGHT, CALORIES,
         )
 
-        /** NOOP's useful fresh-install starting point. Users can replace or extend it up to five. */
-        val defaultSelection: List<KeyMetric> = listOf(CHARGE, EFFORT, REST)
+        /** Fresh-install secondary signals; the hero already owns Recovery, Sleep, and Effort. */
+        val defaultSelection: List<KeyMetric> = listOf(HRV, RESTING_HR, BLOOD_OXYGEN)
     }
 }
 
@@ -98,7 +99,7 @@ object KeyMetricPrefs {
         NoopPrefs.of(context).edit().putInt(KEY_WINDOW, value).apply()
     }
 
-    /** The pinned tiles in display order. Empty/unset preferences yield the three core defaults. */
+    /** The pinned tiles in display order. Empty/unset preferences yield the secondary-signal defaults. */
     fun enabled(context: Context): List<KeyMetric> =
         decodeEnabled(NoopPrefs.of(context).getString(KEY_LAYOUT, null))
 
@@ -113,7 +114,7 @@ object KeyMetricPrefs {
 
     /**
      * Decode the stored string into an ordered pin set. Empty, unset, or all-unknown data yields the
-     * three core defaults. Older versions allowed more than five; their first five survive in order.
+     * fresh-install defaults. Older versions allowed more than five; their first five survive in order.
      */
     fun decodeEnabled(raw: String?): List<KeyMetric> {
         val trimmed = raw?.trim().orEmpty()

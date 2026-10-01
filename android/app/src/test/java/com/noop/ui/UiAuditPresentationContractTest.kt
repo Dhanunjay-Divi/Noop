@@ -144,7 +144,7 @@ class UiAuditPresentationContractTest {
         val digest = source("src/main/java/com/noop/ui/WeeklyDigestCard.kt")
 
         assertTrue(today.contains("return recoveryBandLabel(score)"))
-        assertTrue(today.contains("recovery != null -> recoveryBandLabel(recovery)"))
+        assertTrue(today.contains("ownRecovery != null -> recoveryBandLabel(ownRecovery)"))
         assertTrue(
             today.contains(
                 "TodayRecoveryHeroTone.RECOVERY ->\n" +

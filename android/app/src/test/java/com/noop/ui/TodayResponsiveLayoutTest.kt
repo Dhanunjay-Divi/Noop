@@ -36,7 +36,7 @@ class TodayResponsiveLayoutTest {
         val today = source("com/noop/ui/TodayScreen.kt")
         val start = today.indexOf("private fun DailySignalHeader(")
         val end = today.indexOf(
-            "@Composable\nprivate fun DailySignalSourceBadgeLive(",
+            "@Composable\nprivate fun DailySignalSourceLabel(",
             startIndex = start,
         )
         val block = today.substring(start, end)
@@ -55,7 +55,6 @@ class TodayResponsiveLayoutTest {
                 availableWidthPx = 340,
                 identityTextWidthPx = 142,
                 stateTextWidthPx = 82,
-                sourceTextWidthPx = null,
                 fixedContentWidthPx = 120,
             ),
         )
@@ -65,7 +64,6 @@ class TodayResponsiveLayoutTest {
                 availableWidthPx = 360,
                 identityTextWidthPx = 142,
                 stateTextWidthPx = 82,
-                sourceTextWidthPx = null,
                 fixedContentWidthPx = 120,
             ),
         )
@@ -75,7 +73,6 @@ class TodayResponsiveLayoutTest {
                 availableWidthPx = 500,
                 identityTextWidthPx = 142,
                 stateTextWidthPx = 82,
-                sourceTextWidthPx = null,
                 fixedContentWidthPx = 120,
             ),
         )
@@ -83,12 +80,14 @@ class TodayResponsiveLayoutTest {
         val today = source("com/noop/ui/TodayScreen.kt")
         val block = today.substring(
             today.indexOf("private fun DailySignalHeader("),
-            today.indexOf("@Composable\nprivate fun DailySignalSourceBadgeLive("),
+            today.indexOf("@Composable\nprivate fun DailySignalSourceLabel("),
         )
         assertTrue(block.contains("rememberTextMeasurer(cacheSize = 6)"))
         assertTrue(block.contains("identityTextWidthPx = textMeasurer.measure("))
         assertTrue(block.contains("stateTextWidthPx = textMeasurer.measure("))
-        assertTrue(block.contains("sourceTextWidthPx = sourceText?.let"))
+        assertTrue(block.contains("sourceLabel.orEmpty()"))
+        assertTrue(block.contains("DailySignalSourceLabel("))
+        assertFalse(block.contains("DailySignalSourceBadge"))
         assertFalse(block.contains("singleRowMinimum"))
     }
 

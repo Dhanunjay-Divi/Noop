@@ -81,6 +81,7 @@
     <string name="appwide_calendar_summary_overline">ESTE MES</string>
     <string name="appwide_calendar_summary_scored_format">%1$d días registrados · media %2$s</string>
     <string name="appwide_calendar_your_month">Tu mes</string>
+    <string name="appwide_charge_confidence_baseline_ready">Referencia lista</string>
     <string name="appwide_charge_confidence_calibrating">Calibrando</string>
     <string name="appwide_charge_confidence_estimate">Estimación</string>
     <string name="appwide_charge_confidence_reliable">Fiable</string>
