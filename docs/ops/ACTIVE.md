@@ -4,6 +4,18 @@ Last updated: **2026-10-01**
 
 ## Authoritative context
 
+- The physical comparison review branch `codex/physical-band-review-20261001`
+  starts at candidate `232f746e0` and contains source fix `2e676e75d` for Apple
+  optional step/sleep command serialization. Focused supplier tests pass 70/70,
+  SDK boundary checks pass 7/7, the default-off iOS graph compiles, and the
+  Android Full Debug APK (9.2.1-debug / 304) assembles. Both
+  iPhones now have Developer Mode enabled. Physical collection is not run:
+  required signing capabilities, approved external supplier artifacts, account
+  configuration, and the zero-row compatibility manifest remain gates. Android
+  is included and the owner will connect a phone. See the
+  [physical review](../handoff/NOOP-PHYSICAL-BAND-TEST-REVIEW-2026-10-01.md) and
+  [current round](rounds/2026-10-01-physical-band-candidate-review.md).
+
 - The Today metric-catalog refinement is locally verified after complete
   Android Full and Apple hosted-contract repair on
   `codex/today-metric-catalog-fitness-age-20261001`. Apple and Android now
