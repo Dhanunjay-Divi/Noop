@@ -10,7 +10,8 @@ Status: scoped source fix locally verified; physical collection not yet run
 - Candidate branch: `codex/today-metric-catalog-fitness-age-20261001`
 - Exact baseline SHA: `232f746e045d2755947579c3408efc5c3b84ff69`
 - Exact implementation SHA: `2e676e75dda24c203c12d755fe0530b92ca56f3b` (source/test fix; review documentation follows)
-- Local review branch: `codex/physical-band-review-20261001`
+- Published review branch: `codex/physical-band-review-20261001`
+- Draft review PR: https://github.com/Dhanunjay-Divi/Noop/pull/28 (base is the pinned Today-catalog branch; no merge performed)
 - iOS version/build: 9.2.1 / 231; unsigned graph builds; signed install unavailable.
 - Android Full Debug version/build: 9.2.1-debug / 304; APK assembled, not installed.
 - Android APK SHA-256: `77c4513713f95166e4502ff273f1d9b780ccccec4f4091baf15ca04bd5832fb6`.
@@ -198,7 +199,8 @@ Review the dedicated branch against the exact baseline above, not the whole
 unmerged Today-catalog delta against older main. The primary Today-catalog PR is
 still open at that baseline. Apply this scoped implementation after reviewing
 its source diff and operation log, using normal branch policy and required exact
-checks. No merge, force-push, release or firmware action is performed by this
+checks. The review branch is published as draft PR #28. No merge, force-push, release or
+firmware action is performed by this
 review round. The requester explicitly authorized the fix and review branch.
 
 ## Reviewer Conclusion

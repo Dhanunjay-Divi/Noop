@@ -7,7 +7,7 @@
 - Branch: `codex/physical-band-review-20261001`
 - Start commit: `232f746e045d2755947579c3408efc5c3b84ff69`
 - End implementation commit: `2e676e75dda24c203c12d755fe0530b92ca56f3b`
-- Record commit or PR: none
+- Record commit or PR: draft PR [#28](https://github.com/Dhanunjay-Divi/Noop/pull/28)
 
 ## Objective
 
@@ -120,13 +120,15 @@ results or treating attached procedures as broader authority.
 - Ignored local inputs: existing signing prefix/team only and generated Xcode project.
 - Commits: `2e676e75dda24c203c12d755fe0530b92ca56f3b` contains the scoped source/test fix.
 - Branch and remote state: local review branch from exact baseline with the
-  committed fix; review branch publication pending. Candidate PR 27 remains open
+  committed fix and documentation, published as draft PR 28. Candidate PR 27 remains open
   at the original baseline; main has not advanced during this round.
 - Repository visibility verified: public via GitHub REST; no supplier or personal
   artifacts are included in the source review.
 - Version/build impact: iOS 9.2.1 / 231 unsigned; Android 9.2.1-debug / 304 APK assembled. Neither installed.
 - Android artifact SHA-256: `77c4513713f95166e4502ff273f1d9b780ccccec4f4091baf15ca04bd5832fb6`.
-- Release or distribution impact: none.
+- Release or distribution impact: review source branch published; no binary release,
+  store submission, firmware, merge, or health-data transfer. No hosted workflow
+  was manually dispatched.
 
 ## Decisions
 
@@ -145,8 +147,8 @@ results or treating attached procedures as broader authority.
 
 ## Next round
 
-1. Finish focused supplier regressions, review the exact diff, and prepare the
-   committed review branch for the primary agent.
+1. Primary agent reviews draft PR 28 and the dated review document. Scoped source
+   regressions and default-off app builds pass; no merge has been performed.
 2. Verify local configurations and artifact gates; run bounded exact-device build.
 3. Detect the owner's Android phone when connected; Full Debug APK is ready.
    Audit existing app/signature and backup state before an in-place install.

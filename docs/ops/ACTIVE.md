@@ -5,6 +5,7 @@ Last updated: **2026-10-01**
 ## Authoritative context
 
 - The physical comparison review branch `codex/physical-band-review-20261001`
+  is published as draft PR [#28](https://github.com/Dhanunjay-Divi/Noop/pull/28). It
   starts at candidate `232f746e0` and contains source fix `2e676e75d` for Apple
   optional step/sleep command serialization. Focused supplier tests pass 70/70,
   SDK boundary checks pass 7/7, the default-off iOS graph compiles, and the
