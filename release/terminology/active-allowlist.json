@@ -1253,12 +1253,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 14,
+      "occurrenceCount": 16,
       "owner": "project team",
       "path": "Strand/Liquid/LiquidTodayView.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "d357f6f4a6f66a66841fbf90ce5492fc7c58ae833b012a7ccc59a3947ba00a16"
+      "sha256": "46c917c8b153fcc730d2c11a2ee741846437912f513f2a67f8461d41db4faf5d"
     },
     {
       "category": "core",
@@ -4331,12 +4331,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 54,
+      "occurrenceCount": 55,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "e4cdda828e215f30338112e2ca1d1c6824ea0680466879dbc66c9535508e967d"
+      "sha256": "d677ee9cfd43e63c8ba7e950e21c15d3b7249fba29227c15e9a51e45415365f6"
     },
     {
       "category": "customer",
