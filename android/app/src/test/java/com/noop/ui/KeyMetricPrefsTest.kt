@@ -6,29 +6,45 @@ import org.junit.Test
 class KeyMetricPrefsTest {
 
     @Test
-    fun freshInstallDefaultsToRecoveryEffortAndSleep() {
-        val expected = listOf(KeyMetric.CHARGE, KeyMetric.EFFORT, KeyMetric.REST)
+    fun freshInstallDefaultsToSecondarySignalsWithoutRepeatingTheHero() {
+        val expected = listOf(
+            KeyMetric.HRV,
+            KeyMetric.RESTING_HR,
+            KeyMetric.BLOOD_OXYGEN,
+            KeyMetric.RESPIRATORY,
+            KeyMetric.STEPS,
+            KeyMetric.WEIGHT,
+        )
+        val heroMetrics = setOf(KeyMetric.CHARGE, KeyMetric.REST, KeyMetric.EFFORT)
         assertEquals(expected, KeyMetric.defaultSelection)
         assertEquals(expected, KeyMetricPrefs.decodeEnabled(null))
         assertEquals(expected, KeyMetricPrefs.decodeEnabled(""))
         assertEquals(expected, KeyMetricPrefs.decodeEnabled("   "))
+        assertEquals(emptySet<KeyMetric>(), expected.toSet().intersect(heroMetrics))
+    }
+
+    @Test
+    fun explicitExistingCoreSelectionRemainsUnchanged() {
+        val existing = listOf(KeyMetric.CHARGE, KeyMetric.EFFORT, KeyMetric.REST)
+        assertEquals(existing, KeyMetricPrefs.decodeEnabled("charge,effort,rest"))
+        assertEquals("charge,effort,rest", KeyMetricPrefs.encode(existing))
     }
 
     @Test
     fun selectionContractMatchesProductLimitAndCatalog() {
         assertEquals(3, KeyMetricPrefs.MIN_SELECTION_COUNT)
-        assertEquals(5, KeyMetricPrefs.MAX_SELECTION_COUNT)
+        assertEquals(6, KeyMetricPrefs.MAX_SELECTION_COUNT)
         assertEquals(KeyMetric.entries.toSet(), KeyMetric.defaultOrder.toSet())
     }
 
     @Test
     fun shortLegacySelectionKeepsUserOrderAndFillsToThree() {
         assertEquals(
-            listOf(KeyMetric.STEPS, KeyMetric.HRV, KeyMetric.CHARGE),
+            listOf(KeyMetric.STEPS, KeyMetric.HRV, KeyMetric.RESTING_HR),
             KeyMetricPrefs.decodeEnabled("steps,hrv"),
         )
         assertEquals(
-            "bloodOxygen,charge,effort",
+            "bloodOxygen,hrv,restingHr",
             KeyMetricPrefs.encode(listOf(KeyMetric.BLOOD_OXYGEN)),
         )
     }
@@ -55,6 +71,7 @@ class KeyMetricPrefsTest {
                 KeyMetric.BLOOD_OXYGEN,
                 KeyMetric.RESTING_HR,
                 KeyMetric.CALORIES,
+                KeyMetric.WEIGHT,
             ),
             KeyMetricPrefs.decodeEnabled(
                 "steps, hrv,steps,bloodOxygen,restingHr,calories,weight,effort",
@@ -63,7 +80,7 @@ class KeyMetricPrefsTest {
     }
 
     @Test
-    fun decodeAllUnknownFallsBackToCoreDefaults() {
+    fun decodeAllUnknownFallsBackToFreshDefaults() {
         assertEquals(
             KeyMetric.defaultSelection,
             KeyMetricPrefs.decodeEnabled("retiredMetric,unknown"),
@@ -73,7 +90,7 @@ class KeyMetricPrefsTest {
     @Test
     fun encodeAlsoEnforcesDedupeCapAndNonemptySelection() {
         assertEquals(
-            "steps,hrv,bloodOxygen,restingHr,calories",
+            "steps,hrv,bloodOxygen,restingHr,calories,weight",
             KeyMetricPrefs.encode(
                 listOf(
                     KeyMetric.STEPS,
@@ -86,6 +103,9 @@ class KeyMetricPrefsTest {
                 ),
             ),
         )
-        assertEquals("charge,effort,rest", KeyMetricPrefs.encode(emptyList()))
+        assertEquals(
+            "hrv,restingHr,bloodOxygen,respiratory,steps,weight",
+            KeyMetricPrefs.encode(emptyList()),
+        )
     }
 }

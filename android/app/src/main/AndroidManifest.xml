@@ -194,6 +194,13 @@
             android:name="firebase_messaging_auto_init_enabled"
             android:value="false" />
 
+        <activity
+            android:name="com.noop.ui.NotificationRouteActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+
         <!--
           MainActivity no longer carries the LAUNCHER intent-filter itself. The home-screen entry
           point is split into two <activity-alias> elements below (.IconDefault / .IconNavy), each

@@ -1,8 +1,131 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-30**
+Last updated: **2026-10-01**
 
 ## Authoritative context
+
+- Band-first required-account onboarding is locally complete on
+  `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
+  commit `dc9d7efef`. A reset customer
+  installation now proceeds through Terms, Welcome, Bluetooth, supported-band
+  setup, Create account or Sign in, required ownership confirmation, profile,
+  plan, and app entry. Unconfigured account builds fail closed at Account and
+  expose no local-test continuation. Apple onboarding and Bluetooth contracts
+  pass 33/33; clean iPhone journeys pass 2/2 plus a final 1/1 neutral-copy
+  rerun; Android API 35 first-run journeys pass 3/3; Android onboarding policy
+  passes 17/17; and Full/Demo compilation passes without the removed
+  local/exploration resource warning. Current 1206x2622 captures and OCR show
+  the neutral `your compatible band` footer without observed clipping.
+  A versioned completion marker returns legacy account-free installs to the
+  required Account boundary, and the final combined walls pass 57/57 Apple and
+  78/78 Android focused cases. Earlier hosted heads isolated stale localization,
+  Android shell-fixture, and Apple source-contract expectations without
+  weakening the required flow. Exact hosted head `06e064f42` passed every
+  repository-policy, backend, Swift-package, Android, and macOS job. The iOS
+  production-shell suite failed only its configured-provider onboarding case
+  because three raw Terms switch taps did not verify their resulting values
+  before checking the fail-closed Accept button. The repaired test uses the
+  existing retry-and-state helper and passes that exact case 1/1 locally in
+  59.436 seconds. The onboarding repair itself changed no product, consent,
+  account, or health behavior; the subsequent notification audit remediation
+  is recorded below. One final consolidated push and exact-head hosted
+  verification remain before protected integration. Production identity
+  credentials, signed installation, live provider recovery, and physical BLE
+  remain pending.
+
+- Actionable wellness notifications are locally complete on
+  `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
+  commit `dc9d7efef`. Hydration opens a
+  user-confirmed water-log flow, qualified stress opens a visible one-minute
+  paced-breathing session, and inactivity opens a dismissible two-minute
+  movement break; notification delivery never silently logs behavior. Stress
+  remains default-off, non-diagnostic, and requires the existing corroborated
+  HRV, resting-HR, fresh low-motion, worn, session, quiet-hour, cooldown, and
+  replay gates rather than heart rate alone. Hydration cannot schedule more
+  often than hourly; inactivity defaults to a 45-minute threshold, 30-minute
+  continuing-bout re-nudge, worn-only evidence, and active/quiet-hour gates.
+  One- and two-minute actions use monotonic elapsed time across UI pauses.
+  Exact local evidence passes the complete iOS Simulator graph, 57/57 Apple
+  focused tests, 108/108 Apple reminder regressions, 78/78 Android focused
+  tests, Full/Demo Android compilation, all supported-locale generation,
+  claims/privacy/brand gates, 110 operations records, and diff hygiene.
+  Earlier hosted heads isolated release-policy and onboarding verification
+  drift rather than a reminder-runtime defect. Exact hosted head `06e064f42`
+  passed health claims, i18n, operations, release controls, runtime licenses,
+  trusted release controls, server, Swift packages, Android, and macOS. The
+  only iOS failure was the unrelated configured-provider onboarding test
+  interacting nondeterministically with the fail-closed Terms switches. Its
+  deterministic helper-based repair passes the exact case 1/1 locally in
+  59.436 seconds. A final independent audit then found and fixed three Apple
+  gaps: clean-install inactivity enable now requests notification permission,
+  macOS hydration notifications open the confirmed water-log flow, and Apple
+  plus Android movement copy no longer exposes inferred seated minutes. The
+  combined Apple regression passes 11/11, the generic iOS Simulator build
+  passes, Android focused notification/localization tests pass, and the full
+  all-platform i18n audit has zero translated-key gaps. Stress remains
+  multi-signal and never heart-rate-only; no action silently logs behavior.
+  One final consolidated push and exact-head hosted verification remain before
+  protected integration. Signed physical-device notification, background,
+  haptic, battery, and sensor validation remain pending.
+
+- The final PR `#25` replacement is locally verified on
+  `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
+  commit `b8018ac5e`. Mobile Today is number-first, the compact iPhone `More`
+  endpoint no longer has a decorative outer pill, selected metrics support six
+  focused cards plus one explicit all-history route, and macOS Today no longer
+  sits inside a nested `960`-point phone column. Wide Mac windows use the full
+  detail pane with Daily Signal beside the plan disclosure and a three-column
+  metric grid; narrow windows and accessibility text retain a full-width
+  stacked fallback. Final replacement evidence passes 69/69 Android focused
+  tests with Full/Demo Kotlin compilation, 134/134 affected Apple contracts,
+  and the complete iPhone Simulator graph. Wide `3200x1880` and narrow
+  `2000x1520` macOS captures were reviewed without observed clipping or overlap.
+  Earlier complete Android walls, configured onboarding automation, paired
+  phone review, StrandDesign, localization, claims, release-control, and
+  repository-policy evidence remain applicable. One documentation pin and one
+  consolidated push are pending before exact-head hosted checks and protected
+  integration. Signed physical-phone accessibility/frame-pacing and all
+  physical-band behavior remain external. No formula, source selection,
+  storage, account-provider, network, BLE, release, or production behavior
+  changed.
+
+- The mobile liquid-navigation refinement is locally complete on
+  `codex/mobile-navigation-sparkline-redesign-20260930`. The five-tab dock now
+  remains structurally separate from a compact `28x38` visible, `48x52`
+  interactive edge lens with bounded drag, nearest-edge snap, persisted side
+  and height, and accessibility movement alternatives. Android Trends now uses
+  connected-observation semantics instead of a decorative wand, More uses a
+  familiar app grid, and both dock rims are quieter. Exact local evidence
+  passes 58/58 StrandDesign tests, 19/19 Android focused contracts, Full/Demo
+  Kotlin compilation, Demo APK assembly, 90/90 Apple shell/state contracts,
+  and the complete iOS Simulator graph. Paired default, alternate-edge, and
+  nine-action-center screenshots were reviewed at 1206x2622 and 1080x2424;
+  Android drag persistence survived relaunch and its recent log sample had zero
+  matching fatal/ANR signatures. No formula, health data, network, BLE,
+  account, deployment, release, commit, or push behavior changed. Owner review,
+  normal protected integration, and signed physical-phone navigation,
+  accessibility, and frame-pacing checks remain. Full all-platform
+  localization, 107 operations records, and diff hygiene pass. After evidence
+  became durable, the exact 5.7 GiB iOS DerivedData, 623 MiB Android app build
+  output, and 170 MiB StrandDesign build output were removed; installed
+  synthetic candidates remain available for review.
+
+- The local mobile-navigation and sparkline redesign is branch
+  `codex/mobile-navigation-sparkline-redesign-20260930` from protected-main
+  commit `144e1bb904d4de1760a2d773e88d769bcf2f490d`. It aligns the iPhone and
+  Android five-tab signal docks, replaces the full-slot selected pill with an
+  icon-sized accent halo, and turns the ambiguous add control into a
+  speech-bubble/ECG NOOP action center that opens the existing nine vetted
+  actions under "How can NOOP help?". It also applies bounded monotone
+  interpolation to shared sparkline primitives without changing samples,
+  formulas, sources, or storage. Exact local evidence passes all 58
+  StrandDesign tests, Android focused contracts and Demo APK assembly, 85/85
+  Apple shell/state contracts, and the complete final iOS Simulator app graph.
+  Paired synthetic Today and action-center screenshots were reviewed at
+  1206x2622 and 1080x2424 for parity, clipping, readability, and overlap.
+  Android's recent log buffer had no matching fatal/ANR and both app processes
+  remained live. No commit, push, deployment, release, or physical-device
+  claim has been made; owner review and protected integration remain pending.
 
 - The current supplier-metrics replacement is branch
   `codex/supplier-metrics-main-verification-20260930`. PR `#22` reviewed exact
@@ -421,7 +544,7 @@ Last updated: **2026-09-30**
 - The September 25 first-run and supported-band milestone is committed in
   `db7de8e2571b1effd8278537d63bd7019b2b0d28`; its exact hosted head is green.
   Apple and Android now use the same eight-stage first-run
-  sequence, with account before band setup and no Home surface mounted under
+  sequence, with supported-band setup before account and no Home surface mounted under
   incomplete onboarding. Normal customer entry points say `Connect band` and
   list only pairable launch transports: the supplier `NOOP Band` appears only
   when its native adapter is available, while compatible 5/MG and 4.0 remain
@@ -833,11 +956,12 @@ Last updated: **2026-09-30**
   protected-main trusted result remain pending. No Docker image build,
   production runtime, signing, legal, carrier, physiology, or physical
   accessibility result is claimed without direct evidence.
-- Current production behavior remains local-first and account-free for
-  exploration. D-059 targets staged cloud authority for durable account
-  history, canonical formulas, recommendations, and cross-device state while
-  retaining the encrypted edge collector, bounded offline cache, immediate
-  Safety initiation, and explicit per-data-class rollback gates.
+- The current release candidate requires a NOOP account before shell entry;
+  there is no ordinary account-free exploration path. D-059 still stages cloud
+  authority for durable history, canonical formulas, recommendations, and
+  cross-device state while retaining the encrypted edge collector, bounded
+  offline cache, immediate Safety initiation, and explicit per-data-class
+  rollback gates.
 - Managed portability now has v2 integrity, resumable export, complete
   prevalidation, and resumable idempotent import for selected chunks plus
   `day_ownership`. Ownership deletion now has cooling-off request, status,

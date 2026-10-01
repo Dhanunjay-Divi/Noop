@@ -256,7 +256,12 @@ class RetainedScreenPerformanceTest {
         val today = source("com/noop/ui/TodayScreen.kt")
 
         assertTrue(components.contains("pulsing && !renderStill && !interactionInProgress"))
-        assertTrue(today.contains("syncing && !rememberPoseStill() && !interactionInProgress"))
+        assertTrue(today.contains("val posed = rememberPoseStill()"))
+        assertTrue(
+            today.contains(
+                "val interactionInProgress = LocalLiquidInteractionInProgress.current",
+            ),
+        )
         assertTrue(today.contains("LaunchedEffect(status, posed, interactionInProgress)"))
         assertTrue(today.contains("if (posed || interactionInProgress) return@LaunchedEffect"))
     }

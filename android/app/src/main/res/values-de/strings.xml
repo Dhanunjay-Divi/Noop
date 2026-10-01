@@ -1704,7 +1704,7 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Kalorien</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Wähle, welche Kacheln in deinem Kontrollzentrum erscheinen, und ordne sie mit den Pfeilen neu.</string>
-    <string name="key_metrics_selection_instructions">Pinne 3 bis 5 Messwerte oben an. Alle Messwerte bleiben sichtbar.</string>
+    <string name="key_metrics_selection_instructions">Pinne 3 bis 6 Messwerte oben an. Alle Messwerte bleiben sichtbar.</string>
     <string name="key_metrics_selection_count">%1$d von %2$d angepinnt</string>
     <string name="key_metrics_show_selected">Ausgewählte Messwerte anzeigen</string>
     <string name="key_metrics_show_all_count">Alle Messwerte anzeigen (%1$d)</string>
@@ -2219,9 +2219,7 @@
     <string name="onboarding_data_boundary_configured_body">Bandmesswerte beginnen auf diesem Telefon. In diesem konfigurierten Build musst du dich anmelden und den Bandbesitz erfolgreich bestätigen, bevor die Einrichtung abgeschlossen werden kann. Gesundheitsdaten werden nur übertragen, wenn du eine verwaltete Datenfunktion separat aktivierst und ihr zustimmst.</string>
     <string name="onboarding_data_boundary_exploration_title">Lokal erkunden</string>
     <string name="onboarding_data_boundary_exploration_body">Dieser Build erstellt kein Konto und lädt keine Gesundheitsdaten hoch. Die Einrichtung bleibt auf diesem Telefon; die Aktivierung des Bandbesitzes und verwaltete Cloud-Funktionen sind nicht verfügbar.</string>
-    <string name="onboarding_bluetooth_boundary_configured">NOOP verbindet sich über Bluetooth Low Energy direkt mit Noop Band. Bandsuche und Live-Messwerte bleiben auf diesem Telefon. Der konfigurierte Kontodienst wird für die Konto- und Bandbesitzaktivierung verwendet; die Übertragung von Gesundheitsdaten erfordert eine separate ausdrückliche Zustimmung.</string>
-    <string name="onboarding_bluetooth_boundary_exploration">NOOP verbindet sich über Bluetooth Low Energy direkt mit Noop Band. Bandsuche, Live-Messwerte und Einrichtung bleiben auf diesem Telefon. Kontofunktionen und Cloud-Uploads sind in diesem Erkundungs-Build deaktiviert.</string>
-    <string name="onboarding_bluetooth_permission_prompt">Wenn die Systemabfrage erscheint, wähle Zulassen, damit NOOP Noop Band finden kann.</string>
+    <string name="onboarding_bluetooth_permission_prompt">Wenn die Systemabfrage erscheint, wähle Zulassen, damit NOOP dein kompatibles Band finden kann.</string>
     <string name="onboarding_date_of_birth">Geburtsdatum</string>
     <string name="onboarding_age_years">%1$d Jahre</string>
     <string name="onboarding_units_independent">Gewichts- und Größeneinheiten sind unabhängig. NOOP speichert einen präzisen Wert und ändert nur dessen Anzeige.</string>
@@ -2992,4 +2990,10 @@
     <string name="managed_friends_deletion_scheduled_detail">Friends und Kontodienste sind während der 24-stündigen Bedenkzeit pausiert. Lokale Gesundheitsdaten bleiben auf diesem Smartphone.</string>
     <string name="ownership_progress_step">Schritt %1$d von %2$d</string>
     <string name="ownership_setup_complete">Besitzeinrichtung abgeschlossen.</string>
+    <string name="noop_command_lens_move_left">Am linken Rand platzieren</string>
+    <string name="noop_command_lens_move_right">Am rechten Rand platzieren</string>
+    <string name="noop_command_lens_move_up">Nach oben verschieben</string>
+    <string name="noop_command_lens_move_down">Nach unten verschieben</string>
+    <string name="noop_command_lens_left_edge">Linker Rand</string>
+    <string name="noop_command_lens_right_edge">Rechter Rand</string>
 </resources>

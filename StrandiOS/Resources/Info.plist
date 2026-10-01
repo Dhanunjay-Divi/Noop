@@ -65,6 +65,8 @@
 	<string>public.app-category.healthcare-fitness</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NOOPBandOrderURL</key>
+	<string>$(NOOP_BAND_ORDER_URL)</string>
 	<key>NOOPLaunchGateIterations</key>
 	<string>$(NOOP_LAUNCH_GATE_ITERATIONS)</string>
 	<key>NOOPLaunchGateRequired</key>

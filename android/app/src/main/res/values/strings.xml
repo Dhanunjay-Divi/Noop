@@ -1717,7 +1717,7 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calories</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Choose which tiles show on your Control Center and reorder them with the arrows.</string>
-    <string name="key_metrics_selection_instructions">Pin 3 to 5 metrics at the top. Every metric stays visible.</string>
+    <string name="key_metrics_selection_instructions">Pin 3 to 6 metrics at the top. Every metric stays visible.</string>
     <string name="key_metrics_selection_count">%1$d of %2$d pinned</string>
     <string name="key_metrics_show_selected">Show selected metrics</string>
     <string name="key_metrics_show_all_count">Show all metrics (%1$d)</string>
@@ -2233,9 +2233,7 @@
     <string name="onboarding_data_boundary_configured_body">Band readings start on this phone. This configured build requires sign-in and a completed band claim before setup can finish. Health data is not uploaded unless you separately enable and consent to a managed data feature.</string>
     <string name="onboarding_data_boundary_exploration_title">Explore locally</string>
     <string name="onboarding_data_boundary_exploration_body">This build does not create an account or upload health data. Setup stays on this phone; band ownership activation and managed cloud features are unavailable.</string>
-    <string name="onboarding_bluetooth_boundary_configured">NOOP connects directly to Noop Band over Bluetooth Low Energy. Band discovery and live readings stay on this phone. The configured account service is used for account and band-ownership activation; health data transfer requires separate explicit consent.</string>
-    <string name="onboarding_bluetooth_boundary_exploration">NOOP connects directly to Noop Band over Bluetooth Low Energy. Band discovery, live readings and setup stay on this phone. Account actions and cloud upload are off in this exploration build.</string>
-    <string name="onboarding_bluetooth_permission_prompt">When the system prompt appears, choose Allow so NOOP can find Noop Band.</string>
+    <string name="onboarding_bluetooth_permission_prompt">When the system prompt appears, choose Allow so NOOP can find your compatible band.</string>
     <string name="onboarding_date_of_birth">Date of birth</string>
     <string name="onboarding_age_years">%1$d yrs</string>
     <string name="onboarding_units_independent">Weight and height units are independent. NOOP stores one precise value and only changes how it is displayed.</string>
@@ -3006,4 +3004,10 @@
     <string name="app_report_delivery_in_progress">Feedback delivery is in progress.</string>
     <string name="ownership_progress_step">Step %1$d of %2$d</string>
     <string name="ownership_setup_complete">Ownership setup complete.</string>
+    <string name="noop_command_lens_move_left">Move to left edge</string>
+    <string name="noop_command_lens_move_right">Move to right edge</string>
+    <string name="noop_command_lens_move_up">Move up</string>
+    <string name="noop_command_lens_move_down">Move down</string>
+    <string name="noop_command_lens_left_edge">Left edge</string>
+    <string name="noop_command_lens_right_edge">Right edge</string>
 </resources>

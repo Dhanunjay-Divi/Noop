@@ -2,6 +2,7 @@ package com.noop.ui
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -16,22 +17,24 @@ class SafetyShellContractTest {
     }
 
     @Test
-    fun safetySetupIsPartOfOnboardingBeforeAppearance() {
-        val onboarding = source(
-            "src/main/java/com/noop/ui/OnboardingScreen.kt",
-            "app/src/main/java/com/noop/ui/OnboardingScreen.kt",
-            "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
-        )
-        assumeTrue("Onboarding source unavailable", onboarding != null)
-        val text = onboarding!!
+    fun requiredAccountOnboardingKeepsOptionalSetupOutOfTheMandatoryFlow() {
+        val pages = onboardingPages(ownershipConfigured = true)
 
-        assertTrue(text.contains("SafetyContacts(\"Finish later\")"))
-        assertTrue(text.contains("OnboardingPage.SafetyContacts -> SafetyContactsStep()"))
-        assertTrue(text.contains("SafetyContactsSetup(controller = controller)"))
-        assertTrue(
-            text.indexOf("SafetyContacts(\"Finish later\")") <
-                text.indexOf("Appearance(\"Continue\")"),
+        assertEquals(
+            listOf(
+                OnboardingPage.Welcome,
+                OnboardingPage.Bluetooth,
+                OnboardingPage.Connect,
+                OnboardingPage.Account,
+                OnboardingPage.Ownership,
+                OnboardingPage.Profile,
+                OnboardingPage.Plan,
+                OnboardingPage.Done,
+            ),
+            pages,
         )
+        assertFalse(pages.contains(OnboardingPage.SafetyContacts))
+        assertFalse(pages.contains(OnboardingPage.Appearance))
     }
 
     @Test
@@ -54,8 +57,24 @@ class SafetyShellContractTest {
         )) {
             assertTrue(title, actions.contains("QuickAction(\"$title\""))
         }
-        assertTrue(text.contains("FloatingQuickAddButton(onClick = onQuickActions)"))
+        assertTrue(text.contains("MovableNoopCommandLens("))
+        assertTrue(text.contains("onClick = { showQuickActions = true }"))
+        val commandLens = text
+            .substringAfter("private fun MovableNoopCommandLens(")
+            .substringBefore("\n}\n\n/**")
+        assertTrue(commandLens.contains("Canvas(modifier = Modifier.size(14.dp))"))
+        assertTrue(commandLens.contains("sweepAngle = 288f"))
+        assertTrue(commandLens.contains("drawCircle("))
+        assertTrue(commandLens.contains("radius = 2.25.dp.toPx()"))
+        assertFalse(commandLens.contains("val monogram = Path()"))
+        assertFalse(commandLens.contains("Icons.Filled.ChatBubble"))
+        assertTrue(commandLens.contains("NoopCommandLensPrefs"))
+        assertTrue(commandLens.contains("detectDragGestures"))
+        assertFalse(commandLens.contains("Icons.Filled.Add"))
         assertTrue(text.contains("quickActions.chunked(3)"))
+        assertTrue(text.contains("NoopModalSystemBars()"))
+        assertTrue(text.contains("DialogWindowProvider"))
+        assertTrue(text.contains("window.navigationBarColor = navigationBarColor"))
     }
 
     @Test

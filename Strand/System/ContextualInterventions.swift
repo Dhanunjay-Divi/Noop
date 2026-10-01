@@ -111,6 +111,13 @@ struct ContextualInterventionDecision: Equatable, Sendable {
 enum ContextualInterventionPolicy {
     static let globalCooldown: TimeInterval = 30 * 60
 
+    static func preferenceAllowsDelivery(
+        kind: ContextualInterventionKind,
+        stressPhoneNudgeEnabled: Bool
+    ) -> Bool {
+        kind != .stressBreathing || stressPhoneNudgeEnabled
+    }
+
     static func evaluate(
         _ candidate: ContextualInterventionCandidate,
         state: ContextualInterventionState,
@@ -479,11 +486,17 @@ enum ContextualInterventionCenter {
         content.categoryIdentifier =
             candidate.kind == .adaptivePlannedWorkout
                 ? DailyReviewNotifications.plannedWorkoutCategoryID
-                : DailyReviewNotifications.privacyCategoryID
+                : candidate.kind == .stressBreathing
+                    ? DailyReviewNotifications.stressBreathingCategoryID
+                    : DailyReviewNotifications.privacyCategoryID
         content.threadIdentifier = "noop.contextual.\(candidate.kind.rawValue)"
         var userInfo: [AnyHashable: Any] = [
             NotificationRouteBridge.userInfoKey: candidate.route.rawValue
         ]
+        if candidate.kind == .stressBreathing {
+            userInfo[NotificationRouteBridge.presentationUserInfoKey] =
+                NotificationRoutePresentation.startBreathing.rawValue
+        }
         if candidate.kind == .adaptivePlannedWorkout {
             userInfo[AdaptivePlannedWorkoutScheduler.startSecUserInfoKey] = Int(
                 candidate.observedAt.addingTimeInterval(
@@ -589,6 +602,12 @@ enum ContextualInterventionCenter {
     private static func deliveryConsentCurrent(
         for candidate: ContextualInterventionCandidate
     ) -> Bool {
+        guard ContextualInterventionPolicy.preferenceAllowsDelivery(
+            kind: candidate.kind,
+            stressPhoneNudgeEnabled: BiofeedbackPrefs.phoneNudge
+        ) else {
+            return false
+        }
         guard !candidate.kind.isAdaptiveDayGuidance ||
                 ContextualInterventionSettings.adaptiveDayGuidanceEnabled else {
             return false
@@ -600,6 +619,19 @@ enum ContextualInterventionCenter {
                 currentPlannedWorkoutFingerprint,
                 candidate.fingerprint
             )
+    }
+
+    static func cancelStressBreathingNotification(
+        on center: UNUserNotificationCenter = .current()
+    ) {
+        pendingDeliveries.removeAll {
+            $0.candidate.kind == .stressBreathing
+        }
+        LocalNotificationLifecycle.cancel(
+            identifiers: ["contextual-\(ContextualInterventionKind.stressBreathing.rawValue)"],
+            presented: true,
+            on: center
+        )
     }
 
     static func invalidatePlannedWorkoutCandidate() {

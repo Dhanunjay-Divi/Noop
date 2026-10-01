@@ -51,6 +51,8 @@ class AppShellInstrumentedTest {
     private var originalAcceptedTermsVersion: String? = null
     private var onboardedWasPresent = false
     private var originalOnboarded = false
+    private var requiredAccountVersionWasPresent = false
+    private var originalRequiredAccountVersion = 0
     private var changelogWasPresent = false
     private var originalLastSeenChangelog: String? = null
 
@@ -92,12 +94,20 @@ class AppShellInstrumentedTest {
             prefs.getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, null)
         onboardedWasPresent = prefs.contains(NoopPrefs.KEY_ONBOARDED)
         originalOnboarded = prefs.getBoolean(NoopPrefs.KEY_ONBOARDED, false)
+        requiredAccountVersionWasPresent =
+            prefs.contains(REQUIRED_ACCOUNT_ONBOARDING_VERSION_KEY)
+        originalRequiredAccountVersion =
+            prefs.getInt(REQUIRED_ACCOUNT_ONBOARDING_VERSION_KEY, 0)
         changelogWasPresent = prefs.contains(NoopPrefs.KEY_LAST_SEEN_CHANGELOG)
         originalLastSeenChangelog =
             prefs.getString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, null)
         prefs.edit()
             .putString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, Terms.CURRENT_VERSION)
             .putBoolean(NoopPrefs.KEY_ONBOARDED, true)
+            .putInt(
+                REQUIRED_ACCOUNT_ONBOARDING_VERSION_KEY,
+                REQUIRED_ACCOUNT_ONBOARDING_VERSION,
+            )
             .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
             .commit()
         scenario = ActivityScenario.launch(MainActivity::class.java)
@@ -191,20 +201,23 @@ class AppShellInstrumentedTest {
     }
 
     @Test
-    fun todayMetricDetailKeepsTodaySelectedAndReselectReturnsToRoot() {
-        val metricTag = "noop.today.metric.charge"
-        compose.onNodeWithTag("noop.today.list")
-            .performScrollToNode(hasTestTag(metricTag))
+    fun todayHeroRecoveryOpensDetailWithoutChangingSelectedTab() {
+        val metricTag = "noop.today.hero.recovery"
         compose.onNodeWithTag(metricTag).performClick()
         compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodesWithTag("noop.today.list").fetchSemanticsNodes().isEmpty()
+            compose.onAllNodesWithTag("noop.today.recovery-breakdown")
+                .fetchSemanticsNodes()
+                .isNotEmpty()
         }
         assertSelected("noop.tab.today")
 
-        compose.onNodeWithTag("noop.tab.today").performClick()
+        compose.onNodeWithTag("noop.today.recovery-breakdown.close").performClick()
         compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodesWithTag("noop.today.list").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithTag("noop.today.recovery-breakdown")
+                .fetchSemanticsNodes()
+                .isEmpty()
         }
+        compose.onNodeWithTag("noop.today.list").assertIsDisplayed()
     }
 
     @Test
@@ -374,6 +387,14 @@ class AppShellInstrumentedTest {
             editor.putBoolean(NoopPrefs.KEY_ONBOARDED, originalOnboarded)
         } else {
             editor.remove(NoopPrefs.KEY_ONBOARDED)
+        }
+        if (requiredAccountVersionWasPresent) {
+            editor.putInt(
+                REQUIRED_ACCOUNT_ONBOARDING_VERSION_KEY,
+                originalRequiredAccountVersion,
+            )
+        } else {
+            editor.remove(REQUIRED_ACCOUNT_ONBOARDING_VERSION_KEY)
         }
         if (changelogWasPresent) {
             editor.putString(

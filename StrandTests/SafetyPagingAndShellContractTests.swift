@@ -1818,9 +1818,11 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
     }
 
     func testConciseOnboardingDefersSafetyAndAppearanceToReachableAppSurfaces() throws {
-        let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
-        let androidOnboarding = try source(
-            "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt"
+        let appleFlowPolicy = try source(
+            "Strand/Onboarding/OnboardingFlowPolicy.swift"
+        )
+        let androidFlowPolicy = try source(
+            "android/app/src/main/java/com/noop/ui/OnboardingFlowPolicy.kt"
         )
         let iosShell = try source("StrandiOS/App/RootTabView.swift")
         let androidShell = try source(
@@ -1828,17 +1830,15 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         )
 
         let appleSteps = try XCTUnwrap(
-            onboarding.range(
-                of: "static func onboardingSteps(ownershipConfigured _: Bool) -> [Step]"
-            )
+            appleFlowPolicy.range(of: "static func onboardingSteps(")
         )
         let appleRestore = try XCTUnwrap(
-            onboarding.range(
+            appleFlowPolicy.range(
                 of: "static func restoredOnboardingStep(",
-                range: appleSteps.upperBound..<onboarding.endIndex
+                range: appleSteps.upperBound..<appleFlowPolicy.endIndex
             )
         )
-        let appleActiveSteps = onboarding[
+        let appleActiveSteps = appleFlowPolicy[
             appleSteps.lowerBound..<appleRestore.lowerBound
         ]
         XCTAssertFalse(appleActiveSteps.contains(".safetyContacts"))
@@ -1847,16 +1847,16 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertFalse(appleActiveSteps.contains(".dailyRhythm"))
 
         let androidSteps = try XCTUnwrap(
-            androidOnboarding.range(of: "internal fun onboardingPages(")
+            androidFlowPolicy.range(of: "internal fun onboardingPages(")
         )
-        let androidSetupSource = try XCTUnwrap(
-            androidOnboarding.range(
-                of: "internal fun onboardingCompletedDeviceSetupSource(",
-                range: androidSteps.upperBound..<androidOnboarding.endIndex
+        let androidAccountCopy = try XCTUnwrap(
+            androidFlowPolicy.range(
+                of: "internal data class OnboardingAccountCopy(",
+                range: androidSteps.upperBound..<androidFlowPolicy.endIndex
             )
         )
-        let androidActiveSteps = androidOnboarding[
-            androidSteps.lowerBound..<androidSetupSource.lowerBound
+        let androidActiveSteps = androidFlowPolicy[
+            androidSteps.lowerBound..<androidAccountCopy.lowerBound
         ]
         XCTAssertFalse(androidActiveSteps.contains("OnboardingPage.SafetyContacts"))
         XCTAssertFalse(androidActiveSteps.contains("OnboardingPage.Appearance"))
@@ -1879,7 +1879,36 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(shell.contains(
             "case menu, workout, strength, nutrition, journal, hydration, hrv, breathe, intervals, live"
         ))
-        XCTAssertTrue(shell.contains("FloatingQuickAddButton(compact: tabBarCompact)"))
+        XCTAssertTrue(shell.contains("MovableNoopCommandLens("))
+        XCTAssertTrue(shell.contains(#"Item(title: "Trends", icon: "point.3.connected.trianglepath.dotted""#))
+        XCTAssertTrue(shell.contains(#"Item(title: "Workouts", icon: "dumbbell.fill""#))
+        XCTAssertTrue(shell.contains(#"Item(title: "Sleep", icon: "moon.zzz.fill""#))
+        XCTAssertTrue(shell.contains(#"Item(title: "More", icon: "circle.grid.2x2.fill""#))
+        let commandLens = try XCTUnwrap(
+            shell.components(separatedBy: "private struct MovableNoopCommandLens").last?
+                .components(separatedBy: "// MARK: - Contextual action rail").first
+        )
+        XCTAssertTrue(shell.contains("private struct NoopCommandSignalMark: View"))
+        XCTAssertTrue(commandLens.contains("NoopCommandSignalMark()"))
+        XCTAssertTrue(shell.contains(".trim(from: 0, to: 0.80)"))
+        XCTAssertTrue(shell.contains("StrokeStyle(lineWidth: 2.5, lineCap: .round)"))
+        XCTAssertTrue(shell.contains(".frame(width: 4.5, height: 4.5)"))
+        XCTAssertTrue(shell.contains(".frame(width: 14, height: 14)"))
+        XCTAssertFalse(shell.contains("private struct NoopCommandMonogram"))
+        XCTAssertFalse(commandLens.contains(#"Image(systemName: "message.fill")"#))
+        XCTAssertFalse(commandLens.contains(#"Image(systemName: "waveform.path.ecg")"#))
+        XCTAssertTrue(commandLens.contains("@AppStorage(\"noop.commandLens.edge\")"))
+        XCTAssertTrue(commandLens.contains("@AppStorage(\"noop.commandLens.verticalFraction\")"))
+        XCTAssertTrue(commandLens.contains("DragGesture(minimumDistance: 6)"))
+        XCTAssertTrue(commandLens.contains("layout.snappedEdge(for: finalPoint)"))
+        XCTAssertTrue(commandLens.contains(#".accessibilityIdentifier("noop.quick-actions")"#))
+        XCTAssertTrue(commandLens.contains(#"Text("Move to left edge")"#))
+        XCTAssertTrue(commandLens.contains(#"Text("Move to right edge")"#))
+        XCTAssertTrue(shell.contains("static let touchSize = CGSize(width: 48, height: 52)"))
+        XCTAssertTrue(commandLens.contains(".frame(width: 18, height: 38)"))
+        XCTAssertTrue(commandLens.contains(".offset(x: edge == .leading ? -18 : 18)"))
+        XCTAssertTrue(commandLens.contains("private var verticalFraction = 0.76"))
+        XCTAssertFalse(commandLens.contains(#"Image(systemName: "plus")"#))
         XCTAssertTrue(shell.contains("--demo-quick-actions"))
 
         let launcher = try XCTUnwrap(
@@ -1894,9 +1923,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             XCTAssertTrue(launcher.contains("tile(\"\(title)\""), title)
         }
         XCTAssertTrue(launcher.contains(#".accessibilityIdentifier("noop.quick-actions.updates")"#))
-        XCTAssertTrue(shell.contains(
-            "Opens Updates, workout, strength, meal, journal, hydration, HRV, breathing, intervals, and Live HR actions"
-        ))
+        XCTAssertTrue(shell.contains("Double-tap to open. Drag to move."))
     }
 
     func testBandRhythmClassifierCannotEscapeProtocolDiagnostics() throws {

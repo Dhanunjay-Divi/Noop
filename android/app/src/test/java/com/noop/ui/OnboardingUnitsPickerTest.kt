@@ -100,7 +100,7 @@ class OnboardingUnitsPickerTest {
         val source = onboardingSource()
 
         assertTrue(source.contains("OnboardingPage.Plan -> ProductPlanStep("))
-        assertTrue(source.contains("ownership.selectPlan(selectedPlan)"))
+        assertTrue(source.contains("providerOwnership.selectPlan(selectedPlan)"))
         assertTrue(source.contains("if ("))
         assertTrue(source.contains("saved &&"))
         assertTrue(source.contains("pageIndex == submittedPage"))
@@ -115,8 +115,8 @@ class OnboardingUnitsPickerTest {
         assertTrue(
             source.contains(
                 "OnboardingPage.Plan ->\n" +
-                    "                        !ownershipState.busy && " +
-                    "postClaimOwnershipReady",
+                    "                        ownershipReconciliationComplete &&\n" +
+                    "                            postClaimOwnershipReady",
             ),
         )
         assertTrue(source.contains("resolvedOnboardingDestination("))

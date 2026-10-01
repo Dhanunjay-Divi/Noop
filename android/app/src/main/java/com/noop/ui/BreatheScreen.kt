@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +65,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import kotlin.math.PI
 import kotlin.math.sin
@@ -154,7 +156,11 @@ private fun StressNudgeSuppressionLease(active: Boolean) {
  * rolling RMSSD show the autonomic response building. Ports BreathingView.swift.
  */
 @Composable
-fun BreatheScreen(viewModel: AppViewModel) {
+fun BreatheScreen(
+    viewModel: AppViewModel,
+    notificationStartRequest: Long = 0L,
+    onNotificationStartConsumed: () -> Unit = {},
+) {
     val live by viewModel.live.collectAsStateWithLifecycle()
     val bpm by viewModel.bpm.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -198,6 +204,12 @@ fun BreatheScreen(viewModel: AppViewModel) {
     var lastStoredOutcome by remember {
         mutableStateOf(NoopPrefs.of(context).getString(KEY_BREATHE_LAST_OUTCOME, "").orEmpty())
     }
+    var oneMinuteSessionActive by remember { mutableStateOf(false) }
+    var notificationSessionActive by remember { mutableStateOf(false) }
+    var oneMinuteStartedAtElapsedRealtimeMs by rememberSaveable {
+        mutableStateOf<Long?>(null)
+    }
+    var wasBonded by remember { mutableStateOf(live.bonded) }
 
     // Bank the just-ended session's outcome (mirrors BreathingView.captureOutcome):
     // null below the 2-minute floor; "-" stays display-only, never persisted.
@@ -213,6 +225,62 @@ fun BreatheScreen(viewModel: AppViewModel) {
         if (core != null && core != "-") {
             lastStoredOutcome = core
             NoopPrefs.of(context).edit().putString(KEY_BREATHE_LAST_OUTCOME, core).apply()
+        }
+    }
+
+    fun stopRunningSession(notificationOutcome: String = "dismissed") {
+        val wasRunning = running
+        val wasNotificationSession = notificationSessionActive
+        running = false
+        oneMinuteSessionActive = false
+        notificationSessionActive = false
+        oneMinuteStartedAtElapsedRealtimeMs = null
+        if (!wasRunning) return
+        endSession()
+        viewModel.stopHaptics()
+        if (wasNotificationSession) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "wellness_notification.action_finished",
+                fields = mapOf(
+                    "action" to "start_breathing",
+                    "outcome" to notificationOutcome,
+                ),
+            )
+        }
+    }
+
+    fun startOneMinuteSession(fromNotification: Boolean = false) {
+        if (running) stopRunningSession()
+        mode = BreatheMode.Breathe
+        pace =
+            if (lockedBpm == null) Pace.Coherence
+            else Pace.Resonance
+        sessionSeconds = 0
+        breathCount = 0
+        endedOutcome = null
+        baselineRmssd = rmssd
+        sessionRmssdSum = 0.0
+        sessionRmssdCount = 0
+        sessionRmssdPeak = 0.0
+        oneMinuteSessionActive = true
+        notificationSessionActive = fromNotification
+        oneMinuteStartedAtElapsedRealtimeMs = SystemClock.elapsedRealtime()
+        running = true
+        if (fromNotification) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "wellness_notification.action_started",
+                fields = mapOf(
+                    "action" to "start_breathing",
+                    "outcome" to "started",
+                ),
+            )
+        }
+    }
+
+    LaunchedEffect(notificationStartRequest) {
+        if (notificationStartRequest > 0L) {
+            startOneMinuteSession(fromNotification = true)
+            onNotificationStartConsumed()
         }
     }
 
@@ -253,8 +321,26 @@ fun BreatheScreen(viewModel: AppViewModel) {
     LaunchedEffect(running) {
         if (!running) return@LaunchedEffect
         while (true) {
-            delay(1000)
-            sessionSeconds += 1
+            delay(if (oneMinuteSessionActive) 250L else 1_000L)
+            val oneMinuteStartedAt = oneMinuteStartedAtElapsedRealtimeMs
+            sessionSeconds = if (oneMinuteSessionActive && oneMinuteStartedAt != null) {
+                ActionableWellnessPolicy.elapsedSeconds(
+                    oneMinuteStartedAt,
+                    SystemClock.elapsedRealtime(),
+                )
+            } else {
+                sessionSeconds + 1
+            }
+            if (ActionableWellnessPolicy.shouldCompleteBreathingSession(
+                isOneMinuteSession = oneMinuteSessionActive,
+                elapsedSeconds = sessionSeconds,
+            )) {
+                stopRunningSession(notificationOutcome = "completed")
+                hostView.performHapticFeedback(
+                    HapticFeedbackConstants.CONFIRM,
+                )
+                break
+            }
         }
     }
 
@@ -283,12 +369,8 @@ fun BreatheScreen(viewModel: AppViewModel) {
         onDispose {
             // Leaving mid-session still banks the outcome (mirrors macOS onDisappear → stop()).
             if (running) {
-                endSession()
-                // #769: also tell the strap to stop haptics on the way out so a leftover pattern can't
-                // wedge the strap if the link drops after we navigate away. Best-effort (guarded send).
-                viewModel.stopHaptics()
+                stopRunningSession()
             }
-            running = false
         }
     }
 
@@ -297,10 +379,15 @@ fun BreatheScreen(viewModel: AppViewModel) {
     // adds the strap-side clear (best-effort) and banks the outcome, mirroring the macOS
     // BiofeedbackController bond watch.
     LaunchedEffect(live.bonded) {
-        if (!live.bonded && running) {
-            running = false
-            endSession()
-            viewModel.stopHaptics()
+        val shouldStop =
+            ActionableWellnessPolicy.shouldStopBreathingForBondTransition(
+                wasBonded = wasBonded,
+                isBonded = live.bonded,
+                isRunning = running,
+            )
+        wasBonded = live.bonded
+        if (shouldStop) {
+            stopRunningSession()
         }
     }
 
@@ -328,7 +415,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
             selection = mode,
             label = { it.label },
             onSelect = {
-                if (running) { running = false; endSession() }
+                if (running) stopRunningSession()
                 mode = it
                 lockedBpm = BiofeedbackPrefs.lockedPace(context)
             },
@@ -337,14 +424,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
         // L3 passive stress check-in card (surfaces when StressOnsetDetector fires).
         StressCheckInCard(
             onBreatheNow = {
-                // Switch to Breathe and start a one-minute session. Coherence (5.5 br/min) is the
-                // resonance fallback pace; the felt cue is identical (one buzz in, two out).
-                mode = BreatheMode.Breathe
-                pace = Pace.Coherence
-                sessionSeconds = 0; breathCount = 0; endedOutcome = null
-                baselineRmssd = rmssd
-                sessionRmssdSum = 0.0; sessionRmssdCount = 0; sessionRmssdPeak = 0.0
-                running = true
+                startOneMinuteSession()
             },
         )
 
@@ -472,12 +552,11 @@ fun BreatheScreen(viewModel: AppViewModel) {
             Button(
                 onClick = {
                     if (running) {
-                        running = false
-                        endSession()
-                        // #769: clear any pattern the strap is mid-way through so a drop right after stop
-                        // can't wedge its haptic manager. Best-effort (no-op when unbonded / on a 5/MG).
-                        viewModel.stopHaptics()
+                        stopRunningSession()
                     } else {
+                        oneMinuteSessionActive = false
+                        notificationSessionActive = false
+                        oneMinuteStartedAtElapsedRealtimeMs = null
                         sessionSeconds = 0
                         breathCount = 0
                         endedOutcome = null

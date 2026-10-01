@@ -372,7 +372,7 @@ struct TodayView: View {
     @AppStorage(UnitPrefs.hrvWindowKey) private var hrvWindowRaw = HrvWindow.whole.rawValue
     private var hrvWindow: HrvWindow { HrvWindow(rawValue: hrvWindowRaw) ?? .whole }
 
-    // Editable Key-Metrics layout (#251), persisted as the three-to-five tiles pinned first. Every metric
+    // Editable Key-Metrics layout (#251), persisted as the three-to-six tiles pinned first. Every metric
     // remains visible; the "Edit" affordance only controls priority and order.
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showingMetricsEditor = false
@@ -1077,7 +1077,11 @@ struct TodayView: View {
     /// Any other real source (Mi Band, Health Connect, nutrition) keeps its `FusionSource.displayName`
     ///, still the genuine merge winner, never a blanket claim. Mirror EXACTLY in Kotlin.
     nonisolated static func provenanceDisplayLabel(rawSource: String, deviceId: String) -> String {
-        if rawSource.hasSuffix("-noop") { return "On-device" }
+        if rawSource.hasSuffix("-noop")
+            || rawSource == "noop-computed"
+            || rawSource == FormulaPublicationGate.computedSourceKind {
+            return "On-device"
+        }
         if rawSource == deviceId || rawSource == Repository.whoopSource { return "Imported" }
         if rawSource == Repository.appleHealthSource { return "Apple Health" }
         // Fall back to the FusionSource display name for any other known source; else the raw id.
@@ -3613,7 +3617,7 @@ struct TodayView: View {
                 .accessibilityLabel("Edit Key Metrics")
                 .help("Choose and reorder pinned Key Metrics")
             }
-            // Keep Today focused on the editor-selected three-to-five metrics. The full catalog remains in
+            // Keep Today focused on the editor-selected three-to-six metrics. The full catalog remains in
             // Explore and each metric's history view.
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                 ForEach(visibleKeyMetrics) { metric in

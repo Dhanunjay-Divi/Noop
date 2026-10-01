@@ -123,6 +123,12 @@ class ReviewSampleModeContractTest {
         assertTrue(model > termsGate)
         assertTrue(root.contains("application.startOperationalRuntime()"))
         assertTrue(root.contains("context.mainActivityOrNull()?.resumeAfterOperationalRuntimeStarted()"))
+        assertTrue(root.contains("val reviewSampleOffered = !demoBypass && forceReviewSample"))
+        assertFalse(
+            root.contains(
+                "forceReviewSample || acceptedTerms != Terms.CURRENT_VERSION",
+            ),
+        )
         assertFalse(root.contains("LaunchedEffect(operationalRuntimeReady)"))
         assertFalse(main.contains("deferLaunchMaintenance()"))
     }

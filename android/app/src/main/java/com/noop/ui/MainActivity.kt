@@ -21,6 +21,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -79,11 +80,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         demoRoute = intent.getStringExtra(EXTRA_DEMO_ROUTE).takeIf { BuildConfig.DEBUG }
         stageManagedFriendsLink(intent)
-        // A notification tap can cold-launch the activity before the Compose shell exists. Persist the
-        // trusted route now; AppRoot consumes it once its navigation host mounts.
-        if ((application as NoopApplication).operationalRuntimeStarted) {
-            NotificationRouteBridge.recordFromIntent(applicationContext, intent)
-        }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         // Load the saved "Card transparency" so every frosted card renders at the chosen opacity from launch.
         CardAppearance.init(this)
@@ -194,11 +190,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         setIntent(intent)
         demoRoute = intent.getStringExtra(EXTRA_DEMO_ROUTE).takeIf { BuildConfig.DEBUG }
         stageManagedFriendsLink(intent)
-        // FLAG_ACTIVITY_SINGLE_TOP routes a warm notification tap here. The bridge wakes the mounted
-        // NavHost and also persists the request in case an onboarding/terms gate currently hides it.
-        if ((application as NoopApplication).operationalRuntimeStarted) {
-            NotificationRouteBridge.recordFromIntent(applicationContext, intent)
-        }
         requestDemoReportIfNeeded()
     }
 
@@ -231,9 +222,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     "incident_id",
                     "expires_at",
                 ).forEach(intent::removeExtra)
-                intent.putExtra(
-                    NotificationRouteBridge.EXTRA_ROUTE,
-                    NoopNotificationRoute.SAFETY.navRoute,
+                NotificationRouteBridge.recordTrustedRequest(
+                    applicationContext,
+                    NoopNotificationRoute.SAFETY,
                 )
                 safetyIncident?.let { incidentId ->
                     lifecycleScope.launch {
@@ -243,9 +234,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             }
             stagedFriends -> {
                 intent.data = null
-                intent.putExtra(
-                    NotificationRouteBridge.EXTRA_ROUTE,
-                    NoopNotificationRoute.FRIENDS.navRoute,
+                NotificationRouteBridge.recordTrustedRequest(
+                    applicationContext,
+                    NoopNotificationRoute.FRIENDS,
                 )
             }
             else -> return
@@ -255,7 +246,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     internal fun resumeAfterOperationalRuntimeStarted() {
         if (!(application as NoopApplication).operationalRuntimeStarted) return
         stageManagedFriendsLink(intent)
-        NotificationRouteBridge.recordFromIntent(applicationContext, intent)
         ProfileAvatarStore.load(this)
         if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
             StaleSyncReminderScheduler.onAppForegrounded(applicationContext)
@@ -1403,15 +1393,14 @@ fun NoopRoot(
         return
     }
 
-    // Review Sample is offered before Terms on a fresh install and remains entirely process-only. No
-    // production ViewModel, Room store, BLE client, worker, permission, cloud service, or notification
-    // scheduler is constructed while any of these three phases is visible.
+    // Review Sample is an explicit review/debug route, never an ordinary fresh-install intercept. When
+    // requested it remains entirely process-only: no production ViewModel, Room store, BLE client,
+    // worker, permission, cloud service, or notification scheduler is constructed while visible.
     var acceptedTerms by remember {
         mutableStateOf(prefs.getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, "") ?: "")
     }
     var reviewSamplePhase by remember { mutableStateOf(ReviewSamplePhase.ENTRY) }
-    val reviewSampleOffered =
-        !demoBypass && (forceReviewSample || acceptedTerms != Terms.CURRENT_VERSION)
+    val reviewSampleOffered = !demoBypass && forceReviewSample
     if (reviewSampleOffered && reviewSamplePhase != ReviewSamplePhase.CONTINUE_SETUP) {
         when (reviewSamplePhase) {
             ReviewSamplePhase.ENTRY -> ReviewSampleEntry(
@@ -1460,6 +1449,15 @@ fun NoopRoot(
     var onboarded by remember {
         mutableStateOf(prefs.getBoolean(NoopPrefs.KEY_ONBOARDED, false))
     }
+    var requiredAccountOnboardingVersion by remember {
+        mutableIntStateOf(
+            prefs.getInt(REQUIRED_ACCOUNT_ONBOARDING_VERSION_KEY, 0),
+        )
+    }
+    val requiresOnboarding = requiresRequiredAccountOnboarding(
+        onboarded = onboarded,
+        completedVersion = requiredAccountOnboardingVersion,
+    )
     var lastSeenChangelog by remember {
         mutableStateOf(prefs.getString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, "") ?: "")
     }
@@ -1536,16 +1534,31 @@ fun NoopRoot(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    if (!onboarded && !demoBypass) {
+    if (requiresOnboarding && !demoBypass) {
         OnboardingScreen(
             viewModel = appViewModel,
+            requiredAccountMigration = onboarded,
             onFinished = {
                 prefs.edit()
                     .putBoolean(NoopPrefs.KEY_ONBOARDED, true)
+                    .putInt(
+                        REQUIRED_ACCOUNT_ONBOARDING_VERSION_KEY,
+                        REQUIRED_ACCOUNT_ONBOARDING_VERSION,
+                    )
                     .apply()
                 onboarded = true
+                requiredAccountOnboardingVersion =
+                    REQUIRED_ACCOUNT_ONBOARDING_VERSION
             },
         )
+        return
+    }
+
+    val onboardingInstrumentationHarness = remember {
+        OnboardingInstrumentationHarnessRegistry.current()
+    }
+    if (onboardingInstrumentationHarness != null) {
+        onboardingInstrumentationHarness.OperationalShellBoundary()
         return
     }
 

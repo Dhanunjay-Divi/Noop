@@ -16,4 +16,28 @@ enum ProjectInfo {
         string: "https://noop-private-trial.usetaptech.chatgpt.site/support"
     )!
 
+    static var bandOrderURL: URL? {
+        validatedBandOrderURL(
+            Bundle.main.object(
+                forInfoDictionaryKey: "NOOPBandOrderURL"
+            ) as? String
+        )
+    }
+
+    static func validatedBandOrderURL(_ rawValue: String?) -> URL? {
+        guard let rawValue else { return nil }
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty,
+              !value.contains("$("),
+              var components = URLComponents(string: value),
+              components.scheme?.lowercased() == "https",
+              components.host?.isEmpty == false,
+              components.user == nil,
+              components.password == nil else {
+            return nil
+        }
+        components.fragment = nil
+        return components.url
+    }
+
 }

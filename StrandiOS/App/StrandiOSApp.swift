@@ -262,6 +262,27 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
 /// on iOS. The first-run onboarding/pairing wizard, the Terms acknowledgment gate, and the post-update
 /// "What's New" sheet that `ContentView` layers on are reproduced here as `iOSRootView`, wrapped around
 /// `RootTabView` so the iOS app keeps the same gating without depending on the macOS-only shell.
+#if DEBUG
+private enum FreshInstallUITestHarness {
+    static let launchArgument = "--ui-test-reset-first-run"
+
+    static func resetIfRequested(defaults: UserDefaults = .standard) {
+        guard CommandLine.arguments.contains(launchArgument) else { return }
+        [
+            "noop.onboarded",
+            "noop.lastSeenChangelogVersion",
+            "noop.acceptedTermsVersion",
+            "noop.acceptedTermsAt",
+            "noop.firstInstallWelcomePending",
+            "noop.completedFirstInstallWelcome",
+            "noop.lastAcknowledgedTrialBuild",
+            "noop.onboarding.progress.v1",
+            "noop.onboarding.progress.v2",
+        ].forEach { defaults.removeObject(forKey: $0) }
+    }
+}
+#endif
+
 @main
 struct StrandiOSApp: App {
     @UIApplicationDelegateAdaptor(ManagedFirebaseApplicationDelegate.self)
@@ -302,6 +323,9 @@ struct StrandiOSApp: App {
     private var liveActivityShowsEffort = UnitPrefs.liveActivityShowsEffort()
 
     init() {
+        #if DEBUG
+        FreshInstallUITestHarness.resetIfRequested()
+        #endif
         AppDiagnosticsRecorder.shared.start()
         Task {
             await FeedbackUploadCoordinator.shared.start()
@@ -1041,6 +1065,8 @@ private struct iOSRootView: View {
     @EnvironmentObject private var launchAccess: LaunchAccessController
     @EnvironmentObject private var model: AppModel
     @AppStorage("noop.onboarded") private var onboarded = false
+    @AppStorage(OnboardingWizard.requiredAccountOnboardingVersionStorageKey)
+    private var requiredAccountOnboardingVersion = 0
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
     @AppStorage("noop.acceptedTermsAt") private var acceptedTermsAt = ""
@@ -1081,7 +1107,7 @@ private struct iOSRootView: View {
             // refresh, backup catch-up and optional remote sync from its task modifier.
             if hasLaunchAccess
                 && !reviewSampleBlocksStandardLaunch
-                && (onboarded || demoBypass)
+                && (!requiresOnboarding || demoBypass)
                 && (acceptedTerms == Terms.currentVersion || demoBypass) {
                 RootTabView()
             } else {
@@ -1090,12 +1116,18 @@ private struct iOSRootView: View {
             if hasLaunchAccess
                 && !reviewSampleBlocksStandardLaunch
                 && acceptedTerms == Terms.currentVersion
-                && !onboarded
+                && requiresOnboarding
                 && !demoBypass {
-                OnboardingWizard(onFinished: {
-                    onboarded = true
-                    model.refreshAgeMetricsIfProfileChanged()
-                })
+                OnboardingWizard(
+                    requiredAccountMigration: onboarded,
+                    onFinished: {
+                        onboarded = true
+                        requiredAccountOnboardingVersion =
+                            OnboardingWizard
+                                .requiredAccountOnboardingVersion
+                        model.refreshAgeMetricsIfProfileChanged()
+                    }
+                )
                 .transition(.opacity)
                 .zIndex(1)
             }
@@ -1163,6 +1195,10 @@ private struct iOSRootView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: launchAccess.state)
         .animation(.easeInOut(duration: 0.35), value: onboarded)
+        .animation(
+            .easeInOut(duration: 0.35),
+            value: requiredAccountOnboardingVersion
+        )
         .animation(.easeInOut(duration: 0.35), value: acceptedTerms)
         .animation(.easeInOut(duration: 0.35), value: acknowledgedTrialBuild)
         .animation(.easeInOut(duration: 0.2), value: reviewSamplePhase)
@@ -1184,6 +1220,13 @@ private struct iOSRootView: View {
         .onChange(of: launchAccess.state) { _, _ in showWhatsNewIfDue() }
         .onChange(of: onboarded) { _, _ in showWhatsNewIfDue() }
         .onChange(of: reviewSamplePhase) { _, _ in activateStandardLaunchIfNeeded() }
+    }
+
+    private var requiresOnboarding: Bool {
+        OnboardingWizard.requiresRequiredAccountOnboarding(
+            onboarded: onboarded,
+            completedVersion: requiredAccountOnboardingVersion
+        )
     }
 
     /// DEBUG: launched with --demo-seed, skip the first-run gates (onboarding / terms / What's New) so the

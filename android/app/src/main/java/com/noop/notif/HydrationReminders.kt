@@ -27,6 +27,7 @@ import com.noop.managed.ManagedRuntimeGate
 import com.noop.ui.ContextualActionCenter
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotifPrefs
+import com.noop.ui.NotificationRoutePresentation
 import com.noop.ui.NotificationRouteBridge
 import java.time.LocalDate
 import java.time.ZoneId
@@ -549,13 +550,22 @@ object HydrationReminderNotifier {
         val openApp = NotificationPlatformIdentity.activityPendingIntent(
             context,
             NotificationPlatformIdentity.ActivityIntent.HYDRATION,
-            NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.HYDRATION),
+            NotificationRouteBridge.launchIntent(
+                context,
+                NoopNotificationRoute.HYDRATION,
+                presentation = NotificationRoutePresentation.LOG_HYDRATION,
+            ),
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_heart)
             .setContentTitle(title)
             .setContentText(body)
             .setContentIntent(openApp)
+            .addAction(
+                0,
+                context.getString(R.string.appwide_wellness_action_log_water),
+                openApp,
+            )
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)

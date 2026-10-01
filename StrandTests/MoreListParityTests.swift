@@ -212,16 +212,19 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(shell.contains(
             "guard !keyboardVisible, dynamicTypeSize.isAccessibilitySize else { return 0 }"
         ), "Only accessibility navigation should trade overlap for a separate reading region.")
-        XCTAssertTrue(shell.contains(
-            "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize || tabBarCompact"
-        ))
+        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ||"))
+        XCTAssertTrue(shell.contains("reduceTransparency ||"))
+        XCTAssertTrue(shell.contains("colorSchemeContrast == .increased"))
+        XCTAssertFalse(shell.contains(
+            "dynamicTypeSize.isAccessibilitySize || tabBarCompact"
+        ), "Ordinary compact navigation must not paint an opaque full-width reading boundary.")
         XCTAssertTrue(shell.contains(
             "(tabBarCompact ? IPhonePrimaryTab.compactControlDimension : 28)"
-        ), "Large text and compact navigation need an opaque reading boundary above the glass rail.")
+        ), "Opaque accessibility fallbacks must cover the complete current control footprint.")
         XCTAssertFalse(shell.contains(".mask(alignment: .bottom)"),
                        "A shell mask washes out the final visible row before it reaches the reserved strip.")
-        XCTAssertTrue(shell.contains("appearanceMode == .black ? 0.94 : 0.90"),
-                      "Floating navigation needs a smoked base that prevents page copy showing through.")
+        XCTAssertTrue(shell.contains("appearanceMode == .black ? 0.68 : 0.64"),
+                      "Floating navigation needs a readable translucent base, not an opaque black bar.")
         XCTAssertTrue(shell.contains("private var opticalScrim: Color"),
                       "The separate quick-action lens must use the same text-occlusion contract.")
         let interactionEnvironment = try XCTUnwrap(
@@ -282,7 +285,7 @@ final class MoreListParityTests: XCTestCase {
         )
         let accessibilityBoundary = try XCTUnwrap(
             shell.range(
-                of: "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize || tabBarCompact",
+                of: "if !keyboardVisible,\n               dynamicTypeSize.isAccessibilitySize ||",
                 range: safeAreaStart.upperBound..<shell.endIndex
             )
         )
@@ -340,6 +343,10 @@ final class MoreListParityTests: XCTestCase {
     /// the opaque white plate or hide navigation names from assistive technology.
     func testiPhoneTabBarIsAdaptiveGlass() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
+        let tabBar = try XCTUnwrap(
+            shell.components(separatedBy: "private struct FloatingTabBar").last?
+                .components(separatedBy: "private extension Comparable").first
+        )
 
         XCTAssertTrue(shell.contains(".simultaneousGesture(scrollInteractionGesture)"))
         XCTAssertTrue(shell.contains("abs(dy) > abs(dx) * 1.15"),
@@ -379,9 +386,9 @@ final class MoreListParityTests: XCTestCase {
                       "Tab selection needs a local animation so the capsule moves instead of jumping.")
         XCTAssertTrue(shell.contains("return .black.opacity(0.11)"),
                       "Light mode needs a transparent smoke tint instead of a milk-white plate.")
-        XCTAssertTrue(shell.contains("return .white.opacity(0.94)"),
+        XCTAssertTrue(shell.contains("return .white.opacity(0.86)"),
                       "Light mode must obscure body copy beneath the shape while retaining glass highlights.")
-        XCTAssertTrue(shell.contains("navigationInk(active: active)"),
+        XCTAssertTrue(tabBar.contains("navigationInk(active: active, accent: accent)"),
                       "Navigation ink must adapt to light and dark glass.")
         XCTAssertTrue(shell.contains(".opacity(navigationGlassOpacity)"),
                       "Light mode must fade only the material layer, never the navigation ink.")
@@ -407,7 +414,7 @@ final class MoreListParityTests: XCTestCase {
                        "Accessibility sizes must never hide the persistent visual destination labels.")
         XCTAssertTrue(shell.contains(".font(StrandFont.footnote.weight("),
                       "Tab labels must use semantic Dynamic Type rather than a fixed point size.")
-        XCTAssertFalse(shell.contains(".font(.system(size: 11,"),
+        XCTAssertFalse(tabBar.contains(".font(.system(size: 11,"),
                        "The custom tab bar must not bypass Dynamic Type with a fixed label size.")
         // The rail used to shorten Workouts to a hard-coded "Train". That literal had no String Catalog
         // entry, so it rendered untranslated in all nine locales; it was removed. The rail now draws the

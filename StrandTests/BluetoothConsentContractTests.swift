@@ -140,7 +140,7 @@ final class BluetoothConsentContractTests: XCTestCase {
         )
         XCTAssertTrue(
             addDevice.contains(
-                "if Self.supplierPairingAvailableForCurrentBuild"
+                "enabled: Self.supplierPairingAvailableForCurrentBuild"
             )
         )
         XCTAssertTrue(addDevice.contains("return \"whoop-5-mg\""))
@@ -179,12 +179,12 @@ final class BluetoothConsentContractTests: XCTestCase {
         )
         XCTAssertTrue(
             source.contains(
-                "When the system prompt appears, choose Allow so NOOP can find Noop Band."
+                "When the system prompt appears, choose Allow so NOOP can find your compatible band."
             )
         )
         XCTAssertFalse(
             source.contains(
-                "When the system prompt appears, choose Allow so NOOP can find your band."
+                "When the system prompt appears, choose Allow so NOOP can find Noop Band."
             )
         )
     }
@@ -232,7 +232,7 @@ final class BluetoothConsentContractTests: XCTestCase {
 
         XCTAssertTrue(
             source.contains(
-                "if Self.supplierPairingAvailableForCurrentBuild"
+                "enabled: Self.supplierPairingAvailableForCurrentBuild"
             )
         )
         XCTAssertTrue(source.contains("appwide.devices.supplier_display_model"))

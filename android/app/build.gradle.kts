@@ -80,6 +80,7 @@ fun managedBuildValue(propertyName: String, environmentName: String): String =
         .replace("\"", "\\\"")
 
 val managedApiUrl = managedBuildValue("noopManagedApiUrl", "NOOP_MANAGED_API_URL")
+val bandOrderUrl = managedBuildValue("noopBandOrderUrl", "NOOP_BAND_ORDER_URL")
 val managedProjectId = managedBuildValue("noopManagedProjectId", "NOOP_MANAGED_PROJECT_ID")
 val managedApiKey = managedBuildValue("noopManagedApiKey", "NOOP_MANAGED_API_KEY")
 val managedGoogleAppId =
@@ -311,6 +312,7 @@ android {
         buildConfigField("String", "STRENGTH_VIDEO_URL_TEMPLATE", "\"$strengthVideoUrlTemplate\"")
         buildConfigField("boolean", "ALLOW_DEMO_STRENGTH_MEDIA", allowDemoStrengthMedia.toString())
         buildConfigField("String", "MANAGED_API_URL", "\"$managedApiUrl\"")
+        buildConfigField("String", "BAND_ORDER_URL", "\"$bandOrderUrl\"")
         buildConfigField("String", "MANAGED_PROJECT_ID", "\"$managedProjectId\"")
         buildConfigField("String", "MANAGED_API_KEY", "\"$managedApiKey\"")
         buildConfigField("String", "MANAGED_GOOGLE_APP_ID", "\"$managedGoogleAppId\"")

@@ -51,7 +51,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -141,7 +140,9 @@ private enum class DeviceType {
             Garmin -> "Garmin watch"
             Oura -> "Oura ring"
             SupplierBand ->
-                uiString(R.string.appwide_devices_supplier_display_model)
+                uiString(
+                    R.string.appwide_onboarding_device_wizard_account_linked_title,
+                )
     }
 }
 
@@ -995,55 +996,95 @@ private fun TypeStep(
     selectionScope: AddDeviceSelectionScope,
     onPick: (DeviceType) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (supplierAvailable) {
-            TypeRow(
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
+        BandPairingDiscoveryStage(searching = false)
+        BandPairingOptionGroup {
+            BandPairingOptionRow(
                 Icons.Filled.GraphicEq,
                 DeviceType.SupplierBand.title,
                 uiString(
-                    R.string.appwide_onboarding_device_wizard_supplier_android_subtitle,
+                    if (supplierAvailable) {
+                        R.string.appwide_onboarding_device_wizard_account_linked_subtitle
+                    } else {
+                        R.string.appwide_onboarding_device_wizard_account_linked_unavailable
+                    },
                 ),
+                enabled = supplierAvailable,
+                showDivider = true,
             ) {
                 onPick(DeviceType.SupplierBand)
             }
-        }
-        TypeRow(
-            Icons.Filled.Watch,
-            DeviceType.Whoop5MG.title,
-            uiString(R.string.appwide_onboarding_device_wizard_whoop_subtitle),
-        ) {
-            onPick(DeviceType.Whoop5MG)
-        }
-        TypeRow(
-            Icons.Filled.Watch,
-            DeviceType.Whoop4.title,
-            uiString(R.string.appwide_onboarding_device_wizard_whoop_subtitle),
-        ) {
-            onPick(DeviceType.Whoop4)
+            BandPairingOptionRow(
+                Icons.Filled.Watch,
+                DeviceType.Whoop5MG.title,
+                uiString(R.string.appwide_onboarding_device_wizard_compatible_band),
+                showDivider = true,
+            ) {
+                onPick(DeviceType.Whoop5MG)
+            }
+            BandPairingOptionRow(
+                Icons.Filled.Watch,
+                DeviceType.Whoop4.title,
+                uiString(R.string.appwide_onboarding_device_wizard_compatible_band),
+            ) {
+                onPick(DeviceType.Whoop4)
+            }
         }
         if (selectionScope == AddDeviceSelectionScope.AllDevices) {
-            TypeRow(Icons.Filled.FavoriteBorder, DeviceType.HrStrap.title, "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast") {
-                onPick(DeviceType.HrStrap)
-            }
-            TypeRow(Icons.AutoMirrored.Filled.DirectionsRun, DeviceType.GymEquipment.title, "Treadmill, indoor bike, rower or cross-trainer (Bluetooth FTMS)") {
-                onPick(DeviceType.GymEquipment)
+            BandPairingOptionGroup {
+                BandPairingOptionRow(
+                    Icons.Filled.FavoriteBorder,
+                    DeviceType.HrStrap.title,
+                    "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast",
+                    showDivider = true,
+                ) {
+                    onPick(DeviceType.HrStrap)
+                }
+                BandPairingOptionRow(
+                    Icons.AutoMirrored.Filled.DirectionsRun,
+                    DeviceType.GymEquipment.title,
+                    "Treadmill, indoor bike, rower or cross-trainer (Bluetooth FTMS)",
+                ) {
+                    onPick(DeviceType.GymEquipment)
+                }
             }
 
             // EXPERIMENTAL tier - clearly labelled, opt-in, best-effort. Each is honest about what it can
             // actually read; none fabricates data.
             Overline("Experimental", modifier = Modifier.padding(top = 8.dp))
             ExperimentalTierNote()
-            TypeRow(Icons.Filled.Circle, DeviceType.Oura.title, "Take over your ring locally. Beta. This replaces the Oura app.") {
-                onPick(DeviceType.Oura)
-            }
-            TypeRow(Icons.Filled.GraphicEq, DeviceType.Amazfit.title, "Incl. Helio. Live heart rate where the band exposes it. Help us test.") {
-                onPick(DeviceType.Amazfit)
-            }
-            TypeRow(Icons.Filled.GraphicEq, DeviceType.MiBand.title, "Live heart rate on bands that don't need pairing. Help us test.") {
-                onPick(DeviceType.MiBand)
-            }
-            TypeRow(Icons.Filled.Watch, DeviceType.Garmin.title, "Uses the watch's Broadcast Heart Rate. We'll show you how.") {
-                onPick(DeviceType.Garmin)
+            BandPairingOptionGroup {
+                BandPairingOptionRow(
+                    Icons.Filled.Circle,
+                    DeviceType.Oura.title,
+                    "Take over your ring locally. Beta. This replaces the Oura app.",
+                    showDivider = true,
+                ) {
+                    onPick(DeviceType.Oura)
+                }
+                BandPairingOptionRow(
+                    Icons.Filled.GraphicEq,
+                    DeviceType.Amazfit.title,
+                    "Incl. Helio. Live heart rate where the band exposes it. Help us test.",
+                    showDivider = true,
+                ) {
+                    onPick(DeviceType.Amazfit)
+                }
+                BandPairingOptionRow(
+                    Icons.Filled.GraphicEq,
+                    DeviceType.MiBand.title,
+                    "Live heart rate on bands that don't need pairing. Help us test.",
+                    showDivider = true,
+                ) {
+                    onPick(DeviceType.MiBand)
+                }
+                BandPairingOptionRow(
+                    Icons.Filled.Watch,
+                    DeviceType.Garmin.title,
+                    "Uses the watch's Broadcast Heart Rate. We'll show you how.",
+                ) {
+                    onPick(DeviceType.Garmin)
+                }
             }
         }
         if (selectionScope == AddDeviceSelectionScope.AllDevices) {
@@ -1070,33 +1111,6 @@ private fun ExperimentalTierNote() {
             uiString(R.string.l10n_add_device_wizard_experimental_best_effort_support_we_re_db288aa8),
             style = NoopType.footnote,
             color = Palette.statusWarning,
-        )
-    }
-}
-
-@Composable
-private fun TypeRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .frostedCardSurface(cornerRadius = 14.dp)
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = uiString(R.string.l10n_add_device_wizard_title_subtitle_8d9004e8, title, subtitle) }
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(28.dp))
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, style = NoopType.headline, color = Palette.textPrimary)
-            Text(subtitle, style = NoopType.caption, color = Palette.textTertiary)
-        }
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = Palette.textTertiary,
-            modifier = Modifier.size(20.dp),
         )
     }
 }
@@ -1288,7 +1302,6 @@ private fun SupplierBandPickStep(
         } else {
             null
         },
-        showEmptyProgress = searching,
         onRescan = {
             if (!actionBusy) {
                 actionBusy = true
@@ -2094,7 +2107,6 @@ private fun PickList(
     emptyMessage: String? = null,
     emptySecondaryRes: Int? =
         R.string.l10n_add_device_wizard_make_sure_it_s_awake_and_8c40e59f,
-    showEmptyProgress: Boolean = true,
     rows: @Composable () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
@@ -2123,31 +2135,25 @@ private fun PickList(
         }
         if (isEmpty) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .frostedCardSurface(cornerRadius = 14.dp)
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(Metrics.space10),
             ) {
-                if (showEmptyProgress) {
-                    CircularProgressIndicator(
-                        color = Palette.accent,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
-                Text(
-                    emptyMessage
-                        ?: uiString(R.string.l10n_add_device_wizard_searching_1a6a5ba8),
-                    style = NoopType.body,
-                    color = Palette.textPrimary,
-                )
-                emptySecondaryRes?.let { messageRes ->
-                    Text(
-                        uiString(messageRes),
-                        style = NoopType.subhead,
-                        color = Palette.textSecondary,
-                    )
+                BandPairingDiscoveryStage(searching = searching)
+                if (!searching) {
+                    emptyMessage?.let { message ->
+                        Text(
+                            message,
+                            style = NoopType.body,
+                            color = Palette.textPrimary,
+                        )
+                    }
+                    emptySecondaryRes?.let { messageRes ->
+                        Text(
+                            uiString(messageRes),
+                            style = NoopType.subhead,
+                            color = Palette.textSecondary,
+                        )
+                    }
                 }
             }
         } else {

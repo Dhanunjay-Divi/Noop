@@ -29,7 +29,10 @@ internal enum class NoopNotificationRoute(val navRoute: String) {
 }
 
 internal enum class NotificationRoutePresentation(val storedValue: String) {
-    LIGHTER_WORKOUT_OPTIONS("lighter_workout_options");
+    LIGHTER_WORKOUT_OPTIONS("lighter_workout_options"),
+    START_BREATHING("start_breathing"),
+    LOG_HYDRATION("log_hydration"),
+    MOVEMENT_BREAK("movement_break");
 
     companion object {
         fun fromRaw(raw: String?): NotificationRoutePresentation? =
@@ -67,7 +70,7 @@ internal object NotificationRouteBridge {
         route: NoopNotificationRoute,
         journalDay: LocalDate? = null,
         presentation: NotificationRoutePresentation? = null,
-    ): Intent = appLaunchIntent(context)
+    ): Intent = Intent(context, NotificationRouteActivity::class.java)
         .putExtra(EXTRA_ROUTE, route.navRoute)
         .apply {
             if (route == NoopNotificationRoute.JOURNAL && journalDay != null) {
@@ -78,8 +81,12 @@ internal object NotificationRouteBridge {
             }
         }
 
-    /** Record a recognized route and consume the intent extra so configuration recreation cannot replay it. */
-    fun recordFromIntent(context: Context, intent: Intent?): Boolean {
+    /**
+     * Record a recognized route from NOOP's non-exported notification entry point.
+     *
+     * Exported activities must never call this with caller-controlled extras.
+     */
+    fun recordFromTrustedIntent(context: Context, intent: Intent?): Boolean {
         val raw = intent?.getStringExtra(EXTRA_ROUTE)
         val journalDayRaw = intent?.getStringExtra(EXTRA_JOURNAL_DAY)
         val presentationRaw = intent?.getStringExtra(EXTRA_PRESENTATION)
@@ -93,6 +100,22 @@ internal object NotificationRouteBridge {
             null
         }
         val presentation = NotificationRoutePresentation.fromRaw(presentationRaw)
+        recordTrustedRequest(
+            context = context,
+            route = route,
+            journalDay = journalDay,
+            presentation = presentation,
+        )
+        return true
+    }
+
+    /** Record a route after the caller has independently validated its source and payload. */
+    fun recordTrustedRequest(
+        context: Context,
+        route: NoopNotificationRoute,
+        journalDay: LocalDate? = null,
+        presentation: NotificationRoutePresentation? = null,
+    ) {
         synchronized(lock) {
             NoopPrefs.of(context).edit()
                 .putString(KEY_PENDING_ROUTE, route.navRoute)
@@ -111,7 +134,6 @@ internal object NotificationRouteBridge {
                 .apply()
             _routeRequests.value += 1L
         }
-        return true
     }
 
     /** Return one pending trusted route, removing it before navigation. */

@@ -1514,7 +1514,7 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calories</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Choisissez les vignettes à afficher dans votre Centre de contrôle et réorganisez-les avec les flèches.</string>
-    <string name="key_metrics_selection_instructions">Épinglez 3 à 5 métriques en haut. Toutes les métriques restent visibles.</string>
+    <string name="key_metrics_selection_instructions">Épinglez 3 à 6 métriques en haut. Toutes les métriques restent visibles.</string>
     <string name="key_metrics_selection_count">%1$d sur %2$d épinglées</string>
     <string name="key_metrics_show_selected">Afficher les métriques sélectionnées</string>
     <string name="key_metrics_show_all_count">Afficher toutes les métriques (%1$d)</string>
@@ -2203,9 +2203,7 @@
     <string name="onboarding_data_boundary_configured_body">Les mesures du bracelet commencent sur ce téléphone. Cette version configurée exige une connexion et une revendication du bracelet terminée avant de finir la configuration. Les données de santé ne sont pas téléversées sauf si vous activez et acceptez séparément une fonction de données gérées.</string>
     <string name="onboarding_data_boundary_exploration_title">Explorer localement</string>
     <string name="onboarding_data_boundary_exploration_body">Cette version ne crée aucun compte et ne téléverse aucune donnée de santé. La configuration reste sur ce téléphone ; l’activation de la propriété du bracelet et les fonctions cloud gérées ne sont pas disponibles.</string>
-    <string name="onboarding_bluetooth_boundary_configured">NOOP se connecte directement à Noop Band par Bluetooth Low Energy. La recherche du bracelet et les mesures en direct restent sur ce téléphone. Le service de compte configuré sert à activer le compte et la propriété du bracelet ; le transfert de données de santé exige un consentement explicite distinct.</string>
-    <string name="onboarding_bluetooth_boundary_exploration">NOOP se connecte directement à Noop Band par Bluetooth Low Energy. La recherche du bracelet, les mesures en direct et la configuration restent sur ce téléphone. Les actions de compte et le téléversement cloud sont désactivés dans cette version d’exploration.</string>
-    <string name="onboarding_bluetooth_permission_prompt">Lorsque l’invite système s’affiche, choisissez Autoriser pour que NOOP puisse trouver Noop Band.</string>
+    <string name="onboarding_bluetooth_permission_prompt">Lorsque l’invite système s’affiche, choisissez Autoriser pour que NOOP puisse trouver votre bracelet compatible.</string>
     <string name="onboarding_date_of_birth">Date de naissance</string>
     <string name="onboarding_age_years">%1$d ans</string>
     <string name="onboarding_units_independent">Les unités de poids et de taille sont indépendantes. NOOP conserve une valeur précise et ne change que son affichage.</string>
@@ -2976,4 +2974,10 @@
     <string name="managed_friends_deletion_scheduled_detail">Friends et les services du compte sont suspendus pendant le délai de réflexion de 24 heures. Les données de santé locales restent sur ce téléphone.</string>
     <string name="ownership_progress_step">Étape %1$d sur %2$d</string>
     <string name="ownership_setup_complete">Configuration de propriété terminée.</string>
+    <string name="noop_command_lens_move_left">Déplacer vers le bord gauche</string>
+    <string name="noop_command_lens_move_right">Déplacer vers le bord droit</string>
+    <string name="noop_command_lens_move_up">Déplacer vers le haut</string>
+    <string name="noop_command_lens_move_down">Déplacer vers le bas</string>
+    <string name="noop_command_lens_left_edge">Bord gauche</string>
+    <string name="noop_command_lens_right_edge">Bord droit</string>
 </resources>

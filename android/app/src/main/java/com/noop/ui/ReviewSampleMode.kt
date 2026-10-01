@@ -28,16 +28,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
-import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FitnessCenter
-import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Visibility
@@ -250,11 +250,11 @@ private enum class ReviewSampleTab(
     @StringRes val title: Int,
     val icon: ImageVector,
 ) {
-    TODAY(R.string.nav_today, Icons.Filled.Home),
-    TRENDS(R.string.nav_trends, Icons.AutoMirrored.Filled.TrendingUp),
+    TODAY(R.string.nav_today, Icons.Filled.MonitorHeart),
+    TRENDS(R.string.nav_trends, Icons.Filled.Hub),
     WORKOUTS(R.string.nav_workouts, Icons.Filled.FitnessCenter),
-    SLEEP(R.string.nav_sleep, Icons.Filled.Bedtime),
-    MORE(R.string.nav_more, Icons.Filled.MoreHoriz),
+    SLEEP(R.string.nav_sleep, Icons.Filled.NightsStay),
+    MORE(R.string.nav_more, Icons.Filled.Apps),
 }
 
 private data class ReviewSampleMetric(

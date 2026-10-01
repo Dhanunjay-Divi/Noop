@@ -125,11 +125,17 @@ final class ReviewSampleModeContractTests: XCTestCase {
         )
 
         XCTAssertTrue(
-            tabMount.contains("&& (onboarded || demoBypass)"),
+            tabMount.contains("&& (!requiresOnboarding || demoBypass)"),
             "The operational tab shell must not exist until first-run setup completes."
         )
-        XCTAssertTrue(root.contains("&& !onboarded"))
-        XCTAssertTrue(root.contains("OnboardingWizard(onFinished:"))
+        XCTAssertTrue(root.contains("&& requiresOnboarding"))
+        XCTAssertTrue(root.contains("OnboardingWizard("))
+        XCTAssertTrue(root.contains("requiredAccountMigration: onboarded"))
+        XCTAssertTrue(
+            source.contains(
+                "OnboardingWizard.requiresRequiredAccountOnboarding("
+            )
+        )
     }
 
     private func text(_ relativePath: String) throws -> String {

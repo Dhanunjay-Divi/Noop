@@ -25,10 +25,28 @@ import StrandAnalytics
 /// them. The L3 `StressNudgeCenter` is OPTIONAL via the environment: Wave 3 injects a shared instance;
 /// absent that we fall back to a local one, so the view always compiles + the card surface always exists.
 struct BreathingView: View {
-    var body: some View { BreathingContent() }
+    let notificationStartRequest: Int
+    let onNotificationStartConsumed: () -> Void
+
+    init(
+        notificationStartRequest: Int = 0,
+        onNotificationStartConsumed: @escaping () -> Void = {}
+    ) {
+        self.notificationStartRequest = notificationStartRequest
+        self.onNotificationStartConsumed = onNotificationStartConsumed
+    }
+
+    var body: some View {
+        BreathingContent(
+            notificationStartRequest: notificationStartRequest,
+            onNotificationStartConsumed: onNotificationStartConsumed
+        )
+    }
 }
 
 private struct BreathingContent: View {
+    let notificationStartRequest: Int
+    let onNotificationStartConsumed: () -> Void
 
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var live: LiveState
@@ -126,6 +144,14 @@ private struct BreathingContent: View {
     /// Balanced AppModel suppression lease for the fixed-pace Breathe mode. Resonance/Calm sessions own
     /// their separate lease inside `BiofeedbackController`.
     @State private var suppressesStressNudges = false
+    @State private var handledNotificationStartRequest = 0
+    @State private var oneMinuteCueSource: OneMinuteCueSource?
+    @State private var oneMinuteStartedAtUptime: TimeInterval?
+
+    private enum OneMinuteCueSource {
+        case checkIn
+        case notification
+    }
 
     /// 0 = fully contracted, 1 = fully expanded. Drives the orb scale.
     @State private var orbProgress: CGFloat = 0
@@ -185,7 +211,21 @@ private struct BreathingContent: View {
         }
         .onReceive(secondTimer) { _ in
             guard running else { return }
-            sessionSeconds += 1
+            if let oneMinuteStartedAtUptime {
+                sessionSeconds = ActionableWellnessPolicy.elapsedSeconds(
+                    startedAtUptime: oneMinuteStartedAtUptime,
+                    nowUptime: ProcessInfo.processInfo.systemUptime
+                )
+            } else {
+                sessionSeconds += 1
+            }
+            if ActionableWellnessPolicy.shouldCompleteBreathingSession(
+                isOneMinuteSession: oneMinuteCueSource != nil,
+                elapsedSeconds: sessionSeconds
+            ) {
+                stop(oneMinuteOutcome: "completed")
+                StrandHaptic.success.play()
+            }
         }
         .onChangeCompat(of: live.rr) { rr in
             ingest(rr)
@@ -206,6 +246,10 @@ private struct BreathingContent: View {
         .onAppear {
             controllerBox.prepare(model: model, live: live)
             if audioCues { tonePlayer.activate() }
+            startNotificationSessionIfNeeded()
+        }
+        .onChangeCompat(of: notificationStartRequest) { _ in
+            startNotificationSessionIfNeeded()
         }
         .onDisappear { stop(); controller.stop(); tonePlayer.deactivate() }
     }
@@ -232,11 +276,46 @@ private struct BreathingContent: View {
 
     /// Start a one-minute haptic breathing cue at the user's locked resonance pace (or 5.5 fallback) —
     /// the L3 card's "Breathe now" action. Switches to Resonance/Breathe context and runs the controller.
-    private func startOneMinuteCue() {
+    private func startOneMinuteCue(
+        source: OneMinuteCueSource = .checkIn
+    ) {
+        if mode != .breathe {
+            mode = .breathe
+            Task { @MainActor in
+                await Task.yield()
+                beginOneMinuteCue(source: source)
+            }
+            return
+        }
+        beginOneMinuteCue(source: source)
+    }
+
+    private func beginOneMinuteCue(source: OneMinuteCueSource) {
         if running { stop() }
-        let bpm = lockedBpm ?? ResonanceEngine.fallbackBpm
-        let cycles = max(1, Int((60.0 * bpm / 60.0).rounded()))   // ~1 minute of breaths
-        controller.startResonanceSession(bpm: bpm, cycles: cycles)
+        controller.stop()
+        pace = lockedBpm == nil ? .coherence : .resonance
+        start()
+        oneMinuteCueSource = source
+        oneMinuteStartedAtUptime = ProcessInfo.processInfo.systemUptime
+        if source == .notification {
+            AppDiagnosticsRecorder.shared.record(
+                "wellness_notification.action_started",
+                fields: [
+                    "action": "start_breathing",
+                    "outcome": "started",
+                ]
+            )
+        }
+    }
+
+    private func startNotificationSessionIfNeeded() {
+        guard notificationStartRequest > 0,
+              notificationStartRequest != handledNotificationStartRequest else {
+            return
+        }
+        handledNotificationStartRequest = notificationStartRequest
+        onNotificationStartConsumed()
+        startOneMinuteCue(source: .notification)
     }
 
     // MARK: - Status row
@@ -584,6 +663,8 @@ private struct BreathingContent: View {
     // MARK: - Session control (fixed-pace Breathe — unchanged)
 
     private func start() {
+        oneMinuteCueSource = nil
+        oneMinuteStartedAtUptime = nil
         if !suppressesStressNudges {
             model.setStressNudgeSessionActive(true)
             suppressesStressNudges = true
@@ -600,8 +681,11 @@ private struct BreathingContent: View {
         armPhase(.inhale, from: Date(), buzz: true)
     }
 
-    private func stop() {
+    private func stop(oneMinuteOutcome: String = "dismissed") {
         let wasRunning = running
+        let finishedOneMinuteSource = oneMinuteCueSource
+        oneMinuteCueSource = nil
+        oneMinuteStartedAtUptime = nil
         running = false
         if suppressesStressNudges {
             model.setStressNudgeSessionActive(false)
@@ -621,6 +705,15 @@ private struct BreathingContent: View {
             withAnimation(.easeInOut(duration: 0.8)) {
                 orbProgress = 0
             }
+        }
+        if wasRunning, finishedOneMinuteSource == .notification {
+            AppDiagnosticsRecorder.shared.record(
+                "wellness_notification.action_finished",
+                fields: [
+                    "action": "start_breathing",
+                    "outcome": oneMinuteOutcome,
+                ]
+            )
         }
     }
 

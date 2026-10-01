@@ -19,6 +19,9 @@ enum NoopNotificationRoute: String, Codable, Equatable, Sendable {
 
 enum NotificationRoutePresentation: String, Codable, Equatable, Sendable {
     case lighterWorkoutOptions
+    case startBreathing
+    case logHydration
+    case movementBreak
 }
 
 struct PendingNotificationRouteRequest: Equatable, Sendable {
@@ -49,6 +52,7 @@ struct PendingNotificationRouteRequest: Equatable, Sendable {
 enum NotificationRouteBridge {
     static let userInfoKey = "noop.notification.route"
     static let journalDayUserInfoKey = "noop.notification.journalDay"
+    static let presentationUserInfoKey = "noop.notification.presentation"
     static let pendingRouteKey = "noop.notification.pendingRoute"
     static let pendingJournalDayKey = "noop.notification.pendingJournalDay"
     static let pendingPresentationKey = "noop.notification.pendingPresentation"
@@ -61,6 +65,15 @@ enum NotificationRouteBridge {
 
     static func journalDay(from userInfo: [AnyHashable: Any]) -> String? {
         canonicalJournalDay(userInfo[journalDayUserInfoKey] as? String)
+    }
+
+    static func presentation(
+        from userInfo: [AnyHashable: Any]
+    ) -> NotificationRoutePresentation? {
+        guard let raw = userInfo[presentationUserInfoKey] as? String else {
+            return nil
+        }
+        return NotificationRoutePresentation(rawValue: raw)
     }
 
     static func recordPending(
@@ -240,9 +253,17 @@ enum DailyReviewNotifications {
     /// Shared by every wellness notification that must keep detail out of hidden lock-screen previews.
     nonisolated static let privacyCategoryID = "noop.daily-review.private"
     nonisolated static let plannedWorkoutCategoryID = "noop.adaptive.planned-workout.private"
+    nonisolated static let hydrationCategoryID = "noop.hydration.private"
+    nonisolated static let stressBreathingCategoryID =
+        "noop.stress-breathing.private"
+    nonisolated static let inactivityCategoryID = "noop.inactivity.private"
     nonisolated static let keepCurrentPlanActionID = "noop.adaptive.planned-workout.keep"
     nonisolated static let reviewLighterOptionsActionID =
         "noop.adaptive.planned-workout.review"
+    nonisolated static let logWaterActionID = "noop.hydration.log"
+    nonisolated static let startBreathingActionID = "noop.stress-breathing.start"
+    nonisolated static let startMovementBreakActionID =
+        "noop.inactivity.start-movement"
 
     static var isEnabled: Bool {
         isMorningEnabled || isJournalEnabled
@@ -962,12 +983,21 @@ enum DailyReviewNotifications {
         let existing = await center.notificationCategories()
         let category = privacyCategory()
         let plannedWorkoutCategory = plannedWorkoutDecisionCategory()
+        let hydrationCategory = hydrationActionCategory()
+        let stressBreathingCategory = stressBreathingActionCategory()
+        let inactivityCategory = inactivityActionCategory()
         var merged = existing.filter {
             $0.identifier != privacyCategoryID &&
-                $0.identifier != plannedWorkoutCategoryID
+                $0.identifier != plannedWorkoutCategoryID &&
+                $0.identifier != hydrationCategoryID &&
+                $0.identifier != stressBreathingCategoryID &&
+                $0.identifier != inactivityCategoryID
         }
         merged.insert(category)
         merged.insert(plannedWorkoutCategory)
+        merged.insert(hydrationCategory)
+        merged.insert(stressBreathingCategory)
+        merged.insert(inactivityCategory)
         center.setNotificationCategories(merged)
     }
 
@@ -1004,6 +1034,52 @@ enum DailyReviewNotifications {
             ],
             intentIdentifiers: [],
             hiddenPreviewsBodyPlaceholder: String(localized: "Private NOOP check-in"),
+            options: []
+        )
+    }
+
+    static func hydrationActionCategory() -> UNNotificationCategory {
+        actionCategory(
+            identifier: hydrationCategoryID,
+            actionIdentifier: logWaterActionID,
+            title: String(localized: "appwide.wellness.action.log_water")
+        )
+    }
+
+    static func stressBreathingActionCategory() -> UNNotificationCategory {
+        actionCategory(
+            identifier: stressBreathingCategoryID,
+            actionIdentifier: startBreathingActionID,
+            title: String(localized: "appwide.wellness.action.start_breathing")
+        )
+    }
+
+    static func inactivityActionCategory() -> UNNotificationCategory {
+        actionCategory(
+            identifier: inactivityCategoryID,
+            actionIdentifier: startMovementBreakActionID,
+            title: String(localized: "appwide.wellness.action.move_now")
+        )
+    }
+
+    private static func actionCategory(
+        identifier: String,
+        actionIdentifier: String,
+        title: String
+    ) -> UNNotificationCategory {
+        UNNotificationCategory(
+            identifier: identifier,
+            actions: [
+                UNNotificationAction(
+                    identifier: actionIdentifier,
+                    title: title,
+                    options: [.authenticationRequired, .foreground]
+                )
+            ],
+            intentIdentifiers: [],
+            hiddenPreviewsBodyPlaceholder: String(
+                localized: "Private NOOP check-in"
+            ),
             options: []
         )
     }

@@ -112,15 +112,29 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
 
     func testConciseFirstRunKeepsDeferredFeaturesReachableAfterEntry() throws {
         let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
+        let flowPolicy = try source("Strand/Onboarding/OnboardingFlowPolicy.swift")
 
         XCTAssertTrue(onboarding.contains("case welcome, account, bluetooth, scan, ownership, profile, plan, done"))
-        XCTAssertTrue(onboarding.contains(".account,"))
-        XCTAssertTrue(onboarding.contains(".bluetooth,"))
-        XCTAssertTrue(onboarding.contains(".scan,"))
-        XCTAssertTrue(onboarding.contains(".ownership,"))
-        XCTAssertTrue(onboarding.contains(".profile,"))
-        XCTAssertTrue(onboarding.contains(".plan,"))
-        XCTAssertTrue(onboarding.contains(".done,"))
+        let firstRunSteps = try XCTUnwrap(
+            flowPolicy.components(separatedBy: "static func onboardingSteps(").dropFirst().first?
+                .components(separatedBy: "static func restoredOnboardingStep(").first
+        )
+        let orderedSteps = [
+            ".welcome,",
+            ".bluetooth,",
+            ".scan,",
+            ".account,",
+            ".ownership,",
+            ".profile,",
+            ".plan,",
+            ".done,",
+        ]
+        let orderedRanges = try orderedSteps.map { step in
+            try XCTUnwrap(firstRunSteps.range(of: step), step)
+        }
+        for (earlier, later) in zip(orderedRanges, orderedRanges.dropFirst()) {
+            XCTAssertLessThan(earlier.lowerBound, later.lowerBound)
+        }
         XCTAssertTrue(onboarding.contains("case .dailyRhythm: DailyRhythmStep()"))
         XCTAssertTrue(onboarding.contains("case .plan:"))
         XCTAssertTrue(onboarding.contains("ProductPlanStep("))
@@ -130,9 +144,9 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
         XCTAssertTrue(onboarding.contains("case .ownership:"))
         XCTAssertTrue(onboarding.contains("OwnershipAccountView()"))
         XCTAssertTrue(
-            onboarding.contains(
-                "static func onboardingSteps(ownershipConfigured _: Bool) -> [Step]"
-            )
+            flowPolicy.contains("static func onboardingSteps(")
+                && flowPolicy.contains("ownershipConfigured _: Bool")
+                && flowPolicy.contains(") -> [Step]")
         )
         XCTAssertTrue(onboarding.contains("OwnershipAvailabilityStep()"))
         XCTAssertTrue(onboarding.contains("ConnectedTransportAccountStep("))
@@ -146,9 +160,10 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
                 "private static let progressStorageKey = \"noop.onboarding.progress.v2\""
             )
         )
+        XCTAssertTrue(onboarding.contains("let isOwnershipConfigured ="))
         XCTAssertTrue(
             onboarding.contains(
-                "let isOwnershipConfigured = Self.ownershipConfiguredForCurrentBuild"
+                "|| Self.ownershipConfiguredForCurrentBuild"
             )
         )
         XCTAssertTrue(
@@ -196,7 +211,7 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
             )
         )
         XCTAssertTrue(
-            onboarding.contains(
+            flowPolicy.contains(
                 "return .account"
             )
         )
@@ -246,7 +261,7 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
         XCTAssertFalse(step.contains("Toggle("))
     }
 
-    func testLocalFirstCopyDoesNotPromiseOptionalCloudCanNeverBeUsed() throws {
+    func testRequiredAccountCopyRetiresCustomerLocalModeAndCoversSupportedLocales() throws {
         let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
         let settings = try source("Strand/Screens/SettingsView.swift")
         let catalogURL = repoRoot.appendingPathComponent(
@@ -261,16 +276,32 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
 
         XCTAssertFalse(onboarding.contains("all your data, none of the cloud"))
         XCTAssertFalse(settings.contains("all your data, none of the cloud"))
-        XCTAssertTrue(onboarding.contains("your health data, local by default"))
-        XCTAssertTrue(onboarding.contains("cloud features are optional"))
-        XCTAssertTrue(
+        XCTAssertFalse(onboarding.contains("your health data, local by default"))
+        XCTAssertFalse(onboarding.contains("cloud features are optional"))
+        XCTAssertFalse(
             settings.contains("core health data stays local by default")
+        )
+        XCTAssertTrue(onboarding.contains("appwide.onboarding.welcome.body"))
+        XCTAssertTrue(
+            onboarding.contains(
+                "appwide.onboarding.bluetooth.account_boundary_body"
+            )
+        )
+        XCTAssertTrue(
+            settings.contains(
+                "appwide.onboarding.bluetooth.account_boundary_body"
+            )
+        )
+        XCTAssertTrue(
+            onboarding.contains(
+                "NOOP requires an account before pairing. Health-data services and sharing remain separately controlled and consented."
+            )
         )
 
         let activeKeys = [
-            "your health data, local by default",
-            "A private window into your recovery, sleep and effort. Core data is read from NOOP Band and processed on %@; cloud features are optional.",
-            "NOOP: core health data stays local by default.",
+            "appwide.onboarding.welcome.body",
+            "appwide.onboarding.bluetooth.account_boundary_body",
+            "appwide.onboarding.account.release_body",
         ]
         let supportedLocales = [
             "de", "en", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant",

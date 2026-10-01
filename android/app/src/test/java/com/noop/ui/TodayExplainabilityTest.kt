@@ -295,6 +295,8 @@ class TodayExplainabilityTest {
     fun perMetric_computedSibling_readsOnDevice() {
         // The "$deviceId-noop" sibling is a score NOOP computed on THIS device from the raw strap stream.
         assertEquals("On-device", provenanceDisplayLabel("my-whoop-noop"))
+        assertEquals("On-device", provenanceDisplayLabel("noop-computed"))
+        assertEquals("On-device", provenanceDisplayLabel("noop_computed"))
     }
 
     @Test

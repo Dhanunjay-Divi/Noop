@@ -474,106 +474,157 @@ struct AddDeviceWizard: View {
     // MARK: Step 1 — type picker
 
     @ViewBuilder private var typeStep: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if Self.supplierPairingAvailableForCurrentBuild {
+        VStack(alignment: .leading, spacing: 16) {
+            BandPairingDiscoveryView(state: .ready)
+
+            VStack(spacing: 0) {
                 typeRow(
                     .veepoo,
                     icon: "waveform.path.ecg.rectangle",
                     title: String(
                         localized:
-                            "appwide.devices.supplier_display_model"
+                            "appwide.onboarding.device_wizard.account_linked_title"
+                    ),
+                    subtitle: accountLinkedBandSubtitle,
+                    enabled: Self.supplierPairingAvailableForCurrentBuild
+                )
+                typeDivider
+                typeRow(
+                    .whoop5mg,
+                    icon: "applewatch.side.right",
+                    title: String(
+                        localized:
+                            "appwide.onboarding.device_wizard.compatible_5_title"
                     ),
                     subtitle: String(
                         localized:
-                        "appwide.onboarding.device_wizard.supplier_subtitle"
+                            "appwide.onboarding.device_wizard.compatible_band"
+                    )
+                )
+                typeDivider
+                typeRow(
+                    .whoop4,
+                    icon: "applewatch.side.right",
+                    title: String(
+                        localized:
+                            "appwide.onboarding.device_wizard.compatible_4_title"
+                    ),
+                    subtitle: String(
+                        localized:
+                            "appwide.onboarding.device_wizard.compatible_band"
                     )
                 )
             }
-            typeRow(
-                .whoop5mg,
-                icon: "applewatch.side.right",
-                title: String(
-                    localized:
-                        "appwide.onboarding.device_wizard.compatible_5_title"
-                ),
-                subtitle: String(
-                    localized:
-                        "appwide.onboarding.device_wizard.compatible_band"
-                )
-            )
-            typeRow(
-                .whoop4,
-                icon: "applewatch.side.right",
-                title: String(
-                    localized:
-                        "appwide.onboarding.device_wizard.compatible_4_title"
-                ),
-                subtitle: String(
-                    localized:
-                        "appwide.onboarding.device_wizard.compatible_band"
-                )
-            )
-            if selectionScope == .allDevices {
-                typeRow(.hrStrap, icon: "heart.circle",
-                        title: String(localized: "Heart-rate strap"),
-                        subtitle: String(localized: "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast"))
-                typeRow(.gymEquipment, icon: "figure.run.treadmill",
-                        title: String(localized: "Gym equipment"),
-                        subtitle: String(localized: "Treadmill, indoor bike, rower or cross-trainer (Bluetooth FTMS)"))
+            .frostedCardSurface(cornerRadius: 8)
 
-                // EXPERIMENTAL tier — clearly labelled, opt-in, best-effort. Each is honest about what it can
-                // actually read; none fabricates data.
-                Text("Experimental").strandOverline().padding(.top, 8)
-                experimentalTierNote
-                typeRow(.oura, icon: "circle.circle",
-                        title: String(localized: "Oura ring"),
-                        subtitle: String(localized: "Take over your ring locally. Beta. This replaces the Oura app."))
-            }
             if selectionScope == .allDevices {
-                typeRow(.amazfit, icon: "waveform.path.ecg.rectangle",
+                Text("appwide.onboarding.device_wizard.other_sources")
+                    .strandOverline()
+                    .padding(.top, 4)
+                VStack(spacing: 0) {
+                    typeRow(
+                        .hrStrap,
+                        icon: "heart.circle",
+                        title: String(localized: "Heart-rate strap"),
+                        subtitle: String(
+                            localized:
+                                "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast"
+                        )
+                    )
+                    typeDivider
+                    typeRow(
+                        .gymEquipment,
+                        icon: "figure.run.treadmill",
+                        title: String(localized: "Gym equipment"),
+                        subtitle: String(
+                            localized:
+                                "Treadmill, indoor bike, rower or cross-trainer (Bluetooth FTMS)"
+                        )
+                    )
+                }
+                .frostedCardSurface(cornerRadius: 8)
+
+                Text("Experimental")
+                    .strandOverline()
+                    .padding(.top, 8)
+                experimentalTierNote
+                VStack(spacing: 0) {
+                    typeRow(
+                        .oura,
+                        icon: "circle.circle",
+                        title: String(localized: "Oura ring"),
+                        subtitle: String(
+                            localized:
+                                "Take over your ring locally. Beta. This replaces the Oura app."
+                        )
+                    )
+                    typeDivider
+                    typeRow(
+                        .amazfit,
+                        icon: "waveform.path.ecg.rectangle",
                         title: "Amazfit / Zepp",
-                        subtitle: String(localized: "Incl. Helio. Live heart rate where the band exposes it. Help us test."))
-                typeRow(.miBand, icon: "waveform.path.ecg",
+                        subtitle: String(
+                            localized:
+                                "Incl. Helio. Live heart rate where the band exposes it. Help us test."
+                        )
+                    )
+                    typeDivider
+                    typeRow(
+                        .miBand,
+                        icon: "waveform.path.ecg",
                         title: "Xiaomi Mi Band",
-                        subtitle: String(localized: "Live heart rate on bands that don't need pairing. Help us test."))
-                typeRow(.garmin, icon: "applewatch",
+                        subtitle: String(
+                            localized:
+                                "Live heart rate on bands that don't need pairing. Help us test."
+                        )
+                    )
+                    typeDivider
+                    typeRow(
+                        .garmin,
+                        icon: "applewatch",
                         title: String(localized: "Garmin watch"),
-                        subtitle: String(localized: "Uses the watch's Broadcast Heart Rate. We'll show you how."))
+                        subtitle: String(
+                            localized:
+                                "Uses the watch's Broadcast Heart Rate. We'll show you how."
+                        )
+                    )
+                }
+                .frostedCardSurface(cornerRadius: 8)
 
                 whoopFirstNote
             }
         }
     }
 
-    private func typeRow(_ t: DeviceType, icon: String, title: String, subtitle: String) -> some View {
-        Button {
+    private var typeDivider: some View {
+        BandPairingOptionDivider()
+    }
+
+    private var accountLinkedBandSubtitle: String {
+        let key: String.LocalizationValue =
+            Self.supplierPairingAvailableForCurrentBuild
+            ? "appwide.onboarding.device_wizard.account_linked_subtitle"
+            : "appwide.onboarding.device_wizard.account_linked_unavailable"
+        return String(localized: key)
+    }
+
+    private func typeRow(
+        _ t: DeviceType,
+        icon: String,
+        title: String,
+        subtitle: String,
+        enabled: Bool = true
+    ) -> some View {
+        BandPairingOptionRow(
+            icon: icon,
+            title: title,
+            subtitle: subtitle,
+            enabled: enabled,
+            accessibilityIdentifier:
+                "noop.device-wizard.type.\(t.accessibilityID)"
+        ) {
             selectType(t)
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(StrandFont.title2)
-                    .foregroundStyle(StrandPalette.accent)
-                    .frame(width: 30)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(StrandFont.headline)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                    Text(subtitle).font(StrandFont.caption)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.textTertiary)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frostedCardSurface(cornerRadius: 14)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(title). \(subtitle)")
-        .accessibilityIdentifier("noop.device-wizard.type.\(t.accessibilityID)")
     }
 
     private func selectType(_ selectedType: DeviceType) {
@@ -2476,15 +2527,8 @@ private struct SearchingCard: View {
     /// FTMS / Huami / Oura pick lists keep their existing copy unchanged.
     var whoopHint: Bool = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ProgressView().tint(StrandPalette.accent)
-            Text("Searching…")
-                .font(StrandFont.body)
-                .foregroundStyle(StrandPalette.textPrimary)
-            Text("Make sure it's awake and not connected elsewhere.")
-                .font(StrandFont.subhead)
-                .foregroundStyle(StrandPalette.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 14) {
+            BandPairingDiscoveryView(state: .searching)
             if whoopHint {
                 Text(
                     "appwide.onboarding.device_wizard.whoop_search_hint"
@@ -2495,8 +2539,8 @@ private struct SearchingCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .frostedCardSurface(cornerRadius: 14)
+        .padding(18)
+        .frostedCardSurface(cornerRadius: 8)
     }
 }
 

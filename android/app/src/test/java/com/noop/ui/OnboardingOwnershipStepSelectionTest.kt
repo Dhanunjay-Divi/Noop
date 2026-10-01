@@ -13,14 +13,28 @@ import org.junit.Test
 
 class OnboardingOwnershipStepSelectionTest {
     @Test
-    fun accountModeMatchesRuntimeConfiguration() {
-        assertEquals(
-            OnboardingAccountMode.CONFIGURED,
-            onboardingAccountMode(ownershipConfigured = true),
+    fun requiredAccountOnboardingMigratesLegacyCompletedInstalls() {
+        assertTrue(
+            requiresRequiredAccountOnboarding(
+                onboarded = true,
+                completedVersion = 0,
+            ),
+        )
+        assertFalse(
+            requiresRequiredAccountOnboarding(
+                onboarded = true,
+                completedVersion = REQUIRED_ACCOUNT_ONBOARDING_VERSION,
+            ),
         )
         assertEquals(
-            OnboardingAccountMode.EXPLORATION,
-            onboardingAccountMode(ownershipConfigured = false),
+            onboardingPages(ownershipConfigured = true).indexOf(
+                OnboardingPage.Account,
+            ),
+            restoredOnboardingPageIndex(
+                storedPage = null,
+                pages = onboardingPages(ownershipConfigured = true),
+                requiredAccountMigration = true,
+            ),
         )
     }
 
@@ -61,7 +75,7 @@ class OnboardingOwnershipStepSelectionTest {
     }
 
     @Test
-    fun accountCopyPreservesConfiguredAndLocalFirstBoundaries() {
+    fun accountCopyUsesTheRequiredAccountBoundary() {
         assertEquals(
             OnboardingAccountCopy(
                 dataBoundaryTitle =
@@ -69,30 +83,19 @@ class OnboardingOwnershipStepSelectionTest {
                 dataBoundaryBody =
                     R.string.onboarding_data_boundary_configured_body,
                 bluetoothBoundaryBody =
-                    R.string.onboarding_bluetooth_boundary_configured,
+                    R.string.appwide_onboarding_bluetooth_account_boundary_body,
             ),
-            onboardingAccountCopy(OnboardingAccountMode.CONFIGURED),
-        )
-        assertEquals(
-            OnboardingAccountCopy(
-                dataBoundaryTitle =
-                    R.string.onboarding_data_boundary_exploration_title,
-                dataBoundaryBody =
-                    R.string.onboarding_data_boundary_exploration_body,
-                bluetoothBoundaryBody =
-                    R.string.onboarding_bluetooth_boundary_exploration,
-            ),
-            onboardingAccountCopy(OnboardingAccountMode.EXPLORATION),
+            onboardingAccountCopy(),
         )
     }
 
     @Test
-    fun activeFlowIsTheConciseEightStageAccountFirstSequence() {
+    fun activeFlowIsTheConciseEightStageBandFirstSequence() {
         val expected = listOf(
             OnboardingPage.Welcome,
-            OnboardingPage.Account,
             OnboardingPage.Bluetooth,
             OnboardingPage.Connect,
+            OnboardingPage.Account,
             OnboardingPage.Ownership,
             OnboardingPage.Profile,
             OnboardingPage.Plan,
@@ -176,7 +179,7 @@ class OnboardingOwnershipStepSelectionTest {
                 phase = OwnershipPhase.COMPLETE,
             ),
         )
-        assertTrue(
+        assertFalse(
             accountStepCanContinue(
                 ownershipConfigured = false,
                 reconciliationComplete = false,
@@ -186,9 +189,9 @@ class OnboardingOwnershipStepSelectionTest {
     }
 
     @Test
-    fun restoredPostSetupPageReconcilesThroughAccountThenBand() {
+    fun restoredPostSetupPageReconcilesThroughBandThenAccount() {
         assertEquals(
-            OnboardingPage.Account,
+            OnboardingPage.Connect,
             destination(
                 requested = OnboardingPage.Profile,
                 configured = true,
@@ -224,7 +227,7 @@ class OnboardingOwnershipStepSelectionTest {
                 ownershipConfigured = true,
                 reconciliationComplete = false,
                 phase = OwnershipPhase.SIGNED_OUT,
-                deviceSetupComplete = false,
+                deviceSetupComplete = true,
                 supplierClaimRequired = false,
             ),
         )

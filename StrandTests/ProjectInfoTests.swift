@@ -20,4 +20,24 @@ final class ProjectInfoTests: XCTestCase {
             XCTAssertFalse(url.path.lowercased().contains("issues"))
         }
     }
+
+    func testBandOrderURLRequiresPublicHTTPSWithoutCredentials() {
+        XCTAssertEqual(
+            ProjectInfo.validatedBandOrderURL(
+                " https://shop.example.com/band#checkout "
+            )?.absoluteString,
+            "https://shop.example.com/band"
+        )
+
+        for rejected in [
+            nil,
+            "",
+            "$(NOOP_BAND_ORDER_URL)",
+            "http://shop.example.com/band",
+            "https://user:secret@shop.example.com/band",
+            "https:///band",
+        ] {
+            XCTAssertNil(ProjectInfo.validatedBandOrderURL(rejected))
+        }
+    }
 }

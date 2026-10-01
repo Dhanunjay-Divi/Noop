@@ -2523,14 +2523,19 @@ final class AppModel: ObservableObject {
     static let wristAlertsMasterKey = "notif.masterEnabled"
 
     /// Post the local notification mirroring the inactivity (sedentary) wrist nudge. Called right after
-    /// `BLEManager.maybeBuzzInactivity` fires its buzz (see crossLaneNotes). `minutes` = the seated bout
-    /// length the detector reported. No-op on macOS and when wrist alerts are off.
-    static func postInactivity(minutes: Int) {
+    /// `BLEManager.maybeBuzzInactivity` fires its buzz (see crossLaneNotes). The seated duration remains
+    /// internal eligibility evidence and is not exposed in lock-screen copy. No-op on macOS and when
+    /// wrist alerts are off.
+    static func postInactivity(minutes _: Int) {
         #if os(iOS)
-        let body = minutes > 0
-            ? String(localized: "You've been seated for about \(minutes) min. Time to move.")
-            : String(localized: "Time to move. You've been seated a while.")
-        postWristAlert(identifier: "inactivity-nudge", title: String(localized: "Move reminder"), body: body)
+        postWristAlert(
+            identifier: "inactivity-nudge",
+            title: String(localized: "appwide.wellness.inactivity.title"),
+            body: String(localized: "appwide.wellness.inactivity.body"),
+            route: .today,
+            presentation: .movementBreak,
+            categoryIdentifier: DailyReviewNotifications.inactivityCategoryID
+        )
         #endif
     }
 
@@ -2547,7 +2552,14 @@ final class AppModel: ObservableObject {
     /// Shared post path: gate on the wrist-alerts master, then deliver only if the OS already authorized
     /// notifications (no second system prompt , BatteryNotifier-style status-only check). A fresh
     /// identifier per category means a new alert replaces the old one rather than stacking.
-    private static func postWristAlert(identifier: String, title: String, body: String) {
+    private static func postWristAlert(
+        identifier: String,
+        title: String,
+        body: String,
+        route: NoopNotificationRoute? = nil,
+        presentation: NotificationRoutePresentation? = nil,
+        categoryIdentifier: String = DailyReviewNotifications.privacyCategoryID
+    ) {
         guard UserDefaults.standard.bool(forKey: wristAlertsMasterKey) else {
             LocalNotificationLifecycle.suppressed(identifier: identifier)
             return
@@ -2559,10 +2571,21 @@ final class AppModel: ObservableObject {
                 LocalNotificationLifecycle.suppressed(identifier: identifier)
                 return
             }
+            await DailyReviewNotifications.ensurePrivacyCategory(on: center)
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
             content.sound = .default
+            content.categoryIdentifier = categoryIdentifier
+            var userInfo: [AnyHashable: Any] = [:]
+            if let route {
+                userInfo[NotificationRouteBridge.userInfoKey] = route.rawValue
+            }
+            if let presentation {
+                userInfo[NotificationRouteBridge.presentationUserInfoKey] =
+                    presentation.rawValue
+            }
+            content.userInfo = userInfo
             try? await LocalNotificationLifecycle.schedule(
                 UNNotificationRequest(identifier: identifier, content: content, trigger: nil),
                 on: center

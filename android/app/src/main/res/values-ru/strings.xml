@@ -227,7 +227,7 @@
     <string name="l10n_today_screen_steps_cdde4f20">Шаги</string>
     <string name="l10n_today_screen_weight_69c0b815">Вес</string>
     <string name="l10n_today_screen_calories_3e62ecfe">Калории</string>
-    <string name="key_metrics_selection_instructions">Закрепите от 3 до 5 метрик вверху. Все метрики останутся видимыми.</string>
+    <string name="key_metrics_selection_instructions">Закрепите от 3 до 6 метрик вверху. Все метрики останутся видимыми.</string>
     <string name="key_metrics_selection_count">Закреплено %1$d из %2$d</string>
     <string name="key_metrics_show_selected">Показать выбранные метрики</string>
     <string name="key_metrics_show_all_count">Показать все метрики (%1$d)</string>
@@ -555,4 +555,11 @@
     <string name="managed_cloud_error_document_conflict">NOOP сохранил текущие данные. Проверьте последние изменения, затем нажмите «Синхронизировать сейчас», чтобы повторить попытку.</string>
     <string name="ownership_progress_step">Шаг %1$d из %2$d</string>
     <string name="ownership_setup_complete">Настройка владения завершена.</string>
+    <string name="onboarding_bluetooth_permission_prompt">Когда появится системный запрос, выберите «Разрешить», чтобы NOOP мог найти ваш совместимый браслет.</string>
+    <string name="noop_command_lens_move_left">Переместить к левому краю</string>
+    <string name="noop_command_lens_move_right">Переместить к правому краю</string>
+    <string name="noop_command_lens_move_up">Переместить вверх</string>
+    <string name="noop_command_lens_move_down">Переместить вниз</string>
+    <string name="noop_command_lens_left_edge">Левый край</string>
+    <string name="noop_command_lens_right_edge">Правый край</string>
 </resources>

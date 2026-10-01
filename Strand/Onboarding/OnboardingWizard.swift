@@ -14,9 +14,9 @@ import UIKit
 //
 // First-run path:
 //  1 Welcome           - NOOP + data boundary
-//  2 Account           - create or restore the ownership identity
-//  3 Bluetooth         - explain the permission before the OS prompt
-//  4 Band setup        - launch-only chooser: NOOP Band or retained WHOOP test transport
+//  2 Bluetooth         - explain the permission before the OS prompt
+//  3 Band setup        - choose a compatible launch band
+//  4 Account           - create or restore the ownership identity
 //  5 Ownership         - first-party claim/replacement confirmation when required
 //  6 Profile           - age / sex / weight / height bound to ProfileStore
 //  7 Plan              - choose NOOP or save a NOOP+ preference without payment
@@ -33,13 +33,28 @@ public struct OnboardingWizard: View {
     /// Called when the user finishes (or skips to the end of) onboarding.
     public var onFinished: () -> Void
 
-    public init(onFinished: @escaping () -> Void) {
+    public init(
+        requiredAccountMigration: Bool = false,
+        onFinished: @escaping () -> Void
+    ) {
         self.onFinished = onFinished
-        let isOwnershipConfigured = Self.ownershipConfiguredForCurrentBuild
+        #if os(iOS) && DEBUG
+        let hermeticConfiguredProviderUITest =
+            Self.configuredProviderUITestRequested()
+        #else
+        let hermeticConfiguredProviderUITest = false
+        #endif
+        self.hermeticConfiguredProviderUITest =
+            hermeticConfiguredProviderUITest
+        let isOwnershipConfigured =
+            hermeticConfiguredProviderUITest
+            || Self.ownershipConfiguredForCurrentBuild
         ownershipConfigured = isOwnershipConfigured
         var demoStepOverride: Step?
         _ownershipBootstrapComplete = State(
-            initialValue: !isOwnershipConfigured
+            initialValue:
+                hermeticConfiguredProviderUITest
+                || !isOwnershipConfigured
         )
         var initialStep = Self.restoredOnboardingStep(
             storedValue: UserDefaults.standard.string(
@@ -47,6 +62,9 @@ public struct OnboardingWizard: View {
             ),
             ownershipConfigured: isOwnershipConfigured
         )
+        if requiredAccountMigration {
+            initialStep = .account
+        }
         #if DEBUG
         let args = CommandLine.arguments
         if let index = args.firstIndex(of: "--demo-onboarding-page"),
@@ -132,92 +150,6 @@ public struct OnboardingWizard: View {
         }
     }
 
-    static func onboardingSteps(ownershipConfigured _: Bool) -> [Step] {
-        [
-            .welcome,
-            .account,
-            .bluetooth,
-            .scan,
-            .ownership,
-            .profile,
-            .plan,
-            .done,
-        ]
-    }
-
-    static func restoredOnboardingStep(
-        storedValue: String?,
-        ownershipConfigured: Bool
-    ) -> Step {
-        let restored = Step.allCases.first {
-            $0.storageValue == storedValue
-        } ?? .welcome
-        return normalizedOnboardingStep(
-            restored,
-            ownershipConfigured: ownershipConfigured
-        )
-    }
-
-    static func normalizedOnboardingStep(
-        _ candidate: Step,
-        ownershipConfigured: Bool
-    ) -> Step {
-        let steps = onboardingSteps(
-            ownershipConfigured: ownershipConfigured
-        )
-        if steps.contains(candidate) { return candidate }
-        switch candidate {
-        case .what, .expectations, .wear, .bonded, .importData,
-             .notifications, .safetyContacts, .appearance, .dailyRhythm:
-            return .welcome
-        default:
-            return .welcome
-        }
-    }
-
-    static func ownershipDestination(
-        for candidate: Step,
-        ownershipConfigured: Bool,
-        reconciliationComplete: Bool,
-        phase: OwnershipServicePhase,
-        supplierClaimRequired: Bool = true,
-        deviceSetupComplete: Bool = true
-    ) -> Step? {
-        if candidate == .welcome || candidate == .account {
-            return candidate
-        }
-        if ownershipConfigured {
-            guard reconciliationComplete else { return nil }
-            guard accountStepCanContinue(
-                ownershipConfigured: true,
-                reconciliationComplete: true,
-                phase: phase
-            ) else {
-                return .account
-            }
-        }
-        let requiresDeviceSetup = [
-            Step.ownership,
-            .profile,
-            .plan,
-            .done,
-        ].contains(candidate)
-        guard !requiresDeviceSetup || deviceSetupComplete else {
-            return .scan
-        }
-        guard ownershipConfigured else { return candidate }
-        let requiresCompletedClaim = supplierClaimRequired
-            && [.profile, .plan, .done].contains(candidate)
-        guard !requiresCompletedClaim
-            || ownershipCanAccessPostClaimOnboarding(
-                isAvailable: true,
-                phase: phase
-            ) else {
-            return .ownership
-        }
-        return candidate
-    }
-
     private static var ownershipConfiguredForCurrentBuild: Bool {
         #if os(iOS)
         return OwnershipConfiguration.load(bundle: .main) != nil
@@ -226,8 +158,22 @@ public struct OnboardingWizard: View {
         #endif
     }
 
+    #if DEBUG
+    static let configuredProviderUITestLaunchArgument =
+        "--ui-test-configured-provider-onboarding"
+
+    static func configuredProviderUITestRequested(
+        arguments: [String] = CommandLine.arguments
+    ) -> Bool {
+        arguments.contains(configuredProviderUITestLaunchArgument)
+    }
+    #endif
+
     private static let progressStorageKey = "noop.onboarding.progress.v2"
     private let ownershipConfigured: Bool
+    /// An explicit iPhone UI-test lane. Release builds hard-code this false and do not compile the
+    /// launch-argument parser or synthetic views.
+    private let hermeticConfiguredProviderUITest: Bool
     /// DEBUG-only visual previews may render a page without fabricating durable account or device state.
     private let demoStepOverride: Step?
     @State private var step: Step = .welcome
@@ -241,6 +187,8 @@ public struct OnboardingWizard: View {
     @State private var dailyReviewOptIn = DailyReviewNotifications.isEnabled
     @State private var selectedPlan = NoopProductPlan.stored()
     @State private var planSubmissionAttempted = false
+    @State private var hermeticAccountReady = false
+    @State private var hermeticOwnershipClaimed = false
     #if os(iOS)
     @StateObject private var ownershipService = OwnershipService.shared
     #endif
@@ -261,16 +209,7 @@ public struct OnboardingWizard: View {
                 ZStack {
                     switch step {
                     case .welcome:    WelcomeStep()
-                    case .account:
-                        #if os(iOS)
-                        if ownershipConfigured {
-                            OwnershipAccountView()
-                        } else {
-                            OwnershipAvailabilityStep()
-                        }
-                        #else
-                        OwnershipAvailabilityStep()
-                        #endif
+                    case .account:    accountStep
                     case .what:       WhatItDoesStep()
                     case .expectations: ExpectationsStep()
                     case .bluetooth:  BluetoothStep()
@@ -278,23 +217,12 @@ public struct OnboardingWizard: View {
                     case .scan:
                         ScanStep(
                             setupComplete: deviceSetupComplete,
-                            onSetupSource: handleDeviceSetupSource
+                            onSetupSource: handleDeviceSetupSource,
+                            hermeticConfiguredProviderUITest:
+                                hermeticConfiguredProviderUITest
                         )
                     case .bonded:     BondedStep()
-                    case .ownership:
-                        #if os(iOS)
-                        if supplierClaimRequired {
-                            OwnershipAccountView()
-                        } else {
-                            ConnectedTransportAccountStep(
-                                source: registrySetupSource
-                            )
-                        }
-                        #else
-                        ConnectedTransportAccountStep(
-                            source: registrySetupSource
-                        )
-                        #endif
+                    case .ownership:  ownershipStep
                     case .profile:    ProfileStep(isEditing: $profileEditing)
                     case .importData: ImportStep()
                     case .notifications: NotificationsStep(dailyReviewOptIn: $dailyReviewOptIn)
@@ -313,6 +241,7 @@ public struct OnboardingWizard: View {
                 .frame(maxWidth: 620, maxHeight: .infinity)
                 .clipped()
                 .transition(stepTransition)
+                .accessibilityIdentifier("noop.onboarding.page.\(step.storageValue)")
                 .id(step)                       // re-runs the transition per step
                 .padding(.horizontal, 20)
 
@@ -347,21 +276,113 @@ public struct OnboardingWizard: View {
         // Isolated durable-registry observation keeps relaunch/resume fail-closed without subscribing
         // the animated wizard root to high-rate heart-rate updates.
         .background(
-            DeviceSetupWatcher(onSetupSource: handleDeviceSetupSource)
+            deviceSetupWatcher
         )
         #if os(iOS)
         .task {
-            guard demoStepOverride == nil else { return }
+            guard demoStepOverride == nil,
+                  !hermeticConfiguredProviderUITest else {
+                return
+            }
             bootstrapOwnershipIfNeeded()
         }
         .onChange(of: ownershipService.phase) { _, _ in
-            guard demoStepOverride == nil else { return }
+            guard demoStepOverride == nil,
+                  !hermeticConfiguredProviderUITest else {
+                return
+            }
             reconcileOwnershipRequirement()
         }
         .onChange(of: ownershipService.isBusy) { _, _ in
-            guard demoStepOverride == nil else { return }
+            guard demoStepOverride == nil,
+                  !hermeticConfiguredProviderUITest else {
+                return
+            }
             completeOwnershipBootstrapIfSettled()
         }
+        #endif
+    }
+
+    @ViewBuilder
+    private var accountStep: some View {
+        #if os(iOS)
+        #if DEBUG
+        if hermeticConfiguredProviderUITest {
+            HermeticConfiguredOwnershipAccountStep(
+                accountReady: hermeticAccountReady,
+                onSyntheticSuccess: {
+                    hermeticAccountReady = true
+                    AppDiagnosticsRecorder.shared.record(
+                        "onboarding.ui_test",
+                        fields: [
+                            "boundary": "account",
+                            "outcome": "synthetic_completed",
+                        ]
+                    )
+                }
+            )
+        } else if ownershipConfigured {
+            OwnershipAccountView()
+        } else {
+            OwnershipAvailabilityStep()
+        }
+        #else
+        if ownershipConfigured {
+            OwnershipAccountView()
+        } else {
+            OwnershipAvailabilityStep()
+        }
+        #endif
+        #else
+        OwnershipAvailabilityStep()
+        #endif
+    }
+
+    @ViewBuilder
+    private var ownershipStep: some View {
+        #if os(iOS)
+        #if DEBUG
+        if hermeticConfiguredProviderUITest {
+            HermeticOwnershipClaimStep(
+                claimed: hermeticOwnershipClaimed,
+                onSyntheticClaim: {
+                    hermeticOwnershipClaimed = true
+                    AppDiagnosticsRecorder.shared.record(
+                        "onboarding.ui_test",
+                        fields: [
+                            "boundary": "ownership",
+                            "outcome": "synthetic_completed",
+                        ]
+                    )
+                }
+            )
+        } else if supplierClaimRequired {
+            OwnershipAccountView()
+        } else {
+            ConnectedTransportAccountStep(source: registrySetupSource)
+        }
+        #else
+        if supplierClaimRequired {
+            OwnershipAccountView()
+        } else {
+            ConnectedTransportAccountStep(source: registrySetupSource)
+        }
+        #endif
+        #else
+        ConnectedTransportAccountStep(source: registrySetupSource)
+        #endif
+    }
+
+    @ViewBuilder
+    private var deviceSetupWatcher: some View {
+        #if os(iOS) && DEBUG
+        if hermeticConfiguredProviderUITest {
+            EmptyView()
+        } else {
+            DeviceSetupWatcher(onSetupSource: handleDeviceSetupSource)
+        }
+        #else
+        DeviceSetupWatcher(onSetupSource: handleDeviceSetupSource)
         #endif
     }
 
@@ -369,7 +390,7 @@ public struct OnboardingWizard: View {
         guard demoStepOverride == nil else { return }
         registrySetupSource = source
         if source != nil && step == .scan {
-            move(to: .ownership, direction: "automatic")
+            move(to: .account, direction: "automatic")
         } else if source == nil {
             reconcileOwnershipRequirement()
         }
@@ -472,7 +493,13 @@ public struct OnboardingWizard: View {
         }
         switch step {
         case .welcome:    return String(localized: "Get Started")
-        case .account:    return String(localized: "Continue")
+        case .account:
+            return ownershipConfigured
+                ? String(localized: "Continue")
+                : String(
+                    localized:
+                        "appwide.onboarding.account.unconfigured_title"
+                )
         case .what:       return String(localized: "Continue")
         case .expectations: return String(localized: "I understand")
         case .bluetooth:  return String(localized: "Continue")
@@ -609,6 +636,23 @@ public struct OnboardingWizard: View {
         if step == .plan {
             planSubmissionAttempted = true
             #if os(iOS)
+            #if DEBUG
+            if hermeticConfiguredProviderUITest {
+                guard postClaimOwnershipReady else {
+                    reconcileOwnershipRequirement()
+                    return
+                }
+                AppDiagnosticsRecorder.shared.record(
+                    "onboarding.ui_test",
+                    fields: [
+                        "boundary": "plan",
+                        "outcome": "synthetic_completed",
+                    ]
+                )
+                advanceStep()
+                return
+            }
+            #endif
             guard postClaimOwnershipReady else {
                 reconcileOwnershipRequirement()
                 return
@@ -695,38 +739,17 @@ public struct OnboardingWizard: View {
         activeSteps.firstIndex(of: step) ?? 0
     }
 
-    static func accountStepCanContinue(
-        ownershipConfigured: Bool,
-        reconciliationComplete: Bool,
-        phase: OwnershipServicePhase
-    ) -> Bool {
-        guard ownershipConfigured else { return true }
-        guard reconciliationComplete else { return false }
-        switch phase {
-        case .accountReady, .possessionUnavailable, .claiming, .claimed,
-             .complete, .replacementRequired, .authorizingReplacement:
-            return true
-        case .unavailable, .localRecoveryRequired, .signedOut,
-             .emailVerification, .termsReview, .registering,
-             .deletionPending:
-            return false
-        }
-    }
-
-    static func claimStepCanContinue(
-        supplierClaimRequired: Bool,
-        claimed: Bool,
-        reconciliationComplete: Bool
-    ) -> Bool {
-        !supplierClaimRequired || (claimed && reconciliationComplete)
-    }
-
     private var accountStepReady: Bool {
         #if os(iOS)
+        #if DEBUG
+        if hermeticConfiguredProviderUITest {
+            return hermeticAccountReady
+        }
+        #endif
         return Self.accountStepCanContinue(
             ownershipConfigured: ownershipConfigured,
             reconciliationComplete: ownershipReconciliationComplete,
-            phase: ownershipService.phase
+            phase: effectiveOwnershipPhase
         )
         #else
         return true
@@ -739,6 +762,11 @@ public struct OnboardingWizard: View {
 
     private var ownershipClaimed: Bool {
         #if os(iOS)
+        #if DEBUG
+        if hermeticConfiguredProviderUITest {
+            return hermeticOwnershipClaimed
+        }
+        #endif
         return ownershipService.phase == .claimed
             || ownershipService.phase == .complete
         #else
@@ -748,6 +776,11 @@ public struct OnboardingWizard: View {
 
     private var planSubmissionBusy: Bool {
         #if os(iOS)
+        #if DEBUG
+        if hermeticConfiguredProviderUITest {
+            return false
+        }
+        #endif
         return planSubmissionAttempted && ownershipService.isBusy
         #else
         return false
@@ -760,7 +793,7 @@ public struct OnboardingWizard: View {
         guard supplierClaimRequired else { return true }
         return ownershipCanAccessPostClaimOnboarding(
             isAvailable: true,
-            phase: ownershipService.phase
+            phase: effectiveOwnershipPhase
         )
         #else
         return true
@@ -769,6 +802,11 @@ public struct OnboardingWizard: View {
 
     private var ownershipReconciliationComplete: Bool {
         #if os(iOS)
+        #if DEBUG
+        if hermeticConfiguredProviderUITest {
+            return true
+        }
+        #endif
         return ownershipBootstrapComplete && !ownershipService.isBusy
         #else
         return true
@@ -777,6 +815,11 @@ public struct OnboardingWizard: View {
 
     private var planSubmissionStatus: String {
         #if os(iOS)
+        #if DEBUG
+        if hermeticConfiguredProviderUITest {
+            return ""
+        }
+        #endif
         guard planSubmissionAttempted, !ownershipService.isBusy else {
             return ""
         }
@@ -797,7 +840,7 @@ public struct OnboardingWizard: View {
 
     private func ownershipDestination(for candidate: Step) -> Step? {
         #if os(iOS)
-        let phase = ownershipService.phase
+        let phase = effectiveOwnershipPhase
         #else
         let phase = OwnershipServicePhase.unavailable
         #endif
@@ -810,6 +853,18 @@ public struct OnboardingWizard: View {
             deviceSetupComplete: deviceSetupComplete
         )
     }
+
+    #if os(iOS)
+    private var effectiveOwnershipPhase: OwnershipServicePhase {
+        #if DEBUG
+        if hermeticConfiguredProviderUITest {
+            guard hermeticAccountReady else { return .signedOut }
+            return hermeticOwnershipClaimed ? .claimed : .accountReady
+        }
+        #endif
+        return ownershipService.phase
+    }
+    #endif
 
     private func ownershipAllows(_ candidate: Step) -> Bool {
         guard let destination = ownershipDestination(for: candidate) else {
@@ -886,6 +941,316 @@ public struct OnboardingWizard: View {
     }
 }
 
+#if os(iOS) && DEBUG
+private enum HermeticOnboardingCopy {
+    static let ownershipPolicy =
+        "Synthetic ownership policy for automated UI validation only."
+    static let ownershipConsent =
+        "I agree to this synthetic ownership policy."
+    static let syntheticDomain =
+        "This harness accepts only an @example.invalid address."
+    static let accountAuthenticated = "Synthetic account authenticated"
+    static let ownershipConfirmed = "Synthetic ownership confirmed"
+    static let ownershipReady = "Synthetic NOOP Band is ready to confirm."
+    static let ownershipSuccess = "Synthetic ownership success"
+    static let chooseBand = "Choose a supported band"
+    static let bandPickerBoundary =
+        "UI-test simulation only. No Bluetooth scan, identifier or credential is used."
+    static let bandName = "NOOP Band"
+    static let bandDetail =
+        "Deterministic simulated setup and ownership"
+}
+
+private struct HermeticConfiguredOwnershipAccountStep: View {
+    let accountReady: Bool
+    let onSyntheticSuccess: () -> Void
+
+    @State private var createMode = true
+    @State private var email = ""
+    @State private var password = ""
+    @State private var confirmation = ""
+    @State private var acceptedTerms = false
+
+    var body: some View {
+        StepShell(
+            title: createMode
+                ? "Create ownership account"
+                : "Sign in",
+            subtitle:
+                "Hermetic UI-test provider. Inputs stay in memory and no request leaves this process."
+        ) {
+            StrandCard(padding: 20) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Picker("Account action", selection: $createMode) {
+                        Text("Create").tag(true)
+                        Text("Sign in").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(accountReady)
+                    .accessibilityIdentifier("noop.ui-test.ownership.mode")
+
+                    if createMode {
+                        Text(verbatim:
+                            HermeticOnboardingCopy.ownershipPolicy
+                        )
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                        Toggle(isOn: $acceptedTerms) {
+                            Text(verbatim:
+                                HermeticOnboardingCopy.ownershipConsent
+                            )
+                        }
+                        .toggleStyle(.noopSwitch)
+                        .disabled(accountReady)
+                        .accessibilityIdentifier(
+                            "noop.ui-test.ownership.terms"
+                        )
+                    }
+
+                    TextField("Email", text: $email)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(accountReady)
+                        .accessibilityIdentifier("noop.ownership.email")
+
+                    SecureField("Password", text: $password)
+                        .textContentType(
+                            createMode ? .newPassword : .password
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(accountReady)
+                        .accessibilityIdentifier(
+                            "noop.ownership.password"
+                        )
+
+                    if createMode {
+                        SecureField(
+                            "Confirm password",
+                            text: $confirmation
+                        )
+                        .textContentType(.newPassword)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(accountReady)
+                        .accessibilityIdentifier(
+                            "noop.ownership.password-confirmation"
+                        )
+                    }
+
+                    Text(verbatim:
+                        HermeticOnboardingCopy.syntheticDomain
+                    )
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    NoopButton(
+                        accountReady
+                            ? "Synthetic account ready"
+                            : (createMode
+                                ? "Create account"
+                                : "Sign in"),
+                        systemImage: accountReady
+                            ? "checkmark.shield.fill"
+                            : (createMode
+                                ? "person.badge.plus"
+                                : "person.crop.circle.badge.checkmark"),
+                        kind: .primary,
+                        fullWidth: true
+                    ) {
+                        guard submissionReady else { return }
+                        password = ""
+                        confirmation = ""
+                        onSyntheticSuccess()
+                    }
+                    .disabled(accountReady || !submissionReady)
+                    .accessibilityIdentifier(
+                        "noop.ownership.authenticate"
+                    )
+
+                    if accountReady {
+                        Label {
+                            Text(verbatim:
+                                HermeticOnboardingCopy.accountAuthenticated
+                            )
+                        } icon: {
+                            Image(systemName: "checkmark.circle.fill")
+                        }
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.statusPositive)
+                        .accessibilityIdentifier(
+                            "noop.ui-test.account.success"
+                        )
+                    }
+                }
+            }
+            .frame(maxWidth: 520)
+        }
+        .accessibilityIdentifier(
+            "noop.onboarding.account-configured-test"
+        )
+    }
+
+    private var submissionReady: Bool {
+        let normalizedEmail = email
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard normalizedEmail.hasSuffix("@example.invalid"),
+              normalizedEmail.count > "@example.invalid".count,
+              !password.isEmpty else {
+            return false
+        }
+        guard createMode else { return true }
+        return acceptedTerms
+            && !confirmation.isEmpty
+            && password == confirmation
+    }
+}
+
+private struct HermeticOwnershipClaimStep: View {
+    let claimed: Bool
+    let onSyntheticClaim: () -> Void
+
+    var body: some View {
+        StepShell(
+            title: "Confirm band ownership",
+            subtitle:
+                "This synthetic confirmation exercises the ownership gate without Bluetooth, firmware or a network service."
+        ) {
+            StrandCard(padding: 20) {
+                VStack(spacing: 16) {
+                    Image(
+                        systemName: claimed
+                            ? "checkmark.shield.fill"
+                            : "wave.3.right.circle.fill"
+                    )
+                    .font(.system(size: 48, weight: .semibold))
+                    .foregroundStyle(
+                        claimed
+                            ? StrandPalette.statusPositive
+                            : StrandPalette.accent
+                    )
+                    .accessibilityHidden(true)
+
+                    Text(verbatim:
+                        claimed
+                            ? HermeticOnboardingCopy.ownershipConfirmed
+                            : HermeticOnboardingCopy.ownershipReady
+                    )
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .multilineTextAlignment(.center)
+
+                    NoopButton(
+                        claimed
+                            ? "Ownership confirmed"
+                            : "Confirm simulated band",
+                        systemImage: claimed
+                            ? "checkmark"
+                            : "hand.tap",
+                        kind: .primary,
+                        fullWidth: true
+                    ) {
+                        onSyntheticClaim()
+                    }
+                    .disabled(claimed)
+                    .accessibilityIdentifier(
+                        "noop.ui-test.ownership.claim"
+                    )
+
+                    if claimed {
+                        Text(verbatim:
+                            HermeticOnboardingCopy.ownershipSuccess
+                        )
+                            .font(StrandFont.caption)
+                            .foregroundStyle(
+                                StrandPalette.statusPositive
+                            )
+                            .accessibilityIdentifier(
+                                "noop.ui-test.ownership.success"
+                            )
+                    }
+                }
+            }
+            .frame(maxWidth: 520)
+        }
+    }
+}
+
+private struct HermeticSupportedBandPicker: View {
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(verbatim: HermeticOnboardingCopy.chooseBand)
+                        .font(StrandFont.title1)
+                        .foregroundStyle(StrandPalette.textPrimary)
+
+                    Text(verbatim:
+                        HermeticOnboardingCopy.bandPickerBoundary
+                    )
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    Button(action: onSelect) {
+                        HStack(spacing: 14) {
+                            Image(systemName: "wave.3.right.circle.fill")
+                                .font(StrandFont.title2)
+                                .foregroundStyle(StrandPalette.accent)
+                                .frame(width: 30)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(verbatim:
+                                    HermeticOnboardingCopy.bandName
+                                )
+                                    .font(StrandFont.headline)
+                                    .foregroundStyle(
+                                        StrandPalette.textPrimary
+                                    )
+                                Text(verbatim:
+                                    HermeticOnboardingCopy.bandDetail
+                                )
+                                .font(StrandFont.caption)
+                                .foregroundStyle(
+                                    StrandPalette.textTertiary
+                                )
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(
+                                    StrandPalette.textTertiary
+                                )
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frostedCardSurface(cornerRadius: 14)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(
+                        "noop.device-wizard.type.supplier-band"
+                    )
+                }
+                .padding(20)
+            }
+            .background(StrandPalette.surfaceBase.ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", action: onClose)
+                }
+            }
+        }
+    }
+}
+#endif
+
 private struct OwnershipAvailabilityStep: View {
     var body: some View {
         StepShell(
@@ -900,20 +1265,8 @@ private struct OwnershipAvailabilityStep: View {
         ) {
             VStack(spacing: 12) {
                 InfoCard(
-                    icon: "iphone",
-                    tint: StrandPalette.accent,
-                    title: String(
-                        localized:
-                            "appwide.onboarding.account.local_title"
-                    ),
-                    message: String(
-                        localized:
-                            "appwide.onboarding.account.local_body"
-                    )
-                )
-                InfoCard(
-                    icon: "person.crop.circle.badge.checkmark",
-                    tint: StrandPalette.statusPositive,
+                    icon: "person.crop.circle.badge.exclamationmark",
+                    tint: StrandPalette.statusWarning,
                     title: String(
                         localized:
                             "appwide.onboarding.account.release_title"
@@ -1192,11 +1545,21 @@ private struct WelcomeStep: View {
                 BrandMark(size: 120)
                     .scaleEffect(appear ? 1 : 0.92)
                     .opacity(appear ? 1 : 0)
-                Text("your health data, local by default")
+                Text(
+                    String(
+                        localized:
+                            "appwide.onboarding.welcome.title"
+                    )
+                )
                     .font(StrandFont.title2)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .opacity(appear ? 1 : 0)
-                Text("A private window into your recovery, sleep and effort. Core data is read from NOOP Band and processed on \(Platform.deviceNounPhrase); cloud features are optional.")
+                Text(
+                    String(
+                        localized:
+                            "appwide.onboarding.welcome.body"
+                    )
+                )
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .multilineTextAlignment(.center)
@@ -1231,8 +1594,8 @@ private struct WhatItDoesStep: View {
               body: String(localized: "Connect Noop Band, a heart-rate strap, or a gym machine and watch each beat in real time: heart rate, variability, and zones as they happen. Already have history elsewhere? Import a wearable export, or use Apple Health, Oura, Fitbit, or Garmin.")),
         .init(icon: "lock.shield",
               tint: StrandPalette.statusPositive,
-              title: String(localized: "Private by default"),
-              body: String(localized: "Everything starts on \(Platform.deviceNounPhrase). No account or cloud is required. Data leaves only when you explicitly share it, use Coach, or enable your own self-hosted sync.")),
+              title: String(localized: "Account-backed and private"),
+              body: String(localized: "NOOP requires an account before pairing. Health-data services and sharing remain separately controlled and consented.")),
     ]
 
     var body: some View {
@@ -1387,14 +1750,14 @@ private struct BluetoothStep: View {
                     title: String(localized: "Direct band connection"),
                     message: String(
                         localized:
-                            "appwide.onboarding.bluetooth.local_body"
+                            "appwide.onboarding.bluetooth.account_boundary_body"
                     )
                 )
 
                 Text(
                     String(
                         localized:
-                            "When the system prompt appears, choose Allow so NOOP can find Noop Band."
+                            "When the system prompt appears, choose Allow so NOOP can find your compatible band."
                     )
                 )
                     .font(StrandFont.subhead)
@@ -1441,6 +1804,7 @@ private struct WearStep: View {
 private struct ScanStep: View {
     let setupComplete: Bool
     let onSetupSource: (SourceKind?) -> Void
+    let hermeticConfiguredProviderUITest: Bool
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var live: LiveState
 
@@ -1455,30 +1819,9 @@ private struct ScanStep: View {
             subtitle: setupBody
         ) {
             VStack(spacing: 24) {
-                ZStack {
-                    Circle()
-                        .fill(StrandPalette.accent.opacity(0.14))
-                        .frame(width: 148, height: 148)
-                    Image(
-                        systemName: setupComplete
-                            ? "checkmark.circle.fill"
-                            : "dot.radiowaves.left.and.right"
-                    )
-                    .font(.system(size: 58, weight: .semibold))
-                    .foregroundStyle(
-                        setupComplete
-                            ? StrandPalette.statusPositive
-                            : StrandPalette.accent
-                    )
-                }
-                .accessibilityHidden(true)
-
-                if setupComplete {
-                    StatePill(
-                        "appwide.onboarding.device_ready_title",
-                        tone: .positive
-                    )
-                }
+                BandPairingDiscoveryView(
+                    state: setupComplete ? .connected : .ready
+                )
 
                 Button(action: openDeviceWizard) {
                     Label(
@@ -1501,12 +1844,31 @@ private struct ScanStep: View {
                 )
                 .accessibilityIdentifier("noop.onboarding.choose-device")
 
+                BandOrderLinkView(orderURL: ProjectInfo.bandOrderURL)
             }
         }
         .sheet(
             isPresented: $showAddDeviceWizard,
             onDismiss: { refreshSetupSource(recordOutcome: true) }
         ) {
+            #if os(iOS) && DEBUG
+            if hermeticConfiguredProviderUITest {
+                HermeticSupportedBandPicker(
+                    onSelect: completeHermeticBandSetup,
+                    onClose: { showAddDeviceWizard = false }
+                )
+            } else {
+                AddDeviceWizard(
+                    live: live,
+                    onClose: { showAddDeviceWizard = false },
+                    onAddedSource: { source in
+                        addedSource = source
+                        onSetupSource(source)
+                    },
+                    selectionScope: .launchBands
+                )
+            }
+            #else
             AddDeviceWizard(
                 live: live,
                 onClose: { showAddDeviceWizard = false },
@@ -1516,6 +1878,7 @@ private struct ScanStep: View {
                 },
                 selectionScope: .launchBands
             )
+            #endif
         }
         .onAppear {
             refreshSetupSource(recordOutcome: false)
@@ -1532,6 +1895,22 @@ private struct ScanStep: View {
     }
 
     private func refreshSetupSource(recordOutcome: Bool) {
+        #if os(iOS) && DEBUG
+        if hermeticConfiguredProviderUITest {
+            if recordOutcome {
+                AppDiagnosticsRecorder.shared.record(
+                    "onboarding.ui_test",
+                    fields: [
+                        "boundary": "band_setup",
+                        "outcome": addedSource == nil
+                            ? "dismissed"
+                            : "synthetic_completed",
+                    ]
+                )
+            }
+            return
+        }
+        #endif
         if recordOutcome {
             AppDiagnosticsRecorder.shared.record(
                 "onboarding.device_setup",
@@ -1560,6 +1939,14 @@ private struct ScanStep: View {
         )
         onSetupSource(source)
     }
+
+    #if os(iOS) && DEBUG
+    private func completeHermeticBandSetup() {
+        addedSource = .veepoo
+        onSetupSource(.veepoo)
+        showAddDeviceWizard = false
+    }
+    #endif
 
     private var setupBody: String {
         String(

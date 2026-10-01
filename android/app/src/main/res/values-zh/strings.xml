@@ -1665,7 +1665,7 @@
     <string name="l10n_today_screen_calories_3e62ecfe">卡路里</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">选择要在控制台中显示的磁贴，并通过箭头图标上下调整它们的顺序。</string>
-    <string name="key_metrics_selection_instructions">将 3 至 5 项指标置顶。所有指标仍会显示。</string>
+    <string name="key_metrics_selection_instructions">将 3 至 6 项指标置顶。所有指标仍会显示。</string>
     <string name="key_metrics_selection_count">已置顶 %1$d/%2$d 项</string>
     <string name="key_metrics_show_selected">显示已选指标</string>
     <string name="key_metrics_show_all_count">显示全部指标（%1$d）</string>
@@ -2197,9 +2197,7 @@
     <string name="onboarding_data_boundary_configured_body">手环读数会先在此手机上采集。此已配置版本要求先登录并完成手环认领，才能完成设置。除非您另外启用并同意托管数据功能，否则不会上传健康数据。</string>
     <string name="onboarding_data_boundary_exploration_title">本地探索</string>
     <string name="onboarding_data_boundary_exploration_body">此版本不会创建账户或上传健康数据。设置保留在此手机上；手环所有权激活和托管云功能不可用。</string>
-    <string name="onboarding_bluetooth_boundary_configured">NOOP 通过低功耗蓝牙直接连接 Noop Band。手环发现和实时读数保留在此手机上。已配置的账户服务仅用于账户和手环所有权激活；传输健康数据需要单独明确同意。</string>
-    <string name="onboarding_bluetooth_boundary_exploration">NOOP 通过低功耗蓝牙直接连接 Noop Band。手环发现、实时读数和设置都保留在此手机上。此探索版本已关闭账户操作和云端上传。</string>
-    <string name="onboarding_bluetooth_permission_prompt">系统提示出现时，请选择“允许”，以便 NOOP 找到 Noop Band。</string>
+    <string name="onboarding_bluetooth_permission_prompt">系统提示出现时，请选择“允许”，以便 NOOP 找到你的兼容手环。</string>
     <string name="onboarding_date_of_birth">出生日期</string>
     <string name="onboarding_age_years">%1$d 岁</string>
     <string name="onboarding_units_independent">体重和身高单位可分别设置。NOOP 只保存一个精确值，仅改变其显示方式。</string>
@@ -2966,4 +2964,10 @@
     <string name="managed_friends_deletion_scheduled_detail">Friends 和账户服务将在 24 小时冷静期内暂停。本地健康数据仍保留在此手机上。</string>
     <string name="ownership_progress_step">第 %1$d 步，共 %2$d 步</string>
     <string name="ownership_setup_complete">所有权设置已完成。</string>
+    <string name="noop_command_lens_move_left">移到左侧边缘</string>
+    <string name="noop_command_lens_move_right">移到右侧边缘</string>
+    <string name="noop_command_lens_move_up">上移</string>
+    <string name="noop_command_lens_move_down">下移</string>
+    <string name="noop_command_lens_left_edge">左侧边缘</string>
+    <string name="noop_command_lens_right_edge">右侧边缘</string>
 </resources>

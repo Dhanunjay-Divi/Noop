@@ -27,7 +27,7 @@ enum AppChangelog {
                 "**Meet every release clearly.** After each app update, NOOP opens one scrollable welcome with that version's improvements and clear Skip and OK actions. The complete update history stays available under More.",
                 "**A small first-install welcome.** A restrained edge glow appears only around the first release welcome on a new installation, respects reduced-motion and battery-saving settings, and never becomes recurring app chrome.",
                 "**Reports that make 'buggy' actionable.** Shake the phone or open Test Centre to add an optional description and screen snapshot, then share a privacy-bounded ZIP with UI responsiveness, lifecycle, storage, Bluetooth, sync, and recent OS failure evidence.",
-                "**NOOP+ is easy to find and honest about availability.** More now has an always-visible NOOP+ entry plus a dedicated Data row for optional managed storage and multi-device restore. Builds that are not connected to the managed service say so clearly; core NOOP stays account-free.",
+                "**Managed features state their availability.** More keeps NOOP+ and Data entry points visible. A NOOP account is required for setup, while health-data upload, managed storage, and cloud-authoritative metrics remain separately gated until the configured release environment is ready.",
                 "**Matched on iPhone and Android.** Version gating, release content, first-install behavior, dismissal, and the permanent More entry follow the same rules on both platforms.",
             ]
         ),
@@ -340,7 +340,7 @@ enum AppChangelog {
             title: "Local Oura ring support: use your Oura ring with no Oura app (beta)",
             date: "June 2026",
             items: [
-                "**Local Oura ring support (beta).** NOOP can now read an Oura ring directly over Bluetooth, fully on-device, so you can use the ring with no Oura app, no account and no cloud. It reads heart rate, HRV, SpO2, skin temperature and sleep stages off the ring and runs NOOP's own Charge and Rest scoring, not Oura's. Works on Oura Ring 3, 4 and 5, with per-generation capabilities.",
+                "**Direct Oura ring support (beta).** NOOP can read an Oura ring over Bluetooth without relying on the Oura app or an Oura cloud account. It reads heart rate, HRV, SpO2, skin temperature and sleep stages from the ring and runs NOOP's own Charge and Rest scoring, not Oura's. Works on Oura Ring 3, 4 and 5, with per-generation capabilities.",
                 "**How setup works.** Pairing factory-resets the ring and adopts it locally, which is recoverable: if NOOP cannot take it over, you just re-pair it in the Oura app. This is early beta and may not work on every ring yet, so there is also an Advanced bring-your-own-key path and a file-import fallback.",
             ]),
         Release(
@@ -770,7 +770,7 @@ enum AppChangelog {
             date: "June 2026",
             items: [
                 "**WHOOP 4.0: a real night is no longer dropped.** The off-wrist guard added in 4.5.0 could mistake a 4.0's sparse, motion-reconstructed sleep heart-rate for time off the wrist and skip the whole night. It now only treats heart-rate gaps as \"off-wrist\" when your heart-rate is dense enough for a gap to actually mean something - so 4.0 nights track again, while the strap-on-a-desk case it was meant to catch still works. *(Thanks Mindfulpaths for catching it - #507.)*",
-                "**WHOOP 5/MG: steps are accurate now.** The strap's step counter is a *running total*, not a per-reading count - adding it up the old way could over-report steps many times over. NOOP now reads the full counter and adds only the real increases, so your daily step number is sane. It also reads a simple still / walking / running activity signal from the same data, with no cloud. *(Thanks j0b-dev for the analysis - #276 / #316.)*",
+                "**WHOOP 5/MG: steps are accurate now.** The strap's step counter is a *running total*, not a per-reading count - adding it up the old way could over-report steps many times over. NOOP now reads the full counter and adds only the real increases, so your daily step number is sane. It also reads a simple still / walking / running activity signal from the same band data. *(Thanks j0b-dev for the analysis - #276 / #316.)*",
             ]),
         Release(
             version: "4.5.2",
@@ -2335,7 +2335,7 @@ enum AppChangelog {
             title: "First release",
             date: "June 2026",
             items: [
-                "Pair directly with a WHOOP strap over Bluetooth - no WHOOP account, no cloud.",
+                "Pair directly with a WHOOP strap over Bluetooth without WHOOP API credentials.",
                 "Compute recovery, strain, HRV and sleep locally on your own device.",
                 "Bring your history: import a WHOOP export, an Apple Health export, or Android Health Connect.",
             ]),
@@ -2362,6 +2362,6 @@ enum AppChangelog {
         Expectation(
             icon: "lock.shield",
             title: String(localized: "Private by default"),
-            body: String(localized: "No account or project cloud is required. NOOP keeps data local unless you explicitly share it, use an external Coach provider, connect Oura, or enable your own self-hosted sync.")),
+            body: String(localized: "A NOOP account is required for setup and app access. The phone remains the collection edge with a bounded offline working set. Managed health history and cloud-authoritative metrics activate only as each data class completes its consent, security, migration, restore, deletion, and validation gates.")),
     ]
 }

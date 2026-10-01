@@ -17,9 +17,10 @@ import com.noop.R
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
-// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to five in
-// their preferred order. A fresh install starts with NOOP's three core daily signals — Recovery, Effort,
-// and Sleep — while every other metric remains available in the editor and full history.
+// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to six in
+// their preferred order. Recovery, Sleep, and Effort already lead the Today hero, so a fresh install starts
+// with six complementary signals: HRV, resting heart rate, blood oxygen, respiratory rate, steps, and
+// weight. Every metric remains available in the editor and full history.
 // Persistence is display-only.
 //
 // Stored as a single comma-joined string of metric keys in SharedPreferences ("today.keyMetrics"), the
@@ -60,8 +61,15 @@ enum class KeyMetric(
             BLOOD_OXYGEN, RESPIRATORY, STEPS, WEIGHT, CALORIES,
         )
 
-        /** NOOP's useful fresh-install starting point. Users can replace or extend it up to five. */
-        val defaultSelection: List<KeyMetric> = listOf(CHARGE, EFFORT, REST)
+        /** Fresh-install secondary signals; the hero already owns Recovery, Sleep, and Effort. */
+        val defaultSelection: List<KeyMetric> = listOf(
+            HRV,
+            RESTING_HR,
+            BLOOD_OXYGEN,
+            RESPIRATORY,
+            STEPS,
+            WEIGHT,
+        )
     }
 }
 
@@ -74,7 +82,7 @@ enum class KeyMetric(
 object KeyMetricPrefs {
     internal const val KEY_LAYOUT = "today.keyMetrics"
     const val MIN_SELECTION_COUNT = 3
-    const val MAX_SELECTION_COUNT = 5
+    const val MAX_SELECTION_COUNT = 6
     private const val KEY_DETAILED = "today.keyMetricsDetailed"
 
     /** Whether the Key-Metrics tiles render DETAILED — taller/squarer with a 14-day trend graph under the
@@ -98,7 +106,7 @@ object KeyMetricPrefs {
         NoopPrefs.of(context).edit().putInt(KEY_WINDOW, value).apply()
     }
 
-    /** The pinned tiles in display order. Empty/unset preferences yield the three core defaults. */
+    /** The pinned tiles in display order. Empty/unset preferences yield the secondary-signal defaults. */
     fun enabled(context: Context): List<KeyMetric> =
         decodeEnabled(NoopPrefs.of(context).getString(KEY_LAYOUT, null))
 
@@ -107,13 +115,13 @@ object KeyMetricPrefs {
         NoopPrefs.of(context).edit().putString(KEY_LAYOUT, encode(metrics)).apply()
     }
 
-    /** Encode an ordered, deduplicated pin set capped at five. */
+    /** Encode an ordered, deduplicated pin set capped at six. */
     fun encode(metrics: List<KeyMetric>): String =
         normalized(metrics).joinToString(",") { it.raw }
 
     /**
      * Decode the stored string into an ordered pin set. Empty, unset, or all-unknown data yields the
-     * three core defaults. Older versions allowed more than five; their first five survive in order.
+     * fresh-install defaults. Older versions allowed more than six; their first six survive in order.
      */
     fun decodeEnabled(raw: String?): List<KeyMetric> {
         val trimmed = raw?.trim().orEmpty()
@@ -127,16 +135,17 @@ object KeyMetricPrefs {
         return normalized(seen.toList())
     }
 
-    /** Ordered dedupe + bounds. Short legacy selections retain their order and fill from the defaults. */
+    /** Ordered dedupe + bounds. Empty restores the complete default; short custom layouts fill to three. */
     fun normalized(metrics: List<KeyMetric>): List<KeyMetric> {
         val selected = LinkedHashSet(metrics.distinct().take(MAX_SELECTION_COUNT))
+        if (selected.isEmpty()) return KeyMetric.defaultSelection
         (KeyMetric.defaultSelection + KeyMetric.defaultOrder).forEach { fallback ->
             if (selected.size < MIN_SELECTION_COUNT) selected.add(fallback)
         }
         return selected.take(MAX_SELECTION_COUNT)
     }
 
-    /** Full catalog with the saved 3-to-5 pins first; display ordering never mutates the saved pins. */
+    /** Full catalog with the saved 3-to-6 pins first; display ordering never mutates the saved pins. */
     fun catalogOrder(startingWith: List<KeyMetric>): List<KeyMetric> {
         val selected = normalized(startingWith)
         val selectedSet = selected.toHashSet()
