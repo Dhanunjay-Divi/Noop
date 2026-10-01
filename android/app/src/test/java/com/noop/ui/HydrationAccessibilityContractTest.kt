@@ -146,6 +146,20 @@ class HydrationAccessibilityContractTest {
         assertFalse(text.contains("\"of %.1f L\""))
     }
 
+    @Test
+    fun correctionControlsComeBeforeHistoryAndClearRequiresConfirmation() {
+        val source = firstResource("src/main/java/com/noop/ui/HydrationScreen.kt")
+        assumeTrue("HydrationScreen.kt unavailable", source != null)
+        val text = source!!.readText()
+
+        val clearControl = text.indexOf("showClearConfirmation = true")
+        val history = text.indexOf("// 7-DAY HISTORY")
+        assertTrue(clearControl >= 0)
+        assertTrue(history > clearControl)
+        assertTrue(text.contains("appwide_hydration_clear_confirm_message"))
+        assertTrue(text.contains("appwide_hydration_target_details_exclusions"))
+    }
+
     private fun firstResource(relative: String): File? {
         val root = File(System.getProperty("user.dir") ?: ".")
         return listOf(

@@ -166,6 +166,38 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
         XCTAssertEqual(trends[.bloodOxygen], [96.2, 97.1])
     }
 
+    func testNewMeasuredMetricsKeepTheirOwnSeriesAndSleepUsesAsleepMinutes() {
+        let days = [
+            metric("2026-08-20", sleepMinutes: 410),
+            metric("2026-08-21", sleepMinutes: 435),
+        ]
+
+        let trends = LiquidTodayView.keyMetricTrendSeries(
+            days: days,
+            restSeries: [],
+            stepEstimates: [],
+            appleRows: [],
+            endingAt: "2026-08-21",
+            averageHrSeries: [
+                (day: "2026-08-20", value: 71),
+                (day: "2026-08-21", value: 73),
+            ],
+            maxHrSeries: [
+                (day: "2026-08-20", value: 151),
+                (day: "2026-08-21", value: 164),
+            ],
+            vo2MaxSeries: [
+                (day: "2026-08-20", value: 42.3),
+                (day: "2026-08-21", value: 42.8),
+            ]
+        )
+
+        XCTAssertEqual(trends[.averageHr], [71, 73])
+        XCTAssertEqual(trends[.maxHr], [151, 164])
+        XCTAssertEqual(trends[.asleepTime], [410, 435])
+        XCTAssertEqual(trends[.vo2Max], [42.3, 42.8])
+    }
+
     func testDirectionDescribesMovementWithoutAssigningGoodOrBadMeaning() {
         XCTAssertEqual(LiquidTodayView.keyMetricTrendDirection([52, 54]), .up)
         XCTAssertEqual(LiquidTodayView.keyMetricTrendDirection([54, 52]), .down)
@@ -304,12 +336,13 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
         respiratory: Double? = nil,
         spo2: Double? = nil,
         steps: Int? = nil,
+        sleepMinutes: Double? = nil,
         recovery: Double? = nil,
         strain: Double? = nil
     ) -> DailyMetric {
         DailyMetric(
             day: day,
-            totalSleepMin: nil,
+            totalSleepMin: sleepMinutes,
             efficiency: nil,
             deepMin: nil,
             remMin: nil,

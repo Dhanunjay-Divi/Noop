@@ -203,6 +203,37 @@ final class HydrationGoalTests: XCTestCase {
         ), 2950)
     }
 
+    func testPersonalizedBreakdownExplainsTheExactGoalInputs() {
+        XCTAssertEqual(
+            HydrationGoal.personalizedBreakdown(
+                age: 30, ageConfirmed: true,
+                sex: "female", sexConfirmed: true,
+                weightKg: 70, weightConfirmed: true,
+                effort: 50
+            ),
+            HydrationGoal.PersonalizedBreakdown(
+                baselineSource: .confirmedWeight,
+                baselineML: 2450,
+                effortBumpML: 350,
+                goalML: 2800
+            )
+        )
+        XCTAssertEqual(
+            HydrationGoal.personalizedBreakdown(
+                age: 30, ageConfirmed: true,
+                sex: "female", sexConfirmed: true,
+                weightKg: nil, weightConfirmed: false,
+                effort: nil
+            ),
+            HydrationGoal.PersonalizedBreakdown(
+                baselineSource: .confirmedProfile,
+                baselineML: 2160,
+                effortBumpML: 0,
+                goalML: 2150
+            )
+        )
+    }
+
     // MARK: - R3: reminder schedule
 
     func testReminderScheduleSpacesWithinWakingHours() {

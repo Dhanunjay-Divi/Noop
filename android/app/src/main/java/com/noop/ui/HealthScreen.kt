@@ -2941,7 +2941,8 @@ private data class VitalDetailModel(
  *  series from the repo on demand rather than off the cached `days` columns. Mirrors iOS metricDetail. */
 private val SERIES_BACKED_VITAL_KEYS = setOf(
     "fitness_age", "vitality", "steps", "steps_est", "active_kcal", "rest",
-    "weight", "hrv", "rhr", "body_fat", "lean_mass", "vo2max",
+    "weight", "hrv", "rhr", "avg_hr", "max_hr", "sleep_total_min",
+    "body_fat", "lean_mass", "vo2max",
 )
 
 @Composable
@@ -3416,8 +3417,12 @@ private suspend fun buildSeriesVitalDetail(
             .map { VitalReading(it.day, it.value, it.deviceId) },
         format = { it.roundToInt().toString() },
     )
-    "weight", "hrv", "rhr", "body_fat", "lean_mass", "vo2max" -> {
-        val preferredSource = if (key == "hrv" || key == "rhr") "my-whoop" else "apple-health"
+    "weight", "hrv", "rhr", "avg_hr", "max_hr", "sleep_total_min",
+    "body_fat", "lean_mass", "vo2max" -> {
+        val preferredSource = when (key) {
+            "hrv", "rhr", "avg_hr", "max_hr", "sleep_total_min" -> "my-whoop"
+            else -> "apple-health"
+        }
         val resolved = vm.repo.resolvedSeries(
             key = key,
             preferredSource = preferredSource,
@@ -3429,6 +3434,9 @@ private suspend fun buildSeriesVitalDetail(
             "weight" -> "Weight"
             "hrv" -> "HRV"
             "rhr" -> "Resting HR"
+            "avg_hr" -> uiString(R.string.explore_metric_average_heart_rate)
+            "max_hr" -> uiString(R.string.explore_metric_max_heart_rate)
+            "sleep_total_min" -> uiString(R.string.appwide_metric_asleep_time)
             "body_fat" -> "Body Fat"
             "lean_mass" -> "Lean Body Mass"
             else -> "VO₂ Max"
@@ -3436,7 +3444,8 @@ private suspend fun buildSeriesVitalDetail(
         val unit = when (key) {
             "weight", "lean_mass" -> UnitFormatter.massUnit(massUnit)
             "hrv" -> "ms"
-            "rhr" -> "bpm"
+            "rhr", "avg_hr", "max_hr" -> "bpm"
+            "sleep_total_min" -> ""
             "body_fat" -> "%"
             else -> "ml/kg/min"
         }
@@ -3444,7 +3453,11 @@ private suspend fun buildSeriesVitalDetail(
             "weight", "lean_mass" -> { value ->
                 UnitFormatter.massFromKilograms(value, massUnit).removeSuffix(" $unit")
             }
-            "hrv", "rhr" -> { value -> value.roundToInt().toString() }
+            "hrv", "rhr", "avg_hr", "max_hr" -> { value -> value.roundToInt().toString() }
+            "sleep_total_min" -> { value ->
+                val minutes = value.roundToInt()
+                "${minutes / 60}h ${minutes % 60}m"
+            }
             else -> { value -> String.format(Locale.US, "%.1f", value) }
         }
         VitalDetailModel(

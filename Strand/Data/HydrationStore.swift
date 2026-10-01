@@ -1125,6 +1125,33 @@ extension Repository {
         }
     }
 
+    /// Remove every editable NOOP drink for one day in the same transaction as its scalar projection.
+    /// Imported Apple Health hydration is stored under a separate source and is intentionally untouched.
+    @discardableResult
+    func clearHydrationEntries(
+        day: String? = nil
+    ) async -> HydrationMutationResult {
+        let dayKey = day ?? Repository.localDayKey(Date())
+        return await performSerializedHydrationMutation { [self] in
+            do {
+                _ = try await resolvedHydrationEntriesUnserialized(day: dayKey)
+                return await persistHydrationEntries(
+                    [],
+                    day: dayKey,
+                    operation: "clear",
+                    intent: .legacyCorrection
+                )
+            } catch {
+                recordHydrationPersistence(
+                    operation: "clear",
+                    outcome: "failed",
+                    failureKind: AppDiagnosticsRecorder.failureKind(error)
+                )
+                return .failed
+            }
+        }
+    }
+
     /// Set an existing entry's amount (a non-positive amount deletes it), then re-derive + re-bank the day
     /// total. Returns the new day total (ml). Backs the "edit a logged drink / set a custom size" flow.
     @discardableResult
@@ -1415,8 +1442,36 @@ extension Repository {
         return dayKeys.map { ($0, byDay[$0]) }
     }
 
-    /// Hydration goal for `day`, or calendar today when omitted. An explicit historical day with no
-    /// DailyMetric receives no live Effort input; it never borrows today's context.
+    /// Explainable hydration target for `day`, or calendar today when omitted. An explicit historical
+    /// day with no DailyMetric receives no live Effort input; it never borrows today's context.
+    func hydrationGoalBreakdown(
+        profileAge: Int,
+        ageConfirmed: Bool,
+        profileSex: String,
+        sexConfirmed: Bool,
+        weightKg: Double? = nil,
+        weightConfirmed: Bool,
+        day: String? = nil
+    ) -> HydrationGoal.PersonalizedBreakdown? {
+        let context: DailyMetric?
+        if let day {
+            context = localCalendarToday?.day == day
+                ? localCalendarToday
+                : days.last(where: { $0.day == day })
+        } else {
+            context = localCalendarToday
+        }
+        return HydrationGoal.personalizedBreakdown(
+            age: profileAge,
+            ageConfirmed: ageConfirmed,
+            sex: profileSex,
+            sexConfirmed: sexConfirmed,
+            weightKg: weightKg,
+            weightConfirmed: weightConfirmed,
+            effort: context?.strain
+        )
+    }
+
     func hydrationGoalML(
         profileAge: Int,
         ageConfirmed: Bool,
@@ -1426,22 +1481,14 @@ extension Repository {
         weightConfirmed: Bool,
         day: String? = nil
     ) -> Int? {
-        let context: DailyMetric?
-        if let day {
-            context = localCalendarToday?.day == day
-                ? localCalendarToday
-                : days.last(where: { $0.day == day })
-        } else {
-            context = localCalendarToday
-        }
-        return HydrationGoal.personalizedDailyGoalML(
-            age: profileAge,
+        hydrationGoalBreakdown(
+            profileAge: profileAge,
             ageConfirmed: ageConfirmed,
-            sex: profileSex,
+            profileSex: profileSex,
             sexConfirmed: sexConfirmed,
             weightKg: weightKg,
             weightConfirmed: weightConfirmed,
-            effort: context?.strain
-        )
+            day: day
+        )?.goalML
     }
 }

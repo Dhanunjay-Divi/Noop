@@ -81,6 +81,11 @@ struct HydrationDetailModel {
         return await repo.deleteHydrationEntry(id: entryID, day: selectedDayKey)
     }
 
+    func clear(from repo: Repository) async -> HydrationMutationResult {
+        guard hasValidDay else { return .failed }
+        return await repo.clearHydrationEntries(day: selectedDayKey)
+    }
+
     func update(
         entryID: UUID,
         amountML: Int,
@@ -406,6 +411,8 @@ struct HydrationView: View {
     @State private var hasLoadedHydration = false
     @State private var hydrationFailure: HydrationUIFailure?
     @State private var resolvingLegacyReconciliation = false
+    @State private var showTargetDetails = false
+    @State private var showClearConfirmation = false
     /// #798 - the user's custom container size (ml), editable from the custom-size sheet. Persisted local-only.
     @AppStorage(HydrationStore.customSizeKey) private var customSizeML = HydrationGoal.cupML
     @State private var showCustomSizeSheet = false
@@ -461,8 +468,8 @@ struct HydrationView: View {
     private var selectedDaySentence: String {
         isToday ? String(localized: "today") : selectedDayTitle
     }
-    private var goalML: Int? {
-        repo.hydrationGoalML(
+    private var goalBreakdown: HydrationGoal.PersonalizedBreakdown? {
+        repo.hydrationGoalBreakdown(
             profileAge: profile.age,
             ageConfirmed: profile.ageInputConfirmed,
             profileSex: profile.sex,
@@ -472,6 +479,7 @@ struct HydrationView: View {
             day: selectedDayKey
         )
     }
+    private var goalML: Int? { goalBreakdown?.goalML }
     private var totalML: Double? { reading?.valueML }
     private var provenance: HydrationProvenancePresentation? {
         reading?.provenance(
@@ -524,16 +532,13 @@ struct HydrationView: View {
                 } else {
                     legacyReconciliationSection
                 }
+                targetDetailsSection
+                entriesSection
                 if isToday {
                     reminderSection
                 }
-                entriesSection
                 historySection
                 selectedDayTotalSection
-                Text("A simple goal that adjusts to your effort. General wellness guidance, not medical advice.")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             // Rise the hero vessel + tube to the current fill on appear, and re-draw when a log moves it.
             // macOS-13-safe single-param onChange.
@@ -567,6 +572,30 @@ struct HydrationView: View {
             Button("Not now", role: .cancel) {}
         } message: {
             Text("Allow notifications in Settings to use optional water reminders.")
+        }
+        .confirmationDialog(
+            String(localized: "appwide.hydration.clear_confirm_title"),
+            isPresented: $showClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(
+                String(localized: "appwide.hydration.clear_confirm_action"),
+                role: .destructive
+            ) {
+                Task { await clearEntries() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                String(
+                    format: String(
+                        localized: "appwide.hydration.clear_confirm_message",
+                        locale: locale
+                    ),
+                    locale: locale,
+                    selectedDaySentence
+                )
+            )
         }
         // #798 - edit a logged drink's amount.
         .sheet(item: $editingEntry) { entry in
@@ -851,6 +880,105 @@ struct HydrationView: View {
             }
             .frame(maxWidth: .infinity)
         }
+    }
+
+    @ViewBuilder
+    private var targetDetailsSection: some View {
+        if let breakdown = goalBreakdown {
+            card(padding: 14) {
+                DisclosureGroup(isExpanded: $showTargetDetails) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        targetDetailLine(
+                            systemImage: "person.text.rectangle",
+                            text: targetBaselineDescription(breakdown)
+                        )
+                        targetDetailLine(
+                            systemImage: "figure.run",
+                            text: targetEffortDescription(breakdown)
+                        )
+                        targetDetailLine(
+                            systemImage: "checkmark.shield",
+                            text: String(
+                                localized: "appwide.hydration.target_details.exclusions"
+                            )
+                        )
+                        Text(
+                            String(
+                                localized: "appwide.hydration.target_details.guidance"
+                            )
+                        )
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 10)
+                } label: {
+                    Text(
+                        String(
+                            localized: "appwide.hydration.target_details.title"
+                        )
+                    )
+                        .font(StrandFont.subhead.weight(.semibold))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .tint(StrandPalette.textSecondary)
+                .accessibilityHint(
+                    showTargetDetails
+                        ? "Hides the inputs used for this hydration target"
+                        : "Shows the inputs used for this hydration target"
+                )
+            }
+        }
+    }
+
+    private func targetDetailLine(systemImage: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(StrandPalette.accent)
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func targetBaselineDescription(
+        _ breakdown: HydrationGoal.PersonalizedBreakdown
+    ) -> String {
+        let key: String.LocalizationValue =
+            breakdown.baselineSource == .confirmedWeight
+                ? "appwide.hydration.target_details.weight_baseline_format"
+                : "appwide.hydration.target_details.profile_baseline_format"
+        return String(
+            format: String(localized: key, locale: locale),
+            locale: locale,
+            HydrationDisplayFormatting.decimalLitres(
+                fromML: Double(breakdown.baselineML),
+                locale: locale
+            )
+        )
+    }
+
+    private func targetEffortDescription(
+        _ breakdown: HydrationGoal.PersonalizedBreakdown
+    ) -> String {
+        guard breakdown.effortBumpML > 0 else {
+            return String(
+                localized: "appwide.hydration.target_details.effort_none"
+            )
+        }
+        return String(
+            format: String(
+                localized: "appwide.hydration.target_details.effort_format",
+                locale: locale
+            ),
+            locale: locale,
+            breakdown.effortBumpML
+        )
     }
 
     // MARK: - Shared card helper
@@ -1301,6 +1429,24 @@ struct HydrationView: View {
                         Text("Tap a drink to edit it, or use the trash to delete.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
+                        Button(role: .destructive) {
+                            showClearConfirmation = true
+                        } label: {
+                            Label(
+                                String(
+                                    format: String(
+                                        localized: "appwide.hydration.clear_day",
+                                        locale: locale
+                                    ),
+                                    locale: locale,
+                                    selectedDayTitle
+                                ),
+                                systemImage: "trash"
+                            )
+                        }
+                        .buttonStyle(
+                            NoopButtonStyle(.secondary, fullWidth: true)
+                        )
                     }
                 }
             }
@@ -1637,6 +1783,10 @@ struct HydrationView: View {
     /// #798 - delete a logged drink, re-deriving the day total, then refresh.
     private func deleteEntry(_ entry: HydrationEntry) async {
         finishMutation(await detailModel.delete(entryID: entry.id, from: repo))
+    }
+
+    private func clearEntries() async {
+        finishMutation(await detailModel.clear(from: repo))
     }
 
     /// #798 - set a logged drink's amount, re-deriving the day total, then refresh.

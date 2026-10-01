@@ -28,7 +28,9 @@ struct KeyMetricsEditorSheet: View {
             !selectedSet.contains(metric)
                 && (query.isEmpty
                     || metric.title.localizedCaseInsensitiveContains(query)
-                    || metric.category.title.localizedCaseInsensitiveContains(query))
+                    || metric.category.title.localizedCaseInsensitiveContains(query)
+                    || metric.origin.title.localizedCaseInsensitiveContains(query)
+                    || metric.origin.detail.localizedCaseInsensitiveContains(query))
         }
     }
 
@@ -168,15 +170,21 @@ struct KeyMetricsEditorSheet: View {
                     .foregroundStyle(StrandPalette.textSecondary)
                     .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
             } else {
-                ForEach(KeyMetric.Category.allCases) { category in
-                    let metrics = availableMetrics.filter { $0.category == category }
+                ForEach(KeyMetric.Origin.allCases) { origin in
+                    let metrics = availableMetrics.filter { $0.origin == origin }
                     if !metrics.isEmpty {
                         VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-                            Text(category.title.uppercased())
-                                .font(StrandFont.overlineScaled(9))
-                                .tracking(0)
-                                .foregroundStyle(StrandPalette.textTertiary)
-                                .padding(.horizontal, 2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(origin.title.uppercased())
+                                    .font(StrandFont.overlineScaled(9))
+                                    .tracking(0)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                Text(origin.detail)
+                                    .font(StrandFont.caption)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.horizontal, 2)
                             VStack(spacing: NoopMetrics.space2) {
                                 ForEach(metrics) { metric in
                                     availableRow(metric)
@@ -209,9 +217,10 @@ struct KeyMetricsEditorSheet: View {
                 Text(metric.title)
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text(metric.category.title)
+                Text("\(metric.category.title) · \(metric.origin.compactTitle)")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
+                    .lineLimit(1)
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("noop.key-metric.selected.\(metric.rawValue)")
@@ -282,6 +291,10 @@ struct KeyMetricsEditorSheet: View {
                         .foregroundStyle(canAdd ? StrandPalette.textPrimary : StrandPalette.textTertiary)
                     if hydrationBlocked {
                         Text(String(localized: "Enable hydration tracking in Settings"))
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    } else {
+                        Text(metric.category.title)
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
@@ -378,13 +391,13 @@ struct KeyMetricsEditorSheet: View {
         switch metric {
         case .charge, .respiratory, .weight, .stress:
             return StrandPalette.accent
-        case .effort, .calories, .skinTemp:
+        case .effort, .calories, .skinTemp, .maxHr:
             return StrandPalette.metricAmber
-        case .rest, .hrv, .vitality:
+        case .rest, .hrv, .asleepTime, .vitality:
             return StrandPalette.metricPurple
-        case .restingHr:
+        case .restingHr, .averageHr:
             return StrandPalette.metricRose
-        case .bloodOxygen, .steps, .hydration:
+        case .bloodOxygen, .steps, .vo2Max, .hydration:
             return StrandPalette.metricCyan
         }
     }

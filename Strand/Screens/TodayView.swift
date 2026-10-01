@@ -3703,6 +3703,8 @@ struct TodayView: View {
         case .rest:        return MetricCatalog.metric(key: "sleep_performance", source: "my-whoop")
         case .hrv:         return MetricCatalog.metric(key: "hrv", source: "my-whoop")
         case .restingHr:   return MetricCatalog.metric(key: "rhr", source: "my-whoop")
+        case .averageHr:   return MetricCatalog.metric(key: "avg_hr", source: "my-whoop")
+        case .maxHr:       return MetricCatalog.metric(key: "max_hr", source: "my-whoop")
         case .bloodOxygen: return MetricCatalog.metric(key: "spo2", source: "my-whoop")
         case .respiratory:
             let reading = Self.respiratoryDashboardReading(
@@ -3710,9 +3712,12 @@ struct TodayView: View {
                 priorWhoop: lastVitalsDay?.respRateBpm,
                 apple: sparks["resp_rate"]?.last)
             return MetricCatalog.metric(key: "resp_rate", source: reading.source)
+        case .asleepTime:
+            return MetricCatalog.metric(key: "sleep_total_min", source: "my-whoop")
         case .steps:       return selectedStepsMetric
         case .weight:      return MetricCatalog.metric(key: "weight", source: "apple-health")
         case .calories:    return selectedEnergyMetric
+        case .vo2Max:      return MetricCatalog.metric(key: "vo2max", source: "apple-health")
         case .vitality:    return MetricCatalog.metric(key: "vitality", source: "my-whoop")
         case .skinTemp:    return MetricCatalog.metric(key: "skin_temp", source: "my-whoop")
         case .stress, .hydration:
@@ -3810,6 +3815,28 @@ struct TodayView: View {
                     ? StrandPalette.textPrimary
                     : StrandPalette.metricRose
             )
+        case .averageHr:
+            let value = aSelected?.avgHr
+            StatTile(
+                label: "Average Heart Rate",
+                value: value.map(String.init) ?? StrandFormat.missing,
+                systemImage: systemImage,
+                caption: value == nil
+                    ? (Self.emptyVitalCaption(unit: "bpm", isToday: selectedDayOffset == 0) ?? "bpm")
+                    : String(localized: "Apple Health"),
+                accent: value == nil ? StrandPalette.textPrimary : StrandPalette.metricRose
+            )
+        case .maxHr:
+            let value = aSelected?.maxHr
+            StatTile(
+                label: "Max Heart Rate",
+                value: value.map(String.init) ?? StrandFormat.missing,
+                systemImage: systemImage,
+                caption: value == nil
+                    ? (Self.emptyVitalCaption(unit: "bpm", isToday: selectedDayOffset == 0) ?? "bpm")
+                    : String(localized: "Apple Health"),
+                accent: value == nil ? StrandPalette.textPrimary : StrandPalette.metricAmber
+            )
         case .bloodOxygen:
             // PER-FIELD carry (perField: lastSpo2Day): the whole-row `lastScoredRecoveryDay` carry lands on a
             // row whose spo2Pct is nil (computed rows never bank a percentage), so the tile falls through to
@@ -3840,6 +3867,20 @@ struct TodayView: View {
                 accent: respValue == StrandFormat.missing
                     ? StrandPalette.textPrimary
                     : StrandPalette.accent
+            )
+        case .asleepTime:
+            let minutes = d?.totalSleepMin
+            StatTile(
+                label: "Asleep Time",
+                value: minutes.map {
+                    let total = Int($0.rounded())
+                    return "\(total / 60)h \(total % 60)m"
+                } ?? StrandFormat.missing,
+                systemImage: systemImage,
+                caption: minutes == nil
+                    ? Self.needsStrapCaption
+                    : String(localized: "appwide.metric.origin.measured_imported"),
+                accent: minutes == nil ? StrandPalette.textPrimary : StrandPalette.metricPurple
             )
         case .steps:
             // Primary Steps requires a measured Apple Health count for the selected day. Never use a stale
@@ -3874,6 +3915,23 @@ struct TodayView: View {
             )
         case .calories:
             energyKeyMetricTile(systemImage: systemImage)
+        case .vo2Max:
+            let latest = appleDays
+                .filter { $0.day <= selectedDayKey && $0.vo2max != nil }
+                .max(by: { $0.day < $1.day })?
+                .vo2max
+            StatTile(
+                label: "VO₂ Max",
+                value: latest.map { String(format: "%.1f", $0) } ?? StrandFormat.missing,
+                systemImage: systemImage,
+                caption: latest == nil
+                    ? (Self.emptyVitalCaption(
+                        unit: "ml/kg/min",
+                        isToday: selectedDayOffset == 0
+                    ) ?? "ml/kg/min")
+                    : String(localized: "Apple Health"),
+                accent: latest == nil ? StrandPalette.textPrimary : StrandPalette.metricCyan
+            )
         case .stress:
             let value = dashboardValue(.stress)
             StatTile(

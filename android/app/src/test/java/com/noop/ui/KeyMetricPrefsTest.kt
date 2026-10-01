@@ -42,9 +42,13 @@ class KeyMetricPrefsTest {
                 "effort",
                 "hrv",
                 "restingHr",
+                "averageHr",
+                "maxHr",
                 "bloodOxygen",
                 "respiratory",
+                "vo2Max",
                 "skinTemp",
+                "asleepTime",
                 "steps",
                 "calories",
                 "weight",
@@ -65,8 +69,12 @@ class KeyMetricPrefsTest {
         assertEquals(KeyMetricGroup.WELLBEING, KeyMetric.STRESS.group)
         assertEquals(KeyMetricGroup.WELLBEING, KeyMetric.VITALITY.group)
         assertEquals(KeyMetricGroup.VITALS, KeyMetric.SKIN_TEMP.group)
+        assertEquals(KeyMetricGroup.VITALS, KeyMetric.AVERAGE_HR.group)
+        assertEquals(KeyMetricGroup.SLEEP, KeyMetric.ASLEEP_TIME.group)
         assertEquals(KeyMetricGroup.ACTIVITY, KeyMetric.WEIGHT.group)
         assertEquals(KeyMetricGroup.ACTIVITY, KeyMetric.HYDRATION.group)
+        assertEquals(KeyMetricOrigin.MEASURED_IMPORTED, KeyMetric.STEPS.origin)
+        assertEquals(KeyMetricOrigin.NOOP_INSIGHT, KeyMetric.STRESS.origin)
         assertEquals(false, KeyMetric.VITALITY.isBoundedProgress)
     }
 

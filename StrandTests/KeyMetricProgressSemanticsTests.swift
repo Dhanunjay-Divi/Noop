@@ -9,7 +9,8 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
 
     func testRawVitalsAndAssumedGoalsNeverLookLikeCompletion() {
         for metric in [KeyMetric.hrv, .restingHr, .bloodOxygen, .respiratory,
-                       .steps, .weight, .calories, .stress, .vitality, .skinTemp] {
+                       .averageHr, .maxHr, .asleepTime, .vo2Max, .steps, .weight,
+                       .calories, .stress, .vitality, .skinTemp] {
             XCTAssertFalse(metric.isBoundedProgress, "\(metric.rawValue) is not a fixed progress scale")
         }
     }
@@ -30,7 +31,7 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
         XCTAssertTrue(keyMetrics.contains("TextField(\"Search metrics\""))
         XCTAssertTrue(keyMetrics.contains("minus.circle.fill"))
         XCTAssertTrue(keyMetrics.contains("plus.circle.fill"))
-        XCTAssertTrue(keyMetrics.contains("KeyMetric.Category.allCases"))
+        XCTAssertTrue(keyMetrics.contains("KeyMetric.Origin.allCases"))
         XCTAssertTrue(keyMetrics.contains("selected.count <= KeyMetricPrefs.minimumSelectionCount"))
         XCTAssertTrue(keyMetrics.contains("selected.count >= KeyMetricPrefs.maximumSelectionCount"))
         XCTAssertTrue(keyMetrics.contains(".foregroundStyle(Color.black)"))
@@ -104,13 +105,13 @@ final class KeyMetricPrefsTests: XCTestCase {
         XCTAssertEqual(KeyMetricPrefs.minimumSelectionCount, 3)
         XCTAssertEqual(KeyMetricPrefs.maximumSelectionCount, 6)
         XCTAssertEqual(Set(KeyMetric.defaultOrder), Set(KeyMetric.allCases))
-        XCTAssertEqual(KeyMetric.allCases.count, 14)
+        XCTAssertEqual(KeyMetric.allCases.count, 18)
         XCTAssertEqual(
             Set(KeyMetric.allCases),
             Set([
                 .charge, .effort, .rest, .hrv, .restingHr, .bloodOxygen,
-                .respiratory, .steps, .weight, .calories, .stress, .vitality,
-                .skinTemp, .hydration,
+                .averageHr, .maxHr, .respiratory, .asleepTime, .steps, .weight,
+                .calories, .vo2Max, .stress, .vitality, .skinTemp, .hydration,
             ])
         )
         XCTAssertEqual(
@@ -119,7 +120,18 @@ final class KeyMetricPrefsTests: XCTestCase {
         )
         XCTAssertEqual(
             Set(KeyMetric.allCases.filter { $0.category == .vitals }),
-            Set([.hrv, .restingHr, .bloodOxygen, .respiratory, .skinTemp])
+            Set([
+                .hrv, .restingHr, .averageHr, .maxHr, .bloodOxygen, .respiratory,
+                .vo2Max, .skinTemp,
+            ])
+        )
+        XCTAssertEqual(
+            Set(KeyMetric.allCases.filter { $0.category == .sleep }),
+            Set([.asleepTime])
+        )
+        XCTAssertEqual(
+            Set(KeyMetric.allCases.filter { $0.origin == .noopInsight }),
+            Set([.charge, .rest, .effort, .stress, .vitality])
         )
     }
 

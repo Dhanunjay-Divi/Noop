@@ -1424,6 +1424,72 @@ fun TodayScreen(
         }
     }
 
+    // Today-ready direct heart and cardio-fitness readings. Average/Max HR resolve active strap and
+    // imported WHOOP history first, then compatible Health data. Measured VO2 max deliberately starts
+    // from Health data and never falls back to NOOP's separate `vo2max_est` model output.
+    var averageHrByDay by remember(activeStrapId) {
+        mutableStateOf<Map<String, Double>>(emptyMap())
+    }
+    var maxHrByDay by remember(activeStrapId) {
+        mutableStateOf<Map<String, Double>>(emptyMap())
+    }
+    var measuredVo2MaxByDay by remember(activeStrapId) {
+        mutableStateOf<Map<String, Double>>(emptyMap())
+    }
+    LaunchedEffect(
+        days,
+        selectedDayKey,
+        activeStrapId,
+        deferHistoricalQueries,
+        ageMetricDataVersion,
+    ) {
+        if (deferHistoricalQueries) return@LaunchedEffect
+        val fromDay = minOf(
+            days.minOfOrNull { it.day } ?: selectedDayKey,
+            selectedDayKey,
+        )
+        val toDay = maxOf(
+            days.maxOfOrNull { it.day } ?: selectedDayKey,
+            selectedDayKey,
+        )
+        val loaded = loadTodayBestEffort {
+            val average = viewModel.repo.resolvedSeries(
+                "avg_hr",
+                "my-whoop",
+                fromDay,
+                toDay,
+                strapDeviceId = activeStrapId,
+            ).values.associate { it.first to it.second }
+            val maximum = viewModel.repo.resolvedSeries(
+                "max_hr",
+                "my-whoop",
+                fromDay,
+                toDay,
+                strapDeviceId = activeStrapId,
+            ).values.associate { it.first to it.second }
+            val vo2 = viewModel.repo.resolvedSeries(
+                "vo2max",
+                "apple-health",
+                fromDay,
+                toDay,
+                strapDeviceId = activeStrapId,
+            ).values.associate { it.first to it.second }
+            Triple(average, maximum, vo2)
+        } ?: return@LaunchedEffect
+        currentCoroutineContext().ensureActive()
+        if (viewModel.activeStrapId == activeStrapId) {
+            averageHrByDay = loaded.first
+            maxHrByDay = loaded.second
+            measuredVo2MaxByDay = loaded.third
+        }
+    }
+    val averageHrForDay = averageHrByDay[selectedDayKey]
+    val maxHrForDay = maxHrByDay[selectedDayKey]
+    val measuredVo2Max = measuredVo2MaxByDay.entries
+        .filter { it.key <= selectedDayKey }
+        .maxByOrNull { it.key }
+        ?.value
+
     // On-device steps ESTIMATE for the selected day (key "steps_est", computed "-noop" source). It remains
     // available to the explicitly labelled calibration/research screen but cannot fill primary Steps.
     // resolvedSeries reads the computed source for the my-whoop key. Null until loaded or when no
@@ -1819,7 +1885,7 @@ fun TodayScreen(
     // Old imports stay in history, but they do not fill the Today trend tiles.
     val window = rememberTrendWindow(
         days, selectedDay, keyMetricsWindowDays, importedStepsByDay, stepsEstByDay,
-        resolvedSpo2ByDay,
+        resolvedSpo2ByDay, averageHrByDay, maxHrByDay, measuredVo2MaxByDay,
     )
 
     LaunchedEffect(days, activeStrapId, workoutDataVersion, deferHistoricalQueries) {
@@ -2396,6 +2462,9 @@ fun TodayScreen(
                                     profileWeightKg = profileWeightKg,
                                     importedStepsForDay = importedStepsForDay,
                                     estimatedStepsForDay = stepsEstForDay,
+                                    averageHrForDay = averageHrForDay,
+                                    maxHrForDay = maxHrForDay,
+                                    measuredVo2Max = measuredVo2Max,
                                     caloriesForDay = caloriesByDay[selectedDayKey],   // #616: imported-first per day
                                     caloriesSpark = caloriesSpark,                    // #616: imported-first trend
                                     stepsEstimateCaption = stepsEstimateCaption(profileStore),
@@ -5357,7 +5426,7 @@ private fun ScoreHeroRow(
     val sleepIndicator = when {
         restScore == null -> uiString(R.string.appwide_calendar_legend_no_data)
         restStageLowConfidence(day) -> uiString(R.string.appwide_charge_confidence_estimate)
-        else -> null
+        else -> compactSleepMetricStatus(restScore)?.let { uiString(it.labelRes) }
     }
     val sleepProgress = restScore
         ?.let { (it / 100.0).coerceIn(0.0, 1.0).toFloat() }
@@ -5366,6 +5435,10 @@ private fun ScoreHeroRow(
     val sleepLabel = uiString(R.string.l10n_today_screen_sleep_3cac34e6)
     val effortLabel = uiString(R.string.l10n_health_screen_effort_8c974bc6)
     val noData = uiString(R.string.appwide_calendar_legend_no_data)
+    val effortIndicator = strain
+        ?.let(::compactEffortMetricStatus)
+        ?.let { uiString(it.labelRes) }
+        ?: noData
     val recoveryAccessibility = uiString(
         R.string.appwide_a11y_state_format,
         recoveryLabel,
@@ -5397,10 +5470,16 @@ private fun ScoreHeroRow(
         if (effortValue == null) {
             noData
         } else {
-            uiString(
-                R.string.appwide_v4_value_text_out_of_text_format,
-                effortValueText,
-                formatCompactHeroValue(effortMax, decimals = if (effortScale == EffortScale.WHOOP) 1 else 0),
+            joinLocalizedFragments(
+                uiString(
+                    R.string.appwide_v4_value_text_out_of_text_format,
+                    effortValueText,
+                    formatCompactHeroValue(
+                        effortMax,
+                        decimals = if (effortScale == EffortScale.WHOOP) 1 else 0,
+                    ),
+                ),
+                effortIndicator,
             )
         },
     )
@@ -5443,7 +5522,7 @@ private fun ScoreHeroRow(
             },
             progress = effortProgress,
             tint = Palette.effortBright,
-            indicator = if (effortValue == null) noData else null,
+            indicator = effortIndicator,
             accessibilityLabel = effortAccessibility,
             onClick = { onScoreInfo(ScoreSection.EFFORT) },
         ),
@@ -5510,6 +5589,33 @@ private data class CompactHeroMetricSpec(
     val accessibilityLabel: String,
     val onClick: () -> Unit,
 )
+
+internal enum class CompactDailyMetricStatus(@StringRes val labelRes: Int) {
+    NEED_MORE_REST(R.string.appwide_metric_status_need_more_rest),
+    STEADY(R.string.appwide_metric_status_steady),
+    WELL_RESTED(R.string.appwide_metric_status_well_rested),
+    LIGHT(R.string.appwide_metric_status_light),
+    MODERATE(R.string.appwide_metric_status_moderate),
+    HIGH(R.string.appwide_metric_status_high),
+}
+
+internal fun compactSleepMetricStatus(score: Double): CompactDailyMetricStatus? {
+    if (!score.isFinite()) return null
+    return when {
+        score >= 80.0 -> CompactDailyMetricStatus.WELL_RESTED
+        score >= 60.0 -> CompactDailyMetricStatus.STEADY
+        else -> CompactDailyMetricStatus.NEED_MORE_REST
+    }
+}
+
+internal fun compactEffortMetricStatus(score: Double): CompactDailyMetricStatus? {
+    if (!score.isFinite()) return null
+    return when {
+        score >= 70.0 -> CompactDailyMetricStatus.HIGH
+        score >= 30.0 -> CompactDailyMetricStatus.MODERATE
+        else -> CompactDailyMetricStatus.LIGHT
+    }
+}
 
 internal enum class CompactRecoveryCalibrationStatus {
     CALIBRATING,
@@ -7555,6 +7661,9 @@ private fun MetricGrid(
     profileWeightKg: Double = 75.0,
     importedStepsForDay: Int? = null,
     estimatedStepsForDay: Int? = null,
+    averageHrForDay: Double? = null,
+    maxHrForDay: Double? = null,
+    measuredVo2Max: Double? = null,
     // #616: the selected day's calorie value resolved imported-first (imported Apple/Health-Connect
     // activeKcal ?: NOOP's on-device estimate), so the Calories tile matches the card + detail instead of
     // reading the on-device estimate alone (which left it NO_DATA / inconsistent). Mirrors the steps params.
@@ -7665,6 +7774,22 @@ private fun MetricGrid(
                 spark = w.rhr,
             )
         },
+        KeyMetric.AVERAGE_HR to KeyTileData(
+            label = uiString(R.string.explore_metric_average_heart_rate),
+            value = averageHrForDay?.roundToInt()?.toString() ?: NO_DATA,
+            unit = if (averageHrForDay != null) "bpm" else "",
+            tint = Palette.metricRose,
+            frac = null,
+            spark = w.averageHr,
+        ),
+        KeyMetric.MAX_HR to KeyTileData(
+            label = uiString(R.string.explore_metric_max_heart_rate),
+            value = maxHrForDay?.roundToInt()?.toString() ?: NO_DATA,
+            unit = if (maxHrForDay != null) "bpm" else "",
+            tint = Palette.metricAmber,
+            frac = null,
+            spark = w.maxHr,
+        ),
         KeyMetric.BLOOD_OXYGEN to run {
             val v = d?.spo2Pct ?: carriedDay?.spo2Pct ?: spo2CarryDay?.spo2Pct
             KeyTileData(
@@ -7687,6 +7812,14 @@ private fun MetricGrid(
                 spark = w.resp,
             )
         },
+        KeyMetric.ASLEEP_TIME to KeyTileData(
+            label = uiString(R.string.appwide_metric_asleep_time),
+            value = sleepValue(d),
+            unit = "",
+            tint = Palette.metricPurple,
+            frac = null,
+            spark = w.sleepMin,
+        ),
         KeyMetric.SKIN_TEMP to run {
             val v = d?.skinTempDevC ?: carriedDay?.skinTempDevC ?: skinTempDay?.skinTempDevC
             KeyTileData(
@@ -7733,6 +7866,14 @@ private fun MetricGrid(
                 spark = caloriesSpark,   // #616: imported-first trend (was missing → no trend line)
             )
         },
+        KeyMetric.VO2_MAX to KeyTileData(
+            label = uiString(R.string.appwide_metric_vo2_max),
+            value = measuredVo2Max?.let { String.format(Locale.US, "%.1f", it) } ?: NO_DATA,
+            unit = if (measuredVo2Max != null) "ml/kg/min" else "",
+            tint = Palette.metricCyan,
+            frac = null,
+            spark = w.vo2Max,
+        ),
         KeyMetric.STRESS to KeyTileData(
             label = uiString(R.string.nav_stress),
             value = stress?.let { String.format(Locale.US, "%.1f", it.coerceIn(0.0, 3.0)) }
@@ -7785,11 +7926,15 @@ private fun MetricGrid(
         KeyMetric.REST -> ({ onOpenMetric("rest") })
         KeyMetric.HRV -> ({ onOpenMetric("hrv") })
         KeyMetric.RESTING_HR -> ({ onOpenMetric("rhr") })
+        KeyMetric.AVERAGE_HR -> ({ onOpenMetric("avg_hr") })
+        KeyMetric.MAX_HR -> ({ onOpenMetric("max_hr") })
         KeyMetric.BLOOD_OXYGEN -> ({ onOpenMetric("spo2") })
         KeyMetric.RESPIRATORY -> ({ onOpenMetric("resp") })
+        KeyMetric.ASLEEP_TIME -> ({ onOpenMetric("sleep_total_min") })
         KeyMetric.SKIN_TEMP -> ({ onOpenMetric("skin") })
         KeyMetric.STEPS -> ({ onOpenMetric("steps") })
         KeyMetric.CALORIES -> ({ onOpenMetric("active_kcal") })
+        KeyMetric.VO2_MAX -> ({ onOpenMetric("vo2max") })
         KeyMetric.WEIGHT -> ({ onOpenMetric("weight") })
         KeyMetric.STRESS -> onOpenStress
         KeyMetric.VITALITY -> ({ onOpenMetric("vitality") })
@@ -9421,8 +9566,11 @@ private data class Window(
     val sleepMin: List<Double>,
     val hrv: List<Double>,
     val rhr: List<Double>,
+    val averageHr: List<Double>,
+    val maxHr: List<Double>,
     val spo2: List<Double>,
     val resp: List<Double>,
+    val vo2Max: List<Double>,
     // Primary Steps trend, populated only by imported pedometer values.
     val steps: List<Double>,
 )
@@ -9446,9 +9594,13 @@ private fun rememberTrendWindow(
     importedStepsByDay: Map<String, Int> = emptyMap(),
     calibratedStepsByDay: Map<String, Int> = emptyMap(),
     resolvedSpo2ByDay: Map<String, Double> = emptyMap(),
+    averageHrByDay: Map<String, Double> = emptyMap(),
+    maxHrByDay: Map<String, Double> = emptyMap(),
+    measuredVo2MaxByDay: Map<String, Double> = emptyMap(),
 ): Window =
     androidx.compose.runtime.remember(
         days, anchorDay, windowDays, importedStepsByDay, resolvedSpo2ByDay,
+        averageHrByDay, maxHrByDay, measuredVo2MaxByDay,
     ) {
         // Trailing CALENDAR days ending today, NOT the last N stored rows, which on an old import
         // were months-old data shown as a fresh trend (issue #23). ISO yyyy-MM-dd sorts chronologically.
@@ -9457,18 +9609,26 @@ private fun rememberTrendWindow(
         val recent = days.filter { it.day >= cutoff && it.day <= end }
         fun series(pick: (DailyMetric) -> Double?): List<Double> = recent.mapNotNull(pick)
         val measuredWindow = importedStepsByDay.filterKeys { it >= cutoff && it <= end }
+        fun mappedSeries(values: Map<String, Double>): List<Double> =
+            values.entries
+                .filter { it.key in cutoff..end && it.value.isFinite() }
+                .sortedBy { it.key }
+                .map { it.value }
         Window(
             recovery = series { it.recovery },
             strain = series { it.strain },
             sleepMin = series { it.totalSleepMin },
             hrv = series { it.avgHrv },
             rhr = series { it.restingHr?.toDouble() },
+            averageHr = mappedSeries(averageHrByDay),
+            maxHr = mappedSeries(maxHrByDay),
             spo2 = resolvedSpo2ByDay.entries
                 .filter { it.key in cutoff..end }
                 .sortedBy { it.key }
                 .map { it.value }
                 .ifEmpty { series { it.spo2Pct } },
             resp = series { it.respRateBpm },
+            vo2Max = mappedSeries(measuredVo2MaxByDay),
             steps = resolvedStepsSeries(measuredWindow, emptyMap(), emptyMap()).map { it.second },
         )
     }
@@ -9609,7 +9769,9 @@ private fun KeyMetricsEditorDialog(
     val available = KeyMetric.defaultOrder.filter { metric ->
         metric !in selected && (
             query.isEmpty() ||
-                uiString(metric.titleRes).contains(query, ignoreCase = true)
+                uiString(metric.titleRes).contains(query, ignoreCase = true) ||
+                keyMetricGroupTitle(metric.group).contains(query, ignoreCase = true) ||
+                keyMetricOriginTitle(metric.origin).contains(query, ignoreCase = true)
             )
     }
 
@@ -9733,13 +9895,20 @@ private fun KeyMetricsEditorDialog(
                         },
                     )
 
-                    KeyMetricGroup.entries.forEach { group ->
-                        val grouped = available.filter { it.group == group }
+                    KeyMetricOrigin.entries.forEach { origin ->
+                        val grouped = available.filter { it.origin == origin }
                         if (grouped.isNotEmpty()) {
-                            Overline(
-                                keyMetricGroupTitle(group),
+                            Column(
                                 modifier = Modifier.padding(top = Metrics.space4),
-                            )
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Overline(keyMetricOriginTitle(origin))
+                                Text(
+                                    keyMetricOriginDetail(origin),
+                                    style = NoopType.caption,
+                                    color = Palette.textTertiary,
+                                )
+                            }
                             Column {
                                 grouped.forEachIndexed { index, metric ->
                                     KeyMetricAvailableEditorRow(
@@ -9855,12 +10024,23 @@ private fun KeyMetricSelectedEditorRow(
     ) {
         MetricGlyph(icon = metric.icon, size = 30.dp)
         Spacer(Modifier.width(Metrics.space12))
-        Text(
-            title,
-            style = NoopType.body,
-            color = Palette.textPrimary,
+        Column(
             modifier = Modifier.weight(1f),
-        )
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                title,
+                style = NoopType.body,
+                color = Palette.textPrimary,
+            )
+            Text(
+                "${keyMetricGroupTitle(metric.group)} · ${keyMetricOriginCompactTitle(metric.origin)}",
+                style = NoopType.caption,
+                color = Palette.textTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         IconButton(
             onClick = { onMove(index, index - 1) },
             enabled = index > 0,
@@ -9942,6 +10122,12 @@ private fun KeyMetricAvailableEditorRow(
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )
+            } else {
+                Text(
+                    keyMetricGroupTitle(metric.group),
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
             }
         }
         TextButton(
@@ -9961,6 +10147,31 @@ private fun KeyMetricAvailableEditorRow(
 private fun keyMetricGroupTitle(group: KeyMetricGroup): String = when (group) {
     KeyMetricGroup.DAILY_SIGNAL -> uiString(R.string.widget_daily_signal)
     KeyMetricGroup.VITALS -> uiString(R.string.appwide_day_overview_vitals)
+    KeyMetricGroup.SLEEP -> uiString(R.string.l10n_today_screen_sleep_3cac34e6)
     KeyMetricGroup.ACTIVITY -> uiString(R.string.appwide_day_overview_activity)
     KeyMetricGroup.WELLBEING -> uiString(R.string.l10n_settings_screen_health_wellness_93475778)
+}
+
+@Composable
+private fun keyMetricOriginTitle(origin: KeyMetricOrigin): String = when (origin) {
+    KeyMetricOrigin.MEASURED_IMPORTED ->
+        uiString(R.string.appwide_metric_origin_measured_imported)
+    KeyMetricOrigin.NOOP_INSIGHT ->
+        uiString(R.string.appwide_metric_origin_noop_insight)
+}
+
+@Composable
+private fun keyMetricOriginCompactTitle(origin: KeyMetricOrigin): String = when (origin) {
+    KeyMetricOrigin.MEASURED_IMPORTED ->
+        uiString(R.string.appwide_metric_origin_measured_short)
+    KeyMetricOrigin.NOOP_INSIGHT ->
+        uiString(R.string.appwide_metric_origin_noop_short)
+}
+
+@Composable
+private fun keyMetricOriginDetail(origin: KeyMetricOrigin): String = when (origin) {
+    KeyMetricOrigin.MEASURED_IMPORTED ->
+        uiString(R.string.appwide_metric_origin_measured_imported_detail)
+    KeyMetricOrigin.NOOP_INSIGHT ->
+        uiString(R.string.appwide_metric_origin_noop_insight_detail)
 }

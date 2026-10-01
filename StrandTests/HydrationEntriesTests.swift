@@ -2704,6 +2704,53 @@ final class HydrationEntriesTests: XCTestCase {
         XCTAssertEqual(todayEntries.map(\.amountMl), [700])
     }
 
+    func testDetailModelClearRemovesOnlyNoopEntriesAndKeepsImportedHydration() async throws {
+        let day = "2098-03-11"
+        clearEntries(day: day)
+        defer { clearEntries(day: day) }
+        let (repo, store) = try await makeRepository()
+        let addResult = await repo.logHydration(amountMl: 500, day: day)
+        XCTAssertTrue(addResult.succeeded)
+        try await store.upsertMetricSeries(
+            [MetricPoint(day: day, key: HydrationStore.key, value: 700)],
+            deviceId: Repository.appleHealthSource
+        )
+
+        let result = await HydrationDetailModel(
+            selectedDayKey: day
+        ).clear(from: repo)
+        let snapshot = try await HydrationDetailModel(
+            selectedDayKey: day
+        ).load(from: repo)
+
+        XCTAssertTrue(result.succeeded)
+        XCTAssertTrue(snapshot.entries.isEmpty)
+        XCTAssertEqual(snapshot.reading?.source, .appleHealth)
+        XCTAssertEqual(snapshot.reading?.valueML, 700)
+        XCTAssertEqual(snapshot.reading?.noopML, 0)
+        XCTAssertEqual(snapshot.reading?.appleHealthML, 700)
+    }
+
+    func testHydrationCorrectionControlsPrecedeRemindersAndRequireClearConfirmation() throws {
+        let hydration = try source("Strand/Screens/HydrationView.swift")
+        let body = try XCTUnwrap(hydration.range(of: "    var body: some View {"))
+        let bodyText = String(hydration[body.lowerBound...])
+        let entries = try XCTUnwrap(bodyText.range(of: "entriesSection"))
+        let reminders = try XCTUnwrap(bodyText.range(of: "reminderSection"))
+
+        XCTAssertLessThan(entries.lowerBound, reminders.lowerBound)
+        XCTAssertTrue(
+            hydration.contains(
+                "appwide.hydration.clear_confirm_message"
+            )
+        )
+        XCTAssertTrue(
+            hydration.contains(
+                "appwide.hydration.target_details.exclusions"
+            )
+        )
+    }
+
     func testInvalidExplicitDayFailsClosedWithoutFallingBackToToday() async throws {
         let todayDay = "2098-04-20"
         clearEntries(day: todayDay)
@@ -2715,7 +2762,9 @@ final class HydrationEntriesTests: XCTestCase {
 
         XCTAssertFalse(model.hasValidDay)
         let rejectedAdd = await model.add(amountML: 237, to: repo)
+        let rejectedClear = await model.clear(from: repo)
         XCTAssertFalse(rejectedAdd.succeeded)
+        XCTAssertFalse(rejectedClear.succeeded)
         do {
             _ = try await model.load(from: repo)
             XCTFail("An invalid explicit route must fail closed.")

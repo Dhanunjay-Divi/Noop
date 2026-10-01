@@ -103,6 +103,9 @@ struct LiquidTodayView: View {
     @State private var importedActiveKcalDay: Double?  // Apple Health active component for the selected day
     @State private var importedRestingKcalDay: Double? // Apple Health basal/resting component for the selected day
     @State private var importedWeightKg: Double?    // freshest measured weight at or before selected day
+    @State private var resolvedAverageHrDay: Double?
+    @State private var resolvedMaxHrDay: Double?
+    @State private var measuredVo2Max: Double?
     @State private var hrValues: [Double] = []     // hrBuckets since midnight → 5-min means
     @State private var workouts: [WorkoutRow] = [] // newest-first
 
@@ -146,7 +149,12 @@ struct LiquidTodayView: View {
     // Today stays focused on the user's three-to-six selected metrics. The full catalog remains one
     // tap away through "Open all metric history".
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
+    #if DEBUG
+    @State private var showKeyMetricsEditor =
+        CommandLine.arguments.contains("--demo-key-metrics-editor")
+    #else
     @State private var showKeyMetricsEditor = false
+    #endif
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
     private var visibleKeyMetrics: [KeyMetric] { enabledKeyMetrics }
     /// One shared, selected-day-anchored history cache for the compact tile traces. Building this in
@@ -1424,7 +1432,10 @@ struct LiquidTodayView: View {
             maximum: 100,
             unit: "%",
             tint: sleepHeroTone,
-            context: restScore == nil ? String(localized: "No data") : nil,
+            context: restScore
+                .flatMap { CompactDailyMetricStatus.sleep(score: $0) }
+                .map(\.label)
+                ?? String(localized: "No data"),
             decimals: 0,
             onOpen: { openHeroMetric("sleep_performance") },
             onExplain: { explainHeroMetric("sleep_performance") }
@@ -1432,7 +1443,8 @@ struct LiquidTodayView: View {
     }
 
     private var effortHeroMetric: some View {
-        let value = displayDay?.strain.map {
+        let canonicalValue = displayDay?.strain
+        let value = canonicalValue.map {
             UnitFormatter.effortValue($0, scale: effortScale)
         }
         let maximum = effortScale == .whoop ? Double(21) : Double(100)
@@ -1442,7 +1454,10 @@ struct LiquidTodayView: View {
             maximum: maximum,
             unit: effortScale == .whoop ? "/ 21" : "/ 100",
             tint: StrandPalette.effortColor,
-            context: value == nil ? String(localized: "No data") : nil,
+            context: canonicalValue
+                .flatMap { CompactDailyMetricStatus.effort(score: $0) }
+                .map(\.label)
+                ?? String(localized: "No data"),
             decimals: effortScale == .whoop ? 1 : 0,
             onOpen: { openHeroMetric("strain") },
             onExplain: { explainHeroMetric("strain") }
@@ -2981,6 +2996,28 @@ struct LiquidTodayView: View {
         case .restingHr:
             ktile(String(localized: "Resting HR"), intText(rhr), "bpm", StrandPalette.metricRose, nil,
                   trend: keyMetricTrends[.restingHr], symbol: metric.icon, key: "rhr")
+        case .averageHr:
+            ktile(
+                String(localized: "Average Heart Rate"),
+                intText(resolvedAverageHrDay),
+                "bpm",
+                StrandPalette.metricRose,
+                nil,
+                trend: keyMetricTrends[.averageHr],
+                symbol: metric.icon,
+                key: "avg_hr"
+            )
+        case .maxHr:
+            ktile(
+                String(localized: "Max Heart Rate"),
+                intText(resolvedMaxHrDay),
+                "bpm",
+                StrandPalette.metricAmber,
+                nil,
+                trend: keyMetricTrends[.maxHr],
+                symbol: metric.icon,
+                key: "max_hr"
+            )
         case .bloodOxygen:
             let spo2 = liquidSpo2
             ktile(String(localized: "Blood Oxygen"), intText(spo2), "%", StrandPalette.metricCyan, nil,
@@ -2990,6 +3027,17 @@ struct LiquidTodayView: View {
             ktile(String(localized: "Respiratory"), resp.map { String(format: "%.1f", $0) } ?? StrandFormat.missing,
                   "rpm", StrandPalette.effortColor, nil, trend: keyMetricTrends[.respiratory],
                   symbol: metric.icon, key: "resp_rate")
+        case .asleepTime:
+            ktile(
+                String(localized: "Asleep Time"),
+                sleepText,
+                "",
+                StrandPalette.metricPurple,
+                nil,
+                trend: keyMetricTrends[.asleepTime],
+                symbol: metric.icon,
+                key: "sleep_total_min"
+            )
         case .steps:
             ktile(String(localized: "Steps"), stepsText, "", StrandPalette.chargeColor,
                   nil, trend: keyMetricTrends[.steps], symbol: metric.icon, key: nil,
@@ -3000,6 +3048,17 @@ struct LiquidTodayView: View {
                   symbol: metric.icon, key: "weight")
         case .calories:
             energyKTile(symbol: metric.icon)
+        case .vo2Max:
+            ktile(
+                String(localized: "VO₂ Max"),
+                measuredVo2Max.map { String(format: "%.1f", $0) } ?? StrandFormat.missing,
+                "ml/kg/min",
+                StrandPalette.metricCyan,
+                nil,
+                trend: keyMetricTrends[.vo2Max],
+                symbol: metric.icon,
+                key: "vo2max"
+            )
         case .stress:
             ktile(
                 String(localized: "Stress"),
@@ -3325,6 +3384,9 @@ struct LiquidTodayView: View {
         appleRows: [AppleDaily],
         endingAt endDay: String,
         resolvedSpo2: [(day: String, value: Double)] = [],
+        averageHrSeries: [(day: String, value: Double)] = [],
+        maxHrSeries: [(day: String, value: Double)] = [],
+        vo2MaxSeries: [(day: String, value: Double)] = [],
         windowDays: Int = 14
     ) -> [KeyMetric: [Double]] {
         guard let endDate = dayKeyParser.date(from: endDay),
@@ -3359,6 +3421,7 @@ struct LiquidTodayView: View {
             record(.restingHr, day: day.day, value: day.restingHr.map(Double.init))
             record(.bloodOxygen, day: day.day, value: day.spo2Pct)
             record(.respiratory, day: day.day, value: day.respRateBpm)
+            record(.asleepTime, day: day.day, value: day.totalSleepMin)
         }
 
         for point in supplierSteps {
@@ -3369,6 +3432,16 @@ struct LiquidTodayView: View {
         // replace a sparse cache entry, but raw band red/IR samples never enter this series.
         for point in resolvedSpo2 {
             record(.bloodOxygen, day: point.day, value: point.value)
+        }
+
+        for point in averageHrSeries {
+            record(.averageHr, day: point.day, value: point.value)
+        }
+        for point in maxHrSeries {
+            record(.maxHr, day: point.day, value: point.value)
+        }
+        for point in vo2MaxSeries {
+            record(.vo2Max, day: point.day, value: point.value)
         }
 
         // Apple Health pedometer rows override a supplier-native value on the same day. Weight is naturally
@@ -3611,6 +3684,9 @@ struct LiquidTodayView: View {
         importedActiveKcalDay = cache.importedActiveKcalDay
         importedRestingKcalDay = cache.importedRestingKcalDay
         importedWeightKg = cache.importedWeightKg
+        resolvedAverageHrDay = cache.resolvedAverageHrDay
+        resolvedMaxHrDay = cache.resolvedMaxHrDay
+        measuredVo2Max = cache.measuredVo2Max
         hrValues = cache.hrValues
         workouts = cache.workouts
         keyMetricTrends = cache.keyMetricTrends
@@ -3836,6 +3912,20 @@ struct LiquidTodayView: View {
             key: "spo2",
             source: Repository.whoopSource,
             days: max(30, requestedOffset + 15))
+        async let averageHrA = repo.resolvedSeries(
+            key: "avg_hr",
+            source: Repository.whoopSource,
+            days: historyLookbackDays)
+        async let maxHrA = repo.resolvedSeries(
+            key: "max_hr",
+            source: Repository.whoopSource,
+            days: historyLookbackDays)
+        // Measured VO2 max stays separate from NOOP's `vo2max_est`; the Today tile must never
+        // relabel a model estimate as a wearable/Health measurement.
+        async let vo2MaxA = repo.resolvedSeries(
+            key: "vo2max",
+            source: Repository.appleHealthSource,
+            days: ageMetricLookbackDays)
         async let appleA = repo.appleDailyRows(days: historyLookbackDays)
         async let hrA = repo.hrBuckets(from: from, to: to, bucketSeconds: 300)
         async let wkA = repo.workoutRows(overlappingFrom: selectedCalendarWindow.lowerBound,
@@ -3853,12 +3943,21 @@ struct LiquidTodayView: View {
         let restSeries = await restA
         let stepsSeries = await stepsA
         let spo2Resolution = await spo2A
+        let averageHrResolution = await averageHrA
+        let maxHrResolution = await maxHrA
+        let vo2MaxResolution = await vo2MaxA
         let validSpo2Points = spo2Resolution.values.filter {
             $0.value.isFinite && $0.value > 0 && $0.value <= 100
         }
         let resolvedSpo2Local = Dictionary(
             validSpo2Points,
             uniquingKeysWith: { _, last in last })
+        let resolvedAverageHrLocal = averageHrResolution.values
+            .last(where: { $0.day == requestedDayKey })?.value
+        let resolvedMaxHrLocal = maxHrResolution.values
+            .last(where: { $0.day == requestedDayKey })?.value
+        let measuredVo2MaxLocal = vo2MaxResolution.values
+            .last(where: { $0.day <= requestedDayKey })?.value
         let restByDay = Dictionary(restSeries.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
         // Selected day's Rest; tail fallback only at offset 0 (a past day with no row shows nothing) AND
         // only when the tail night is still fresh. #977: a live 5.0 whose sleep never scores (no overnight
@@ -3924,7 +4023,10 @@ struct LiquidTodayView: View {
             supplierSteps: supplierStepPoints,
             appleRows: appleRows,
             endingAt: requestedDayKey,
-            resolvedSpo2: validSpo2Points
+            resolvedSpo2: validSpo2Points,
+            averageHrSeries: averageHrResolution.values,
+            maxHrSeries: maxHrResolution.values,
+            vo2MaxSeries: vo2MaxResolution.values
         )
         let hrValuesLocal = (await hrA).map { $0.bpm }
         // A row that only OVERLAPS the selected day (for example a workout begun before midnight) must
@@ -3970,6 +4072,9 @@ struct LiquidTodayView: View {
             importedActiveKcalDay: importedActiveKcalLocal,
             importedRestingKcalDay: importedRestingKcalLocal,
             importedWeightKg: importedWeightLocal,
+            resolvedAverageHrDay: resolvedAverageHrLocal,
+            resolvedMaxHrDay: resolvedMaxHrLocal,
+            measuredVo2Max: measuredVo2MaxLocal,
             hrValues: hrValuesLocal,
             workouts: workoutsLocal,
             keyMetricTrends: keyMetricTrendsLocal,
@@ -4540,6 +4645,9 @@ struct LiquidTodayLoadCache {
     let importedActiveKcalDay: Double?
     let importedRestingKcalDay: Double?
     let importedWeightKg: Double?
+    let resolvedAverageHrDay: Double?
+    let resolvedMaxHrDay: Double?
+    let measuredVo2Max: Double?
     let hrValues: [Double]
     let workouts: [WorkoutRow]
     let keyMetricTrends: [KeyMetric: [Double]]
@@ -5036,6 +5144,46 @@ private struct LiquidWordmark: View {
 }
 
 // MARK: - Compact Daily Signal metrics
+
+enum CompactDailyMetricStatus: Equatable {
+    case needMoreRest
+    case steady
+    case wellRested
+    case light
+    case moderate
+    case high
+
+    static func sleep(score: Double) -> Self? {
+        guard score.isFinite else { return nil }
+        if score >= 80 { return .wellRested }
+        if score >= 60 { return .steady }
+        return .needMoreRest
+    }
+
+    static func effort(score: Double) -> Self? {
+        guard score.isFinite else { return nil }
+        if score >= 70 { return .high }
+        if score >= 30 { return .moderate }
+        return .light
+    }
+
+    var label: String {
+        switch self {
+        case .needMoreRest:
+            return String(localized: "appwide.metric_status.need_more_rest")
+        case .steady:
+            return String(localized: "appwide.metric_status.steady")
+        case .wellRested:
+            return String(localized: "appwide.metric_status.well_rested")
+        case .light:
+            return String(localized: "appwide.metric_status.light")
+        case .moderate:
+            return String(localized: "appwide.metric_status.moderate")
+        case .high:
+            return String(localized: "appwide.metric_status.high")
+        }
+    }
+}
 
 /// One equal-width readout in the Daily Signal summary. The metric stays number-first and uses only a
 /// quiet bounded line for magnitude, while the short context row preserves calibration, carry, and

@@ -4,6 +4,43 @@ Last updated: **2026-10-01**
 
 ## Authoritative context
 
+- The direct-and-derived Today metric expansion is locally verified on
+  `codex/today-metric-catalog-fitness-age-20261001`. Apple and Android now
+  expose the same 18 Today-ready choices, retain Steps in the fresh-install
+  six, and group the editor into measured/imported source data versus NOOP
+  insights. Average HR, maximum HR, asleep time, and measured VO2 max are now
+  directly selectable; measured VO2 max never falls back to `vo2max_est`, and
+  primary Steps continues to exclude motion-only estimates. Android Full
+  focused compile/tests, Apple focused catalog/trend tests, macOS and complete
+  iPhone Simulator builds, nine-locale generation, and diff hygiene pass. A
+  current 1206x2622 iPhone editor capture was reviewed and Vision OCR confirmed
+  compact one-line metadata plus `18 supported`. Physical Apple Watch, WHOOP,
+  supplier-band, HealthKit, Health Connect, background, battery, and accuracy
+  behavior remains unvalidated and unclaimed.
+
+- The hydration target/correction implementation is focused-test and
+  build-verified on the same branch. Apple and Android now explain the existing
+  confirmed-profile/weight plus bounded-Effort target, keep body composition
+  and wrist temperature outside that estimate, place editable NOOP entries
+  immediately after quick logging, and require confirmation before an atomic
+  clear of only NOOP-owned entries. Apple and Android focused hydration tests,
+  Full Kotlin/resources, Apple app graphs, nine-locale generation, all 114
+  operations records, and diff hygiene pass. Hydration-specific phone visual
+  review, real provider preservation, notification delivery, and physical-band
+  behavior remain pending and unclaimed.
+
+- Daily Signal compact statuses are locally verified on
+  `codex/today-metric-catalog-fitness-age-20261001`. Recovery retains its
+  existing `Low / Steady / Strong` and calibration semantics; Sleep now uses
+  `Need more rest / Steady / Well rested`; Effort now uses
+  `Light / Moderate / High`. Apple focused tests pass 50/50, Android Full
+  resources/Kotlin/unit tests build successfully, and the complete iPhone
+  Simulator graph builds. A current 1206x2622 iPhone capture with values
+  `43 / 85 / 45` was reviewed showing `Steady / Well rested / Moderate`
+  without observed clipping or overlap. No Android emulator was attached, so
+  Android visual review remains pending. No formula, source, storage, account,
+  network, BLE, or physical-device behavior changed or was claimed.
+
 - The Today metric-catalog refinement is locally verified after complete
   Android Full and Apple hosted-contract repair on
   `codex/today-metric-catalog-fitness-age-20261001`. Apple and Android now

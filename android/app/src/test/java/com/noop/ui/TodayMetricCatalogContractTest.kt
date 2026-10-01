@@ -33,7 +33,8 @@ class TodayMetricCatalogContractTest {
         assertTrue(source.contains("noop.today.metricEditor.selected.\${metric.raw}"))
         assertTrue(source.contains("noop.today.metricEditor.available.\${metric.raw}"))
         assertTrue(source.contains("noop.today.metricEditor.search"))
-        assertTrue(source.contains("KeyMetricGroup.entries.forEach"))
+        assertTrue(source.contains("KeyMetricOrigin.entries.forEach"))
+        assertTrue(source.contains("keyMetricOriginDetail(origin)"))
         assertTrue(source.contains("metric != KeyMetric.HYDRATION || hydrationEnabled"))
         assertTrue(source.contains("hydrationEnabled = hydrationEnabled"))
     }
@@ -45,6 +46,19 @@ class TodayMetricCatalogContractTest {
         assertTrue(source.contains("KeyMetric.STRESS -> onOpenStress"))
         assertTrue(source.contains("KeyMetric.VITALITY -> ({ onOpenMetric(\"vitality\") })"))
         assertTrue(source.contains("KeyMetric.HYDRATION -> onOpenHydration"))
+        assertTrue(source.contains("KeyMetric.AVERAGE_HR -> ({ onOpenMetric(\"avg_hr\") })"))
+        assertTrue(source.contains("KeyMetric.MAX_HR -> ({ onOpenMetric(\"max_hr\") })"))
+        assertTrue(source.contains("KeyMetric.ASLEEP_TIME -> ({ onOpenMetric(\"sleep_total_min\") })"))
+        assertTrue(source.contains("KeyMetric.VO2_MAX -> ({ onOpenMetric(\"vo2max\") })"))
+    }
+
+    @Test
+    fun directHeartAndVo2TilesUseResolvedMeasuredSeries() {
+        val source = todaySource()
+        assertTrue(source.contains("\"avg_hr\",\n                \"my-whoop\""))
+        assertTrue(source.contains("\"max_hr\",\n                \"my-whoop\""))
+        assertTrue(source.contains("\"vo2max\",\n                \"apple-health\""))
+        assertTrue(source.contains("never falls back to NOOP's separate `vo2max_est`"))
     }
 
     @Test
