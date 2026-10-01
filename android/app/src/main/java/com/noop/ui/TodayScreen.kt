@@ -2245,7 +2245,7 @@ fun TodayScreen(
                                             color = Palette.hairline,
                                             modifier = Modifier.padding(horizontal = Metrics.space16),
                                         )
-                                        FitnessAgeHeroLane(
+                                        FitnessAgeCompactLane(
                                             age = fitnessAgeToday,
                                             profileAge = profileStore.age.takeIf {
                                                 profileStore.ageInputConfirmed && it > 0
@@ -5963,7 +5963,7 @@ private fun HeroVitalRow(label: String, value: String, icon: ImageVector) {
 }
 
 @Composable
-private fun FitnessAgeHeroLane(
+private fun FitnessAgeCompactLane(
     age: Double?,
     profileAge: Int?,
     onClick: () -> Unit,

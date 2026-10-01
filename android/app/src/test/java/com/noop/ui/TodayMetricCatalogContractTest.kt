@@ -51,7 +51,7 @@ class TodayMetricCatalogContractTest {
     fun fitnessAgeLaneIsTodayOnlyMonthPreciseAndOpensExistingDetail() {
         val source = todaySource()
         assertTrue(source.contains("if (selectedDayOffset == 0)"))
-        assertTrue(source.contains("FitnessAgeHeroLane("))
+        assertTrue(source.contains("FitnessAgeCompactLane("))
         assertTrue(source.contains("FitnessAgePresentation::value"))
         assertTrue(source.contains("FitnessAgePresentation::localizedSpokenValue"))
         assertTrue(source.contains("onClick = { onOpenMetric(\"fitness_age\") }"))

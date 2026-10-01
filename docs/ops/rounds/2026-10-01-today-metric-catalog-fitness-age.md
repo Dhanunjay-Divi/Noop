@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `locally verified; protected integration pending`
+- State: `locally verified after full-suite repair; protected integration pending`
 - Owner: project team
 - Branch: `codex/today-metric-catalog-fitness-age-20261001`
 - Start commit: `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`
@@ -96,9 +96,10 @@ dashboard:
 | Apple macOS dual-architecture app build | Pass | The shared Apple Today surface and editor compile for both macOS architectures | Signed iPhone behavior or physical touch ergonomics |
 | Apple focused contracts | Pass: Key Metric preference/progress, Daily Signal, and settings-disclosure cases | Catalog membership, bounds, Fitness Age placement, and editor source contracts remain coherent | Every app regression or physical accessibility traversal |
 | Android Demo focused contracts | Pass after the localization test correction: Key Metric preferences and Today metric catalog | Stable identifiers, ordering, bounds, hydration gate, routes, localized composed copy, and Fitness Age parity compile and pass in the Demo flavor | Full physical-device runtime behavior |
+| Android Full unit wall after hosted contract repair | Pass: 5,262 tests, 7 skipped | The complete Full-flavor unit suite accepts the compact Fitness Age lane, scoped partial-locale additions, and Hydration's genuine goal progress | Android instrumentation on a physical phone |
 | i18n and health-claims local gates | Pass: no new hardcoded or unextracted UI copy, complete focus-locale coverage, valid JSON/XML resources, and health-claims clear across 1,324 files | The new editor and accessibility copy is resource-backed without adding an unsafe health claim | Hosted execution on the replacement SHA or human translation review |
-| Operations and terminology remediation | Pass: 111 operations records; 18,579 classified legacy occurrences across 1,641 groups; zero forbidden mappings; reviewed inventory SHA-256 `cc522262e0b22d54bfdb9eb3bce9038aff0086ecbd68cb01a6b2e2ad731ba1dd`; 54 terminology/required-CI tests | The round uses the complete required structure, and the generated terminology snapshot plus pinned digest match the rebased tree | Hosted-green release controls until the replacement head runs |
-| Initial hosted PR `#27` policy checks | Operations record, terminology snapshot, and i18n failed narrowly; applicability, health claims, runtime licenses, server, Swift packages, and trusted release controls passed; Apple and Android app jobs continued | The remote candidate reached exact-head verification and isolated evidence/localization defects rather than a hidden gate bypass | A green replacement SHA or protected integration |
+| Operations and terminology remediation | Pass: 111 operations records; 18,579 classified legacy occurrences across 1,641 groups; zero forbidden mappings; reviewed inventory SHA-256 `240e40da83114054a10d0c55a33da035a36a7dd1c540fa99af1a5baee95b7ead`; 54 terminology/required-CI tests | The round uses the complete required structure, and the generated terminology snapshot plus pinned digest match the rebased tree | Hosted-green release controls until the replacement head runs |
+| Hosted PR `#27` replacement head `6980dc324` | Operations, terminology, i18n, applicability, health claims, runtime licenses, server, Swift packages, trusted release controls, Android review-sample shell, and Android production shell passed. The Full unit wall exposed three deterministic contract mismatches: newly scoped locale keys, the compact Fitness Age component name, and Hydration's bounded goal progress. All three are repaired locally and the complete 5,262-test wall passes. The superseded Apple run was cancelled before the next push. | Hosted checks exercised the exact replacement and the remaining failures were corrected without weakening product bounds or medical truth | A green final replacement SHA or protected integration |
 | Visual review | Reviewed phone and desktop Today/editor captures without observed clipping or overlap | The selected grid remains glanceable, the full catalog is discoverable, and Fitness Age is visually subordinate to daily scores | Every viewport, locale, Dynamic Type size, or physical display |
 | Diff hygiene | Pass | No whitespace or merge-marker defect in the current change | Runtime correctness beyond the listed gates |
 
@@ -123,12 +124,14 @@ dashboard:
   and operations records.
 - Rebased implementation commits:
   `2ccee6bd7` (metric catalog and Fitness Age) and
-  `0592900f2` (localization); the commit containing this record carries the
-  terminology, digest, and final focused-test correction.
+  `0592900f2` (localization), followed by `6980dc324` (release-gate repair);
+  the next replacement commit carries the full Android contract repair and
+  updated evidence.
 - Branch and remote state: PR `#27` is open from
   `codex/today-metric-catalog-fitness-age-20261001`, rebased on protected-main
-  closeout `08ad0f472a577e66fd612281550f549fa09c7703`; initial hosted
-  policy failures are corrected locally and one replacement push remains.
+  closeout `08ad0f472a577e66fd612281550f549fa09c7703`; hosted policy
+  failures are repaired, the final Android Full wall passes locally, and one
+  replacement push remains.
 - Repository visibility verified: unchanged.
 - Version/build impact: none planned.
 - Release or distribution impact: source integration only after all protected

@@ -16,9 +16,9 @@ class ScoreTerminologyTest {
     }
 
     @Test
-    fun liquidProgressIsLimitedToGenuinelyBoundedDailyScores() {
+    fun liquidProgressIsLimitedToGenuinelyBoundedDailyMetrics() {
         assertEquals(
-            listOf(KeyMetric.CHARGE, KeyMetric.EFFORT, KeyMetric.REST),
+            listOf(KeyMetric.CHARGE, KeyMetric.EFFORT, KeyMetric.REST, KeyMetric.HYDRATION),
             KeyMetric.entries.filter { it.isBoundedProgress },
         )
     }
