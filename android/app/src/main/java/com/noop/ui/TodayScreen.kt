@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.filled.TrackChanges
@@ -94,6 +95,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -369,6 +371,22 @@ internal fun hydrationDashboardCardValue(
                 ?.let { hydrationLitresText(it.toDouble(), locale, litresFormat) }
             if (goal == null) total else "$total / $goal"
         }
+    }
+}
+
+internal fun skinTemperatureMetricValue(
+    celsius: Double?,
+    unit: TemperatureUnit,
+): String {
+    val value = celsius?.takeIf(Double::isFinite) ?: return NO_DATA
+    if (VitalBands.isAbsoluteSkinTemp(value)) {
+        return UnitFormatter.temperatureFromCelsius(value, unit)
+    }
+    val magnitude = UnitFormatter.temperatureDeltaFromCelsius(kotlin.math.abs(value), unit)
+    return when {
+        value > 0.0 -> "+$magnitude"
+        value < 0.0 -> "−$magnitude"
+        else -> magnitude
     }
 }
 
@@ -2222,6 +2240,19 @@ fun TodayScreen(
                                         onScoreInfo = openGuide,
                                         onChargeTap = { showChargeBreakdown = true },
                                     )
+                                    if (selectedDayOffset == 0) {
+                                        HorizontalDivider(
+                                            color = Palette.hairline,
+                                            modifier = Modifier.padding(horizontal = Metrics.space16),
+                                        )
+                                        FitnessAgeHeroLane(
+                                            age = fitnessAgeToday,
+                                            profileAge = profileStore.age.takeIf {
+                                                profileStore.ageInputConfirmed && it > 0
+                                            },
+                                            onClick = { onOpenMetric("fitness_age") },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -2370,11 +2401,19 @@ fun TodayScreen(
                                     stepsEstimateCaption = stepsEstimateCaption(profileStore),
                                     restScore = restScoreForDay,
                                     restSpark = restCompositeSpark,
+                                    skinTempDay = lastSkinTempDay,
+                                    stress = stressToday,
+                                    vitality = vitalityToday,
+                                    temperatureUnit = temperatureUnit,
+                                    hydrationReadState = displayedHydrationRead,
+                                    hydrationGoalMl = hydrationGoalMl,
                                     enabledMetrics = enabledKeyMetrics,
                                     isToday = selectedDayOffset == 0,
                                     onScoreInfo = openGuide,
                                     detailed = keyMetricsDetailed,
                                     onOpenMetric = onOpenMetric,
+                                    onOpenStress = onOpenStress,
+                                    onOpenHydration = { onOpenHydration(selectedDayKey) },
                                 )
                             }
                             TextButton(
@@ -2617,6 +2656,7 @@ fun TodayScreen(
             initial = enabledKeyMetrics,
             initialDetailed = keyMetricsDetailed,
             initialWindowDays = keyMetricsWindowDays,
+            hydrationEnabled = hydrationEnabled,
             onDismiss = { showMetricsEditor = false },
             onSave = { metrics, detailed, windowDays ->
                 KeyMetricPrefs.setEnabled(context, metrics)
@@ -3038,7 +3078,7 @@ private fun DailyPlanTargetSection(
                         .heightIn(min = 44.dp)
                         .semantics {
                             contentDescription = detailsHint
-                        },
+                        }
                 ) {
                     Text(
                         stringResource(
@@ -5922,6 +5962,92 @@ private fun HeroVitalRow(label: String, value: String, icon: ImageVector) {
     }
 }
 
+@Composable
+private fun FitnessAgeHeroLane(
+    age: Double?,
+    profileAge: Int?,
+    onClick: () -> Unit,
+) {
+    val title = uiString(R.string.l10n_health_screen_fitness_age_12383b4a)
+    val weekly = uiString(R.string.appwide_fitness_age_weekly)
+    val calibrating = uiString(R.string.l10n_today_screen_calibrating_37c2c9bd)
+    val detail = if (age != null && profileAge != null) {
+        FitnessAgePresentation.localizedComparison(age, profileAge)
+    } else {
+        uiString(R.string.appwide_fitness_age_needs_rhr_activity)
+    }
+    val spokenValue = age?.let(FitnessAgePresentation::localizedSpokenValue) ?: calibrating
+    val interaction = remember { MutableInteractionSource() }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .testTag("noop.today.fitnessAgeHero")
+            .liquidPress(interaction)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
+            .clearAndSetSemantics {
+                contentDescription = "$title, $spokenValue, $weekly, $detail"
+                role = Role.Button
+            }
+            .padding(horizontal = Metrics.space16, vertical = Metrics.space10),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+    ) {
+        MetricGlyph(
+            icon = Icons.AutoMirrored.Filled.DirectionsRun,
+            size = 34.dp,
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+            ) {
+                Text(
+                    title.uppercase(Locale.getDefault()),
+                    style = NoopType.overline,
+                    color = Palette.textSecondary,
+                )
+                Text(
+                    weekly,
+                    style = NoopType.overline,
+                    color = Palette.chargeBright,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(Metrics.cornerPill))
+                        .background(Palette.chargeColor.copy(alpha = 0.14f))
+                        .padding(horizontal = Metrics.space8, vertical = 3.dp),
+                )
+            }
+            Text(
+                detail,
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            age?.let(FitnessAgePresentation::value) ?: calibrating,
+            style = if (age != null) NoopType.number(22f) else NoopType.captionNumber,
+            color = if (age != null) Palette.textPrimary else Palette.textTertiary,
+            maxLines = 1,
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Palette.textTertiary,
+            modifier = Modifier.size(Metrics.iconSmall),
+        )
+    }
+}
+
 // MARK: - "Your cards" dashboard (WHOOP "My Dashboard"), iOS yourCardsSection parity
 //
 // A persisted, reorderable selection of metric cards surfaced on Today as flat WHOOP metric ROWS. The
@@ -7439,6 +7565,16 @@ private fun MetricGrid(
     // mini-graph tracks the Rest SCORE rather than raw sleep minutes (#614 follow-up). Other tiles still
     // read their series off `w` (the DailyMetric windows).
     restSpark: List<Double> = emptyList(),
+    skinTempDay: DailyMetric? = null,
+    stress: Double? = null,
+    vitality: Double? = null,
+    temperatureUnit: TemperatureUnit = TemperatureUnit.CELSIUS,
+    hydrationReadState: TodayHydrationReadState = TodayHydrationReadState(
+        dayKey = "",
+        totalMl = null,
+        status = TodayHydrationReadStatus.LOADING,
+    ),
+    hydrationGoalMl: Int? = null,
     enabledMetrics: List<KeyMetric> = KeyMetric.defaultSelection,
     isToday: Boolean = false,
     onScoreInfo: (ScoreSection) -> Unit = {},
@@ -7447,7 +7583,13 @@ private fun MetricGrid(
     // Tile drill-ins: every tile opens its focused trend timeline (vital_detail/<key>, the Sleep
     // night-detail pattern) via [onOpenMetric].
     onOpenMetric: (String) -> Unit = {},
+    onOpenStress: () -> Unit = {},
+    onOpenHydration: () -> Unit = {},
 ) {
+    val hydrationNotLoggedText = uiString(R.string.appwide_hydration_not_logged)
+    val hydrationUnavailableText = uiString(R.string.appwide_hydration_unavailable)
+    val hydrationLocale = LocalConfiguration.current.locales[0]
+    val hydrationLitresFormat = uiString(R.string.hydration_screen_litres_short_format)
     // Current iOS parity: selected metrics only, dimensional semantic glyphs, and either a real trend or a
     // bounded-score liquid rail. The full catalog remains in metric history.
     val descriptors: Map<KeyMetric, KeyTileData> = mapOf(
@@ -7539,6 +7681,16 @@ private fun MetricGrid(
                 spark = w.resp,
             )
         },
+        KeyMetric.SKIN_TEMP to run {
+            val v = d?.skinTempDevC ?: carriedDay?.skinTempDevC ?: skinTempDay?.skinTempDevC
+            KeyTileData(
+                label = uiString(R.string.l10n_health_screen_skin_temperature_f59127f6),
+                value = skinTemperatureMetricValue(v, temperatureUnit),
+                unit = "",
+                tint = Palette.metricAmber,
+                frac = null,
+            )
+        },
         KeyMetric.STEPS to run {
             // Primary Steps requires a measured phone/watch pedometer count. DailyMetric remains a
             // compatibility read only and cannot fill this value.
@@ -7575,6 +7727,44 @@ private fun MetricGrid(
                 spark = caloriesSpark,   // #616: imported-first trend (was missing → no trend line)
             )
         },
+        KeyMetric.STRESS to KeyTileData(
+            label = uiString(R.string.nav_stress),
+            value = stress?.let { String.format(Locale.US, "%.1f", it.coerceIn(0.0, 3.0)) }
+                ?: STRESS_CALIBRATING,
+            unit = if (stress != null) uiString(R.string.l10n_stress_screen_of_3_46203495) else "",
+            tint = Palette.accent,
+            frac = null,
+        ),
+        KeyMetric.VITALITY to KeyTileData(
+            label = uiString(R.string.l10n_health_screen_vitality_be320b06),
+            value = vitality?.let { it.roundToInt().toString() } ?: NO_DATA,
+            unit = if (vitality != null) "/100" else "",
+            tint = LIQUID_PURPLE,
+            frac = vitality?.let { (it / 100.0).coerceIn(0.0, 1.0) },
+        ),
+        KeyMetric.HYDRATION to run {
+            val confirmed = if (hydrationReadState.status == TodayHydrationReadStatus.CONFIRMED) {
+                HydrationStore.confirmedTotal(hydrationReadState.totalMl)
+            } else {
+                null
+            }
+            KeyTileData(
+                label = uiString(R.string.nav_hydration),
+                value = hydrationDashboardCardValue(
+                    state = hydrationReadState,
+                    goalMl = hydrationGoalMl,
+                    notLoggedText = hydrationNotLoggedText,
+                    unavailableText = hydrationUnavailableText,
+                    locale = hydrationLocale,
+                    litresFormat = hydrationLitresFormat,
+                ),
+                unit = "",
+                tint = Palette.metricCyan,
+                frac = hydrationGoalMl
+                    ?.takeIf { it > 0 }
+                    ?.let { goal -> confirmed?.div(goal.toDouble())?.coerceIn(0.0, 1.0) },
+            )
+        },
     )
 
     val tiles = enabledMetrics
@@ -7591,9 +7781,13 @@ private fun MetricGrid(
         KeyMetric.RESTING_HR -> ({ onOpenMetric("rhr") })
         KeyMetric.BLOOD_OXYGEN -> ({ onOpenMetric("spo2") })
         KeyMetric.RESPIRATORY -> ({ onOpenMetric("resp") })
+        KeyMetric.SKIN_TEMP -> ({ onOpenMetric("skin") })
         KeyMetric.STEPS -> ({ onOpenMetric("steps") })
         KeyMetric.CALORIES -> ({ onOpenMetric("active_kcal") })
         KeyMetric.WEIGHT -> ({ onOpenMetric("weight") })
+        KeyMetric.STRESS -> onOpenStress
+        KeyMetric.VITALITY -> ({ onOpenMetric("vitality") })
+        KeyMetric.HYDRATION -> onOpenHydration
     }
     val metricColumnCount = if (LocalDensity.current.fontScale >= 1.3f) 1 else 2
     // Match iOS: two columns normally and one at large text sizes. An odd final tile spans the row
@@ -9387,53 +9581,86 @@ private fun trendWindowLabel(days: Int): String = when (days) {
     else -> "14-day trend"
 }
 
-/** One editor row with its current pinned flag. The working list is rebuilt on each edit. */
-private data class EditableMetric(val metric: KeyMetric, val enabled: Boolean)
-
 @Composable
 private fun KeyMetricsEditorDialog(
     initial: List<KeyMetric>,
     initialDetailed: Boolean = false,
     initialWindowDays: Int = 14,
+    hydrationEnabled: Boolean,
     onDismiss: () -> Unit,
     onSave: (List<KeyMetric>, Boolean, Int) -> Unit,
 ) {
-    // Detailed tiles: taller/squarer with a trend graph under the fill bar (display-only), over the
-    // chosen trailing window (2 days / 1 week / 2 weeks).
     var detailed by remember { mutableStateOf(initialDetailed) }
     var windowDays by remember { mutableStateOf(initialWindowDays) }
-    // Working copy: pinned tiles first in saved order, then the unpinned remainder in canonical order.
-    val items = remember {
-        val enabledSet = initial.toHashSet()
-        mutableStateListOf<EditableMetric>().apply {
-            initial.forEach { add(EditableMetric(it, true)) }
-            KeyMetric.defaultOrder.filter { it !in enabledSet }.forEach { add(EditableMetric(it, false)) }
+    var search by rememberSaveable { mutableStateOf("") }
+    val selected = remember {
+        mutableStateListOf<KeyMetric>().apply {
+            addAll(KeyMetricPrefs.normalized(initial))
         }
     }
-    val selectedCount = items.count { it.enabled }
-
-    fun move(from: Int, to: Int) {
-        if (from in items.indices && to in items.indices) {
-            val item = items.removeAt(from)
-            items.add(to, item)
-        }
+    val selectedCount = selected.size
+    val query = search.trim()
+    val available = KeyMetric.defaultOrder.filter { metric ->
+        metric !in selected && (
+            query.isEmpty() ||
+                uiString(metric.titleRes).contains(query, ignoreCase = true)
+            )
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Surface(
-            color = Palette.surfaceOverlay,
-            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxSize(),
+            color = Palette.surfaceBase,
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = Metrics.space20, vertical = Metrics.space16),
+                verticalArrangement = Arrangement.spacedBy(Metrics.space12),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(uiString(R.string.l10n_today_screen_edit_key_metrics_f95e61a4), style = NoopType.title2, color = Palette.textPrimary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            uiString(R.string.l10n_today_screen_edit_key_metrics_f95e61a4),
+                            style = NoopType.title2,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            uiString(R.string.key_metrics_selection_instructions),
+                            style = NoopType.subhead,
+                            color = Palette.textSecondary,
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(Metrics.iconButton),
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = uiString(R.string.l10n_steps_calibration_screen_close_bbfa773e),
+                            tint = Palette.textSecondary,
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        uiString(R.string.key_metrics_selection_instructions),
-                        style = NoopType.subhead,
+                        uiString(R.string.key_metrics_show_selected),
+                        style = NoopType.overline,
                         color = Palette.textSecondary,
+                        modifier = Modifier.weight(1f),
                     )
                     Text(
                         uiString(
@@ -9450,122 +9677,283 @@ private fun KeyMetricsEditorDialog(
                     )
                 }
 
-                // Detailed tiles: the tile-style option (compact ktile vs squarer tile + 14-day graph).
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(uiString(R.string.l10n_today_screen_detailed_tiles_0801721b), style = NoopType.body, color = Palette.textPrimary)
-                        Text(
-                            uiString(R.string.l10n_today_screen_squarer_tiles_with_a_trend_graph_3c297dec),
-                            style = NoopType.caption,
-                            color = Palette.textSecondary,
-                        )
-                    }
-                    NoopToggleSwitch(
-                        checked = detailed,
-                        onCheckedChange = { detailed = it },
-                        modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_today_screen_detailed_tiles_0801721b) },
-                    )
-                }
-                // The detailed graphs' trailing window — 2 days / 1 week / 2 weeks (the NOOP signature
-                // segmented pill, same control the trend screens use). Only shown while Detailed is on.
-                if (detailed) {
-                    SegmentedPillControl(
-                        items = listOf(2, 7, 14),
-                        selection = windowDays,
-                        label = { when (it) { 2 -> "2 days"; 7 -> "1 week"; else -> "2 weeks" } },
-                        onSelect = { windowDays = it },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                HorizontalDivider(color = Palette.hairline, thickness = 1.dp)
-
                 Column(
                     modifier = Modifier
-                        .heightIn(max = 360.dp)
+                        .weight(1f)
                         .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(Metrics.space12),
                 ) {
-                    items.forEachIndexed { index, item ->
-                        val metricTitle = uiString(item.metric.titleRes)
-                        val toggleEnabled = if (item.enabled) {
-                            selectedCount > KeyMetricPrefs.MIN_SELECTION_COUNT
-                        } else {
-                            selectedCount < KeyMetricPrefs.MAX_SELECTION_COUNT
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            NoopToggleSwitch(
-                                checked = item.enabled,
-                                onCheckedChange = { enabled ->
-                                    items[index] = item.copy(enabled = enabled)
+                    Column {
+                        selected.forEachIndexed { index, metric ->
+                            KeyMetricSelectedEditorRow(
+                                metric = metric,
+                                index = index,
+                                selectedCount = selectedCount,
+                                onMove = { from, to ->
+                                    if (from in selected.indices && to in selected.indices) {
+                                        val moved = selected.removeAt(from)
+                                        selected.add(to, moved)
+                                    }
                                 },
-                                enabled = toggleEnabled,
-                                modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_today_screen_show_item_metric_title_81803daf, metricTitle) },
+                                onRemove = { selected.remove(metric) },
                             )
-                            Spacer(Modifier.width(12.dp))
+                            if (index < selected.lastIndex) {
+                                HorizontalDivider(color = Palette.hairline)
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Palette.hairline)
+
+                    OutlinedTextField(
+                        value = search,
+                        onValueChange = { search = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("noop.today.metricEditor.search"),
+                        singleLine = true,
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Search,
+                                contentDescription = null,
+                                tint = Palette.textTertiary,
+                            )
+                        },
+                        placeholder = {
                             Text(
-                                metricTitle,
-                                style = NoopType.body,
-                                color = if (item.enabled) Palette.textPrimary else Palette.textTertiary,
-                                modifier = Modifier.weight(1f),
+                                uiString(R.string.appwide_gym_search_and_filter),
+                                color = Palette.textTertiary,
                             )
-                            IconButton(
-                                onClick = { move(index, index - 1) },
-                                enabled = index > 0,
-                                modifier = Modifier.size(Metrics.iconButton),
-                            ) {
-                                Icon(
-                                    Icons.Filled.KeyboardArrowUp,
-                                    contentDescription = uiString(R.string.l10n_today_screen_move_item_metric_title_up_52d2104c, metricTitle),
-                                    tint = if (index > 0) Palette.textSecondary else Palette.textTertiary,
-                                    modifier = Modifier.size(Metrics.iconSmall),
-                                )
-                            }
-                            IconButton(
-                                onClick = { move(index, index + 1) },
-                                enabled = index < items.lastIndex,
-                                modifier = Modifier.size(Metrics.iconButton),
-                            ) {
-                                Icon(
-                                    Icons.Filled.KeyboardArrowDown,
-                                    contentDescription = uiString(R.string.l10n_today_screen_move_item_metric_title_down_890afe60, metricTitle),
-                                    tint = if (index < items.lastIndex) Palette.textSecondary else Palette.textTertiary,
-                                    modifier = Modifier.size(Metrics.iconSmall),
-                                )
+                        },
+                    )
+
+                    KeyMetricGroup.entries.forEach { group ->
+                        val grouped = available.filter { it.group == group }
+                        if (grouped.isNotEmpty()) {
+                            Overline(
+                                keyMetricGroupTitle(group),
+                                modifier = Modifier.padding(top = Metrics.space4),
+                            )
+                            Column {
+                                grouped.forEachIndexed { index, metric ->
+                                    KeyMetricAvailableEditorRow(
+                                        metric = metric,
+                                        addEnabled = selectedCount < KeyMetricPrefs.MAX_SELECTION_COUNT &&
+                                            (metric != KeyMetric.HYDRATION || hydrationEnabled),
+                                        hydrationEnabled = hydrationEnabled,
+                                        onAdd = { selected.add(metric) },
+                                    )
+                                    if (index < grouped.lastIndex) {
+                                        HorizontalDivider(color = Palette.hairline)
+                                    }
+                                }
                             }
                         }
-                        if (index < items.lastIndex) {
-                            HorizontalDivider(color = Palette.hairline, thickness = 1.dp)
+                    }
+
+                    HorizontalDivider(color = Palette.hairline)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                uiString(R.string.l10n_today_screen_detailed_tiles_0801721b),
+                                style = NoopType.body,
+                                color = Palette.textPrimary,
+                            )
+                            Text(
+                                uiString(R.string.l10n_today_screen_squarer_tiles_with_a_trend_graph_3c297dec),
+                                style = NoopType.caption,
+                                color = Palette.textSecondary,
+                            )
                         }
+                        NoopToggleSwitch(
+                            checked = detailed,
+                            onCheckedChange = { detailed = it },
+                            modifier = Modifier.semantics {
+                                contentDescription =
+                                    uiString(R.string.l10n_today_screen_detailed_tiles_0801721b)
+                            },
+                        )
+                    }
+                    if (detailed) {
+                        SegmentedPillControl(
+                            items = listOf(2, 7, 14),
+                            selection = windowDays,
+                            label = {
+                                when (it) {
+                                    2 -> "2 days"
+                                    7 -> "1 week"
+                                    else -> "2 weeks"
+                                }
+                            },
+                            onSelect = { windowDays = it },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                 }
 
+                HorizontalDivider(color = Palette.hairline)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(
                         onClick = {
-                            // Reset NOOP's three core pins; every other metric remains visible below them.
-                            val defaults = KeyMetric.defaultSelection.toSet()
-                            items.clear()
-                            KeyMetric.defaultOrder.forEach {
-                                items.add(EditableMetric(it, it in defaults))
-                            }
+                            selected.clear()
+                            selected.addAll(KeyMetric.defaultSelection)
                         },
                         colors = ButtonDefaults.textButtonColors(contentColor = Palette.textSecondary),
-                    ) { Text(uiString(R.string.l10n_today_screen_reset_44c57abd), style = NoopType.body) }
+                    ) {
+                        Text(
+                            uiString(R.string.l10n_today_screen_reset_44c57abd),
+                            style = NoopType.body,
+                        )
+                    }
                     Spacer(Modifier.weight(1f))
                     Button(
-                        onClick = { onSave(items.filter { it.enabled }.map { it.metric }, detailed, windowDays) },
+                        onClick = { onSave(selected.toList(), detailed, windowDays) },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.statusPositive,
                             contentColor = Palette.accentInk,
                         ),
-                    ) { Text(uiString(R.string.l10n_today_screen_done_e9b450d1), style = NoopType.captionNumber) }
+                    ) {
+                        Text(
+                            uiString(R.string.l10n_today_screen_done_e9b450d1),
+                            style = NoopType.captionNumber,
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun KeyMetricSelectedEditorRow(
+    metric: KeyMetric,
+    index: Int,
+    selectedCount: Int,
+    onMove: (Int, Int) -> Unit,
+    onRemove: () -> Unit,
+) {
+    val title = uiString(metric.titleRes)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .testTag("noop.today.metricEditor.selected.${metric.raw}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MetricGlyph(icon = metric.icon, size = 30.dp)
+        Spacer(Modifier.width(Metrics.space12))
+        Text(
+            title,
+            style = NoopType.body,
+            color = Palette.textPrimary,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(
+            onClick = { onMove(index, index - 1) },
+            enabled = index > 0,
+            modifier = Modifier.size(Metrics.iconButton),
+        ) {
+            Icon(
+                Icons.Filled.KeyboardArrowUp,
+                contentDescription =
+                    uiString(R.string.l10n_today_screen_move_item_metric_title_up_52d2104c, title),
+                tint = if (index > 0) Palette.textSecondary else Palette.textTertiary,
+            )
+        }
+        IconButton(
+            onClick = { onMove(index, index + 1) },
+            enabled = index < selectedCount - 1,
+            modifier = Modifier.size(Metrics.iconButton),
+        ) {
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription =
+                    uiString(R.string.l10n_today_screen_move_item_metric_title_down_890afe60, title),
+                tint = if (index < selectedCount - 1) Palette.textSecondary else Palette.textTertiary,
+            )
+        }
+        IconButton(
+            onClick = onRemove,
+            enabled = selectedCount > KeyMetricPrefs.MIN_SELECTION_COUNT,
+            modifier = Modifier
+                .size(Metrics.iconButton)
+                .semantics {
+                    contentDescription =
+                        "${uiString(R.string.l10n_data_sources_screen_remove_e963907d)} $title"
+                },
+        ) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = null,
+                tint = if (selectedCount > KeyMetricPrefs.MIN_SELECTION_COUNT) {
+                    Palette.textSecondary
+                } else {
+                    Palette.textTertiary
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun KeyMetricAvailableEditorRow(
+    metric: KeyMetric,
+    addEnabled: Boolean,
+    hydrationEnabled: Boolean,
+    onAdd: () -> Unit,
+) {
+    val title = uiString(metric.titleRes)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .testTag("noop.today.metricEditor.available.${metric.raw}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MetricGlyph(icon = metric.icon, size = 30.dp)
+        Spacer(Modifier.width(Metrics.space12))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                title,
+                style = NoopType.body,
+                color = if (addEnabled) Palette.textPrimary else Palette.textTertiary,
+            )
+            if (metric == KeyMetric.HYDRATION && !hydrationEnabled) {
+                Text(
+                    "${uiString(R.string.l10n_settings_screen_hydration_tracking_579a2b32)} · " +
+                        uiString(R.string.l10n_data_sources_screen_off_e3de5ab0),
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+            }
+        }
+        TextButton(
+            onClick = onAdd,
+            enabled = addEnabled,
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) {
+            Text(
+                uiString(R.string.l10n_add_device_wizard_add_61cc55aa),
+                style = NoopType.captionNumber,
+            )
+        }
+    }
+}
+
+@Composable
+private fun keyMetricGroupTitle(group: KeyMetricGroup): String = when (group) {
+    KeyMetricGroup.DAILY_SIGNAL -> uiString(R.string.widget_daily_signal)
+    KeyMetricGroup.VITALS -> uiString(R.string.appwide_day_overview_vitals)
+    KeyMetricGroup.ACTIVITY -> uiString(R.string.appwide_day_overview_activity)
+    KeyMetricGroup.WELLBEING -> uiString(R.string.l10n_settings_screen_health_wellness_93475778)
 }

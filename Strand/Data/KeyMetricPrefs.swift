@@ -3,7 +3,8 @@ import SwiftUI
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
-// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to six in
+// The Today screen's "Key Metrics" grid has a curated catalog of Today-ready tiles. This lets the user
+// pin three to six in
 // their preferred order. A fresh install starts with six useful secondary signals so the grid is complete
 // without repeating the Recovery, Sleep, and Effort summary immediately above it. Every other metric
 // remains in the complete catalog. Persistence is display-only: no metric is computed or stored differently.
@@ -26,17 +27,55 @@ enum KeyMetric: String, CaseIterable, Identifiable {
     case steps
     case weight
     case calories
+    case stress
+    case vitality
+    case skinTemp
+    case hydration
 
     var id: String { rawValue }
+
+    enum Category: String, CaseIterable, Identifiable {
+        case dailySignal
+        case vitals
+        case activity
+        case wellbeing
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .dailySignal: return String(localized: "Daily Signal")
+            case .vitals: return String(localized: "Vitals")
+            case .activity: return String(localized: "Activity")
+            case .wellbeing: return String(localized: "Wellbeing")
+            }
+        }
+    }
+
+    var category: Category {
+        switch self {
+        case .charge, .effort, .rest:
+            return .dailySignal
+        case .hrv, .restingHr, .bloodOxygen, .respiratory, .skinTemp:
+            return .vitals
+        case .steps, .weight, .calories, .hydration:
+            return .activity
+        case .stress, .vitality:
+            return .wellbeing
+        }
+    }
 
     /// Whether the metric has a truthful, fixed progress scale. Raw physiology is deliberately false:
     /// HRV/heart rate/respiration/SpO₂ are readings to compare with a personal baseline, not goals where
     /// a fuller bar means healthier. Steps and calories also stay false until the user owns an explicit
-    /// goal rather than NOOP silently assuming 10,000 steps or 800 kcal.
+    /// goal rather than NOOP silently assuming 10,000 steps or 800 kcal. Hydration is the exception because
+    /// its existing opt-in flow owns an explicit personalized daily goal.
     var isBoundedProgress: Bool {
         switch self {
-        case .charge, .effort, .rest: return true
-        case .hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .weight, .calories: return false
+        case .charge, .effort, .rest, .hydration: return true
+        case .hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .weight,
+             .calories, .stress, .vitality, .skinTemp:
+            return false
         }
     }
 
@@ -53,6 +92,10 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         case .steps:       return String(localized: "Steps")
         case .weight:      return String(localized: "Weight")
         case .calories:    return String(localized: "Calories")
+        case .stress:      return String(localized: "Stress")
+        case .vitality:    return String(localized: "Vitality")
+        case .skinTemp:    return String(localized: "Skin Temp")
+        case .hydration:   return String(localized: "Hydration")
         }
     }
 
@@ -70,13 +113,19 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         case .steps:       return "figure.walk"
         case .weight:      return "scalemass.fill"
         case .calories:    return "flame.circle.fill"
+        case .stress:      return "bolt.heart"
+        case .vitality:    return "sparkles"
+        case .skinTemp:    return "thermometer.medium"
+        case .hydration:   return "waterbottle.fill"
         }
     }
 
     /// Canonical catalog order. This includes every choice and is also used to order unselected options.
     static let defaultOrder: [KeyMetric] = [
-        .charge, .effort, .rest, .hrv, .restingHr,
-        .bloodOxygen, .respiratory, .steps, .weight, .calories,
+        .charge, .rest, .effort,
+        .hrv, .restingHr, .bloodOxygen, .respiratory, .skinTemp,
+        .steps, .calories, .weight, .hydration,
+        .stress, .vitality,
     ]
 
     /// NOOP's useful fresh-install starting point. These complement the three Daily Signal scores instead

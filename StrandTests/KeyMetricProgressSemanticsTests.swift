@@ -4,12 +4,12 @@ import XCTest
 final class KeyMetricProgressSemanticsTests: XCTestCase {
     func testOnlyTrueScoresUseProgressRails() {
         XCTAssertEqual(Set(KeyMetric.allCases.filter(\.isBoundedProgress)),
-                       Set([.charge, .effort, .rest]))
+                       Set([.charge, .effort, .rest, .hydration]))
     }
 
     func testRawVitalsAndAssumedGoalsNeverLookLikeCompletion() {
         for metric in [KeyMetric.hrv, .restingHr, .bloodOxygen, .respiratory,
-                       .steps, .weight, .calories] {
+                       .steps, .weight, .calories, .stress, .vitality, .skinTemp] {
             XCTAssertFalse(metric.isBoundedProgress, "\(metric.rawValue) is not a fixed progress scale")
         }
     }
@@ -27,13 +27,15 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(keyMetrics.contains(".toggleStyle(KeyMetricSelectionToggleStyle())"))
-        XCTAssertTrue(keyMetrics.contains(".disabled(toggleLocked)"))
-        XCTAssertTrue(keyMetrics.contains("? StrandPalette.statusPositive"))
-        XCTAssertTrue(keyMetrics.contains(".fill(Color.white)"))
+        XCTAssertTrue(keyMetrics.contains("TextField(\"Search metrics\""))
+        XCTAssertTrue(keyMetrics.contains("minus.circle.fill"))
+        XCTAssertTrue(keyMetrics.contains("plus.circle.fill"))
+        XCTAssertTrue(keyMetrics.contains("KeyMetric.Category.allCases"))
+        XCTAssertTrue(keyMetrics.contains("selected.count <= KeyMetricPrefs.minimumSelectionCount"))
+        XCTAssertTrue(keyMetrics.contains("selected.count >= KeyMetricPrefs.maximumSelectionCount"))
         XCTAssertTrue(keyMetrics.contains(".foregroundStyle(Color.black)"))
         XCTAssertTrue(keyMetrics.contains(
-            #".accessibilityIdentifier("noop.key-metric.toggle.\(item.metric.rawValue)")"#
+            #".accessibilityIdentifier("noop.key-metric.add.\(metric.rawValue)")"#
         ))
         XCTAssertTrue(dashboard.contains(".toggleStyle(.noopSwitch)"))
         XCTAssertTrue(dashboard.contains(
@@ -59,6 +61,23 @@ final class KeyMetricPrefsTests: XCTestCase {
         XCTAssertEqual(KeyMetricPrefs.minimumSelectionCount, 3)
         XCTAssertEqual(KeyMetricPrefs.maximumSelectionCount, 6)
         XCTAssertEqual(Set(KeyMetric.defaultOrder), Set(KeyMetric.allCases))
+        XCTAssertEqual(KeyMetric.allCases.count, 14)
+        XCTAssertEqual(
+            Set(KeyMetric.allCases),
+            Set([
+                .charge, .effort, .rest, .hrv, .restingHr, .bloodOxygen,
+                .respiratory, .steps, .weight, .calories, .stress, .vitality,
+                .skinTemp, .hydration,
+            ])
+        )
+        XCTAssertEqual(
+            Set(KeyMetric.allCases.filter { $0.category == .dailySignal }),
+            Set([.charge, .effort, .rest])
+        )
+        XCTAssertEqual(
+            Set(KeyMetric.allCases.filter { $0.category == .vitals }),
+            Set([.hrv, .restingHr, .bloodOxygen, .respiratory, .skinTemp])
+        )
     }
 
     func testShortLegacySelectionKeepsUserOrderAndFillsToThree() {

@@ -66,7 +66,10 @@ final class SwitchStyleContractTests: XCTestCase {
 
     func testSelectionControlsRetainTheirNonSwitchStyles() throws {
         let keyMetrics = try source("Strand/Screens/KeyMetricsEditorSheet.swift")
-        XCTAssertTrue(keyMetrics.contains(".toggleStyle(KeyMetricSelectionToggleStyle())"))
+        XCTAssertFalse(keyMetrics.contains("Toggle("))
+        XCTAssertTrue(keyMetrics.contains("plus.circle.fill"))
+        XCTAssertTrue(keyMetrics.contains("minus.circle.fill"))
+        XCTAssertTrue(keyMetrics.contains(#".accessibilityIdentifier("noop.key-metric.search")"#))
 
         let terms = try source("Strand/App/TermsGateView.swift")
         XCTAssertTrue(terms.contains(".toggleStyle(.checkbox)"))

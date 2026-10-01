@@ -1305,6 +1305,27 @@ struct LiquidTodayView: View {
             )
 
             heroMetricSummary
+
+            // Fitness Age updates weekly, so it stays visually subordinate to the three daily scores and
+            // is never shown while browsing an older day with today's latest estimate.
+            if selectedDayOffset == 0 {
+                let recent = repo.days.suffix(7)
+                Divider().overlay(StrandPalette.onDarkSecondary.opacity(0.18))
+                FitnessAgeHeroRow(
+                    age: visibleFitnessAge,
+                    profileAge: profile.ageInputConfirmed ? profile.age : nil,
+                    calibrationText: fitnessCalibrationCompactCopy(
+                        rhrDays: recent.compactMap(\.restingHr).count,
+                        activityDays: recent.compactMap(\.strain).count,
+                        hasAge: profile.ageInputConfirmed
+                            && FitnessAgeEngine.supports(age: Double(profile.age)),
+                        hasSex: profile.sexInputConfirmed
+                            && FitnessAgeEngine.supports(sex: profile.sex)
+                    ),
+                    onOpen: { openHeroMetric("fitness_age") },
+                    onExplain: { explainHeroMetric("fitness_age") }
+                )
+            }
         }
         .padding(.vertical, todayHeroVerticalPadding)
         .padding(.horizontal, todayHeroHorizontalPadding)
@@ -2979,6 +3000,59 @@ struct LiquidTodayView: View {
                   symbol: metric.icon, key: "weight")
         case .calories:
             energyKTile(symbol: metric.icon)
+        case .stress:
+            ktile(
+                String(localized: "Stress"),
+                stressText,
+                stress == nil ? "" : "/ 3",
+                StrandPalette.accent,
+                nil,
+                symbol: metric.icon,
+                route: .stress
+            )
+        case .vitality:
+            ktile(
+                String(localized: "Vitality"),
+                intText(visibleVitality),
+                "",
+                liquidPurple,
+                nil,
+                symbol: metric.icon,
+                key: "vitality"
+            )
+        case .skinTemp:
+            let value = liquidSkinTemperature
+            ktile(
+                String(localized: "Skin Temp"),
+                value.map(skinTemperatureText) ?? StrandFormat.missing,
+                "",
+                StrandPalette.metricAmber,
+                nil,
+                symbol: metric.icon,
+                key: "skin_temp"
+            )
+        case .hydration:
+            let value = hydrationEnabled
+                ? hydrationGoalML.map {
+                    HydrationStore.cardValue(totalML: hydrationTotalML, goalML: $0)
+                } ?? StrandFormat.missing
+                : String(localized: "Not enabled")
+            let progress = hydrationEnabled
+                ? hydrationGoalML.flatMap { goal in
+                    hydrationTotalML.map {
+                        HydrationGoal.fraction(totalML: $0, goalML: goal)
+                    }
+                }
+                : nil
+            ktile(
+                String(localized: "Hydration"),
+                value,
+                "",
+                StrandPalette.metricCyan,
+                progress,
+                symbol: metric.icon,
+                route: hydrationEnabled ? .hydration(day: selectedDayKey) : nil
+            )
         }
     }
 
@@ -3065,7 +3139,8 @@ struct LiquidTodayView: View {
     private func ktile(_ label: String, _ value: String, _ unit: String, _ tint: Color, _ frac: Double?,
                        trend: [Double]? = nil,
                        symbol: String, key: String? = nil,
-                       detailMetric: MetricDescriptor? = nil) -> some View {
+                       detailMetric: MetricDescriptor? = nil,
+                       route: TabRoute? = nil) -> some View {
         let showsTrend = (trend?.count ?? 0) > 1
         let tile = VStack(
             alignment: .leading,
@@ -3129,19 +3204,19 @@ struct LiquidTodayView: View {
         // #430 parity: tap -> the metric's trend detail (the same Explore dossier its MetricRow pushes).
         // This is a ROOT Today link, so it must push a TabRoute VALUE into the tab NavigationPath; a
         // closure destination bypasses that path and prevents re-tapping Today from popping to root.
+        let metricRoute = (detailMetric ?? key.flatMap { key in
+            MetricCatalog.all.first(where: { $0.key == key })
+        }).map { TabRoute.metricSourced(key: $0.key, source: $0.source) }
         return Group {
-            if let metric = detailMetric ?? key.flatMap({ key in
-                MetricCatalog.all.first(where: { $0.key == key })
-            }) {
-                let route = TabRoute.metricSourced(key: metric.key, source: metric.source)
+            if let resolvedRoute = route ?? metricRoute {
                 if allowsLocalMutations {
-                    NavigationLink(value: route) {
+                    NavigationLink(value: resolvedRoute) {
                         tile
                     }
                     .buttonStyle(.plain)
                 } else {
                     NavigationLink {
-                        readOnlyDestination(for: route)
+                        readOnlyDestination(for: resolvedRoute)
                     } label: {
                         tile
                     }
@@ -5367,6 +5442,86 @@ private struct DailySignalWaveformShape: Shape {
                                      y: rect.minY + point.y * rect.height))
         }
         return path
+    }
+}
+
+/// A compact weekly lane under the three daily scores. It is intentionally a row, not a fourth score:
+/// Fitness Age changes slowly and should remain useful without competing with today's state.
+private struct FitnessAgeHeroRow: View {
+    let age: Double?
+    let profileAge: Int?
+    let calibrationText: String
+    let onOpen: () -> Void
+    let onExplain: () -> Void
+
+    private var valueText: String {
+        age.map(FitnessAgePresentation.value) ?? String(localized: "Calibrating")
+    }
+
+    private var comparisonText: String {
+        guard let age, let profileAge else { return calibrationText }
+        return FitnessAgePresentation.comparison(estimate: age, profileAge: profileAge)
+    }
+
+    var body: some View {
+        HStack(spacing: NoopMetrics.space2) {
+            Button(action: onOpen) {
+                HStack(spacing: NoopMetrics.space3) {
+                    MetricGlyph("figure.run", size: 30)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text("FITNESS AGE")
+                                .font(StrandFont.overlineScaled(9.5))
+                                .tracking(0)
+                            Text("WEEKLY")
+                                .font(StrandFont.overlineScaled(7.5))
+                                .tracking(0)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(StrandPalette.chargeColor.opacity(0.14), in: Capsule())
+                        }
+                        .foregroundStyle(StrandPalette.onDarkSecondary)
+
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(valueText)
+                                .font(StrandFont.number(17))
+                                .foregroundStyle(StrandPalette.onDarkPrimary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.82)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(StrandPalette.onDarkSecondary)
+                                .accessibilityHidden(true)
+                        }
+
+                        Text(comparisonText)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.onDarkSecondary.opacity(0.82))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: NoopMetrics.space2)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Fitness Age")
+            .accessibilityValue("\(valueText). \(comparisonText)")
+            .accessibilityHint("Opens the detailed weekly trend.")
+            .accessibilityIdentifier("noop.today.fitness-age")
+
+            MetricInfoButton(
+                title: String(localized: "About Fitness Age"),
+                tint: StrandPalette.chargeColor,
+                visualSize: 24,
+                action: onExplain
+            )
+        }
+        .padding(.top, 2)
+        .frame(minHeight: 58)
     }
 }
 

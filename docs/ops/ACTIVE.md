@@ -4,6 +4,16 @@ Last updated: **2026-10-01**
 
 ## Authoritative context
 
+- The Today metric-catalog refinement is locally verified on
+  `codex/today-metric-catalog-fitness-age-20261001`. Apple and Android now
+  expose the same 14 Today-ready metrics in a selected-first, searchable,
+  grouped editor while keeping the dashboard bounded to three through six
+  cards. Fitness Age is a compact today-only weekly lane under Daily Signal.
+  Apple dual-architecture build and focused contracts pass; Android Demo
+  focused contracts pass; visual review found no observed clipping or overlap.
+  Protected integration remains pending. No formula, source, storage, account,
+  BLE, notification, or physical-device behavior changed or was claimed.
+
 - Band-first required-account onboarding is integrated on protected `main`
   through PR `#25` at merge commit
   `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`. A reset customer

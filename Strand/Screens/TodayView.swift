@@ -3676,7 +3676,17 @@ struct TodayView: View {
     /// Every classic tile opens the same source-pinned Metric Explorer dossier as its Liquid twin.
     @ViewBuilder
     private func keyMetricTile(_ metric: KeyMetric) -> some View {
-        if let descriptor = keyMetricDescriptor(metric) {
+        if metric == .stress {
+            NavigationLink(value: TabRoute.stress) {
+                keyMetricTileContent(metric)
+            }
+            .buttonStyle(.plain)
+        } else if metric == .hydration, hydrationEnabled {
+            NavigationLink(value: TabRoute.hydration(day: selectedDayKey)) {
+                keyMetricTileContent(metric)
+            }
+            .buttonStyle(.plain)
+        } else if let descriptor = keyMetricDescriptor(metric) {
             NavigationLink(value: TabRoute.metricSourced(key: descriptor.key, source: descriptor.source)) {
                 keyMetricTileContent(metric)
             }
@@ -3703,6 +3713,10 @@ struct TodayView: View {
         case .steps:       return selectedStepsMetric
         case .weight:      return MetricCatalog.metric(key: "weight", source: "apple-health")
         case .calories:    return selectedEnergyMetric
+        case .vitality:    return MetricCatalog.metric(key: "vitality", source: "my-whoop")
+        case .skinTemp:    return MetricCatalog.metric(key: "skin_temp", source: "my-whoop")
+        case .stress, .hydration:
+            return nil
         }
     }
 
@@ -3860,6 +3874,54 @@ struct TodayView: View {
             )
         case .calories:
             energyKeyMetricTile(systemImage: systemImage)
+        case .stress:
+            let value = dashboardValue(.stress)
+            StatTile(
+                label: "Stress",
+                value: value,
+                systemImage: systemImage,
+                caption: DashboardCard.stress.subtitle,
+                accent: value == Self.calibratingPlaceholder
+                    ? StrandPalette.textPrimary
+                    : StrandPalette.accent
+            )
+        case .vitality:
+            let value = dashboardValue(.vitality)
+            StatTile(
+                label: "Vitality",
+                value: value,
+                systemImage: systemImage,
+                caption: DashboardCard.vitality.subtitle,
+                accent: value == StrandFormat.missing
+                    ? StrandPalette.textPrimary
+                    : StrandPalette.metricPurple
+            )
+        case .skinTemp:
+            let value = dashboardValue(.skinTemp)
+            StatTile(
+                label: "Skin Temp",
+                value: value,
+                systemImage: systemImage,
+                caption: DashboardCard.skinTemp.subtitle,
+                accent: value == StrandFormat.missing
+                    ? StrandPalette.textPrimary
+                    : StrandPalette.metricAmber
+            )
+        case .hydration:
+            let value = hydrationEnabled
+                ? dashboardValue(.hydration)
+                : String(localized: "Not enabled")
+            StatTile(
+                label: "Hydration",
+                value: value,
+                systemImage: systemImage,
+                caption: hydrationEnabled
+                    ? DashboardCard.hydration.subtitle
+                    : String(localized: "Enable hydration tracking in Settings"),
+                accent: hydrationEnabled
+                    ? StrandPalette.metricCyan
+                    : StrandPalette.textPrimary
+            )
         }
     }
 

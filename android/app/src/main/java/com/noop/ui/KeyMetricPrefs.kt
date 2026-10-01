@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
@@ -17,7 +18,7 @@ import com.noop.R
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
-// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to six in
+// The Today screen's "Key Metrics" grid exposes every Today-ready tile. This lets the user pin three to six in
 // their preferred order. Recovery, Sleep, and Effort already lead the Today hero, so a fresh install starts
 // with six complementary signals: HRV, resting heart rate, blood oxygen, respiratory rate, steps, and
 // weight. Every metric remains available in the editor and full history.
@@ -32,33 +33,117 @@ import com.noop.R
  * One of the Today screen's Key-Metric tiles. The [raw] is the stable persisted identifier — keep it
  * byte-identical to the macOS `KeyMetric` enum so a backup/restore reads the same layout on either OS.
  */
+enum class KeyMetricGroup {
+    DAILY_SIGNAL,
+    VITALS,
+    ACTIVITY,
+    WELLBEING,
+}
+
 enum class KeyMetric(
     val raw: String,
     @StringRes val titleRes: Int,
     val icon: ImageVector,
+    val group: KeyMetricGroup,
     /** True only when the tile's value has a real, bounded progress axis. Raw vitals deliberately stay
      *  false: mapping HRV, resting HR, respiration, etc. to an arbitrary ceiling makes a decorative fill
      *  look like "more is better" health progress. */
     val isBoundedProgress: Boolean = false,
 ) {
-    CHARGE("charge", R.string.l10n_today_screen_recovery_ea924f72, Icons.Filled.Bolt, isBoundedProgress = true),
-    EFFORT("effort", R.string.trends_effort, Icons.Filled.LocalFireDepartment, isBoundedProgress = true),
-    REST("rest", R.string.l10n_today_screen_sleep_3cac34e6, Icons.Filled.Bedtime, isBoundedProgress = true),
-    HRV("hrv", R.string.widget_hrv, Icons.Filled.MonitorHeart),
-    RESTING_HR("restingHr", R.string.l10n_today_screen_resting_hr_26677094, Icons.Filled.Favorite),
-    BLOOD_OXYGEN("bloodOxygen", R.string.l10n_today_screen_blood_oxygen_a8ad9ff5, Icons.Filled.WaterDrop),
-    RESPIRATORY("respiratory", R.string.l10n_today_screen_respiratory_1cd8c175, Icons.Filled.Air),
-    STEPS("steps", R.string.l10n_today_screen_steps_cdde4f20, Icons.AutoMirrored.Filled.DirectionsWalk),
-    WEIGHT("weight", R.string.l10n_today_screen_weight_69c0b815, Icons.Filled.MonitorWeight),
-    CALORIES("calories", R.string.l10n_today_screen_calories_3e62ecfe, Icons.Filled.LocalFireDepartment);
+    CHARGE(
+        "charge",
+        R.string.l10n_today_screen_recovery_ea924f72,
+        Icons.Filled.Bolt,
+        KeyMetricGroup.DAILY_SIGNAL,
+        isBoundedProgress = true,
+    ),
+    EFFORT(
+        "effort",
+        R.string.trends_effort,
+        Icons.Filled.LocalFireDepartment,
+        KeyMetricGroup.DAILY_SIGNAL,
+        isBoundedProgress = true,
+    ),
+    REST(
+        "rest",
+        R.string.l10n_today_screen_sleep_3cac34e6,
+        Icons.Filled.Bedtime,
+        KeyMetricGroup.DAILY_SIGNAL,
+        isBoundedProgress = true,
+    ),
+    HRV("hrv", R.string.widget_hrv, Icons.Filled.MonitorHeart, KeyMetricGroup.VITALS),
+    RESTING_HR(
+        "restingHr",
+        R.string.l10n_today_screen_resting_hr_26677094,
+        Icons.Filled.Favorite,
+        KeyMetricGroup.VITALS,
+    ),
+    BLOOD_OXYGEN(
+        "bloodOxygen",
+        R.string.l10n_today_screen_blood_oxygen_a8ad9ff5,
+        Icons.Filled.WaterDrop,
+        KeyMetricGroup.VITALS,
+    ),
+    RESPIRATORY(
+        "respiratory",
+        R.string.l10n_today_screen_respiratory_1cd8c175,
+        Icons.Filled.Air,
+        KeyMetricGroup.VITALS,
+    ),
+    SKIN_TEMP(
+        "skinTemp",
+        R.string.l10n_health_screen_skin_temperature_f59127f6,
+        Icons.Filled.AcUnit,
+        KeyMetricGroup.VITALS,
+    ),
+    STEPS(
+        "steps",
+        R.string.l10n_today_screen_steps_cdde4f20,
+        Icons.AutoMirrored.Filled.DirectionsWalk,
+        KeyMetricGroup.ACTIVITY,
+    ),
+    CALORIES(
+        "calories",
+        R.string.l10n_today_screen_calories_3e62ecfe,
+        Icons.Filled.LocalFireDepartment,
+        KeyMetricGroup.ACTIVITY,
+    ),
+    STRESS(
+        "stress",
+        R.string.nav_stress,
+        Icons.Filled.MonitorHeart,
+        KeyMetricGroup.WELLBEING,
+    ),
+    VITALITY(
+        "vitality",
+        R.string.l10n_health_screen_vitality_be320b06,
+        Icons.Filled.Bolt,
+        KeyMetricGroup.WELLBEING,
+    ),
+    WEIGHT(
+        "weight",
+        R.string.l10n_today_screen_weight_69c0b815,
+        Icons.Filled.MonitorWeight,
+        KeyMetricGroup.ACTIVITY,
+    ),
+    HYDRATION(
+        "hydration",
+        R.string.nav_hydration,
+        Icons.Filled.WaterDrop,
+        KeyMetricGroup.ACTIVITY,
+        isBoundedProgress = true,
+    );
 
     companion object {
         fun fromRaw(raw: String?): KeyMetric? = entries.firstOrNull { it.raw == raw }
 
         /** Canonical catalog order. Includes every choice and orders unselected editor rows. */
         val defaultOrder: List<KeyMetric> = listOf(
-            CHARGE, EFFORT, REST, HRV, RESTING_HR,
-            BLOOD_OXYGEN, RESPIRATORY, STEPS, WEIGHT, CALORIES,
+            CHARGE, REST, EFFORT,
+            HRV, RESTING_HR,
+            BLOOD_OXYGEN, RESPIRATORY, SKIN_TEMP,
+            STEPS, CALORIES, WEIGHT, HYDRATION,
+            STRESS, VITALITY,
         )
 
         /** Fresh-install secondary signals; the hero already owns Recovery, Sleep, and Effort. */
