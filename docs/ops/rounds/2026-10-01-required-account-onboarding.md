@@ -6,7 +6,7 @@
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `4d034b92f6fcfd1dfe05fbe4c698c469f44e4f0a`
-- End implementation commit: pending
+- End implementation commit: `dc9d7efef4561e854bb5c0504335e442a8a7696f`
 - Record commit or PR: PR `#25`
 
 ## Objective
@@ -132,8 +132,10 @@ data class or formula is already cloud-authoritative.
 - Changed paths: shared onboarding flow policies, supported-band picker and
   discovery components, order-link boundary, active copy/localization,
   configured test harnesses, and cross-platform first-run tests
-- Commits: pending
-- Branch and remote state: isolated PR branch; no new push yet
+- Commits: implementation `dc9d7efef4561e854bb5c0504335e442a8a7696f`;
+  this record carries the separate verification pin
+- Branch and remote state: committed locally on the isolated PR branch;
+  consolidated push pending
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
 - Release or distribution impact: first-run source correction only

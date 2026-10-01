@@ -5,7 +5,8 @@ Last updated: **2026-10-01**
 ## Authoritative context
 
 - Band-first required-account onboarding is locally complete on
-  `codex/mobile-navigation-sparkline-redesign-20260930`. A reset customer
+  `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
+  commit `dc9d7efef`. A reset customer
   installation now proceeds through Terms, Welcome, Bluetooth, supported-band
   setup, Create account or Sign in, required ownership confirmation, profile,
   plan, and app entry. Unconfigured account builds fail closed at Account and
@@ -22,7 +23,8 @@ Last updated: **2026-10-01**
   live provider recovery, and physical BLE remain pending.
 
 - Actionable wellness notifications are locally complete on
-  `codex/mobile-navigation-sparkline-redesign-20260930`. Hydration opens a
+  `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
+  commit `dc9d7efef`. Hydration opens a
   user-confirmed water-log flow, qualified stress opens a visible one-minute
   paced-breathing session, and inactivity opens a dismissible two-minute
   movement break; notification delivery never silently logs behavior. Stress

@@ -6,7 +6,7 @@
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `4d034b92f6fcfd1dfe05fbe4c698c469f44e4f0a`
-- End implementation commit: pending
+- End implementation commit: `dc9d7efef4561e854bb5c0504335e442a8a7696f`
 - Record commit or PR: PR `#25`
 
 ## Objective
@@ -174,8 +174,10 @@ rate-limited.
   breathing presentation, new movement surfaces and timer policies, reminder
   producers, localization source/generated resources, focused tests, decision
   log, and operations records
-- Commits: pending
-- Branch and remote state: dirty isolated PR branch; no new push
+- Commits: implementation `dc9d7efef4561e854bb5c0504335e442a8a7696f`;
+  this record carries the separate verification pin
+- Branch and remote state: committed locally on the isolated PR branch;
+  consolidated push pending
 - Repository visibility verified: unchanged
 - Version/build impact: none planned
 - Release or distribution impact: none until protected integration
