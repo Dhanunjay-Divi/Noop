@@ -120,6 +120,8 @@ data class or formula is already cloud-authoritative.
 | Visual and OCR review | Pass at 1206x2622 | Terms, Bluetooth, supported-band picker, Account, ownership, and completion captures have no observed clipping or overlap; current Bluetooth copy matches the account-required direction | Dynamic Type and physical-device rendering outside the tested simulator |
 | First exact hosted head `294ff9b5a` | Failed a scoped localization-policy check and an obsolete Android test that still required Safety and Appearance inside onboarding | Hosted verification reached the current band-first implementation and isolated stale repository contracts | A green replacement SHA, live identity provider, or signed phone |
 | Hosted-head remediation | Pass locally: localization 6/6, Safety shell 3/3, complete Full Debug 5,255 tests with seven intentional skips, i18n audit, release-control wall, and iOS Simulator graph | The exact eight-page required-account sequence remains enforced while Safety stays reachable from the persistent shell | Hosted replacement execution, production identity, or physical BLE |
+| Second exact hosted head `45731f878` | Android production-shell failed eight app-shell setup timeouts after 110 instrumentation tests had passed; all failures were at the fixture wait for `noop.today.list` | The shared fixture set `KEY_ONBOARDED` but omitted `REQUIRED_ACCOUNT_ONBOARDING_VERSION_KEY`, so the app correctly redirected it to required onboarding | A green final exact head or live-provider behavior |
+| Versioned shell-fixture remediation | Exact API 35 `AppShellInstrumentedTest` 8/8 pass | Existing-user shell tests now seed and restore the same versioned completion boundary enforced by production code | Production identity, physical BLE, or signed-phone behavior |
 
 ## Physical device and deployment
 
@@ -136,8 +138,9 @@ data class or formula is already cloud-authoritative.
   configured test harnesses, and cross-platform first-run tests
 - Commits: implementation `dc9d7efef4561e854bb5c0504335e442a8a7696f`;
   first remote verification pin `294ff9b5ae6dd81310b0fc372af1473ba43027ac`;
-  the commit containing this record carries the hosted-failure remediation
-- Branch and remote state: PR `#25` is open at remote head `294ff9b5a`;
+  first hosted remediation `45731f8780e2c0593a0b9ed14a04914bc002bf10`;
+  the commit containing this record carries the final shell-fixture remediation
+- Branch and remote state: PR `#25` is open at remote head `45731f878`;
   the commit containing this record is the locally verified replacement
   candidate
 - Repository visibility verified: unchanged

@@ -159,6 +159,8 @@ rate-limited.
 | Notification route inventory | Pass | Existing user-facing wellness/Safety notification producers retain trusted destinations; the three formerly incomplete lanes now open exact actions | Human usefulness or delivery cadence on physical devices |
 | First exact hosted head `294ff9b5a` | Failed scoped i18n, terminology-pin, and Android aggregate checks; Swift packages, server, health claims, operations, runtime licenses, and trusted release controls passed | The remote candidate reached hosted verification and isolated repository-policy and stale-test defects | A green exact-head candidate or protected integration |
 | Hosted-head remediation | Pass locally: affected Android 9/9; complete Full Debug 5,255 tests with seven intentional skips; i18n audit; terminology check; 258 release-control tests; required-CI and trusted self-verification; iOS Simulator graph | The replacement tree fixes the hosted failures without changing notification eligibility, delivery semantics, or action runtime | Hosted execution on the replacement SHA or physical notification behavior |
+| Second exact hosted head `45731f878` | All completed policy, backend, and Swift package workflows passed; Android review-sample passed; Android production-shell failed eight `AppShellInstrumentedTest` setup timeouts | The reminder implementation and repository controls remained green while one shared shell fixture failed to satisfy the new onboarding migration boundary | A green final exact head |
+| App-shell fixture remediation | Exact API 35 managed-device class 8/8 pass | The fixture now seeds and restores both the legacy onboarded flag and the required-account onboarding version, so shell tests reach the operational app | Physical notification delivery or hosted execution on the final SHA |
 | Diff hygiene | Pass | No whitespace/error-marker defect in the current working diff | Functional correctness beyond the listed gates |
 
 ## Physical device and deployment
@@ -178,8 +180,9 @@ rate-limited.
   log, and operations records
 - Commits: implementation `dc9d7efef4561e854bb5c0504335e442a8a7696f`;
   first remote verification pin `294ff9b5ae6dd81310b0fc372af1473ba43027ac`;
-  the commit containing this record carries the hosted-failure remediation
-- Branch and remote state: PR `#25` is open at remote head `294ff9b5a`;
+  first hosted remediation `45731f8780e2c0593a0b9ed14a04914bc002bf10`;
+  the commit containing this record carries the final shell-fixture remediation
+- Branch and remote state: PR `#25` is open at remote head `45731f878`;
   the commit containing this record is the locally verified replacement
   candidate
 - Repository visibility verified: unchanged

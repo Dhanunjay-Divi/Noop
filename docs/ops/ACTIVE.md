@@ -26,6 +26,11 @@ Last updated: **2026-10-01**
   the replacement candidate; exact-head hosted verification remains before
   protected integration. Production identity credentials, signed installation,
   live provider recovery, and physical BLE remain pending.
+  Remote head `45731f878` then passed the repository-policy, backend, Swift
+  package, and Android review-sample jobs but exposed one instrumentation
+  fixture that still set only the legacy onboarding Boolean. The fixture now
+  also seeds and restores the required-account onboarding version; its exact
+  API 35 `AppShellInstrumentedTest` class passes 8/8 locally.
 
 - Actionable wellness notifications are locally complete on
   `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
@@ -52,6 +57,11 @@ Last updated: **2026-10-01**
   candidate; exact-head hosted verification remains before protected
   integration. Signed physical-device notification, background, haptic,
   battery, and sensor validation remain pending.
+  Remote head `45731f878` passed all completed policy, backend, and Swift
+  package workflows; Android production-shell alone failed eight app-shell
+  tests because their shared fixture omitted the new versioned onboarding
+  completion marker. No wellness runtime assertion failed. The corrected
+  fixture passes the exact eight-test API 35 class locally.
 
 - The final PR `#25` replacement is locally verified on
   `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
