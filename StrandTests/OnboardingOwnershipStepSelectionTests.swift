@@ -3,6 +3,22 @@ import XCTest
 import WhoopStore
 
 final class OnboardingOwnershipStepSelectionTests: XCTestCase {
+    func testRequiredAccountOnboardingMigratesLegacyCompletedInstalls() {
+        XCTAssertTrue(
+            OnboardingWizard.requiresRequiredAccountOnboarding(
+                onboarded: true,
+                completedVersion: 0
+            )
+        )
+        XCTAssertFalse(
+            OnboardingWizard.requiresRequiredAccountOnboarding(
+                onboarded: true,
+                completedVersion:
+                    OnboardingWizard.requiredAccountOnboardingVersion
+            )
+        )
+    }
+
     #if DEBUG
     func testConfiguredProviderUITestRequiresExactExplicitArgument() {
         XCTAssertTrue(
@@ -33,7 +49,7 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
     }
     #endif
 
-    func testFirstRunUsesConciseAccountFirstSequence() {
+    func testFirstRunUsesConciseBandFirstSequence() {
         let steps = OnboardingWizard.onboardingSteps(
             ownershipConfigured: true
         )
@@ -42,9 +58,9 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
             steps,
             [
                 .welcome,
-                .account,
                 .bluetooth,
                 .scan,
+                .account,
                 .ownership,
                 .profile,
                 .plan,
@@ -84,7 +100,7 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
         )
     }
 
-    func testRemovedCheckpointsRestartTheAccountFirstJourney() {
+    func testRemovedCheckpointsRestartTheBandFirstJourney() {
         for step in [
             OnboardingWizard.Step.what,
             .expectations,
@@ -102,9 +118,7 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
 
     func testTransientOwnershipBootstrapDoesNotResolveOrPersistRedirect() {
         for step in [
-            OnboardingWizard.Step.bluetooth,
-            .scan,
-            .ownership,
+            OnboardingWizard.Step.ownership,
             .profile,
             .plan,
             .done,
@@ -121,11 +135,28 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
         }
     }
 
+    func testBandSetupRemainsReachableBeforeAccountReconciliation() {
+        for step in [
+            OnboardingWizard.Step.welcome,
+            .bluetooth,
+            .scan,
+            .account,
+        ] {
+            XCTAssertEqual(
+                OnboardingWizard.ownershipDestination(
+                    for: step,
+                    ownershipConfigured: true,
+                    reconciliationComplete: false,
+                    phase: .signedOut
+                ),
+                step
+            )
+        }
+    }
+
     func testSignedOutAccountRedirectsEveryLaterStepToAccount() {
         for step in [
-            OnboardingWizard.Step.bluetooth,
-            .scan,
-            .ownership,
+            OnboardingWizard.Step.ownership,
             .profile,
             .plan,
             .done,
@@ -262,12 +293,12 @@ final class OnboardingOwnershipStepSelectionTests: XCTestCase {
                 reconciliationComplete: false,
                 phase: .unavailable
             ),
-            .done
+            .account
         )
     }
 
-    func testUnconfiguredAccountStepContinuesWithoutReconciliation() {
-        XCTAssertTrue(
+    func testUnconfiguredAccountStepFailsClosed() {
+        XCTAssertFalse(
             OnboardingWizard.accountStepCanContinue(
                 ownershipConfigured: false,
                 reconciliationComplete: false,

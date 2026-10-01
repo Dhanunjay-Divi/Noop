@@ -14,9 +14,9 @@ import UIKit
 //
 // First-run path:
 //  1 Welcome           - NOOP + data boundary
-//  2 Account           - create or restore the ownership identity
-//  3 Bluetooth         - explain the permission before the OS prompt
-//  4 Band setup        - launch-only chooser: NOOP Band or retained WHOOP test transport
+//  2 Bluetooth         - explain the permission before the OS prompt
+//  3 Band setup        - choose a compatible launch band
+//  4 Account           - create or restore the ownership identity
 //  5 Ownership         - first-party claim/replacement confirmation when required
 //  6 Profile           - age / sex / weight / height bound to ProfileStore
 //  7 Plan              - choose NOOP or save a NOOP+ preference without payment
@@ -33,7 +33,10 @@ public struct OnboardingWizard: View {
     /// Called when the user finishes (or skips to the end of) onboarding.
     public var onFinished: () -> Void
 
-    public init(onFinished: @escaping () -> Void) {
+    public init(
+        requiredAccountMigration: Bool = false,
+        onFinished: @escaping () -> Void
+    ) {
         self.onFinished = onFinished
         #if os(iOS) && DEBUG
         let hermeticConfiguredProviderUITest =
@@ -59,6 +62,9 @@ public struct OnboardingWizard: View {
             ),
             ownershipConfigured: isOwnershipConfigured
         )
+        if requiredAccountMigration {
+            initialStep = .account
+        }
         #if DEBUG
         let args = CommandLine.arguments
         if let index = args.firstIndex(of: "--demo-onboarding-page"),
@@ -142,92 +148,6 @@ public struct OnboardingWizard: View {
             case .done: return "Ready"
             }
         }
-    }
-
-    static func onboardingSteps(ownershipConfigured _: Bool) -> [Step] {
-        [
-            .welcome,
-            .account,
-            .bluetooth,
-            .scan,
-            .ownership,
-            .profile,
-            .plan,
-            .done,
-        ]
-    }
-
-    static func restoredOnboardingStep(
-        storedValue: String?,
-        ownershipConfigured: Bool
-    ) -> Step {
-        let restored = Step.allCases.first {
-            $0.storageValue == storedValue
-        } ?? .welcome
-        return normalizedOnboardingStep(
-            restored,
-            ownershipConfigured: ownershipConfigured
-        )
-    }
-
-    static func normalizedOnboardingStep(
-        _ candidate: Step,
-        ownershipConfigured: Bool
-    ) -> Step {
-        let steps = onboardingSteps(
-            ownershipConfigured: ownershipConfigured
-        )
-        if steps.contains(candidate) { return candidate }
-        switch candidate {
-        case .what, .expectations, .wear, .bonded, .importData,
-             .notifications, .safetyContacts, .appearance, .dailyRhythm:
-            return .welcome
-        default:
-            return .welcome
-        }
-    }
-
-    static func ownershipDestination(
-        for candidate: Step,
-        ownershipConfigured: Bool,
-        reconciliationComplete: Bool,
-        phase: OwnershipServicePhase,
-        supplierClaimRequired: Bool = true,
-        deviceSetupComplete: Bool = true
-    ) -> Step? {
-        if candidate == .welcome || candidate == .account {
-            return candidate
-        }
-        if ownershipConfigured {
-            guard reconciliationComplete else { return nil }
-            guard accountStepCanContinue(
-                ownershipConfigured: true,
-                reconciliationComplete: true,
-                phase: phase
-            ) else {
-                return .account
-            }
-        }
-        let requiresDeviceSetup = [
-            Step.ownership,
-            .profile,
-            .plan,
-            .done,
-        ].contains(candidate)
-        guard !requiresDeviceSetup || deviceSetupComplete else {
-            return .scan
-        }
-        guard ownershipConfigured else { return candidate }
-        let requiresCompletedClaim = supplierClaimRequired
-            && [.profile, .plan, .done].contains(candidate)
-        guard !requiresCompletedClaim
-            || ownershipCanAccessPostClaimOnboarding(
-                isAvailable: true,
-                phase: phase
-            ) else {
-            return .ownership
-        }
-        return candidate
     }
 
     private static var ownershipConfiguredForCurrentBuild: Bool {
@@ -470,7 +390,7 @@ public struct OnboardingWizard: View {
         guard demoStepOverride == nil else { return }
         registrySetupSource = source
         if source != nil && step == .scan {
-            move(to: .ownership, direction: "automatic")
+            move(to: .account, direction: "automatic")
         } else if source == nil {
             reconcileOwnershipRequirement()
         }
@@ -573,7 +493,13 @@ public struct OnboardingWizard: View {
         }
         switch step {
         case .welcome:    return String(localized: "Get Started")
-        case .account:    return String(localized: "Continue")
+        case .account:
+            return ownershipConfigured
+                ? String(localized: "Continue")
+                : String(
+                    localized:
+                        "appwide.onboarding.account.unconfigured_title"
+                )
         case .what:       return String(localized: "Continue")
         case .expectations: return String(localized: "I understand")
         case .bluetooth:  return String(localized: "Continue")
@@ -811,32 +737,6 @@ public struct OnboardingWizard: View {
 
     private var currentStepIndex: Int {
         activeSteps.firstIndex(of: step) ?? 0
-    }
-
-    static func accountStepCanContinue(
-        ownershipConfigured: Bool,
-        reconciliationComplete: Bool,
-        phase: OwnershipServicePhase
-    ) -> Bool {
-        guard ownershipConfigured else { return true }
-        guard reconciliationComplete else { return false }
-        switch phase {
-        case .accountReady, .possessionUnavailable, .claiming, .claimed,
-             .complete, .replacementRequired, .authorizingReplacement:
-            return true
-        case .unavailable, .localRecoveryRequired, .signedOut,
-             .emailVerification, .termsReview, .registering,
-             .deletionPending:
-            return false
-        }
-    }
-
-    static func claimStepCanContinue(
-        supplierClaimRequired: Bool,
-        claimed: Bool,
-        reconciliationComplete: Bool
-    ) -> Bool {
-        !supplierClaimRequired || (claimed && reconciliationComplete)
     }
 
     private var accountStepReady: Bool {
@@ -1365,20 +1265,8 @@ private struct OwnershipAvailabilityStep: View {
         ) {
             VStack(spacing: 12) {
                 InfoCard(
-                    icon: "iphone",
-                    tint: StrandPalette.accent,
-                    title: String(
-                        localized:
-                            "appwide.onboarding.account.local_title"
-                    ),
-                    message: String(
-                        localized:
-                            "appwide.onboarding.account.local_body"
-                    )
-                )
-                InfoCard(
-                    icon: "person.crop.circle.badge.checkmark",
-                    tint: StrandPalette.statusPositive,
+                    icon: "person.crop.circle.badge.exclamationmark",
+                    tint: StrandPalette.statusWarning,
                     title: String(
                         localized:
                             "appwide.onboarding.account.release_title"
@@ -1657,11 +1545,21 @@ private struct WelcomeStep: View {
                 BrandMark(size: 120)
                     .scaleEffect(appear ? 1 : 0.92)
                     .opacity(appear ? 1 : 0)
-                Text("your health data, local by default")
+                Text(
+                    String(
+                        localized:
+                            "appwide.onboarding.welcome.title"
+                    )
+                )
                     .font(StrandFont.title2)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .opacity(appear ? 1 : 0)
-                Text("A private window into your recovery, sleep and effort. Core data is read from NOOP Band and processed on \(Platform.deviceNounPhrase); cloud features are optional.")
+                Text(
+                    String(
+                        localized:
+                            "appwide.onboarding.welcome.body"
+                    )
+                )
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .multilineTextAlignment(.center)
@@ -1696,8 +1594,8 @@ private struct WhatItDoesStep: View {
               body: String(localized: "Connect Noop Band, a heart-rate strap, or a gym machine and watch each beat in real time: heart rate, variability, and zones as they happen. Already have history elsewhere? Import a wearable export, or use Apple Health, Oura, Fitbit, or Garmin.")),
         .init(icon: "lock.shield",
               tint: StrandPalette.statusPositive,
-              title: String(localized: "Private by default"),
-              body: String(localized: "Everything starts on \(Platform.deviceNounPhrase). No account or cloud is required. Data leaves only when you explicitly share it, use Coach, or enable your own self-hosted sync.")),
+              title: String(localized: "Account-backed and private"),
+              body: String(localized: "NOOP requires an account before pairing. Health-data services and sharing remain separately controlled and consented.")),
     ]
 
     var body: some View {
@@ -1852,14 +1750,14 @@ private struct BluetoothStep: View {
                     title: String(localized: "Direct band connection"),
                     message: String(
                         localized:
-                            "appwide.onboarding.bluetooth.local_body"
+                            "appwide.onboarding.bluetooth.account_boundary_body"
                     )
                 )
 
                 Text(
                     String(
                         localized:
-                            "When the system prompt appears, choose Allow so NOOP can find Noop Band."
+                            "When the system prompt appears, choose Allow so NOOP can find your compatible band."
                     )
                 )
                     .font(StrandFont.subhead)
@@ -1921,30 +1819,9 @@ private struct ScanStep: View {
             subtitle: setupBody
         ) {
             VStack(spacing: 24) {
-                ZStack {
-                    Circle()
-                        .fill(StrandPalette.accent.opacity(0.14))
-                        .frame(width: 148, height: 148)
-                    Image(
-                        systemName: setupComplete
-                            ? "checkmark.circle.fill"
-                            : "dot.radiowaves.left.and.right"
-                    )
-                    .font(.system(size: 58, weight: .semibold))
-                    .foregroundStyle(
-                        setupComplete
-                            ? StrandPalette.statusPositive
-                            : StrandPalette.accent
-                    )
-                }
-                .accessibilityHidden(true)
-
-                if setupComplete {
-                    StatePill(
-                        "appwide.onboarding.device_ready_title",
-                        tone: .positive
-                    )
-                }
+                BandPairingDiscoveryView(
+                    state: setupComplete ? .connected : .ready
+                )
 
                 Button(action: openDeviceWizard) {
                     Label(
@@ -1967,6 +1844,7 @@ private struct ScanStep: View {
                 )
                 .accessibilityIdentifier("noop.onboarding.choose-device")
 
+                BandOrderLinkView(orderURL: ProjectInfo.bandOrderURL)
             }
         }
         .sheet(

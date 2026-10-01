@@ -2528,9 +2528,25 @@ final class AppModel: ObservableObject {
     static func postInactivity(minutes: Int) {
         #if os(iOS)
         let body = minutes > 0
-            ? String(localized: "You've been seated for about \(minutes) min. Time to move.")
-            : String(localized: "Time to move. You've been seated a while.")
-        postWristAlert(identifier: "inactivity-nudge", title: String(localized: "Move reminder"), body: body)
+            ? String(
+                format: String(
+                    localized:
+                        "appwide.wellness.inactivity.body_minutes"
+                ),
+                minutes
+            )
+            : String(
+                localized:
+                    "appwide.wellness.inactivity.body"
+            )
+        postWristAlert(
+            identifier: "inactivity-nudge",
+            title: String(localized: "appwide.wellness.inactivity.title"),
+            body: body,
+            route: .today,
+            presentation: .movementBreak,
+            categoryIdentifier: DailyReviewNotifications.inactivityCategoryID
+        )
         #endif
     }
 
@@ -2547,7 +2563,14 @@ final class AppModel: ObservableObject {
     /// Shared post path: gate on the wrist-alerts master, then deliver only if the OS already authorized
     /// notifications (no second system prompt , BatteryNotifier-style status-only check). A fresh
     /// identifier per category means a new alert replaces the old one rather than stacking.
-    private static func postWristAlert(identifier: String, title: String, body: String) {
+    private static func postWristAlert(
+        identifier: String,
+        title: String,
+        body: String,
+        route: NoopNotificationRoute? = nil,
+        presentation: NotificationRoutePresentation? = nil,
+        categoryIdentifier: String = DailyReviewNotifications.privacyCategoryID
+    ) {
         guard UserDefaults.standard.bool(forKey: wristAlertsMasterKey) else {
             LocalNotificationLifecycle.suppressed(identifier: identifier)
             return
@@ -2559,10 +2582,21 @@ final class AppModel: ObservableObject {
                 LocalNotificationLifecycle.suppressed(identifier: identifier)
                 return
             }
+            await DailyReviewNotifications.ensurePrivacyCategory(on: center)
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
             content.sound = .default
+            content.categoryIdentifier = categoryIdentifier
+            var userInfo: [AnyHashable: Any] = [:]
+            if let route {
+                userInfo[NotificationRouteBridge.userInfoKey] = route.rawValue
+            }
+            if let presentation {
+                userInfo[NotificationRouteBridge.presentationUserInfoKey] =
+                    presentation.rawValue
+            }
+            content.userInfo = userInfo
             try? await LocalNotificationLifecycle.schedule(
                 UNNotificationRequest(identifier: identifier, content: content, trigger: nil),
                 on: center

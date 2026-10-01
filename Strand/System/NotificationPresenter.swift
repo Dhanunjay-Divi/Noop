@@ -1117,6 +1117,37 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         Task { @MainActor in
             ContextualActionCenter.shared.capture(response.notification.request)
         }
+        let wellnessAction: (
+            route: NoopNotificationRoute,
+            presentation: NotificationRoutePresentation,
+            diagnosticAction: String
+        )? = switch actionIdentifier {
+        case DailyReviewNotifications.logWaterActionID:
+            (.hydration, .logHydration, "log_hydration")
+        case DailyReviewNotifications.startBreathingActionID:
+            (.breathe, .startBreathing, "start_breathing")
+        case DailyReviewNotifications.startMovementBreakActionID:
+            (.today, .movementBreak, "movement_break")
+        default:
+            nil
+        }
+        if let wellnessAction {
+            NotificationRouteBridge.recordPending(
+                wellnessAction.route,
+                presentation: wellnessAction.presentation
+            )
+            Task { @MainActor in
+                AppDiagnosticsRecorder.shared.record(
+                    "wellness_notification.action",
+                    fields: [
+                        "action": wellnessAction.diagnosticAction,
+                        "outcome": "accepted",
+                    ]
+                )
+            }
+            completionHandler()
+            return
+        }
         #if os(iOS)
         if let incidentID = ManagedSafetyPushPayload.incidentIDForUserResponse(
             from: response.notification.request.content.userInfo
@@ -1147,6 +1178,9 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
                 route,
                 journalDay: NotificationRouteBridge.journalDay(
                     from: response.notification.request.content.userInfo
+                ),
+                presentation: NotificationRouteBridge.presentation(
+                    from: response.notification.request.content.userInfo
                 )
             )
         }
@@ -1157,6 +1191,9 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
             NotificationRouteBridge.recordPending(
                 route,
                 journalDay: NotificationRouteBridge.journalDay(
+                    from: response.notification.request.content.userInfo
+                ),
+                presentation: NotificationRouteBridge.presentation(
                     from: response.notification.request.content.userInfo
                 )
             )

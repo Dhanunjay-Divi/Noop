@@ -1253,6 +1253,8 @@ struct AutomationsView: View {
             set: { on in
                 guard on else {
                     behavior.stressPhoneNudge = false
+                    ContextualInterventionCenter
+                        .cancelStressBreathingNotification()
                     return
                 }
                 behavior.stressPhoneNudge = true

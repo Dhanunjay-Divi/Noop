@@ -2,6 +2,7 @@
 # Gradle -P values override environment variables, which override this file.
 # Use only a reviewed NOOP+ environment; never commit real configuration.
 noopManagedApiUrl=https://managed-api.example.invalid
+noopBandOrderUrl=https://shop.example.invalid/band
 noopManagedProjectId=your-staging-project
 noopManagedApiKey=replace-with-restricted-firebase-api-key
 noopManagedGoogleAppId=1:000000000000:android:0000000000000000

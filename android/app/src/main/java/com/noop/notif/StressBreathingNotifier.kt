@@ -15,6 +15,7 @@ import com.noop.R
 import com.noop.ui.BiofeedbackPrefs
 import com.noop.ui.ContextualActionCenter
 import com.noop.ui.NoopNotificationRoute
+import com.noop.ui.NotificationRoutePresentation
 import com.noop.ui.NotificationRouteBridge
 
 internal data class StressBreathingNotificationState(
@@ -171,7 +172,11 @@ object StressBreathingNotifier {
             val openBreathe = NotificationPlatformIdentity.activityPendingIntent(
                 context,
                 NotificationPlatformIdentity.ActivityIntent.STRESS_BREATHING,
-                NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.BREATHE),
+                NotificationRouteBridge.launchIntent(
+                    context,
+                    NoopNotificationRoute.BREATHE,
+                    presentation = NotificationRoutePresentation.START_BREATHING,
+                ),
             )
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
@@ -179,6 +184,11 @@ object StressBreathingNotifier {
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setContentIntent(openBreathe)
+                .addAction(
+                    0,
+                    context.getString(R.string.appwide_wellness_action_start_breathing),
+                    openBreathe,
+                )
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)

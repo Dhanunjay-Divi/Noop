@@ -810,9 +810,14 @@ enum HydrationReminders {
             content.title = spec.title
             content.body = spec.body
             content.sound = .default
-            content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+            content.categoryIdentifier =
+                DailyReviewNotifications.hydrationCategoryID
             content.threadIdentifier = "noop.hydration"
-            content.userInfo = [NotificationRouteBridge.userInfoKey: spec.route.rawValue]
+            content.userInfo = [
+                NotificationRouteBridge.userInfoKey: spec.route.rawValue,
+                NotificationRouteBridge.presentationUserInfoKey:
+                    NotificationRoutePresentation.logHydration.rawValue,
+            ]
 
             var components = DateComponents()
             components.hour = spec.minuteOfDay / 60
@@ -941,10 +946,14 @@ enum HydrationReminders {
             content.title = String(localized: "Hydration check-in")
             content.body = String(localized: "Take a moment to drink some water if you need it.")
             content.sound = .default
-            content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+            content.categoryIdentifier =
+                DailyReviewNotifications.hydrationCategoryID
             content.threadIdentifier = "noop.hydration"
             content.userInfo = [
-                NotificationRouteBridge.userInfoKey: NoopNotificationRoute.hydration.rawValue
+                NotificationRouteBridge.userInfoKey:
+                    NoopNotificationRoute.hydration.rawValue,
+                NotificationRouteBridge.presentationUserInfoKey:
+                    NotificationRoutePresentation.logHydration.rawValue,
             ]
             let components = calendar.dateComponents(
                 [.calendar, .timeZone, .year, .month, .day, .hour, .minute],
@@ -1106,10 +1115,13 @@ enum HydrationReminders {
         content.title = String(localized: "Hydration check-in")
         content.body = String(localized: "No water was logged from the band cue. Open Hydration if you drank.")
         content.sound = .default
-        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.categoryIdentifier =
+            DailyReviewNotifications.hydrationCategoryID
         content.threadIdentifier = "noop.hydration"
         content.userInfo = [
             NotificationRouteBridge.userInfoKey: NoopNotificationRoute.hydration.rawValue,
+            NotificationRouteBridge.presentationUserInfoKey:
+                NotificationRoutePresentation.logHydration.rawValue,
             LocalNotificationPriorityMarker.hydrationMissedResponse: true,
         ]
         let components = calendar.dateComponents(

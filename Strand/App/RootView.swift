@@ -251,6 +251,8 @@ struct RootView: View {
     @State private var preSearchExpansion: Set<String>? = nil
     @State private var showLighterWorkoutOptions = false
     @State private var showStrengthTrainer = false
+    @State private var breathingNotificationStartRequest = 0
+    @State private var showMovementBreak = false
 
     /// The groups expanded at rest: every single-item group (so its lone row is visible) plus the group
     /// owning the current selection. Keeps the sidebar to "headers + the active group" as the spec asks.
@@ -519,6 +521,10 @@ struct RootView: View {
                 .environmentObject(repo)
                 .frame(minWidth: 760, minHeight: 720)
         }
+        .sheet(isPresented: $showMovementBreak) {
+            MovementBreakView()
+                .frame(minWidth: 420, minHeight: 460)
+        }
     }
 
     /// Cold and warm notification taps converge here. `consumePending` removes the route before the
@@ -545,9 +551,24 @@ struct RootView: View {
         case .safety: select(.safety)
         case .coach: select(.coach)
         }
-        if request.presentation == .lighterWorkoutOptions,
-           !model.runtimeRole.enforcesManagedViewerReadOnlyRoutes {
+        switch request.presentation {
+        case .lighterWorkoutOptions
+            where !model.runtimeRole.enforcesManagedViewerReadOnlyRoutes:
             showLighterWorkoutOptions = true
+        case .startBreathing:
+            breathingNotificationStartRequest &+= 1
+        case .logHydration:
+            AppDiagnosticsRecorder.shared.record(
+                "wellness_notification.action_started",
+                fields: [
+                    "action": "log_hydration",
+                    "outcome": "opened",
+                ]
+            )
+        case .movementBreak:
+            showMovementBreak = true
+        default:
+            break
         }
     }
 
@@ -633,7 +654,14 @@ struct RootView: View {
         case .insightsHub: InsightsHubView()
         case .coach: CoachView()
         case .live: liveDetail
-        case .breathe: BreathingView()
+        case .breathe:
+            BreathingView(
+                notificationStartRequest:
+                    breathingNotificationStartRequest,
+                onNotificationStartConsumed: {
+                    breathingNotificationStartRequest = 0
+                }
+            )
         case .intervals: IntervalTimerView()
         case .explore:
             MetricExplorerView(

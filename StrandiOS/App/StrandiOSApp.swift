@@ -1065,6 +1065,8 @@ private struct iOSRootView: View {
     @EnvironmentObject private var launchAccess: LaunchAccessController
     @EnvironmentObject private var model: AppModel
     @AppStorage("noop.onboarded") private var onboarded = false
+    @AppStorage(OnboardingWizard.requiredAccountOnboardingVersionStorageKey)
+    private var requiredAccountOnboardingVersion = 0
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
     @AppStorage("noop.acceptedTermsAt") private var acceptedTermsAt = ""
@@ -1105,7 +1107,7 @@ private struct iOSRootView: View {
             // refresh, backup catch-up and optional remote sync from its task modifier.
             if hasLaunchAccess
                 && !reviewSampleBlocksStandardLaunch
-                && (onboarded || demoBypass)
+                && (!requiresOnboarding || demoBypass)
                 && (acceptedTerms == Terms.currentVersion || demoBypass) {
                 RootTabView()
             } else {
@@ -1114,12 +1116,18 @@ private struct iOSRootView: View {
             if hasLaunchAccess
                 && !reviewSampleBlocksStandardLaunch
                 && acceptedTerms == Terms.currentVersion
-                && !onboarded
+                && requiresOnboarding
                 && !demoBypass {
-                OnboardingWizard(onFinished: {
-                    onboarded = true
-                    model.refreshAgeMetricsIfProfileChanged()
-                })
+                OnboardingWizard(
+                    requiredAccountMigration: onboarded,
+                    onFinished: {
+                        onboarded = true
+                        requiredAccountOnboardingVersion =
+                            OnboardingWizard
+                                .requiredAccountOnboardingVersion
+                        model.refreshAgeMetricsIfProfileChanged()
+                    }
+                )
                 .transition(.opacity)
                 .zIndex(1)
             }
@@ -1187,6 +1195,10 @@ private struct iOSRootView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: launchAccess.state)
         .animation(.easeInOut(duration: 0.35), value: onboarded)
+        .animation(
+            .easeInOut(duration: 0.35),
+            value: requiredAccountOnboardingVersion
+        )
         .animation(.easeInOut(duration: 0.35), value: acceptedTerms)
         .animation(.easeInOut(duration: 0.35), value: acknowledgedTrialBuild)
         .animation(.easeInOut(duration: 0.2), value: reviewSamplePhase)
@@ -1208,6 +1220,13 @@ private struct iOSRootView: View {
         .onChange(of: launchAccess.state) { _, _ in showWhatsNewIfDue() }
         .onChange(of: onboarded) { _, _ in showWhatsNewIfDue() }
         .onChange(of: reviewSamplePhase) { _, _ in activateStandardLaunchIfNeeded() }
+    }
+
+    private var requiresOnboarding: Bool {
+        OnboardingWizard.requiresRequiredAccountOnboarding(
+            onboarded: onboarded,
+            completedVersion: requiredAccountOnboardingVersion
+        )
     }
 
     /// DEBUG: launched with --demo-seed, skip the first-run gates (onboarding / terms / What's New) so the

@@ -555,6 +555,7 @@
     <string name="managed_cloud_error_document_conflict">NOOP 保留了你目前的資料。請檢查最近的變更，然後點一下「立即同步」重試。</string>
     <string name="ownership_progress_step">第 %1$d 步，共 %2$d 步</string>
     <string name="ownership_setup_complete">所有權設定已完成。</string>
+    <string name="onboarding_bluetooth_permission_prompt">當系統提示出現時，請選擇「允許」，以便 NOOP 找到你的相容手環。</string>
     <string name="noop_command_lens_move_left">移到左側邊緣</string>
     <string name="noop_command_lens_move_right">移到右側邊緣</string>
     <string name="noop_command_lens_move_up">上移</string>

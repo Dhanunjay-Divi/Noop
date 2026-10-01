@@ -82,7 +82,7 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["noop.terms.title"].waitForExistence(timeout: 10))
     }
 
-    func testFreshInstallOrdersTermsAccountBluetoothAndBandSetup() {
+    func testFreshInstallOrdersTermsBluetoothAndBandSetupBeforeAccount() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-test-reset-first-run"]
         app.launch()
@@ -121,18 +121,11 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(primary.waitForExistence(timeout: 5))
         primary.tap()
 
-        let account = app.descendants(matching: .any)["noop.onboarding.page.account"]
-        XCTAssertTrue(account.waitForExistence(timeout: 10))
-        XCTAssertTrue(
-            app.descendants(matching: .any)["noop.onboarding.account-unconfigured"]
-                .waitForExistence(timeout: 5)
-        )
-        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
-        keepScreenshot(app, name: "fresh-install-account")
-        primary.tap()
-
         let bluetooth = app.descendants(matching: .any)["noop.onboarding.page.bluetooth"]
         XCTAssertTrue(bluetooth.waitForExistence(timeout: 10))
+        XCTAssertFalse(
+            app.descendants(matching: .any)["noop.onboarding.page.account"].exists
+        )
         XCTAssertFalse(app.buttons["noop.tab.0"].exists)
         keepScreenshot(app, name: "fresh-install-bluetooth")
         primary.tap()
@@ -151,6 +144,9 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(bandSetup.waitForExistence(timeout: 15))
         let chooseDevice = app.buttons["noop.onboarding.choose-device"]
         XCTAssertTrue(chooseDevice.waitForExistence(timeout: 5))
+        XCTAssertFalse(
+            app.descendants(matching: .any)["noop.onboarding.page.account"].exists
+        )
         XCTAssertFalse(app.buttons["noop.tab.0"].exists)
         chooseDevice.tap()
 
@@ -162,7 +158,7 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertFalse(app.buttons["noop.device-wizard.type.heart-rate-strap"].exists)
         XCTAssertFalse(app.buttons["noop.device-wizard.type.gym-equipment"].exists)
         XCTAssertFalse(app.buttons["noop.device-wizard.type.oura"].exists)
-        keepScreenshot(app, name: "fresh-install-supported-bands")
+        keepScreenshot(app, name: "fresh-install-band-before-account")
     }
 
     func testConfiguredProviderAndSyntheticBandCompleteFullOnboarding() {
@@ -204,6 +200,42 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertFalse(app.buttons["noop.tab.0"].exists)
         XCTAssertTrue(primary.waitForExistence(timeout: 5))
         primary.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.bluetooth"
+            ].waitForExistence(timeout: 10)
+        )
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        primary.tap()
+
+        let systemAlert = app.alerts.firstMatch
+        if systemAlert.waitForExistence(timeout: 3) {
+            let allow = systemAlert.buttons["Allow"]
+            if allow.exists {
+                allow.tap()
+            } else {
+                systemAlert.buttons.firstMatch.tap()
+            }
+        }
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.onboarding.page.scan"
+            ].waitForExistence(timeout: 15)
+        )
+        XCTAssertFalse(primary.isEnabled)
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        let chooseDevice =
+            app.buttons["noop.onboarding.choose-device"]
+        XCTAssertTrue(chooseDevice.waitForExistence(timeout: 5))
+        chooseDevice.tap()
+
+        let syntheticBand =
+            app.buttons["noop.device-wizard.type.supplier-band"]
+        XCTAssertTrue(syntheticBand.waitForExistence(timeout: 10))
+        keepScreenshot(app, name: "configured-onboarding-supported-band")
+        syntheticBand.tap()
 
         XCTAssertTrue(
             app.descendants(matching: .any)[
@@ -268,42 +300,6 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout: 5) { primary.isEnabled })
         XCTAssertFalse(app.buttons["noop.tab.0"].exists)
         primary.tap()
-
-        XCTAssertTrue(
-            app.descendants(matching: .any)[
-                "noop.onboarding.page.bluetooth"
-            ].waitForExistence(timeout: 10)
-        )
-        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
-        primary.tap()
-
-        let systemAlert = app.alerts.firstMatch
-        if systemAlert.waitForExistence(timeout: 3) {
-            let allow = systemAlert.buttons["Allow"]
-            if allow.exists {
-                allow.tap()
-            } else {
-                systemAlert.buttons.firstMatch.tap()
-            }
-        }
-
-        XCTAssertTrue(
-            app.descendants(matching: .any)[
-                "noop.onboarding.page.scan"
-            ].waitForExistence(timeout: 15)
-        )
-        XCTAssertFalse(primary.isEnabled)
-        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
-        let chooseDevice =
-            app.buttons["noop.onboarding.choose-device"]
-        XCTAssertTrue(chooseDevice.waitForExistence(timeout: 5))
-        chooseDevice.tap()
-
-        let syntheticBand =
-            app.buttons["noop.device-wizard.type.supplier-band"]
-        XCTAssertTrue(syntheticBand.waitForExistence(timeout: 10))
-        keepScreenshot(app, name: "configured-onboarding-supported-band")
-        syntheticBand.tap()
 
         XCTAssertTrue(
             app.descendants(matching: .any)[

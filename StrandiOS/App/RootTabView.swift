@@ -87,6 +87,8 @@ struct RootTabView: View {
     @State private var expandedContextualActionID: String?
     @State private var hydrationConfirmationML: Int?
     @State private var showLighterWorkoutOptions = false
+    @State private var breathingNotificationStartRequest = 0
+    @State private var showMovementBreak = false
     /// One `NavigationPath` per tab, indexed by tab tag. Re-tapping the already-active tab pops
     /// that tab's stack to its root (#135) by clearing its path — an animated pop that leaves the
     /// root view alive, so an at-root re-tap keeps scroll position and never re-runs `.task`
@@ -480,6 +482,11 @@ struct RootTabView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showMovementBreak) {
+            MovementBreakView()
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
         // Honour a router request. Ordinary destinations enter through More's OWN NavigationStack so
         // the persistent five-tab glass bar behaves identically whether a page was opened from the More
         // index, a dashboard card, or a deep link. Only short tasks and immersive sessions use sheets.
@@ -782,11 +789,26 @@ struct RootTabView: View {
                 NotificationRouteBridge.journalDayOffset(for: request)
         }
         openNotificationRoute(request.route)
-        if request.presentation == .lighterWorkoutOptions {
+        switch request.presentation {
+        case .lighterWorkoutOptions:
             Task { @MainActor in
                 await Task.yield()
                 presentLighterWorkoutOptions(source: "notification")
             }
+        case .startBreathing:
+            breathingNotificationStartRequest &+= 1
+        case .logHydration:
+            AppDiagnosticsRecorder.shared.record(
+                "wellness_notification.action_started",
+                fields: [
+                    "action": "log_hydration",
+                    "outcome": "opened",
+                ]
+            )
+        case .movementBreak:
+            showMovementBreak = true
+        case nil:
+            break
         }
     }
 
@@ -913,7 +935,15 @@ struct RootTabView: View {
         case .journal:
             quickScreen(InsightsView())
         case .breathe:
-            quickScreen(BreathingView())
+            quickScreen(
+                BreathingView(
+                    notificationStartRequest:
+                        breathingNotificationStartRequest,
+                    onNotificationStartConsumed: {
+                        breathingNotificationStartRequest = 0
+                    }
+                )
+            )
         case .nutrition:
             quickScreen(NutritionLogView())
         case .strength:

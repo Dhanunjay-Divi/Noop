@@ -2233,9 +2233,7 @@
     <string name="onboarding_data_boundary_configured_body">Band readings start on this phone. This configured build requires sign-in and a completed band claim before setup can finish. Health data is not uploaded unless you separately enable and consent to a managed data feature.</string>
     <string name="onboarding_data_boundary_exploration_title">Explore locally</string>
     <string name="onboarding_data_boundary_exploration_body">This build does not create an account or upload health data. Setup stays on this phone; band ownership activation and managed cloud features are unavailable.</string>
-    <string name="onboarding_bluetooth_boundary_configured">NOOP connects directly to Noop Band over Bluetooth Low Energy. Band discovery and live readings stay on this phone. The configured account service is used for account and band-ownership activation; health data transfer requires separate explicit consent.</string>
-    <string name="onboarding_bluetooth_boundary_exploration">NOOP connects directly to Noop Band over Bluetooth Low Energy. Band discovery, live readings and setup stay on this phone. Account actions and cloud upload are off in this exploration build.</string>
-    <string name="onboarding_bluetooth_permission_prompt">When the system prompt appears, choose Allow so NOOP can find Noop Band.</string>
+    <string name="onboarding_bluetooth_permission_prompt">When the system prompt appears, choose Allow so NOOP can find your compatible band.</string>
     <string name="onboarding_date_of_birth">Date of birth</string>
     <string name="onboarding_age_years">%1$d yrs</string>
     <string name="onboarding_units_independent">Weight and height units are independent. NOOP stores one precise value and only changes how it is displayed.</string>

@@ -35,6 +35,8 @@
 	<string>public.app-category.healthcare-fitness</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
+	<key>NOOPBandOrderURL</key>
+	<string>$(NOOP_BAND_ORDER_URL)</string>
 	<key>NOOPManagedAPIKey</key>
 	<string>$(NOOP_MANAGED_API_KEY)</string>
 	<key>NOOPManagedAPIURL</key>

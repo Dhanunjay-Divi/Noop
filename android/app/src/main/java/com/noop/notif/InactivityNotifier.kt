@@ -8,8 +8,10 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.noop.R
+import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotifPrefs
-import com.noop.ui.appLaunchIntent
+import com.noop.ui.NotificationRouteBridge
+import com.noop.ui.NotificationRoutePresentation
 
 /**
  * #577 — posts the inactivity (sedentary) wrist nudge as a real system notification, mirroring the iOS
@@ -29,9 +31,12 @@ object InactivityNotifier {
         // Mirror the iOS master gate: the engine already honours it before buzzing, re-check anyway.
         if (!NotifPrefs.getBool(context, NotifPrefs.MASTER, false)) return
         val body = if (minutes > 0) {
-            "You've been seated for about $minutes min. Time to move."
+            context.getString(
+                R.string.appwide_wellness_inactivity_body_minutes,
+                minutes,
+            )
         } else {
-            "Time to move. You've been seated a while."
+            context.getString(R.string.appwide_wellness_inactivity_body)
         }
         // Defensive: never let a notify() throw (revoked POST_NOTIFICATIONS, OEM quirk) crash the offload.
         runCatching {
@@ -47,16 +52,28 @@ object InactivityNotifier {
             val openApp = NotificationPlatformIdentity.activityPendingIntent(
                 context,
                 NotificationPlatformIdentity.ActivityIntent.INACTIVITY,
-                appLaunchIntent(context),
+                NotificationRouteBridge.launchIntent(
+                    context,
+                    NoopNotificationRoute.TODAY,
+                    presentation = NotificationRoutePresentation.MOVEMENT_BREAK,
+                ),
             )
             val n = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
-                .setContentTitle("Move reminder")
+                .setContentTitle(
+                    context.getString(R.string.appwide_wellness_inactivity_title),
+                )
                 .setContentText(body)
                 .setContentIntent(openApp)
+                .addAction(
+                    0,
+                    context.getString(R.string.appwide_wellness_action_move_now),
+                    openApp,
+                )
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .protectPrivateContent(context, CHANNEL_ID)
                 .build()
             NotificationLifecycleLedger.posted(
                 context,
@@ -81,13 +98,17 @@ object InactivityNotifier {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         runCatching {
             val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (mgr.getNotificationChannel(CHANNEL_ID) != null) return
             mgr.createNotificationChannel(
                 NotificationChannel(
-                    CHANNEL_ID, "Inactivity reminder",
+                    CHANNEL_ID,
+                    context.getString(
+                        R.string.appwide_wellness_inactivity_channel_name,
+                    ),
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
-                    description = "A nudge to move after a long sedentary stretch."
+                    description = context.getString(
+                        R.string.appwide_wellness_inactivity_channel_description,
+                    )
                 },
             )
         }

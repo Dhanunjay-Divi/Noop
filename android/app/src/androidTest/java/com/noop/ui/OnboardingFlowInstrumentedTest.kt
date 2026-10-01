@@ -355,23 +355,16 @@ class OnboardingFlowInstrumentedTest {
     }
 
     @Test
-    fun postTermsUnconfiguredAccountFlowReachesSupportedBandPicker() {
+    fun postTermsBandFirstFlowReachesSupportedBandPickerWithoutAccountBypass() {
         compose.onNodeWithTag("noop.onboarding.root").assertIsDisplayed()
         compose.onNodeWithTag("noop.onboarding.primary")
             .assertTextEquals("Get Started")
             .assertIsEnabled()
             .performClick()
 
-        waitForTag("noop.onboarding.page.account")
-        waitForTextDisplayed(
-            context.getString(R.string.appwide_onboarding_account_unconfigured_title),
-        )
-        compose.onNodeWithTag("noop.onboarding.primary")
-            .assertTextEquals("Continue")
-            .assertIsEnabled()
-            .performClick()
-
         waitForTag("noop.onboarding.page.bluetooth")
+        compose.onNodeWithTag("noop.onboarding.page.account")
+            .assertDoesNotExist()
         waitForTextDisplayed(
             context.getString(
                 R.string.l10n_onboarding_screen_a_quick_word_before_you_connect_5a29015a,
@@ -382,6 +375,8 @@ class OnboardingFlowInstrumentedTest {
             .performClick()
 
         waitForTag("noop.onboarding.page.scan")
+        compose.onNodeWithTag("noop.onboarding.page.account")
+            .assertDoesNotExist()
         waitForTextDisplayed(
             context.getString(R.string.appwide_onboarding_device_setup_title),
         )
@@ -551,7 +546,7 @@ class FreshInstallOnboardingOrderInstrumentedTest {
     }
 
     @Test
-    fun freshInstallOrdersTermsAccountBluetoothAndBandSetup() {
+    fun freshInstallOrdersTermsBluetoothAndBandSetupBeforeAccount() {
         compose.onNodeWithTag("noop.onboarding.root").assertDoesNotExist()
         compose.onNodeWithTag("noop.tab.today").assertDoesNotExist()
 
@@ -571,17 +566,15 @@ class FreshInstallOnboardingOrderInstrumentedTest {
             .assertTextEquals("Get Started")
             .performClick()
 
-        waitForTag("noop.onboarding.page.account")
-        compose.onNodeWithTag("noop.tab.today").assertDoesNotExist()
-        compose.onNodeWithTag("noop.onboarding.primary")
-            .assertTextEquals("Continue")
-            .performClick()
-
         waitForTag("noop.onboarding.page.bluetooth")
+        compose.onNodeWithTag("noop.onboarding.page.account")
+            .assertDoesNotExist()
         compose.onNodeWithTag("noop.tab.today").assertDoesNotExist()
         compose.onNodeWithTag("noop.onboarding.primary").performClick()
 
         waitForTag("noop.onboarding.page.scan")
+        compose.onNodeWithTag("noop.onboarding.page.account")
+            .assertDoesNotExist()
         compose.onNodeWithTag("noop.tab.today").assertDoesNotExist()
         compose.onNodeWithTag("noop.onboarding.choose-device")
             .assertIsDisplayed()
@@ -739,6 +732,25 @@ class ConfiguredProviderFullOnboardingInstrumentedTest {
             .assertTextEquals("Get Started")
             .performClick()
 
+        waitForTag("noop.onboarding.page.bluetooth")
+        assertTabsUnavailable()
+        compose.onNodeWithTag("noop.onboarding.primary")
+            .assertIsEnabled()
+            .performClick()
+
+        waitForTag("noop.onboarding.page.scan")
+        assertTabsUnavailable()
+        compose.onNodeWithTag("noop.onboarding.primary")
+            .assertIsNotEnabled()
+        compose.onNodeWithTag("noop.onboarding.choose-device")
+            .assertIsDisplayed()
+            .performClick()
+
+        waitForTag("noop.ui-test.band-picker")
+        compose.onNodeWithTag("noop.device-wizard.type.supplier-band")
+            .assertIsDisplayed()
+            .performClick()
+
         waitForTag("noop.onboarding.account-configured-test")
         assertTabsUnavailable()
         compose.onNodeWithTag("noop.onboarding.primary")
@@ -780,25 +792,6 @@ class ConfiguredProviderFullOnboardingInstrumentedTest {
         waitForEnabled("noop.onboarding.primary")
         assertTabsUnavailable()
         compose.onNodeWithTag("noop.onboarding.primary").performClick()
-
-        waitForTag("noop.onboarding.page.bluetooth")
-        assertTabsUnavailable()
-        compose.onNodeWithTag("noop.onboarding.primary")
-            .assertIsEnabled()
-            .performClick()
-
-        waitForTag("noop.onboarding.page.scan")
-        assertTabsUnavailable()
-        compose.onNodeWithTag("noop.onboarding.primary")
-            .assertIsNotEnabled()
-        compose.onNodeWithTag("noop.onboarding.choose-device")
-            .assertIsDisplayed()
-            .performClick()
-
-        waitForTag("noop.ui-test.band-picker")
-        compose.onNodeWithTag("noop.device-wizard.type.supplier-band")
-            .assertIsDisplayed()
-            .performClick()
 
         waitForTag("noop.onboarding.page.ownership")
         assertTabsUnavailable()

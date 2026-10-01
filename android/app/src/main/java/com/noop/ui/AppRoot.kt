@@ -104,6 +104,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -405,6 +406,11 @@ fun AppRoot(
     var expandedContextualActionId by rememberSaveable { mutableStateOf<String?>(null) }
     var hydrationConfirmationMl by remember { mutableIntStateOf(0) }
     var showLighterWorkoutOptions by rememberSaveable { mutableStateOf(false) }
+    var breathingNotificationStartRequest by remember { mutableLongStateOf(0L) }
+    var showMovementBreak by rememberSaveable { mutableStateOf(false) }
+    var movementBreakStartedAtMs by rememberSaveable { mutableLongStateOf(0L) }
+    var movementBreakStartedRecorded by rememberSaveable { mutableStateOf(false) }
+    var movementBreakTerminalOutcome by rememberSaveable { mutableStateOf<String?>(null) }
     val contextualActionScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val keyboardVisible = WindowInsets.ime.getBottom(density) > 0
@@ -528,6 +534,30 @@ fun AppRoot(
                         fields = mapOf("source" to "notification"),
                     )
                     showLighterWorkoutOptions = true
+                } else if (
+                    request.presentation ==
+                    NotificationRoutePresentation.START_BREATHING
+                ) {
+                    breathingNotificationStartRequest += 1L
+                } else if (
+                    request.presentation ==
+                    NotificationRoutePresentation.LOG_HYDRATION
+                ) {
+                    com.noop.AppDiagnosticsRecorder.record(
+                        "wellness_notification.action_started",
+                        fields = mapOf(
+                            "action" to "log_hydration",
+                            "outcome" to "opened",
+                        ),
+                    )
+                } else if (
+                    request.presentation ==
+                    NotificationRoutePresentation.MOVEMENT_BREAK
+                ) {
+                    movementBreakStartedAtMs = android.os.SystemClock.elapsedRealtime()
+                    movementBreakStartedRecorded = false
+                    movementBreakTerminalOutcome = null
+                    showMovementBreak = true
                 }
             }
         }
@@ -629,7 +659,16 @@ fun AppRoot(
                     )
                 }
                 composable(Destination.Intervals.route) { IntervalsScreen(viewModel) }
-                composable(Destination.Breathe.route) { BreatheScreen(viewModel) }
+                composable(Destination.Breathe.route) {
+                    BreatheScreen(
+                        viewModel,
+                        notificationStartRequest =
+                            breathingNotificationStartRequest,
+                        onNotificationStartConsumed = {
+                            breathingNotificationStartRequest = 0L
+                        },
+                    )
+                }
                 composable(Destination.Coach.route) { CoachScreen() }
                 composable(Destination.Explore.route) { TrendsExploreScreen(viewModel) }
                 composable(Destination.Automations.route) { AutomationsScreen(viewModel) }
@@ -893,6 +932,53 @@ fun AppRoot(
                         quickOverlay = QuickActionKind.STRENGTH
                     },
                     onDismiss = { showLighterWorkoutOptions = false },
+                )
+            }
+        }
+
+        if (showMovementBreak) {
+            fun finishMovementBreak() {
+                val outcome =
+                    if (
+                        ActionableWellnessPolicy.movementRemainingSeconds(
+                            movementBreakStartedAtMs,
+                            android.os.SystemClock.elapsedRealtime(),
+                        ) == 0
+                    ) {
+                        "completed"
+                    } else {
+                        "dismissed"
+                    }
+                if (movementBreakTerminalOutcome == null) {
+                    movementBreakTerminalOutcome = outcome
+                    com.noop.AppDiagnosticsRecorder.record(
+                        "wellness_notification.movement_break",
+                        fields = mapOf("outcome" to outcome),
+                    )
+                }
+                showMovementBreak = false
+            }
+            LaunchedEffect(movementBreakStartedAtMs) {
+                if (!movementBreakStartedRecorded) {
+                    movementBreakStartedRecorded = true
+                    com.noop.AppDiagnosticsRecorder.record(
+                        "wellness_notification.movement_break",
+                        fields = mapOf("outcome" to "started"),
+                    )
+                }
+            }
+            ModalBottomSheet(
+                onDismissRequest = ::finishMovementBreak,
+                sheetState = rememberModalBottomSheetState(
+                    skipPartiallyExpanded = true,
+                ),
+                containerColor = Palette.surfaceOverlay,
+                contentColor = Palette.textPrimary,
+            ) {
+                NoopModalSystemBars()
+                MovementBreakSheet(
+                    startedAtElapsedRealtimeMs = movementBreakStartedAtMs,
+                    onDismiss = ::finishMovementBreak,
                 )
             }
         }

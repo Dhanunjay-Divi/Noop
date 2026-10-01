@@ -73,6 +73,9 @@ class AddDeviceWizardScannerLifecycleTest {
         val picker = source
             .substringAfter("private fun SupplierBandPickStep(")
             .substringBefore("@Composable\nprivate fun SupplierBandConfirmStep(")
+        val sharedPicker = source
+            .substringAfter("private fun PickList(")
+            .substringBefore("@Composable\nprivate fun DiscoveredRow(")
 
         assertTrue(callSite.contains("state = supplierPairingState"))
         assertTrue(
@@ -85,7 +88,12 @@ class AddDeviceWizardScannerLifecycleTest {
                 "state == com.noop.ble.veepoo.VeepooAdapterState.FAILED",
             ),
         )
-        assertTrue(picker.contains("showEmptyProgress = searching"))
+        assertTrue(
+            sharedPicker.contains(
+                "BandPairingDiscoveryStage(searching = searching)",
+            ),
+        )
+        assertFalse(sharedPicker.contains("CircularProgressIndicator("))
         assertTrue(
             picker.contains(
                 "appwide_onboarding_device_wizard_supplier_android_failed",

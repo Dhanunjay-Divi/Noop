@@ -4,6 +4,41 @@ Last updated: **2026-10-01**
 
 ## Authoritative context
 
+- Band-first required-account onboarding is locally complete on
+  `codex/mobile-navigation-sparkline-redesign-20260930`. A reset customer
+  installation now proceeds through Terms, Welcome, Bluetooth, supported-band
+  setup, Create account or Sign in, required ownership confirmation, profile,
+  plan, and app entry. Unconfigured account builds fail closed at Account and
+  expose no local-test continuation. Apple onboarding and Bluetooth contracts
+  pass 33/33; clean iPhone journeys pass 2/2 plus a final 1/1 neutral-copy
+  rerun; Android API 35 first-run journeys pass 3/3; Android onboarding policy
+  passes 17/17; and Full/Demo compilation passes without the removed
+  local/exploration resource warning. Current 1206x2622 captures and OCR show
+  the neutral `your compatible band` footer without observed clipping.
+  A versioned completion marker returns legacy account-free installs to the
+  required Account boundary, and the final combined walls pass 57/57 Apple and
+  78/78 Android focused cases.
+  Protected integration, production identity credentials, signed installation,
+  live provider recovery, and physical BLE remain pending.
+
+- Actionable wellness notifications are locally complete on
+  `codex/mobile-navigation-sparkline-redesign-20260930`. Hydration opens a
+  user-confirmed water-log flow, qualified stress opens a visible one-minute
+  paced-breathing session, and inactivity opens a dismissible two-minute
+  movement break; notification delivery never silently logs behavior. Stress
+  remains default-off, non-diagnostic, and requires the existing corroborated
+  HRV, resting-HR, fresh low-motion, worn, session, quiet-hour, cooldown, and
+  replay gates rather than heart rate alone. Hydration cannot schedule more
+  often than hourly; inactivity defaults to a 45-minute threshold, 30-minute
+  continuing-bout re-nudge, worn-only evidence, and active/quiet-hour gates.
+  One- and two-minute actions use monotonic elapsed time across UI pauses.
+  Exact local evidence passes the complete iOS Simulator graph, 57/57 Apple
+  focused tests, 108/108 Apple reminder regressions, 78/78 Android focused
+  tests, Full/Demo Android compilation, all supported-locale generation,
+  claims/privacy/brand gates, 110 operations records, and diff hygiene.
+  Protected integration and signed physical-device notification, background,
+  haptic, battery, and sensor validation remain pending.
+
 - The final PR `#25` replacement is locally verified on
   `codex/mobile-navigation-sparkline-redesign-20260930` at implementation
   commit `b8018ac5e`. Mobile Today is number-first, the compact iPhone `More`
@@ -480,7 +515,7 @@ Last updated: **2026-10-01**
 - The September 25 first-run and supported-band milestone is committed in
   `db7de8e2571b1effd8278537d63bd7019b2b0d28`; its exact hosted head is green.
   Apple and Android now use the same eight-stage first-run
-  sequence, with account before band setup and no Home surface mounted under
+  sequence, with supported-band setup before account and no Home surface mounted under
   incomplete onboarding. Normal customer entry points say `Connect band` and
   list only pairable launch transports: the supplier `NOOP Band` appears only
   when its native adapter is available, while compatible 5/MG and 4.0 remain
@@ -892,11 +927,12 @@ Last updated: **2026-10-01**
   protected-main trusted result remain pending. No Docker image build,
   production runtime, signing, legal, carrier, physiology, or physical
   accessibility result is claimed without direct evidence.
-- Current production behavior remains local-first and account-free for
-  exploration. D-059 targets staged cloud authority for durable account
-  history, canonical formulas, recommendations, and cross-device state while
-  retaining the encrypted edge collector, bounded offline cache, immediate
-  Safety initiation, and explicit per-data-class rollback gates.
+- The current release candidate requires a NOOP account before shell entry;
+  there is no ordinary account-free exploration path. D-059 still stages cloud
+  authority for durable history, canonical formulas, recommendations, and
+  cross-device state while retaining the encrypted edge collector, bounded
+  offline cache, immediate Safety initiation, and explicit per-data-class
+  rollback gates.
 - Managed portability now has v2 integrity, resumable export, complete
   prevalidation, and resumable idempotent import for selected chunks plus
   `day_ownership`. Ownership deletion now has cooling-off request, status,

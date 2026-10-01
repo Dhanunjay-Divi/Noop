@@ -33,8 +33,6 @@ MAPPINGS = {
     "Noop Band not connected": "Strap not connected",
     "Connect Noop Band to see live heart rate":
         "Connect your strap to see live heart rate",
-    "When the system prompt appears, choose Allow so NOOP can find Noop Band.":
-        "When the system prompt appears, choose Allow so NOOP can find your strap.",
     "Connect Noop Band for haptic guidance. You'll feel one pulse on the inhale and two on the exhale, so you can breathe with your eyes closed.":
         "Connect your strap for haptic guidance. You'll feel one pulse on the inhale, two on the exhale, so you can breathe with your eyes closed.",
     "No live heart rate yet. Open Live to pair Noop Band.":

@@ -71,7 +71,7 @@ final class ScreenStateContractTests: XCTestCase {
 
         XCTAssertTrue(
             root.contains(
-                "request.presentation == .lighterWorkoutOptions"
+                "case .lighterWorkoutOptions"
             )
         )
         XCTAssertTrue(
@@ -85,9 +85,9 @@ final class ScreenStateContractTests: XCTestCase {
         )
         XCTAssertTrue(
             root.contains(
-                "request.presentation == .lighterWorkoutOptions,\n"
-                    + "           !model.runtimeRole"
-                    + ".enforcesManagedViewerReadOnlyRoutes"
+                "case .lighterWorkoutOptions\n"
+                    + "            where !model.runtimeRole"
+                    + ".enforcesManagedViewerReadOnlyRoutes:"
             )
         )
         XCTAssertTrue(

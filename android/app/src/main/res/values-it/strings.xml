@@ -555,6 +555,7 @@
     <string name="managed_cloud_error_document_conflict">NOOP ha conservato i tuoi dati attuali. Controlla le modifiche più recenti, quindi tocca “Sincronizza ora” per riprovare.</string>
     <string name="ownership_progress_step">Passaggio %1$d di %2$d</string>
     <string name="ownership_setup_complete">Configurazione della proprietà completata.</string>
+    <string name="onboarding_bluetooth_permission_prompt">Quando appare la richiesta di sistema, scegli Consenti così NOOP può trovare la tua fascia compatibile.</string>
     <string name="noop_command_lens_move_left">Sposta sul bordo sinistro</string>
     <string name="noop_command_lens_move_right">Sposta sul bordo destro</string>
     <string name="noop_command_lens_move_up">Sposta verso l’alto</string>

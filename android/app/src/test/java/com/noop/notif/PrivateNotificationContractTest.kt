@@ -33,6 +33,7 @@ class PrivateNotificationContractTest {
             "notif/DailyReviewReminders.kt",
             "notif/HydrationReminders.kt",
             "notif/IllnessAlertNotifier.kt",
+            "notif/InactivityNotifier.kt",
             "notif/ManagedSafetyNotifier.kt",
             "notif/ManagedSocialPokeNotifier.kt",
             "notif/ScheduledReportNotifier.kt",
