@@ -227,7 +227,7 @@
     <string name="l10n_today_screen_steps_cdde4f20">Шаги</string>
     <string name="l10n_today_screen_weight_69c0b815">Вес</string>
     <string name="l10n_today_screen_calories_3e62ecfe">Калории</string>
-    <string name="key_metrics_selection_instructions">Закрепите от 3 до 5 метрик вверху. Все метрики останутся видимыми.</string>
+    <string name="key_metrics_selection_instructions">Закрепите от 3 до 6 метрик вверху. Все метрики останутся видимыми.</string>
     <string name="key_metrics_selection_count">Закреплено %1$d из %2$d</string>
     <string name="key_metrics_show_selected">Показать выбранные метрики</string>
     <string name="key_metrics_show_all_count">Показать все метрики (%1$d)</string>

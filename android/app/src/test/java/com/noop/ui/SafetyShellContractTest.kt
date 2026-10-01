@@ -60,13 +60,19 @@ class SafetyShellContractTest {
         val commandLens = text
             .substringAfter("private fun MovableNoopCommandLens(")
             .substringBefore("\n}\n\n/**")
-        assertTrue(commandLens.contains("Canvas(modifier = Modifier.size(width = 18.dp, height = 22.dp))"))
-        assertTrue(commandLens.contains("StrokeJoin.Round"))
+        assertTrue(commandLens.contains("Canvas(modifier = Modifier.size(14.dp))"))
+        assertTrue(commandLens.contains("sweepAngle = 288f"))
+        assertTrue(commandLens.contains("drawCircle("))
+        assertTrue(commandLens.contains("radius = 2.25.dp.toPx()"))
+        assertFalse(commandLens.contains("val monogram = Path()"))
         assertFalse(commandLens.contains("Icons.Filled.ChatBubble"))
         assertTrue(commandLens.contains("NoopCommandLensPrefs"))
         assertTrue(commandLens.contains("detectDragGestures"))
         assertFalse(commandLens.contains("Icons.Filled.Add"))
         assertTrue(text.contains("quickActions.chunked(3)"))
+        assertTrue(text.contains("NoopModalSystemBars()"))
+        assertTrue(text.contains("DialogWindowProvider"))
+        assertTrue(text.contains("window.navigationBarColor = navigationBarColor"))
     }
 
     @Test

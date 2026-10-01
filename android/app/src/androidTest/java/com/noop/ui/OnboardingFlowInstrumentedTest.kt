@@ -753,6 +753,7 @@ class ConfiguredProviderFullOnboardingInstrumentedTest {
         compose.onNodeWithTag("noop.ownership.mode.create")
             .performClick()
         compose.onNodeWithTag("noop.ownership.password_confirmation")
+            .performScrollTo()
             .assertIsDisplayed()
 
         compose.onNodeWithTag("noop.ownership.email")

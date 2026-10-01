@@ -146,9 +146,10 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
                 "private static let progressStorageKey = \"noop.onboarding.progress.v2\""
             )
         )
+        XCTAssertTrue(onboarding.contains("let isOwnershipConfigured ="))
         XCTAssertTrue(
             onboarding.contains(
-                "let isOwnershipConfigured = Self.ownershipConfiguredForCurrentBuild"
+                "|| Self.ownershipConfiguredForCurrentBuild"
             )
         )
         XCTAssertTrue(

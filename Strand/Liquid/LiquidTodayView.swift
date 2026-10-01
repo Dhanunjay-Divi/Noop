@@ -143,7 +143,7 @@ struct LiquidTodayView: View {
         #endif
         return saved
     }
-    // Today stays focused on the user's three-to-five selected metrics. The full catalog remains one
+    // Today stays focused on the user's three-to-six selected metrics. The full catalog remains one
     // tap away through "Open all metric history".
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showKeyMetricsEditor = false
@@ -450,23 +450,10 @@ struct LiquidTodayView: View {
                     if allowsLocalMutations {
                         ActiveWorkoutIndicatorSection()
                     }
-                    // #today-layout (parity with Android): every Today section — the Charge/Effort/Rest hero
-                    // and Start-session included — renders in the user's saved order. Reorder via the Arrange
-                    // sheet (the header's up/down button; native drag rows); the order persists under the
-                    // byte-identical "today.sectionOrder" key Android uses. A gated-off Start-session renders
-                    // nothing and keeps its slot in the saved order.
-                    ForEach(sectionOrder) { section in
-                        if isTodayDetailSection(section) {
-                            if section == firstVisibleTodayDetailSection {
-                                todayDetailsDisclosure
-                            }
-                            if todayDetailsExpanded {
-                                todaySection(section)
-                            }
-                        } else {
-                            todaySection(section)
-                        }
-                    }
+                    // Phones and narrow desktop windows preserve the exact user-arranged reading order.
+                    // A wide Mac uses the same leaves in a responsive dashboard so the detail pane no
+                    // longer reads like a phone column floating in the middle of a desktop window.
+                    orderedTodaySections
                     // The suggestion leaf owns the auto-detection mode and candidate gates, so mounting it
                     // here has zero empty-state footprint while making the opt-in feature reachable from
                     // the default Liquid Today screen.
@@ -475,7 +462,7 @@ struct LiquidTodayView: View {
                     }
                     dataSourcesSection
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, todayContentHorizontalPadding)
                 .padding(.top, todaySceneTopPadding)
                 // The shell reserves the bar's layout height. Keep the same small content breathing room
                 // as ScreenScaffold so the bar's upward-cast shadow never washes over the final card.
@@ -487,9 +474,8 @@ struct LiquidTodayView: View {
             }
             .modifier(LegacyLiquidTodayScrollOffsetProbe())
             #if os(macOS)
-            // Use the desktop pane without returning to the detached two-column self-check layout.
-            // The sky remains full-bleed while one stable content track keeps the reading order intact.
-            .frame(maxWidth: 960)
+            // The split-view detail column already owns the readable desktop bounds. Let Today use that
+            // full pane instead of imposing a second phone-like container inside it.
             .frame(maxWidth: .infinity)
             #endif
         }
@@ -1028,6 +1014,92 @@ struct LiquidTodayView: View {
             isTodayDetailSection(section) && (section != .target || selectedDayOffset == 0)
         }
     }
+
+    private var todayContentHorizontalPadding: CGFloat {
+        #if os(macOS)
+        NoopMetrics.space6
+        #else
+        NoopMetrics.space4
+        #endif
+    }
+
+    @ViewBuilder
+    private var orderedTodaySections: some View {
+        #if os(macOS)
+        macOrderedTodaySections
+        #else
+        mobileOrderedTodaySections
+        #endif
+    }
+
+    @ViewBuilder
+    private var mobileOrderedTodaySections: some View {
+        ForEach(sectionOrder) { section in
+            if isTodayDetailSection(section) {
+                if section == firstVisibleTodayDetailSection {
+                    todayDetailsDisclosure
+                }
+                if todayDetailsExpanded {
+                    todaySection(section)
+                }
+            } else {
+                todaySection(section)
+            }
+        }
+    }
+
+    #if os(macOS)
+    @ViewBuilder
+    private var macOrderedTodaySections: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            mobileOrderedTodaySections
+        } else {
+            ViewThatFits(in: .horizontal) {
+                macWideTodaySections
+                mobileOrderedTodaySections
+            }
+        }
+    }
+
+    private var macWideTodaySections: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            HStack(alignment: .top, spacing: NoopMetrics.space4) {
+                heroCard
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .layoutPriority(1)
+                    .accessibilityIdentifier("noop.today.mac-overview.signal")
+
+                if firstVisibleTodayDetailSection != nil {
+                    todayDetailsDisclosure
+                        .frame(
+                            minWidth: 280,
+                            idealWidth: 340,
+                            maxWidth: 400,
+                            alignment: .topLeading
+                        )
+                        .accessibilityIdentifier("noop.today.mac-overview.plan")
+                }
+            }
+
+            ForEach(sectionOrder.filter { $0 != .hero }) { section in
+                if section == .keyMetrics {
+                    keyMetricsSection(columnCount: 3)
+                        .id(Self.keyMetricsAnchorID)
+                } else if isTodayDetailSection(section) {
+                    if todayDetailsExpanded {
+                        todaySection(section)
+                    }
+                } else {
+                    todaySection(section)
+                }
+            }
+        }
+        // ViewThatFits selects the stacked fallback before this desktop composition can
+        // squeeze either the signal summary or its plan control into an awkward narrow rail.
+        .frame(minWidth: 840, maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("noop.today.mac-wide-dashboard")
+    }
+    #endif
 
     @ViewBuilder
     private func todaySection(_ section: TodaySection) -> some View {
@@ -2765,6 +2837,10 @@ struct LiquidTodayView: View {
     // MARK: - Key metrics grid
 
     private var keyMetricsSection: some View {
+        keyMetricsSection(columnCount: dynamicTypeSize.isAccessibilitySize ? 1 : 2)
+    }
+
+    private func keyMetricsSection(columnCount: Int) -> some View {
         // HRV / Resting HR (+ Blood Oxygen / Respiratory) tiles share the recovery vitals' per-field
         // today-first carry so they don't blank at the rollover while Recovery/Strain/Rest stay strictly
         // today's own (they are scored surfaces).
@@ -2787,16 +2863,25 @@ struct LiquidTodayView: View {
                 }
             }
             // Show only the editor-selected metrics here. The full catalog remains in metric history.
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(.flexible(), spacing: NoopMetrics.space3),
-                    count: dynamicTypeSize.isAccessibilitySize ? 1 : 2
-                ),
-                spacing: NoopMetrics.space3
-            ) {
-                ForEach(visibleKeyMetrics) { metric in
-                    ktileFor(metric, hrv: hrv, rhr: rhr)
-                        .accessibilityIdentifier("noop.today.key-metric.\(metric.rawValue)")
+            // Row construction is explicit so a three- or five-card custom layout ends with one useful
+            // full-width card rather than an empty half-column.
+            let resolvedColumnCount = max(1, columnCount)
+            let metricRows = stride(
+                from: 0,
+                to: visibleKeyMetrics.count,
+                by: resolvedColumnCount
+            ).map { start in
+                Array(visibleKeyMetrics[start..<min(start + resolvedColumnCount, visibleKeyMetrics.count)])
+            }
+            VStack(spacing: NoopMetrics.space3) {
+                ForEach(Array(metricRows.enumerated()), id: \.offset) { _, rowMetrics in
+                    HStack(spacing: NoopMetrics.space3) {
+                        ForEach(rowMetrics) { metric in
+                            ktileFor(metric, hrv: hrv, rhr: rhr)
+                                .frame(maxWidth: .infinity)
+                                .accessibilityIdentifier("noop.today.key-metric.\(metric.rawValue)")
+                        }
+                    }
                 }
             }
             Group {
@@ -2818,10 +2903,30 @@ struct LiquidTodayView: View {
     }
 
     private var openMetricHistoryLabel: some View {
-        Label("Open all metric history", systemImage: "clock.arrow.circlepath")
-            .font(StrandFont.footnote)
-            .foregroundStyle(StrandPalette.textSecondary)
-            .frame(maxWidth: .infinity, minHeight: 44)
+        HStack(spacing: NoopMetrics.space3) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(StrandPalette.metricCyan)
+                .frame(width: 28, height: 28)
+                .background(
+                    Circle()
+                        .fill(StrandPalette.metricCyan.opacity(0.12))
+                )
+
+            Text("Open all metric history")
+                .font(StrandFont.subhead)
+                .fontWeight(.semibold)
+                .foregroundStyle(StrandPalette.textPrimary)
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(StrandPalette.textTertiary)
+        }
+        .padding(.horizontal, NoopMetrics.space2)
+        .frame(maxWidth: .infinity, minHeight: 48)
+        .contentShape(Rectangle())
     }
 
     /// One editor-selected Key-Metric tile: the metric's value/tint/fill exactly as the old hard-coded

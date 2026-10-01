@@ -788,12 +788,15 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
         XCTAssertTrue(shell.contains(
             ".frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))"
         ))
-        XCTAssertTrue(shell.contains(
-            "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize || tabBarCompact"
+        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ||"))
+        XCTAssertTrue(shell.contains("reduceTransparency ||"))
+        XCTAssertTrue(shell.contains("colorSchemeContrast == .increased"))
+        XCTAssertFalse(shell.contains(
+            "dynamicTypeSize.isAccessibilitySize || tabBarCompact"
         ))
         XCTAssertTrue(shell.contains(
             "(tabBarCompact ? IPhonePrimaryTab.compactControlDimension : 28)"
-        ))
+        ), "Opaque accessibility fallbacks must cover the complete current control footprint.")
         XCTAssertTrue(shell.contains(".padding(.bottom, tabContentBottomReservation)"))
         XCTAssertFalse(shell.contains("floatingTabBarClearance"))
     }

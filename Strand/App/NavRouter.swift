@@ -18,6 +18,7 @@ enum IPhonePrimaryTab: Int, CaseIterable, Equatable {
     static let itemSpacing: CGFloat = 2
     static let minimumTouchDimension: CGFloat = 44
     static let compactControlDimension: CGFloat = 48
+    static let compactControlWidth: CGFloat = 112
 }
 
 // MARK: - NavRouter

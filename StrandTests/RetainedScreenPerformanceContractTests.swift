@@ -200,7 +200,7 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(block.contains("!historyReadsBlocked"))
     }
 
-    func testTodayDecorativeStatusClocksPauseDuringScrollInteraction() throws {
+    func testTodayDecorativeStatusMotionPausesDuringScrollInteraction() throws {
         let classic = try source("Strand/Screens/TodayView.swift")
         let liquid = try source("Strand/Liquid/LiquidTodayView.swift")
         let statusPill = try source(
@@ -210,7 +210,6 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(classic.contains("@Environment(\\.liquidInteractionInProgress)"))
         XCTAssertTrue(classic.contains("!interactionInProgress else"))
         XCTAssertTrue(liquid.contains("@Environment(\\.liquidInteractionInProgress)"))
-        XCTAssertTrue(liquid.contains("syncing && !reduceMotion && !interactionInProgress"))
         XCTAssertTrue(liquid.contains("guard !posed, !interactionInProgress else"))
         XCTAssertTrue(statusPill.contains("@Environment(\\.noopInteractionInProgress)"))
         XCTAssertTrue(statusPill.contains("&& !interactionInProgress"))
@@ -258,7 +257,7 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         let start = try XCTUnwrap(shell.range(of: "onReselect: { tag in"))
         let end = try XCTUnwrap(
             shell.range(
-                of: "})\n                    .frame(maxWidth: .infinity",
+                of: "\n                )\n                .frame(maxWidth: 500",
                 range: start.upperBound..<shell.endIndex
             )
         )

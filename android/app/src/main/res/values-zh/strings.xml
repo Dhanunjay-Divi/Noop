@@ -1665,7 +1665,7 @@
     <string name="l10n_today_screen_calories_3e62ecfe">卡路里</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">选择要在控制台中显示的磁贴，并通过箭头图标上下调整它们的顺序。</string>
-    <string name="key_metrics_selection_instructions">将 3 至 5 项指标置顶。所有指标仍会显示。</string>
+    <string name="key_metrics_selection_instructions">将 3 至 6 项指标置顶。所有指标仍会显示。</string>
     <string name="key_metrics_selection_count">已置顶 %1$d/%2$d 项</string>
     <string name="key_metrics_show_selected">显示已选指标</string>
     <string name="key_metrics_show_all_count">显示全部指标（%1$d）</string>

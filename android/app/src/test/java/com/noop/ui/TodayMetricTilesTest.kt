@@ -27,6 +27,25 @@ class TodayMetricTilesTest {
     private fun stepsDay(deviceId: String, day: String, steps: Int?) =
         AppleDaily(deviceId = deviceId, day = day, steps = steps)
 
+    private fun todayScreenSource(): String {
+        val root = File(System.getProperty("user.dir") ?: ".")
+        return listOf(
+            File(root, "src/main/java/com/noop/ui/TodayScreen.kt"),
+            File(root, "app/src/main/java/com/noop/ui/TodayScreen.kt"),
+            File(root, "android/app/src/main/java/com/noop/ui/TodayScreen.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("TodayScreen.kt source root is unavailable")
+    }
+
+    @Test
+    fun defaultWeightTileOpensItsFocusedHistory() {
+        assertTrue(
+            todayScreenSource().contains(
+                "KeyMetric.WEIGHT -> ({ onOpenMetric(\"weight\") })",
+            ),
+        )
+    }
+
     // MARK: latestWeightKg
 
     @Test

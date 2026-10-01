@@ -44,7 +44,9 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
 
 final class KeyMetricPrefsTests: XCTestCase {
     func testFreshInstallDefaultsComplementDailySignalSummary() {
-        let secondaryDefaults: [KeyMetric] = [.hrv, .restingHr, .bloodOxygen]
+        let secondaryDefaults: [KeyMetric] = [
+            .hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .weight,
+        ]
         XCTAssertEqual(KeyMetric.defaultSelection, secondaryDefaults)
         XCTAssertEqual(KeyMetricPrefs.decodeEnabled(""), secondaryDefaults)
         XCTAssertEqual(KeyMetricPrefs.decodeEnabled("   "), secondaryDefaults)
@@ -55,7 +57,7 @@ final class KeyMetricPrefsTests: XCTestCase {
 
     func testSelectionContractMatchesProductLimit() {
         XCTAssertEqual(KeyMetricPrefs.minimumSelectionCount, 3)
-        XCTAssertEqual(KeyMetricPrefs.maximumSelectionCount, 5)
+        XCTAssertEqual(KeyMetricPrefs.maximumSelectionCount, 6)
         XCTAssertEqual(Set(KeyMetric.defaultOrder), Set(KeyMetric.allCases))
     }
 
@@ -89,7 +91,7 @@ final class KeyMetricPrefsTests: XCTestCase {
             KeyMetricPrefs.decodeEnabled(
                 "steps, hrv,steps,bloodOxygen,restingHr,calories,weight,effort"
             ),
-            [.steps, .hrv, .bloodOxygen, .restingHr, .calories]
+            [.steps, .hrv, .bloodOxygen, .restingHr, .calories, .weight]
         )
     }
 
@@ -105,8 +107,11 @@ final class KeyMetricPrefsTests: XCTestCase {
             KeyMetricPrefs.encode([
                 .steps, .hrv, .steps, .bloodOxygen, .restingHr, .calories, .weight,
             ]),
-            "steps,hrv,bloodOxygen,restingHr,calories"
+            "steps,hrv,bloodOxygen,restingHr,calories,weight"
         )
-        XCTAssertEqual(KeyMetricPrefs.encode([]), "hrv,restingHr,bloodOxygen")
+        XCTAssertEqual(
+            KeyMetricPrefs.encode([]),
+            "hrv,restingHr,bloodOxygen,respiratory,steps,weight"
+        )
     }
 }

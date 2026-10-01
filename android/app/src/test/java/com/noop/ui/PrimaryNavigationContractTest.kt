@@ -289,12 +289,12 @@ class PrimaryNavigationContractTest {
         assertTrue(lens.contains("CustomAccessibilityAction(moveRightLabel)"))
         assertTrue(lens.contains("CustomAccessibilityAction(moveUpLabel)"))
         assertTrue(lens.contains("CustomAccessibilityAction(moveDownLabel)"))
-        assertTrue(lens.contains(".width(28.dp)"))
+        assertTrue(lens.contains(".width(18.dp)"))
         assertTrue(lens.contains(".height(38.dp)"))
-        assertTrue(lens.contains("(-9).dp else 9.dp"))
+        assertTrue(lens.contains("(-18).dp else 18.dp"))
         assertTrue(lens.contains("val touchWidth = 48.dp"))
         assertTrue(lens.contains("val touchHeight = 52.dp"))
-        assertTrue(text.contains("DEFAULT_VERTICAL_FRACTION = 0.90f"))
+        assertTrue(text.contains("DEFAULT_VERTICAL_FRACTION = 0.76f"))
     }
 
     @Test

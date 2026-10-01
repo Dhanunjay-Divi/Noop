@@ -372,7 +372,7 @@ struct TodayView: View {
     @AppStorage(UnitPrefs.hrvWindowKey) private var hrvWindowRaw = HrvWindow.whole.rawValue
     private var hrvWindow: HrvWindow { HrvWindow(rawValue: hrvWindowRaw) ?? .whole }
 
-    // Editable Key-Metrics layout (#251), persisted as the three-to-five tiles pinned first. Every metric
+    // Editable Key-Metrics layout (#251), persisted as the three-to-six tiles pinned first. Every metric
     // remains visible; the "Edit" affordance only controls priority and order.
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showingMetricsEditor = false
@@ -3617,7 +3617,7 @@ struct TodayView: View {
                 .accessibilityLabel("Edit Key Metrics")
                 .help("Choose and reorder pinned Key Metrics")
             }
-            // Keep Today focused on the editor-selected three-to-five metrics. The full catalog remains in
+            // Keep Today focused on the editor-selected three-to-six metrics. The full catalog remains in
             // Explore and each metric's history view.
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                 ForEach(visibleKeyMetrics) { metric in

@@ -212,16 +212,19 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(shell.contains(
             "guard !keyboardVisible, dynamicTypeSize.isAccessibilitySize else { return 0 }"
         ), "Only accessibility navigation should trade overlap for a separate reading region.")
-        XCTAssertTrue(shell.contains(
-            "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize || tabBarCompact"
-        ))
+        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ||"))
+        XCTAssertTrue(shell.contains("reduceTransparency ||"))
+        XCTAssertTrue(shell.contains("colorSchemeContrast == .increased"))
+        XCTAssertFalse(shell.contains(
+            "dynamicTypeSize.isAccessibilitySize || tabBarCompact"
+        ), "Ordinary compact navigation must not paint an opaque full-width reading boundary.")
         XCTAssertTrue(shell.contains(
             "(tabBarCompact ? IPhonePrimaryTab.compactControlDimension : 28)"
-        ), "Large text and compact navigation need an opaque reading boundary above the glass rail.")
+        ), "Opaque accessibility fallbacks must cover the complete current control footprint.")
         XCTAssertFalse(shell.contains(".mask(alignment: .bottom)"),
                        "A shell mask washes out the final visible row before it reaches the reserved strip.")
-        XCTAssertTrue(shell.contains("appearanceMode == .black ? 0.94 : 0.90"),
-                      "Floating navigation needs a smoked base that prevents page copy showing through.")
+        XCTAssertTrue(shell.contains("appearanceMode == .black ? 0.68 : 0.64"),
+                      "Floating navigation needs a readable translucent base, not an opaque black bar.")
         XCTAssertTrue(shell.contains("private var opticalScrim: Color"),
                       "The separate quick-action lens must use the same text-occlusion contract.")
         let interactionEnvironment = try XCTUnwrap(
@@ -282,7 +285,7 @@ final class MoreListParityTests: XCTestCase {
         )
         let accessibilityBoundary = try XCTUnwrap(
             shell.range(
-                of: "if !keyboardVisible, dynamicTypeSize.isAccessibilitySize || tabBarCompact",
+                of: "if !keyboardVisible,\n               dynamicTypeSize.isAccessibilitySize ||",
                 range: safeAreaStart.upperBound..<shell.endIndex
             )
         )
@@ -383,7 +386,7 @@ final class MoreListParityTests: XCTestCase {
                       "Tab selection needs a local animation so the capsule moves instead of jumping.")
         XCTAssertTrue(shell.contains("return .black.opacity(0.11)"),
                       "Light mode needs a transparent smoke tint instead of a milk-white plate.")
-        XCTAssertTrue(shell.contains("return .white.opacity(0.94)"),
+        XCTAssertTrue(shell.contains("return .white.opacity(0.86)"),
                       "Light mode must obscure body copy beneath the shape while retaining glass highlights.")
         XCTAssertTrue(tabBar.contains("navigationInk(active: active, accent: accent)"),
                       "Navigation ink must adapt to light and dark glass.")

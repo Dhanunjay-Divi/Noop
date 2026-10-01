@@ -7,7 +7,14 @@ class KeyMetricPrefsTest {
 
     @Test
     fun freshInstallDefaultsToSecondarySignalsWithoutRepeatingTheHero() {
-        val expected = listOf(KeyMetric.HRV, KeyMetric.RESTING_HR, KeyMetric.BLOOD_OXYGEN)
+        val expected = listOf(
+            KeyMetric.HRV,
+            KeyMetric.RESTING_HR,
+            KeyMetric.BLOOD_OXYGEN,
+            KeyMetric.RESPIRATORY,
+            KeyMetric.STEPS,
+            KeyMetric.WEIGHT,
+        )
         val heroMetrics = setOf(KeyMetric.CHARGE, KeyMetric.REST, KeyMetric.EFFORT)
         assertEquals(expected, KeyMetric.defaultSelection)
         assertEquals(expected, KeyMetricPrefs.decodeEnabled(null))
@@ -26,7 +33,7 @@ class KeyMetricPrefsTest {
     @Test
     fun selectionContractMatchesProductLimitAndCatalog() {
         assertEquals(3, KeyMetricPrefs.MIN_SELECTION_COUNT)
-        assertEquals(5, KeyMetricPrefs.MAX_SELECTION_COUNT)
+        assertEquals(6, KeyMetricPrefs.MAX_SELECTION_COUNT)
         assertEquals(KeyMetric.entries.toSet(), KeyMetric.defaultOrder.toSet())
     }
 
@@ -64,6 +71,7 @@ class KeyMetricPrefsTest {
                 KeyMetric.BLOOD_OXYGEN,
                 KeyMetric.RESTING_HR,
                 KeyMetric.CALORIES,
+                KeyMetric.WEIGHT,
             ),
             KeyMetricPrefs.decodeEnabled(
                 "steps, hrv,steps,bloodOxygen,restingHr,calories,weight,effort",
@@ -82,7 +90,7 @@ class KeyMetricPrefsTest {
     @Test
     fun encodeAlsoEnforcesDedupeCapAndNonemptySelection() {
         assertEquals(
-            "steps,hrv,bloodOxygen,restingHr,calories",
+            "steps,hrv,bloodOxygen,restingHr,calories,weight",
             KeyMetricPrefs.encode(
                 listOf(
                     KeyMetric.STEPS,
@@ -95,6 +103,9 @@ class KeyMetricPrefsTest {
                 ),
             ),
         )
-        assertEquals("hrv,restingHr,bloodOxygen", KeyMetricPrefs.encode(emptyList()))
+        assertEquals(
+            "hrv,restingHr,bloodOxygen,respiratory,steps,weight",
+            KeyMetricPrefs.encode(emptyList()),
+        )
     }
 }

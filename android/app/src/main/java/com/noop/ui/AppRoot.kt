@@ -100,6 +100,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -134,9 +135,11 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -148,6 +151,8 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -781,6 +786,7 @@ fun AppRoot(
                 containerColor = Palette.surfaceOverlay,
                 contentColor = Palette.textPrimary,
             ) {
+                NoopModalSystemBars()
                 QuickActionLauncher(
                     unreadUpdates = updateStore.unreadCount,
                     onUpdates = {
@@ -889,6 +895,27 @@ fun AppRoot(
                     onDismiss = { showLighterWorkoutOptions = false },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun NoopModalSystemBars() {
+    val view = LocalView.current
+    val dark = !Palette.isLight
+    val navigationBarColor = Palette.surfaceOverlay.toArgb()
+
+    DisposableEffect(view, dark, navigationBarColor) {
+        val window = (view.parent as? DialogWindowProvider)?.window
+            ?: return@DisposableEffect onDispose {}
+        val previousColor = window.navigationBarColor
+        val controller = WindowCompat.getInsetsController(window, view)
+
+        window.navigationBarColor = navigationBarColor
+        controller.isAppearanceLightNavigationBars = !dark
+
+        onDispose {
+            window.navigationBarColor = previousColor
         }
     }
 }
@@ -1574,7 +1601,7 @@ internal object NoopCommandLensPrefs {
     const val FILE = "noop.commandLens"
     const val EDGE = "edge"
     const val VERTICAL_FRACTION = "verticalFraction"
-    const val DEFAULT_VERTICAL_FRACTION = 0.90f
+    const val DEFAULT_VERTICAL_FRACTION = 0.76f
 
     fun readEdge(prefs: android.content.SharedPreferences): NoopCommandLensEdge =
         runCatching {
@@ -1825,10 +1852,10 @@ private fun MovableNoopCommandLens(
         ) {
             Box(
                 modifier = Modifier
-                    .width(28.dp)
+                    .width(18.dp)
                     .height(38.dp)
                     .offset(
-                        x = if (edge == NoopCommandLensEdge.START) (-9).dp else 9.dp,
+                        x = if (edge == NoopCommandLensEdge.START) (-18).dp else 18.dp,
                     )
                     .navigationGlassSurface(
                         shape = lensShape,
@@ -1853,25 +1880,29 @@ private fun MovableNoopCommandLens(
                     ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Canvas(modifier = Modifier.size(width = 18.dp, height = 22.dp)) {
-                        val monogram = Path().apply {
-                            moveTo(size.width * 0.22f, size.height * 0.80f)
-                            lineTo(size.width * 0.22f, size.height * 0.20f)
-                            lineTo(size.width * 0.78f, size.height * 0.80f)
-                            lineTo(size.width * 0.78f, size.height * 0.20f)
-                        }
-                        drawPath(
-                            path = monogram,
+                    Canvas(modifier = Modifier.size(14.dp)) {
+                        val strokeWidth = 2.5.dp.toPx()
+                        val radius = (size.minDimension - strokeWidth) / 2f
+                        drawArc(
                             brush = Brush.linearGradient(
                                 colors = listOf(Palette.chargeBright, Palette.metricCyan),
                                 start = Offset.Zero,
                                 end = Offset(size.width, size.height),
                             ),
+                            startAngle = -90f,
+                            sweepAngle = 288f,
+                            useCenter = false,
+                            topLeft = Offset(center.x - radius, center.y - radius),
+                            size = Size(radius * 2f, radius * 2f),
                             style = Stroke(
-                                width = 2.8.dp.toPx(),
+                                width = strokeWidth,
                                 cap = StrokeCap.Round,
-                                join = StrokeJoin.Round,
                             ),
+                        )
+                        drawCircle(
+                            color = Palette.textPrimary,
+                            radius = 2.25.dp.toPx(),
+                            center = center,
                         )
                     }
                 }
@@ -1908,14 +1939,14 @@ internal fun Modifier.navigationGlassSurface(
 ): Modifier = composed {
     val light = Palette.isLight
     val base = if (light) {
-        Color.White.copy(alpha = 0.72f)
+        Color.White.copy(alpha = 0.66f)
     } else {
-        Palette.surfaceRaised.copy(alpha = 0.72f)
+        Palette.surfaceRaised.copy(alpha = 0.56f)
     }
     val smoke = if (light) {
         Color.Black.copy(alpha = 0.025f)
     } else {
-        Color.Black.copy(alpha = 0.13f)
+        Color.Black.copy(alpha = 0.08f)
     }
     val topSpecular = if (light) {
         Color.White.copy(alpha = 0.62f)
@@ -1930,7 +1961,7 @@ internal fun Modifier.navigationGlassSurface(
     val lowerShade = if (light) {
         Color.Black.copy(alpha = 0.055f)
     } else {
-        Color.Black.copy(alpha = 0.18f)
+        Color.Black.copy(alpha = 0.12f)
     }
     val rimTop = accentRim ?: if (light) {
         Color.White.copy(alpha = 0.52f)
@@ -1940,7 +1971,7 @@ internal fun Modifier.navigationGlassSurface(
     val rimBottom = if (light) {
         Color.Black.copy(alpha = 0.07f)
     } else {
-        Color.Black.copy(alpha = 0.20f)
+        Color.Black.copy(alpha = 0.15f)
     }
 
     this

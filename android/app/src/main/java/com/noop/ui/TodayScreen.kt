@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Favorite
@@ -1238,7 +1239,7 @@ fun TodayScreen(
     val journalReminderOn = remember { NoopPrefs.journalReminderEnabled(context) }
     // S4: the Synthesis card collapses to a one-liner that expands on tap (default collapsed). Mirrors iOS.
     var synthesisExpanded by remember { mutableStateOf(false) }
-    // Key Metrics stays focused on the user's selected three-to-five signals. Data Sources still
+    // Key Metrics stays focused on the user's selected three-to-six signals. Data Sources still
     // collapses to its summary, and the complete metric catalog remains in history.
     var sourcesExpanded by remember { mutableStateOf(false) }
     var scoringCardSeen by remember { mutableStateOf(ScoringGuidePrefs.cardSeen(context)) }
@@ -2380,20 +2381,39 @@ fun TodayScreen(
                                 onClick = onOpenMetricHistory,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(min = 44.dp),
+                                    .heightIn(min = 48.dp),
+                                contentPadding = PaddingValues(horizontal = Metrics.space2),
                                 colors = ButtonDefaults.textButtonColors(
-                                    contentColor = Palette.textSecondary,
+                                    contentColor = Palette.textPrimary,
                                 ),
                             ) {
-                                Icon(
-                                    Icons.Filled.History,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(Metrics.iconSmall),
-                                )
-                                Spacer(Modifier.width(Metrics.space8))
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(Palette.metricCyan.copy(alpha = 0.12f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Filled.History,
+                                        contentDescription = null,
+                                        tint = Palette.metricCyan,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                                Spacer(Modifier.width(Metrics.gap))
                                 Text(
                                     stringResource(R.string.key_metrics_open_history),
                                     style = NoopType.subhead,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f),
+                                    textAlign = TextAlign.Start,
+                                )
+                                Icon(
+                                    Icons.Filled.ChevronRight,
+                                    contentDescription = null,
+                                    tint = Palette.textTertiary,
+                                    modifier = Modifier.size(16.dp),
                                 )
                             }
                         }
@@ -7563,7 +7583,6 @@ private fun MetricGrid(
     // with a windowed series: Recovery/Effort/Rest open their new trend details; the vitals +
     // Steps/Calories open the same vital_detail trends the Health cards use. Today's Charge DRIVERS stay
     // on the hero ring's breakdown sheet (its existing home) — the tile is the history view.
-    // Weight has no windowed detail yet -> not tappable (null keeps the tile inert rather than lying).
     fun tapFor(metric: KeyMetric): (() -> Unit)? = when (metric) {
         KeyMetric.CHARGE -> ({ onOpenMetric("recovery") })
         KeyMetric.EFFORT -> ({ onOpenMetric("strain") })
@@ -7574,10 +7593,11 @@ private fun MetricGrid(
         KeyMetric.RESPIRATORY -> ({ onOpenMetric("resp") })
         KeyMetric.STEPS -> ({ onOpenMetric("steps") })
         KeyMetric.CALORIES -> ({ onOpenMetric("active_kcal") })
-        KeyMetric.WEIGHT -> null
+        KeyMetric.WEIGHT -> ({ onOpenMetric("weight") })
     }
     val metricColumnCount = if (LocalDensity.current.fontScale >= 1.3f) 1 else 2
-    // Match iOS: two columns normally and one at large text sizes.
+    // Match iOS: two columns normally and one at large text sizes. An odd final tile spans the row
+    // instead of leaving a dead half-column.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         tiles.chunked(metricColumnCount).forEach { rowTiles ->
             // Detailed rows equalise heights (IntrinsicSize.Max + fillMaxHeight, the #399 idiom): a
@@ -7599,7 +7619,6 @@ private fun MetricGrid(
                             .then(if (detailed) Modifier.fillMaxHeight() else Modifier),
                     )
                 }
-                repeat(metricColumnCount - rowTiles.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -9358,7 +9377,7 @@ private fun grouped(value: Int): String =
 //
 // A Today-local dialog for choosing which Key-Metric tiles lead the Control Center and in what order.
 // Display-only: it edits the persisted `today.keyMetrics` pins, never any stored metric. Every tile remains
-// visible; switches pin three to five, and explicit arrows reorder them consistently on every device.
+// visible; switches pin three to six, and explicit arrows reorder them consistently on every device.
 // Mirrors the Apple KeyMetricsEditorSheet.
 
 /** The Key-Metrics header's trailing label for the chosen detailed-graph window. */

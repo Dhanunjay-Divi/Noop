@@ -3,10 +3,10 @@ import SwiftUI
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
-// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to five in
-// their preferred order. A fresh install starts with three useful secondary signals so the grid does not
-// repeat the Recovery, Sleep, and Effort summary immediately above it. Every other metric follows them in
-// the complete catalog. Persistence is display-only: no metric is computed or stored differently.
+// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to six in
+// their preferred order. A fresh install starts with six useful secondary signals so the grid is complete
+// without repeating the Recovery, Sleep, and Effort summary immediately above it. Every other metric
+// remains in the complete catalog. Persistence is display-only: no metric is computed or stored differently.
 //
 // Stored as a single comma-joined string of metric keys in @AppStorage (UserDefaults), the same
 // mechanism every other macOS NOOP preference uses. Android uses the same persisted key and metric
@@ -81,7 +81,9 @@ enum KeyMetric: String, CaseIterable, Identifiable {
 
     /// NOOP's useful fresh-install starting point. These complement the three Daily Signal scores instead
     /// of duplicating them; existing saved selections still decode unchanged.
-    static let defaultSelection: [KeyMetric] = [.hrv, .restingHr, .bloodOxygen]
+    static let defaultSelection: [KeyMetric] = [
+        .hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .weight,
+    ]
 }
 
 /// Display-only persistence for the Key-Metrics layout. Holds an ORDERED list of pinned tiles; a tile not
@@ -90,7 +92,7 @@ enum KeyMetricPrefs {
     /// UserDefaults key — a comma-joined list of `KeyMetric` rawValues in display order.
     static let layoutKey = "today.keyMetrics"
     static let minimumSelectionCount = 3
-    static let maximumSelectionCount = 5
+    static let maximumSelectionCount = 6
 
     /// Encode a valid ordered pin set. This boundary also protects callers other than the editor from
     /// persisting duplicates, an empty dashboard, or more tiles than the Today surface supports.
@@ -99,8 +101,8 @@ enum KeyMetricPrefs {
     }
 
     /// Decode the stored string into an ordered pin set. Empty, unset, or all-unknown data yields the
-    /// three fresh-install defaults. Older app versions allowed more than five; preserving their first
-    /// five makes that migration deterministic and keeps the user's strongest ordering signal.
+    /// six fresh-install defaults. Older app versions allowed more than six; preserving their first
+    /// six makes that migration deterministic and keeps the user's strongest ordering signal.
     static func decodeEnabled(_ raw: String) -> [KeyMetric] {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return KeyMetric.defaultSelection }
@@ -116,13 +118,16 @@ enum KeyMetricPrefs {
         return normalized(result)
     }
 
-    /// Ordered dedupe + bounds shared by encoding and tests. A short or empty request is completed from
-    /// the three fresh-install defaults first, then the canonical catalog. This migrates older one/two-tile
-    /// preferences without discarding the user's chosen order.
+    /// Ordered dedupe + bounds shared by encoding and tests. An empty request restores the complete
+    /// fresh-install snapshot; a short nonempty request fills only to the three-card minimum so an
+    /// intentional compact layout remains compact.
     static func normalized(_ metrics: [KeyMetric]) -> [KeyMetric] {
         var seen = Set<KeyMetric>()
         var selected = Array(metrics.filter { seen.insert($0).inserted }
             .prefix(maximumSelectionCount))
+        if selected.isEmpty {
+            return KeyMetric.defaultSelection
+        }
         for fallback in KeyMetric.defaultSelection + KeyMetric.defaultOrder
         where selected.count < minimumSelectionCount && seen.insert(fallback).inserted {
             selected.append(fallback)
@@ -131,7 +136,7 @@ enum KeyMetricPrefs {
     }
 
     /// The full dashboard catalog with the user's pinned metrics first. Resolving this display order never
-    /// changes or expands the saved three-to-five pin set.
+    /// changes or expands the saved three-to-six pin set.
     static func catalogOrder(startingWith metrics: [KeyMetric]) -> [KeyMetric] {
         let selected = normalized(metrics)
         let selectedSet = Set(selected)

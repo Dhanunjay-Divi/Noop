@@ -18,6 +18,10 @@ final class IPhonePrimaryTabTests: XCTestCase {
             IPhonePrimaryTab.compactControlDimension,
             IPhonePrimaryTab.minimumTouchDimension
         )
+        XCTAssertGreaterThan(
+            IPhonePrimaryTab.compactControlWidth,
+            IPhonePrimaryTab.compactControlDimension
+        )
     }
 
     @MainActor

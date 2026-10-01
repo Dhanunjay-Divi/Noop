@@ -77,7 +77,7 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         )
 
         let alert = try XCTUnwrap(body.range(of: "HealthAlertBanner()"))
-        let reordered = try XCTUnwrap(body.range(of: "ForEach(sectionOrder)"))
+        let reordered = try XCTUnwrap(body.range(of: "orderedTodaySections"))
         XCTAssertLessThan(alert.lowerBound, reordered.lowerBound,
                           "A health warning must be pinned above user-reorderable sections.")
         XCTAssertEqual(body.components(separatedBy: "HealthAlertBanner()").count - 1, 1)
@@ -86,6 +86,32 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         XCTAssertTrue(leaf.contains("if let alert = model.healthAlert"))
         XCTAssertFalse(leaf.contains("@AppStorage"),
                        "A raised health warning must not be permanently hidden by a display preference.")
+    }
+
+    func testMacTodayUsesFullPaneWithResponsiveDashboardFallback() throws {
+        let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+        let body = try slice(
+            source,
+            from: "private var liquidBody: some View",
+            to: ".accessibilityIdentifier(\"noop.today.scroll\")"
+        )
+        let desktop = try slice(
+            source,
+            from: "private var macOrderedTodaySections",
+            to: "#endif\n\n    @ViewBuilder\n    private func todaySection"
+        )
+
+        XCTAssertTrue(body.contains("orderedTodaySections"))
+        XCTAssertTrue(body.contains(".frame(maxWidth: .infinity)"))
+        XCTAssertFalse(body.contains(".frame(maxWidth: 960)"))
+
+        XCTAssertTrue(desktop.contains("ViewThatFits(in: .horizontal)"))
+        XCTAssertTrue(desktop.contains("macWideTodaySections"))
+        XCTAssertTrue(desktop.contains("mobileOrderedTodaySections"))
+        XCTAssertTrue(desktop.contains(".frame(minWidth: 840, maxWidth: .infinity"))
+        XCTAssertTrue(desktop.contains("keyMetricsSection(columnCount: 3)"))
+        XCTAssertTrue(desktop.contains("noop.today.mac-overview.signal"))
+        XCTAssertTrue(desktop.contains("noop.today.mac-overview.plan"))
     }
 
     func testHydrationOffRemovesSavedCardInsteadOfRenderingBlankRow() {

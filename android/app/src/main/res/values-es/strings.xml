@@ -1514,7 +1514,7 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calorías</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Elige qué mosaicos se muestran en tu Control Center y reordénalos con las flechas.</string>
-    <string name="key_metrics_selection_instructions">Fija entre 3 y 5 métricas en la parte superior. Todas las métricas permanecen visibles.</string>
+    <string name="key_metrics_selection_instructions">Fija entre 3 y 6 métricas en la parte superior. Todas las métricas permanecen visibles.</string>
     <string name="key_metrics_selection_count">%1$d de %2$d fijadas</string>
     <string name="key_metrics_show_selected">Mostrar métricas seleccionadas</string>
     <string name="key_metrics_show_all_count">Mostrar todas las métricas (%1$d)</string>

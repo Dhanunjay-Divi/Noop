@@ -1285,36 +1285,40 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "onboarding-editable-measurements")
     }
 
-    func testKeyMetricSelectionEnforcesAccessibleThreeToFiveBoundaries() {
+    func testKeyMetricSelectionEnforcesAccessibleThreeToSixBoundaries() {
         let app = launchDemoScreen("keymetricseditor")
         let recovery = app.switches["noop.key-metric.toggle.charge"]
         let hrv = app.switches["noop.key-metric.toggle.hrv"]
         let restingHR = app.switches["noop.key-metric.toggle.restingHr"]
         let bloodOxygen = app.switches["noop.key-metric.toggle.bloodOxygen"]
+        let respiratory = app.switches["noop.key-metric.toggle.respiratory"]
+        let calories = app.switches["noop.key-metric.toggle.calories"]
 
         XCTAssertTrue(recovery.waitForExistence(timeout: 20))
         XCTAssertTrue(hrv.exists)
-        XCTAssertEqual(recovery.value as? String, "1")
-        XCTAssertFalse(recovery.isEnabled)
-        XCTAssertEqual(hrv.value as? String, "0")
+        XCTAssertEqual(hrv.value as? String, "1")
         XCTAssertTrue(hrv.isEnabled)
+        XCTAssertEqual(recovery.value as? String, "0")
+        XCTAssertFalse(recovery.isEnabled)
 
         hrv.tap()
-        XCTAssertTrue(app.staticTexts["4 of 5 pinned"].waitForExistence(timeout: 3))
-        XCTAssertEqual(hrv.value as? String, "1")
+        XCTAssertTrue(app.staticTexts["5 of 6 pinned"].waitForExistence(timeout: 3))
+        XCTAssertEqual(hrv.value as? String, "0")
         XCTAssertTrue(recovery.isEnabled)
 
         recovery.tap()
-        XCTAssertTrue(app.staticTexts["3 of 5 pinned"].waitForExistence(timeout: 3))
-        XCTAssertEqual(recovery.value as? String, "0")
-        XCTAssertFalse(hrv.isEnabled)
+        XCTAssertTrue(app.staticTexts["6 of 6 pinned"].waitForExistence(timeout: 3))
+        XCTAssertEqual(recovery.value as? String, "1")
+        XCTAssertFalse(calories.isEnabled)
 
-        recovery.tap()
-        XCTAssertTrue(app.staticTexts["4 of 5 pinned"].waitForExistence(timeout: 3))
         restingHR.tap()
-        XCTAssertTrue(app.staticTexts["5 of 5 pinned"].waitForExistence(timeout: 3))
-        XCTAssertEqual(restingHR.value as? String, "1")
-        XCTAssertFalse(bloodOxygen.isEnabled)
+        XCTAssertTrue(app.staticTexts["5 of 6 pinned"].waitForExistence(timeout: 3))
+        bloodOxygen.tap()
+        XCTAssertTrue(app.staticTexts["4 of 6 pinned"].waitForExistence(timeout: 3))
+        respiratory.tap()
+        XCTAssertTrue(app.staticTexts["3 of 6 pinned"].waitForExistence(timeout: 3))
+        XCTAssertFalse(recovery.isEnabled)
+        XCTAssertTrue(hrv.isEnabled)
         keepScreenshot(app, name: "key-metrics-accessible-color-boundaries")
     }
 
@@ -1446,25 +1450,24 @@ final class NOOPiOSUITests: XCTestCase {
         var navigationY = compactNavigation.exists
             ? compactNavigation.frame.minY
             : expandedNavigation.frame.minY
-        var firstFloatingControlY = min(
-            navigationY,
-            quickActions.frame.minY
-        )
-        for _ in 0..<10 where finalControl.frame.maxY + 8 > firstFloatingControlY {
+        for _ in 0..<10 where finalControl.frame.maxY + 8 > navigationY {
             app.swipeUp()
             navigationY = compactNavigation.exists
                 ? compactNavigation.frame.minY
                 : expandedNavigation.frame.minY
-            firstFloatingControlY = min(
-                navigationY,
-                quickActions.frame.minY
-            )
         }
-        XCTAssertTrue(finalControl.isHittable)
+        XCTAssertTrue(
+            waitUntil(timeout: 10) { finalControl.isHittable },
+            "The Sleep Planner's final switch must remain tappable after settling."
+        )
         XCTAssertLessThanOrEqual(
             finalControl.frame.maxY + 8,
-            firstFloatingControlY,
-            "The Sleep Planner's final switch must settle above both floating navigation controls."
+            navigationY,
+            "The Sleep Planner's final switch must settle above the bottom navigation."
+        )
+        XCTAssertFalse(
+            finalControl.frame.intersects(quickActions.frame),
+            "The Sleep Planner's final switch must not intersect the movable action lens."
         )
         keepScreenshot(app, name: "sleep-planner-clear-endpoint")
     }
@@ -1496,16 +1499,22 @@ final class NOOPiOSUITests: XCTestCase {
         var navigationY = compactNavigation.exists
             ? compactNavigation.frame.minY
             : expandedNavigation.frame.minY
-        var firstFloatingControlY = min(navigationY, quickActions.frame.minY)
-        for _ in 0..<8 where sundayWakeRow.frame.maxY + 8 > firstFloatingControlY {
+        for _ in 0..<8 where sundayWakeRow.frame.maxY + 8 > navigationY {
             app.swipeUp()
             navigationY = compactNavigation.exists
                 ? compactNavigation.frame.minY
                 : expandedNavigation.frame.minY
-            firstFloatingControlY = min(navigationY, quickActions.frame.minY)
         }
         XCTAssertTrue(sundayWakeRow.isHittable)
-        XCTAssertLessThanOrEqual(sundayWakeRow.frame.maxY + 8, firstFloatingControlY)
+        XCTAssertLessThanOrEqual(
+            sundayWakeRow.frame.maxY + 8,
+            navigationY,
+            "The final weekday row must settle above the bottom navigation."
+        )
+        XCTAssertFalse(
+            sundayWakeRow.frame.intersects(quickActions.frame),
+            "The final weekday row must not intersect the movable action lens."
+        )
     }
 
     func testDeviceActionsAndFooterClearPersistentNavigation() {
@@ -1536,14 +1545,18 @@ final class NOOPiOSUITests: XCTestCase {
             compactNavigation.exists || expandedNavigation.waitForExistence(timeout: 5),
             "Navigation must remain available in its compact or accessibility-expanded presentation."
         )
+        XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
         let navigationY = compactNavigation.exists
             ? compactNavigation.frame.minY
             : expandedNavigation.frame.minY
-        let firstFloatingControlY = min(navigationY, quickActions.frame.minY)
         XCTAssertLessThanOrEqual(
             footer.frame.maxY + 8,
-            firstFloatingControlY,
-            "The Devices footer must settle above both floating controls."
+            navigationY,
+            "The Devices footer must settle above the bottom navigation."
+        )
+        XCTAssertFalse(
+            footer.frame.intersects(quickActions.frame),
+            "The Devices footer must not intersect the movable action lens."
         )
         keepScreenshot(app, name: "devices-actions-and-clear-endpoint")
     }

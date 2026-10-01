@@ -5,7 +5,7 @@ import StrandDesign
 //
 // A Today-local sheet for choosing which Key-Metric tiles lead the Control Center and in what order.
 // Display-only: it edits the persisted `today.keyMetrics` pin string, never any stored metric. Every tile
-// remains visible; three to five pinned tiles render first. Explicit controls behave identically on macOS
+// remains visible; three to six pinned tiles render first. Explicit controls behave identically on macOS
 // and iOS without depending on List EditMode.
 
 struct KeyMetricsEditorSheet: View {
@@ -150,7 +150,7 @@ struct KeyMetricsEditorSheet: View {
             Text("Edit Key Metrics")
                 .font(StrandFont.rounded(24, weight: .bold))
                 .foregroundStyle(StrandPalette.textPrimary)
-            Text("Pin 3 to 5 metrics at the top. Every metric stays visible.")
+            Text("Pin 3 to 6 metrics at the top. Every metric stays visible.")
                 .font(StrandFont.subhead)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -220,7 +220,7 @@ struct KeyMetricsEditorSheet: View {
             return String(localized: "At least three metrics must stay pinned.")
         }
         if !item.enabled, selectedCount >= KeyMetricPrefs.maximumSelectionCount {
-            return String(localized: "Five metrics are already pinned.")
+            return String(localized: "Six metrics are already pinned.")
         }
         return String(localized: "Pin or unpin this metric.")
     }
