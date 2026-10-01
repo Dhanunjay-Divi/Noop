@@ -1098,7 +1098,7 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "terms-readable-primary-action")
     }
 
-    func testOnboardingDeviceSetupShowsOnlyAvailableLaunchBands() {
+    func testOnboardingDeviceSetupShowsLaunchBandsAndDisablesUnavailableAccountLinkedBand() {
         let app = launchDemoScreen(
             "onboarding",
             extraArguments: ["--demo-onboarding-page", "scan"]
@@ -1113,11 +1113,14 @@ final class NOOPiOSUITests: XCTestCase {
 
         let whoop5 = app.buttons["noop.device-wizard.type.whoop-5-mg"]
         let whoop4 = app.buttons["noop.device-wizard.type.whoop-4"]
+        let accountLinked =
+            app.buttons["noop.device-wizard.type.supplier-band"]
         XCTAssertTrue(whoop5.waitForExistence(timeout: 10))
         XCTAssertTrue(whoop4.waitForExistence(timeout: 5))
-        XCTAssertTrue(whoop5.label.hasPrefix("Compatible band 5.0 / MG."))
-        XCTAssertTrue(whoop4.label.hasPrefix("Compatible band 4.0."))
-        XCTAssertFalse(app.buttons["noop.device-wizard.type.supplier-band"].exists)
+        XCTAssertTrue(accountLinked.waitForExistence(timeout: 5))
+        XCTAssertTrue(whoop5.isEnabled)
+        XCTAssertTrue(whoop4.isEnabled)
+        XCTAssertFalse(accountLinked.isEnabled)
         XCTAssertFalse(app.buttons["noop.device-wizard.type.heart-rate-strap"].exists)
         XCTAssertFalse(app.buttons["noop.device-wizard.type.gym-equipment"].exists)
         XCTAssertFalse(app.buttons["noop.device-wizard.type.oura"].exists)

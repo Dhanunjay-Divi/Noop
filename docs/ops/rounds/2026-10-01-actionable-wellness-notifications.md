@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `locally reverified after first hosted-head remediation; replacement exact-head verification, protected integration, and physical validation pending`
+- State: `locally reverified after final hosted-head remediation; replacement exact-head verification, protected integration, and physical validation pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `4d034b92f6fcfd1dfe05fbe4c698c469f44e4f0a`
@@ -161,6 +161,8 @@ rate-limited.
 | Hosted-head remediation | Pass locally: affected Android 9/9; complete Full Debug 5,255 tests with seven intentional skips; i18n audit; terminology check; 258 release-control tests; required-CI and trusted self-verification; iOS Simulator graph | The replacement tree fixes the hosted failures without changing notification eligibility, delivery semantics, or action runtime | Hosted execution on the replacement SHA or physical notification behavior |
 | Second exact hosted head `45731f878` | All completed policy, backend, and Swift package workflows passed; Android review-sample passed; Android production-shell failed eight `AppShellInstrumentedTest` setup timeouts | The reminder implementation and repository controls remained green while one shared shell fixture failed to satisfy the new onboarding migration boundary | A green final exact head |
 | App-shell fixture remediation | Exact API 35 managed-device class 8/8 pass | The fixture now seeds and restores both the legacy onboarded flag and the required-account onboarding version, so shell tests reach the operational app | Physical notification delivery or hosted execution on the final SHA |
+| Third exact hosted head `0c5cfafca` | Android and all repository-policy jobs passed. Apple exposed stale source-contract assertions after onboarding policy extraction, one stale launch-band UI expectation, and two iOS Simulator launch timeouts. | The exact replacement reached both app graphs and isolated verification-contract drift from the wellness runtime. | A green replacement SHA or physical notification behavior |
+| Final Apple remediation | 97/97 affected macOS tests, complete macOS 2,418 with one intentional skip, and the exact launch-band iOS UI case 1/1 pass locally | Current tests pin the eight-step band-first route, versioned shell gate, disabled unavailable account-linked row, and deferred Safety/appearance reachability | Hosted rerun stability, signed-device delivery, or physical-band behavior |
 | Diff hygiene | Pass | No whitespace/error-marker defect in the current working diff | Functional correctness beyond the listed gates |
 
 ## Physical device and deployment
@@ -181,8 +183,9 @@ rate-limited.
 - Commits: implementation `dc9d7efef4561e854bb5c0504335e442a8a7696f`;
   first remote verification pin `294ff9b5ae6dd81310b0fc372af1473ba43027ac`;
   first hosted remediation `45731f8780e2c0593a0b9ed14a04914bc002bf10`;
-  the commit containing this record carries the final shell-fixture remediation
-- Branch and remote state: PR `#25` is open at remote head `45731f878`;
+  shell-fixture remediation `0c5cfafca9c1856590a965c780684fbac2c761b7`;
+  the commit containing this record carries the final Apple verification remediation
+- Branch and remote state: PR `#25` is open at remote head `0c5cfafca`;
   the commit containing this record is the locally verified replacement
   candidate
 - Repository visibility verified: unchanged

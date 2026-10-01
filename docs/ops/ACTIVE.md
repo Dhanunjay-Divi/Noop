@@ -62,6 +62,13 @@ Last updated: **2026-10-01**
   tests because their shared fixture omitted the new versioned onboarding
   completion marker. No wellness runtime assertion failed. The corrected
   fixture passes the exact eight-test API 35 class locally.
+  Remote head `0c5cfafca` then passed Android and all repository-policy jobs.
+  Apple exposed stale source-contract assertions after onboarding policy
+  extraction, one stale launch-band UI expectation, and two simulator launch
+  timeouts. The corrected verification layer passes 97/97 affected macOS
+  tests, the complete 2,418-case macOS wall with one intentional skip, and the
+  exact launch-band iOS UI case 1/1 locally. A replacement push and exact-head
+  hosted verification remain before protected integration.
 
 - The final PR `#25` replacement is locally verified on
   `codex/mobile-navigation-sparkline-redesign-20260930` at implementation

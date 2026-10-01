@@ -1818,9 +1818,11 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
     }
 
     func testConciseOnboardingDefersSafetyAndAppearanceToReachableAppSurfaces() throws {
-        let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
-        let androidOnboarding = try source(
-            "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt"
+        let appleFlowPolicy = try source(
+            "Strand/Onboarding/OnboardingFlowPolicy.swift"
+        )
+        let androidFlowPolicy = try source(
+            "android/app/src/main/java/com/noop/ui/OnboardingFlowPolicy.kt"
         )
         let iosShell = try source("StrandiOS/App/RootTabView.swift")
         let androidShell = try source(
@@ -1828,17 +1830,15 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         )
 
         let appleSteps = try XCTUnwrap(
-            onboarding.range(
-                of: "static func onboardingSteps(ownershipConfigured _: Bool) -> [Step]"
-            )
+            appleFlowPolicy.range(of: "static func onboardingSteps(")
         )
         let appleRestore = try XCTUnwrap(
-            onboarding.range(
+            appleFlowPolicy.range(
                 of: "static func restoredOnboardingStep(",
-                range: appleSteps.upperBound..<onboarding.endIndex
+                range: appleSteps.upperBound..<appleFlowPolicy.endIndex
             )
         )
-        let appleActiveSteps = onboarding[
+        let appleActiveSteps = appleFlowPolicy[
             appleSteps.lowerBound..<appleRestore.lowerBound
         ]
         XCTAssertFalse(appleActiveSteps.contains(".safetyContacts"))
@@ -1847,16 +1847,16 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertFalse(appleActiveSteps.contains(".dailyRhythm"))
 
         let androidSteps = try XCTUnwrap(
-            androidOnboarding.range(of: "internal fun onboardingPages(")
+            androidFlowPolicy.range(of: "internal fun onboardingPages(")
         )
-        let androidSetupSource = try XCTUnwrap(
-            androidOnboarding.range(
-                of: "internal fun onboardingCompletedDeviceSetupSource(",
-                range: androidSteps.upperBound..<androidOnboarding.endIndex
+        let androidAccountCopy = try XCTUnwrap(
+            androidFlowPolicy.range(
+                of: "internal data class OnboardingAccountCopy(",
+                range: androidSteps.upperBound..<androidFlowPolicy.endIndex
             )
         )
-        let androidActiveSteps = androidOnboarding[
-            androidSteps.lowerBound..<androidSetupSource.lowerBound
+        let androidActiveSteps = androidFlowPolicy[
+            androidSteps.lowerBound..<androidAccountCopy.lowerBound
         ]
         XCTAssertFalse(androidActiveSteps.contains("OnboardingPage.SafetyContacts"))
         XCTAssertFalse(androidActiveSteps.contains("OnboardingPage.Appearance"))

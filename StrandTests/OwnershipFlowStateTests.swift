@@ -233,53 +233,59 @@ final class OwnershipFlowStateTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let source = try String(
+        let wizard = try String(
             contentsOf: root.appendingPathComponent(
                 "Strand/Onboarding/OnboardingWizard.swift"
             ),
             encoding: .utf8
         )
+        let policy = try String(
+            contentsOf: root.appendingPathComponent(
+                "Strand/Onboarding/OnboardingFlowPolicy.swift"
+            ),
+            encoding: .utf8
+        )
 
-        XCTAssertTrue(source.contains("guard reconciliationComplete else { return nil }"))
-        XCTAssertTrue(source.contains("guard accountStepCanContinue("))
-        XCTAssertTrue(source.contains("return .account"))
+        XCTAssertTrue(policy.contains("guard reconciliationComplete else { return nil }"))
+        XCTAssertTrue(policy.contains("guard accountStepCanContinue("))
+        XCTAssertTrue(policy.contains("return .account"))
         XCTAssertTrue(
-            source.contains(
+            policy.contains(
                 "let requiresCompletedClaim = supplierClaimRequired"
             )
         )
         XCTAssertTrue(
-            source.contains(
-                "guard !requiresDeviceSetup || deviceSetupComplete else"
+            policy.contains(
+                "guard deviceSetupComplete else { return .scan }"
             )
         )
-        XCTAssertTrue(source.contains("return .scan"))
+        XCTAssertTrue(policy.contains("return .scan"))
         XCTAssertTrue(
-            source.contains(
-                "&& [.profile, .plan, .done].contains(candidate)"
+            policy.contains(
+                "[.profile, .plan, .done].contains(candidate)"
             )
         )
-        XCTAssertTrue(source.contains("guard !requiresCompletedClaim"))
-        XCTAssertTrue(source.contains("if !ownershipAllows(step) {"))
-        XCTAssertTrue(source.contains("guard ownershipAllows(.done) else {"))
+        XCTAssertTrue(policy.contains("guard !requiresCompletedClaim"))
+        XCTAssertTrue(wizard.contains("if !ownershipAllows(step) {"))
+        XCTAssertTrue(wizard.contains("guard ownershipAllows(.done) else {"))
         XCTAssertTrue(
-            source.contains(
+            wizard.contains(
                 "guard let destination = ownershipDestination(for: next) else"
             )
         )
         XCTAssertTrue(
-            source.contains(
+            wizard.contains(
                 ".onChange(of: ownershipService.phase) { _, _ in"
             )
         )
         XCTAssertTrue(
-            source.contains(
+            wizard.contains(
                 ".onChange(of: ownershipService.isBusy) { _, _ in"
             )
         )
-        XCTAssertTrue(source.contains("DeviceSetupWatcher("))
-        XCTAssertTrue(source.contains(".onReceive(registry.$devices)"))
-        XCTAssertTrue(source.contains("reconcileOwnershipRequirement()"))
+        XCTAssertTrue(wizard.contains("DeviceSetupWatcher("))
+        XCTAssertTrue(wizard.contains(".onReceive(registry.$devices)"))
+        XCTAssertTrue(wizard.contains("reconcileOwnershipRequirement()"))
     }
 
     func testPlanDefaultsToNoopAndRoundTrips() {
