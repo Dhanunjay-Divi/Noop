@@ -70,12 +70,12 @@ class OnboardingAttachContractTest {
     @Test fun onboardingDelegatesPairingToTheSourceAwareWizard() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val onboarding = source(userDir, "OnboardingScreen.kt").readText()
+        val deviceSetupPolicy =
+            source(userDir, "OnboardingDeviceSetupPolicy.kt").readText()
         val addDevice = source(userDir, "AddDeviceWizard.kt").readText()
         val connectStep = onboarding
             .substringAfter("private fun ConnectStep(")
-            .substringBefore(
-                "// A short celebration after a real device source is saved.",
-            )
+            .substringBefore("@Composable\nprivate fun BondedStep()")
 
         assertTrue(onboarding.contains("AddDeviceWizard("))
         assertTrue(onboarding.contains("onboardingCompletedDeviceSetupSource("))
@@ -88,7 +88,17 @@ class OnboardingAttachContractTest {
         )
         assertFalse(onboarding.contains("live.bonded || registrySetupSource"))
         assertFalse(onboarding.contains("LaunchedEffect(live.bonded)"))
-        assertTrue(onboarding.contains("SourceCoordinator.isWhoop(device)"))
+        assertTrue(deviceSetupPolicy.contains("SourceCoordinator.isWhoop(device)"))
+        assertTrue(
+            deviceSetupPolicy.contains(
+                "source == SourceKind.veepoo && !supplierAvailable",
+            ),
+        )
+        assertTrue(
+            deviceSetupPolicy.contains(
+                "supplierRegistrationUsable(device.id)",
+            ),
+        )
         assertTrue(onboarding.contains("\"onboarding.device_setup\""))
         assertTrue(connectStep.contains("appwide_onboarding_device_setup_action"))
         assertFalse(connectStep.contains("viewModel.connect("))
@@ -127,7 +137,7 @@ class OnboardingAttachContractTest {
         assertFalse(addDevice.contains("supplierCommitFailed"))
         assertTrue(
             addDevice.contains(
-                "appwide_onboarding_device_wizard_whoop_subtitle",
+                "appwide_onboarding_device_wizard_compatible_band",
             ),
         )
         assertTrue(
@@ -152,7 +162,7 @@ class OnboardingAttachContractTest {
         assertFalse(addDevice.contains("onSuccess = onClose"))
     }
 
-    @Test fun unconfiguredAccountStepUsesTheGeneratedLocalTestBoundary() {
+    @Test fun unconfiguredAccountStepUsesTheGeneratedFailClosedBoundary() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val onboarding = source(userDir, "OnboardingScreen.kt").readText()
 
@@ -161,13 +171,15 @@ class OnboardingAttachContractTest {
             "appwide_onboarding_account_unconfigured_subtitle",
             "appwide_onboarding_account_release_title",
             "appwide_onboarding_account_release_body",
-            "appwide_onboarding_account_local_title",
-            "appwide_onboarding_account_local_body",
             "appwide_onboarding_account_unconfigured_footer",
         )) {
             assertTrue(key, onboarding.contains("R.string.$key"))
         }
+        assertFalse(onboarding.contains("R.string.appwide_onboarding_account_local_title"))
+        assertFalse(onboarding.contains("R.string.appwide_onboarding_account_local_body"))
         assertTrue(onboarding.contains("OnboardingPage.Account -> AccountAvailabilityStep()"))
+        assertTrue(onboarding.contains("OnboardingPage.Account -> accountStepReady"))
+        assertTrue(onboarding.contains("if (!accountStepReady) return"))
         assertTrue(
             onboarding.contains("targetPage == OnboardingPage.Account &&"),
         )
@@ -204,18 +216,31 @@ class OnboardingAttachContractTest {
         val typeStep = addDevice
             .substringAfter("private fun TypeStep(")
             .substringBefore("/** A shared \"this tier is experimental\" note")
+        val claimEligibleGroup = typeStep
+            .substringAfter("BandPairingOptionGroup {")
+            .substringBefore(
+                "if (selectionScope == AddDeviceSelectionScope.AllDevices)",
+            )
 
-        val supplier = typeStep.indexOf("onPick(DeviceType.SupplierBand)")
-        val whoop5 = typeStep.indexOf("onPick(DeviceType.Whoop5MG)")
-        val whoop4 = typeStep.indexOf("onPick(DeviceType.Whoop4)")
+        val supplier =
+            claimEligibleGroup.indexOf("onPick(DeviceType.SupplierBand)")
+        val whoop5 =
+            claimEligibleGroup.indexOf("onPick(DeviceType.Whoop5MG)")
+        val whoop4 =
+            claimEligibleGroup.indexOf("onPick(DeviceType.Whoop4)")
 
         assertTrue(supplier >= 0)
         assertTrue(whoop5 > supplier)
         assertTrue(whoop4 > whoop5)
-        assertTrue(typeStep.contains("if (supplierAvailable)"))
+        assertTrue(typeStep.contains("BandPairingDiscoveryStage(searching = false)"))
+        assertTrue(claimEligibleGroup.contains("BandPairingOptionRow("))
+        assertTrue(claimEligibleGroup.contains("enabled = supplierAvailable"))
+        assertFalse(claimEligibleGroup.contains("onPick(DeviceType.HrStrap)"))
+        assertFalse(claimEligibleGroup.contains("onPick(DeviceType.GymEquipment)"))
+        assertFalse(claimEligibleGroup.contains("onPick(DeviceType.Oura)"))
         assertTrue(
-            typeStep.contains(
-                "appwide_onboarding_device_wizard_whoop_subtitle",
+            claimEligibleGroup.contains(
+                "appwide_onboarding_device_wizard_compatible_band",
             ),
         )
         assertTrue(
@@ -241,10 +266,25 @@ class OnboardingAttachContractTest {
             ),
         )
         assertTrue(addDevice.contains("resolvedAddDeviceStart(start, supplierAvailable)"))
-        assertTrue(addDevice.contains("if (supplierAvailable)"))
         assertTrue(
             addDevice.contains(
-                "appwide_devices_supplier_display_model",
+                "t == DeviceType.SupplierBand && supplierAvailable",
+            ),
+        )
+        assertTrue(addDevice.contains("enabled = supplierAvailable"))
+        assertTrue(
+            addDevice.contains(
+                "appwide_onboarding_device_wizard_account_linked_title",
+            ),
+        )
+        assertTrue(
+            addDevice.contains(
+                "appwide_onboarding_device_wizard_account_linked_subtitle",
+            ),
+        )
+        assertTrue(
+            addDevice.contains(
+                "appwide_onboarding_device_wizard_account_linked_unavailable",
             ),
         )
         assertTrue(
@@ -286,13 +326,29 @@ class OnboardingAttachContractTest {
     @Test fun dailyRhythmMapsEverydayToolsWithoutEnablingThem() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val onboarding = source(userDir, "OnboardingScreen.kt").readText()
+        val flowPolicy = source(userDir, "OnboardingFlowPolicy.kt").readText()
+        val activePages = flowPolicy
+            .substringAfter("): List<OnboardingPage> = listOf(")
+            .substringBefore(")\n\ninternal data class OnboardingAccountCopy")
 
         assertTrue(onboarding.contains("OnboardingPage.DailyRhythm -> DailyRhythmStep()"))
-        assertTrue(onboarding.contains("DailyRhythm(\"Continue\")"))
-        assertTrue(
-            onboarding.indexOf("DailyRhythm(\"Continue\")") <
-                onboarding.indexOf("Done(\"Enter NOOP\")"),
-        )
+        assertTrue(flowPolicy.contains("DailyRhythm(\"Continue\")"))
+        assertFalse(activePages.contains("OnboardingPage.DailyRhythm"))
+        var previousPage = -1
+        for (page in listOf(
+            "Welcome",
+            "Bluetooth",
+            "Connect",
+            "Account",
+            "Ownership",
+            "Profile",
+            "Plan",
+            "Done",
+        )) {
+            val pageIndex = activePages.indexOf("OnboardingPage.$page")
+            assertTrue(page, pageIndex > previousPage)
+            previousPage = pageIndex
+        }
         for (key in listOf(
             "onboarding_rhythm_morning_body",
             "onboarding_rhythm_quick_body",
@@ -333,9 +389,10 @@ class OnboardingAttachContractTest {
     @Test fun accountBandAndSupplierClaimAreIndependentFailClosedGates() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val onboarding = source(userDir, "OnboardingScreen.kt").readText()
+        val flowPolicy = source(userDir, "OnboardingFlowPolicy.kt").readText()
         val moveTo = onboarding
-            .substringAfter("fun moveTo(target: Int, direction: String) {")
-            .substringBefore("suspend fun refreshDeviceSetupSource(")
+            .substringAfter("fun moveTo(")
+            .substringBefore("fun acceptDeviceSetupSource(")
 
         assertTrue(
             onboarding.contains(
@@ -367,17 +424,25 @@ class OnboardingAttachContractTest {
                 moveTo.indexOf("prefs.edit()"),
         )
         assertTrue(
-            onboarding.contains(
-                "if (ownershipConfigured && !reconciliationComplete) {\n" +
-                    "        return null",
+            flowPolicy.contains(
+                "if (!deviceSetupComplete) return OnboardingPage.Connect",
             ),
         )
         assertTrue(
-            onboarding.contains(
-                "if (requiresBand && !deviceSetupComplete) {\n" +
-                    "        return OnboardingPage.Connect",
+            flowPolicy.contains(
+                "if (requested == OnboardingPage.Account) " +
+                    "return OnboardingPage.Account",
             ),
         )
+        assertTrue(
+            flowPolicy.contains(
+                "if (!ownershipConfigured) return OnboardingPage.Account",
+            ),
+        )
+        assertTrue(flowPolicy.contains("if (!reconciliationComplete) return null"))
+        assertTrue(flowPolicy.contains("!accountStepCanContinue("))
+        assertTrue(flowPolicy.contains("!claimStepCanContinue("))
+        assertTrue(flowPolicy.contains("return OnboardingPage.Ownership"))
         assertTrue(
             onboarding.contains(
                 "supplierClaimRequired = registrySetupSource == SourceKind.veepoo",

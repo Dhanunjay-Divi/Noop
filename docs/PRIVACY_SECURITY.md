@@ -6,7 +6,7 @@ against the actual source tree; file paths and identifiers below are real and ca
 be checked.
 
 > **Not affiliated with WHOOP. Not a medical device.** NOOP is an independent,
-> unofficial, local-first companion app. It interoperates with a WHOOP strap that
+> unofficial wearable companion. It interoperates with a WHOOP strap that
 > **you own**, reading **your own** biometric data from **your own** device. It is
 > not affiliated with, endorsed by, or connected to WHOOP, Inc. All computed
 > outputs (Charge, Effort, Rest, HRV, SpO₂, skin temperature, respiratory rate — Charge/Effort/Rest
@@ -14,26 +14,32 @@ be checked.
 > are approximations and are not clinically validated. Self-tracking features such
 > as the Mind / mood check-in and nutrition import are **informational only** and are
 > **not** a diagnosis, treatment, or dietary/medical advice. Use at your own risk;
-> your data stays on your device unless you explicitly enable one of the
-> destinations disclosed below. See `DISCLAIMER.md`, `TERMS.md`, and
-> `ATTRIBUTION.md` at the repo root.
+> a configured NOOP managed account is required for customer onboarding and app
+> access. Account identity and ownership processing are separate from health-data
+> authority: health data moves only through the consented or migrated boundaries
+> disclosed below. See `DISCLAIMER.md`, `TERMS.md`, and `ATTRIBUTION.md` at the
+> repo root.
 
 ---
 
-## 1. Design principle: offline by default
+## 1. Design principle: required identity, bounded edge collection, explicit health-data authority
 
-NOOP is **offline by default**. The biometric pipeline — strap → on-device decode →
-local SQLite — has no network layer at all: no phone-home, no analytics, no accounts,
-no login, no cloud sync, and no telemetry. Everything NOOP computes about you lives in a
-single SQLite file on your own device.
+Customer onboarding requires a configured NOOP managed account and the
+identity/ownership control-plane requests needed to establish it. The phone
+remains the BLE collection edge, decoder, and bounded SQLite working set. That
+edge path does not make account creation equivalent to health-data upload.
+Durable history and canonical metric publication move to managed services only
+as each data class completes its consent, migration, parity, restore, deletion,
+rollback, security, performance, and physical-device gates.
 
-NOOP's runtime network clients have exactly **four optional data-bearing
-destination classes**: the **AI Coach** (§1.1a), the **Oura history import**
-(§1.1b), a server the user operates through **Self-hosted Sync** (§1.1c), and
-NOOP-hosted account services for **managed backup, Friends, and app-to-app
-Safety** (§1.1e-f). The legacy self-hosted Friends protocol (§1.1d) remains
-only for compatibility and controlled migration; Apple, Android, and macOS do
-not route customers to it. The AI Coach is off until you turn it on with your own API key; when you
+NOOP's runtime network boundaries include the required **account and ownership
+control plane**, plus separately configured or consented destinations: the
+**AI Coach** (§1.1a), the **Oura history import** (§1.1b), retained
+**Self-hosted Sync** compatibility (§1.1c), and NOOP-hosted services for
+**managed history, Friends, and app-to-app Safety** (§1.1e-f). The legacy
+self-hosted Friends protocol (§1.1d) remains only for compatibility and
+controlled migration; Apple, Android, and macOS do not route customers to it.
+The AI Coach is off until you turn it on with your own API key; when you
 ask it a question it sends a short text summary of your recent metrics to the provider you
 choose. The Oura history import is **not even compiled into a default build** — the code
 only exists in your binary if you build from source with your own Oura developer app's
@@ -52,13 +58,16 @@ Send. A confirmed first-release Safety page instead uses the managed app-to-app 
 §1.1e. SMS/voice is a disabled fallback until its separate carrier or DLT, legal, physical-delivery,
 monitoring, failover, and staffed-operations gates pass.
 
-Data enters NOOP three ways. It leaves only when **you** deliberately configure or initiate
-one of the explicit outputs:
+Data enters NOOP through the paths below. Account and ownership metadata move
+during required setup. Health data leaves the phone only through a separately
+consented output or a data class whose managed-authority migration has passed
+its recorded gates:
 
 | Path | Transport | Direction |
 |------|-----------|-----------|
 | Live collection | Bluetooth LE, strap → device | Read-only from the strap |
 | File import (Apple Health, WHOOP CSV, nutrition CSV) | User-selected files on disk | Read-only from disk |
+| NOOP account and ownership | HTTPS with provider identity, App Check, and installation authorization | Identity, terms, installation authorization, and ownership metadata ↔ NOOP's managed service; no health payload is authorized by account creation alone |
 | Oura history import (opt-in build flag, §1.1b) | HTTPS OAuth + REST, `api.ouraring.com` → device | Read-only from your own Oura account |
 | Self-hosted Sync (§1.1c) and legacy Friends compatibility API (§1.1d) | HTTPS, or HTTP only on loopback/private LAN | Selected records ↔ the server you configure. The retained Friends API is not exposed by the current customer Friends route. |
 | Safety Network (§1.1e, §1.4) | HTTPS plus opaque APNs/FCM wake delivery for the managed app-to-app path; optional self-hosted/server-to-provider HTTPS only when separately enabled | Accepted-contact enrollment and an explicit app SOS → the server; authenticated page/response state → NOOP. Location requires separate incident-scoped consent. Band and possible-fall origins, plus SMS/voice fallback, remain unavailable until their own gates pass. |
@@ -67,15 +76,17 @@ one of the explicit outputs:
 | Apple Health export, incl. iOS "Export for Shortcuts" | On-device, user-initiated | NOOP → your Apple Health, on your device only (§1.3) |
 | Safety message handoff | OS share sheet, user-initiated | Prepared text and an optional fresh one-shot location → the destination app and recipient you choose (§1.4) |
 
-The only **NOOP-owned data-bearing network clients** are those four opt-in
-destination classes. Customer Friends and app-to-app Safety use the separately
-configured managed account service; the retained self-hosted Friends protocol
-is not a current customer route. The collection/analysis pipeline itself
-produces no network traffic.
+NOOP-owned network clients are split between required account/ownership
+processing and separately consented health, social, Coach, import, or
+compatibility paths. Customer Friends and app-to-app Safety use the configured
+managed account service; the retained self-hosted Friends protocol is not a
+current customer route. The collection/analysis pipeline does not transmit a
+health data class until its explicit output or managed-authority boundary is
+enabled.
 Apple Health export is an **on-device** hand-off, while Safety sharing is an explicit
 handoff to another app whose own transport and privacy terms then apply — see §1.3–1.4.
 
-### 1.1 Network code: only explicit optional destinations
+### 1.1 Network code: required identity plus explicit data destinations
 
 The biometric pipeline and core decode/analytics packages
 (`WhoopProtocol`, `WhoopStore`, `StrandAnalytics`, `StrandImport`, `StrandDesign`)
@@ -127,11 +138,13 @@ one of the four opt-in data-bearing destinations and runs only on your terms:
   provider you picked, under your own account. NOOP runs no server in between and keeps
   no copy.
 
-If you never enable the AI Coach, Self-hosted Sync, Friends, Safety Network, or
-NOOP+, never build the Oura import in (§1.1b), and never tap **Check for
-updates**, the biometric collection and analytics pipeline makes no network
-request. A default community build has no managed-service configuration, and
-the Oura code is not in that binary.
+Even when Coach, Self-hosted Sync, Friends, Safety Network, NOOP+, Oura import,
+and update checks remain disabled, a configured customer build still contacts
+the managed identity and ownership control plane during setup. Account creation
+does not authorize health-data transfer. A data class reaches managed storage
+or canonical processing only after its separate consent and migration gates.
+A clean community build has no managed-service configuration and therefore
+intentionally stops at the Account step; the Oura code is not in that binary.
 
 ### 1.1b The Oura history import (compiled out by default, bring your own OAuth app)
 
@@ -389,7 +402,7 @@ does not participate in BLE collection or local scoring:
   the entered phone number and anti-abuse/request metadata to Google/Firebase
   and the SMS delivery chain so it can issue a one-time code. Signing in does
   not upload health data. A separate screen identifies the data classes,
-  content modes, disclosed processing purpose, local-first boundary, and exact
+  content modes, disclosed processing purpose, phone-edge boundary, and exact
   policy revision; the user must explicitly allow backup before enrollment or
   upload.
 - **Application and installation authorization.** App Attest on iOS or Play
@@ -495,10 +508,9 @@ That is the entire entitlement file. Four keys:
 
 - **`app-sandbox`** — the process runs inside the macOS App Sandbox container.
 - **`device.bluetooth`** — permits BLE access to talk to the strap. The matching
-  `NSBluetoothAlwaysUsageDescription` string (declared in `project.yml`) states
-  plainly: *"NOOP connects directly to your WHOOP strap over Bluetooth to read heart
-  rate, R-R intervals, battery, and sensor data locally. Data leaves only if you
-  explicitly enable your own self-hosted server."*
+  `NSBluetoothAlwaysUsageDescription` string is declared in `project.yml` and
+  explains direct sensor collection. It is not the account or managed-health
+  disclosure; onboarding and this document define those separate boundaries.
 - **`files.user-selected.read-write`** — lets the app read import files the user
   explicitly picks (and write the database in its own container).
 - **`network.client`** — outbound socket access. Used by the explicit AI Coach,
@@ -517,9 +529,9 @@ Notably **absent**:
   the app cannot wander the disk; it sees only what the user hands it through the
   open panel, plus its own sandbox container.
 
-This is the structural guarantee behind "local by default" on macOS: the sandbox
-permits outbound access required by the deliberate opt-ins above, while app logic gates
-each request — no
+This is the structural macOS egress boundary: the sandbox permits outbound
+access required by the declared account and data destinations above, while app
+logic gates each request — no
 undeclared entitlement could smuggle out a connection the user didn't ask for. The
 property is enforced by the OS, not merely by convention.
 
@@ -537,7 +549,8 @@ NOOP's own store — but it never leaves your **device**, and never touches the 
   choose which metrics to push, and NOOP writes only those, only when you trigger the export. There
   is no background sync.
 - **On-device, not a network upload.** The export is a local hand-off to Apple Health on the same
-  phone. No NOOP server, no cloud, no telemetry is involved — consistent with §1.
+  phone. This export path does not contact NOOP's managed service or telemetry;
+  required account traffic and other managed features are separate.
 - **HealthKit-free option.** The **"Export for Shortcuts"** path produces data for the Apple
   Shortcuts app rather than writing through HealthKit directly, so you can route it with a Shortcut
   you control. Where it does write to Apple Health, it does so through Apple's permission-gated APIs:
@@ -807,7 +820,8 @@ outbound payload **hex**, and offload progress (trim cursors, chunk acks). It is
 in RAM only; the "Share strap log" button writes it to a private app-cache file at
 share time and hands that file to the OS share sheet. Nothing is uploaded by NOOP.
 
-**What it does *not* contain.** No account credentials (there is no account), no
+**What it does *not* contain.** No NOOP account credentials, tokens, or provider
+subjects, and no
 decoded biometric *values* (heart-rate numbers, R-R intervals, SpO₂, skin-temp are not
 written to the log — only control-plane command names and frame-routing), and no
 hello-token or serial hex (the handshake lines log *that* a step happened, not its
@@ -1035,40 +1049,32 @@ visibility alone.
 
 ---
 
-## 4. What NOOP does *not* collect or transmit
+## 4. What NOOP does *not* collect or transmit automatically
 
-- **No required account for core local capability.** App exploration, imports,
-  current compatible-device use, local metrics, exports, and post-activation
-  first-party band use require no continuous account service. A first-party
-  NOOP Band has one narrow ownership-account exception for initial claim and
-  replacement-phone authorization. That control plane stores hashed identity
-  and ownership metadata, not health data, and is disabled in released builds
-  until approved physical possession proof exists. NOOP-hosted Friends uses a
-  managed account, but account access is separate from managed health-backup
-  consent and does not upload health data by itself. The retained self-hosted
-  Friends credential described in §1.1d is compatibility-only and has no
-  routed customer setup flow.
+- **Required account access is not blanket health-data consent.** Customer
+  onboarding and app access require the configured NOOP identity and ownership
+  service. It processes identity, terms, installation authorization, plan, and
+  ownership-control metadata. Creating or signing into that account does not by
+  itself authorize upload of existing health history. Each managed health-data
+  class requires its disclosed consent and completed migration gates. Builds
+  without the complete managed environment fail closed at Account.
   Separately, Oura history import (§1.1b) has *you* sign into *your own* Oura
   account, at Oura's login page, over OAuth—NOOP never sees your password, only
-  the resulting tokens kept in Keychain. NOOP+ is the optional exception:
-  enabling managed backup creates a phone-verified managed account only after
-  the separate consent in §1.1f.
+  the resulting tokens kept in Keychain.
 - **No telemetry / analytics / crash reporting.** No third-party SDKs of that kind.
-- **No required managed cloud in current compatible-device builds.** Self-hosted
-  Sync (§1.1c) remains optional, and its legacy Friends protocol (§1.1d) has no
-  routed customer setup flow. NOOP-hosted Friends account access is separate
-  from health-backup enrollment. Oura history import is inbound-only. NOOP+
-  managed sync is a
-  separate, explicit opt-in and does not currently participate in local
-  collection or metric computation. D-059 is a staged first-party target for
-  durable history and canonical formula publication; no authority changes until
-  its consent, parity, restore, deletion, rollback, security, performance, and
-  physical-device gates pass. Builds without complete managed environment
-  configuration cannot connect to it.
+- **Cloud-authoritative health migration is staged, not implied complete.**
+  The managed account is required, but durable history, canonical formula
+  publication, Friends, Safety, and expanded managed storage remain bounded by
+  their individual implementation, consent, parity, restore, deletion,
+  rollback, security, performance, operations, and physical-device gates.
+  Existing phone data remains in the bounded edge working set until exact
+  server acknowledgement and proven restore permit a recorded migration.
+  Self-hosted Sync (§1.1c) and its legacy Friends protocol (§1.1d) remain
+  compatibility paths, not current customer onboarding alternatives.
 - **No advertising identifiers, no tracking.**
-- **No WHOOP account or API credentials.** NOOP talks only to the strap over local
-  BLE; it does not authenticate against, or pull from, any WHOOP server. (Oura is the
-  one account-based exception — see above and §1.1b.)
+- **No WHOOP account or API credentials.** The required account is a NOOP
+  account. Strap collection does not authenticate against or pull from a WHOOP
+  server. Oura history import uses its separate OAuth boundary (§1.1b).
 
 ---
 
@@ -1076,7 +1082,7 @@ visibility alone.
 
 | Surface | Risk | Mitigation | Where |
 |---------|------|------------|-------|
-| Process | Data exfiltration / network egress | Four explicit optional destination classes: AI Coach (your provider/key and text summary, §1.1a), Oura import (your OAuth app, inbound-only, §1.1b), your self-hosted Sync server (§1.1c, with a compatibility-only legacy Friends API), and separately consented NOOP-hosted managed backup, Friends, and app-to-app Safety (§1.1e-f). No telemetry; default builds have no managed endpoint configuration. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, `Strand/Data/FriendsService.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `infra/gcp/` |
+| Process | Data exfiltration / network egress | Required identity/ownership traffic is separated from consented health-data authority. Additional destinations are AI Coach (your provider/key and text summary, §1.1a), Oura import (your OAuth app, inbound-only, §1.1b), retained self-hosted Sync compatibility (§1.1c), and gated NOOP-hosted managed history, Friends, and app-to-app Safety (§1.1e-f). No telemetry; builds without complete managed configuration fail closed at Account. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, `Strand/Data/FriendsService.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `infra/gcp/` |
 | First-party band ownership | Identity enumeration, duplicate claim, stolen installation credential, weak database principal, terms substitution, cross-account access | Separate default-off control plane; App Check plus verified email/password identity plus random Keychain/Keystore-backed installation credential; hashed provider subject and band identity; digest- and host-pinned no-cache terms; idempotent advisory-locked claim; append-only acceptance/claim/event rows; column-level runtime grants; readiness rejects privilege escalation. The production possession provider always returns unavailable until an approved supplier challenge-bound proof exists. No health payload, email, phone, password, OTP, printed number, raw possession response, or plaintext provider subject is stored. | `server/migrations/026_band_ownership.sql`, `server/app/ownership_*`, `Strand/System/OwnershipFlowState.swift`, `StrandiOS/System/Ownership*`, `android/app/src/main/java/com/noop/ownership/`, `infra/gcp/scripts/configure-ownership-database.py` |
 | NOOP+ managed backup | Identity abuse, cross-tenant access, token leak, oversized/decompression payload, ambiguous upload, over-retention | Separate phone verification and versioned health-data consent; App Check plus ID token plus per-installation credential plus tenant/resource authorization; secret credentials in Keychain/Keystore-backed encrypted storage; one-object generation-safe upload capabilities; compressed and uncompressed bounds plus digests; idempotent manifests/change feed; seven-day raw and 30-day essential local pruning only after exact server validation; revoke and erasure state machines. Apple and Android resume a restore-snapshot-bound ZIP for selected retained managed chunk classes plus `day_ownership`, the only managed document included, verify v2 object and aggregate integrity, and complete a two-pass import validation before any local mutation. Private checkpoints make export and idempotent import resumable. This is not every personal record. The readable sensitive ZIP is user-initiated and is separate from the server `/exports` route, which only verifies a client-produced encrypted archive. Live large-account, effective-expiry, cancellation/auth-refresh, cross-tenant, low-storage, and physical process-death evidence remain open. | `Packages/NoopRemoteSync`, `Packages/WhoopStore`, `Strand/System/ManagedHistoryArchiveWriter.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `server/app/managed_*`, `server/migrations/014_*` through `025_*`, `infra/gcp/` |
 | NOOP+ managed Friends | Alias/invite enumeration, over-sharing, harassment, link interception, stale poke delivery | Random rotatable exact-match aliases; no directory/contact upload; hashed expiring revocable invite capabilities; mutual acceptance; directional six-field allowlists; field clearing; blocks/removal/profile deletion; non-competitive badges; receiver global and per-friend poke controls; quiet hours, cooldowns, daily limits, expiry, leased claims, and idempotent acknowledgement. Received capabilities stay in Keychain/encrypted preferences and diagnostics omit links, aliases, names, IDs, values, and payloads. Current custom links and catch-up-only local notification/haptics are disclosed as pre-launch limitations. | `server/migrations/025_managed_social.sql`, `server/app/managed_repository.py`, `Packages/NoopRemoteSync/.../ManagedSocialModels.swift`, `StrandiOS/System/ManagedFriendsView.swift`, `android/app/src/main/java/com/noop/managed/`, `android/app/src/main/java/com/noop/ui/ManagedFriendsScreen.kt` |

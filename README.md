@@ -5,12 +5,14 @@
 <h1 align="center">NOOP</h1>
 
 <p align="center">
-  <strong>A local-first health, fitness, sleep, nutrition, and Safety companion.</strong>
+  <strong>A connected health, fitness, sleep, nutrition, and Safety companion.</strong>
 </p>
 
 <p align="center">
-  NOOP turns wearable and phone signals into an explainable daily picture while
-  keeping core collection, scoring, history, and export on the user's device.
+  NOOP turns wearable and phone signals into an explainable daily picture. A
+  configured NOOP account is required for setup and access; the phone remains
+  the collection edge and bounded offline working set while managed history
+  and canonical metrics advance through reviewed release gates.
 </p>
 
 <p align="center">
@@ -99,7 +101,7 @@ Today | Trends | Workouts | Sleep | More
 | **Nutrition and Hydration** | Editable meals, nullable nutrients, saved foods, hydration goals, exact entries, and accessible quick logging. |
 | **Safety** | Opt-in paging to accepted NOOP contacts with incident status and optional latest-only location sharing. |
 | **Friends** | Invitation-only, directional sharing with exact-match IDs, explicit field controls, removal, blocking, and receiver-controlled pokes. |
-| **Data controls** | Imports, local backup, export, diagnostics, self-hosted sync, optional NOOP+, device revocation, and erasure. |
+| **Data controls** | Imports, bounded phone storage, managed account services, backup, export, diagnostics, device revocation, and erasure. |
 
 NOOP does not manufacture a score when evidence is absent. Missing input stays
 missing; building, stale, partial, unsupported, and unavailable states remain
@@ -111,13 +113,16 @@ visible to the user.
 Wearable / Health API / import
               |
               v
-       durable local storage
+       phone edge collector
+              |
+              v
+ bounded offline working set
               |
               v
     source and quality checks
               |
               v
-       on-device analytics
+ versioned metric processing
               |
               v
  Today / Sleep / Workouts / Trends
@@ -125,6 +130,12 @@ Wearable / Health API / import
               v
  evidence-qualified optional action
 ```
+
+The phone path remains necessary for responsive collection and temporary
+network loss. Durable managed history and cloud-authoritative metric
+publication are enabled per data class only after recorded consent, parity,
+security, restore, deletion, rollback, performance, and physical-device gates.
+This repository does not claim that production authority migration is complete.
 
 - **Morning:** explain sleep and recovery, show uncertainty, and offer a
   realistic plan rather than a judgment.
@@ -146,25 +157,24 @@ orchestrator and evidence contract.
 The matched Apple and Android onboarding sequence is:
 
 ```text
-Welcome
-  -> product and evidence expectations
+Terms acceptance
+  -> Welcome
   -> Bluetooth explanation
-  -> wear and connect
-  -> optional first-party ownership flow
+  -> connect a supported band
+  -> Create account or Sign in
+  -> ownership confirmation when required
   -> profile
-  -> imports
-  -> explicit notification choice
-  -> optional Safety contacts
-  -> appearance and daily rhythm
-  -> NOOP or NOOP+ preference
+  -> plan preference
   -> Today
 ```
 
-App exploration, imports, local user records, and exports remain account-free.
-A future first-party NOOP Band requires a narrow ownership account for initial
-claim and replacement-phone authorization. Once activated, core collection,
-scoring, history, export, and supported local control must continue without
-NOOP+, payment, subscription, or continuous network access.
+A configured managed NOOP account is required before ownership confirmation
+and app entry. Builds without complete account-service configuration stop at
+the Account step and do not expose anonymous or local-test continuation.
+Account creation does not itself authorize health-data upload: managed history
+and canonical metric publication remain separate, consented, per-data-class
+migrations. The phone retains the bounded working state needed during temporary
+network loss.
 
 The production possession sequence remains hardware-dependent:
 
@@ -183,13 +193,15 @@ supplier contract, neutral SDK adapters, and physical-device matrix exist.
 
 | Capability | NOOP | NOOP+ |
 |---|---:|---:|
-| Local collection and storage | Yes | Yes |
-| On-device metrics and history | Yes | Yes |
+| Required NOOP account access | Yes | Yes |
+| Phone edge collection and bounded offline working set | Yes | Yes |
+| Current metrics and bounded offline history | Yes | Yes |
 | Workouts, Journal, Coach, nutrition, and automations | Yes | Yes |
-| Local backup and export | Yes | Yes |
-| Managed multi-device storage and restore | No | Optional |
-| Managed Friends and app Safety transport | No | Optional |
-| Core operation during a cloud outage | Yes | Yes |
+| Backup and export controls | Yes | Yes |
+| Cloud-authoritative history and canonical metrics | Staged per data class | Staged per data class |
+| Expanded managed storage and multi-device restore | No | Release-gated |
+| Managed Friends and app Safety transport | Release-gated | Release-gated |
+| Bounded operation during temporary network loss | Yes | Yes |
 
 NOOP+ is a separate, explicit consent boundary. Selecting a preference does
 not itself upload data, open checkout, grant entitlement, or turn ownership
@@ -199,7 +211,11 @@ clients, operations, privacy, security, deletion, and recovery gates pass.
 
 ## Privacy And Safety
 
-- Core health storage and analytics are local-first.
+- A configured NOOP account is required for onboarding and app access.
+- The phone remains the collection edge and bounded offline working set;
+  durable managed history and canonical metrics activate only after their
+  recorded migration and release gates pass.
+- Account creation alone does not authorize health-data upload.
 - AI Coach, cloud imports, self-hosted services, and NOOP+ are separate
   destinations. Each remains off until the user deliberately configures or
   consents to it.
@@ -312,7 +328,7 @@ Platform BLE / Health APIs / imports
        +----------+-----------+
        |                      |
        v                      v
- local analytics       optional sync outbox
+ metric processing      gated managed outbox
        |                      |
        v                      v
  bounded read models    resumable transfer
@@ -328,14 +344,14 @@ Packages/WhoopStore        GRDB/SQLite storage and migrations
 Packages/StrandAnalytics   Pure health and fitness policies
 Packages/StrandImport      File and health-data import
 Packages/StrandDesign      Shared Apple design system
-Packages/NoopRemoteSync    Optional self-hosted and managed clients
+Packages/NoopRemoteSync    Managed clients and retained self-host compatibility
 
 Strand/                    Shared Apple app and macOS shell
 StrandiOS/                 iPhone lifecycle and navigation
 StrandiOSWidgets/          Widgets and Live Activities
 NOOPWatch*/                Watch companion targets
 android/                   Android app, storage, analytics, and background work
-server/                    Optional account, sync, Friends, and Safety services
+server/                    Account plus staged sync, Friends, and Safety services
 Tools/                     Verification, localization, release, and QA gates
 ```
 
@@ -346,7 +362,8 @@ Core rules:
 3. Long work is bounded, resumable, cancellable, and kept off the UI thread.
 4. Missing input remains missing.
 5. Every score retains source, formula revision, and explainable evidence.
-6. Core local operation cannot depend on NOOP+ availability.
+6. Bounded phone collection, immediate Safety initiation, export, and current
+   safe offline use cannot depend on payment or continuous network availability.
 7. Safety transport cannot be entered by an ordinary wellness score.
 
 Read [System architecture](docs/ARCHITECTURE.md),
@@ -361,9 +378,10 @@ it is not a production-release claim.
 The supplier-independent source currently includes:
 
 - native Apple and Android product flows;
-- local storage, imports, analytics, workouts, sleep, Journal, Coach,
+- phone edge storage, imports, analytics, workouts, sleep, Journal, Coach,
   nutrition, hydration, diagnostics, backup, and export;
-- optional managed-storage, Friends, and app Safety foundations;
+- managed-account plus staged managed-storage, Friends, and app Safety
+  foundations;
 - bounded observability and cross-platform policy gates;
 - protected release controls and evidence tooling.
 

@@ -1159,8 +1159,8 @@ struct SettingsView: View {
     private var strapCard: some View {
         SettingsSection(
             icon: "antenna.radiowaves.left.and.right",
-            title: "Noop Band",
-            blurb: "NOOP pairs directly with Noop Band over Bluetooth. No separate band app or cloud account is required."
+            title: "Band connection",
+            blurb: "NOOP pairs directly with your supported band over Bluetooth. A configured NOOP account is required for setup and app access; managed health capabilities remain release-gated."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 12) {
@@ -2224,7 +2224,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "info.circle.fill",
             title: "About",
-            blurb: "NOOP: core health data stays local by default."
+            blurb: "NOOP uses required account access with staged managed health services."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 10) {
@@ -2437,7 +2437,7 @@ struct SettingsView: View {
                 }
                 .accessibilityLabel("Project home and source code on GitHub")
 
-                Text("The companion for Noop Band. Your history, live stream, and numbers stay on this device by default. Data leaves only through features you explicitly enable, such as your own self-hosted sync.")
+                Text("NOOP pairs with supported bands through the phone. A managed NOOP account is required for setup and access. The phone keeps a bounded offline working set, while durable history and canonical metrics move to managed services only after their release, consent, security, migration, and validation gates pass.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
