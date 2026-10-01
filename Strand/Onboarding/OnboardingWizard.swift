@@ -313,6 +313,7 @@ public struct OnboardingWizard: View {
                 .frame(maxWidth: 620, maxHeight: .infinity)
                 .clipped()
                 .transition(stepTransition)
+                .accessibilityIdentifier("noop.onboarding.page.\(step.storageValue)")
                 .id(step)                       // re-runs the transition per step
                 .padding(.horizontal, 20)
 

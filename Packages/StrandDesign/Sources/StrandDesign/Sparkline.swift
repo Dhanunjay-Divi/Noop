@@ -9,6 +9,104 @@ import SwiftUI
 // with an optional crisp leading dot at the latest sample and a faint area
 // wash (WHOOP-flat: no bloom). Designed to sit in a card/tile or the menu-bar popover.
 
+struct SparklineCubicSegment {
+    let start: CGPoint
+    let control1: CGPoint
+    let control2: CGPoint
+    let end: CGPoint
+}
+
+enum SparklineGeometry {
+    /// Builds a monotone cubic Hermite curve through every sample. Tangent limiting keeps each
+    /// segment inside its two endpoint values, so smoothing cannot invent a higher peak or lower
+    /// trough than the measured series.
+    static func monotoneSegments(points: [CGPoint]) -> [SparklineCubicSegment] {
+        guard points.count > 1 else { return [] }
+
+        var slopes: [CGFloat] = []
+        slopes.reserveCapacity(points.count - 1)
+        for index in 0..<(points.count - 1) {
+            let width = points[index + 1].x - points[index].x
+            guard width > 0 else { return [] }
+            slopes.append((points[index + 1].y - points[index].y) / width)
+        }
+
+        var tangents = [CGFloat](repeating: 0, count: points.count)
+        tangents[0] = slopes[0]
+        tangents[points.count - 1] = slopes[slopes.count - 1]
+
+        if points.count > 2 {
+            for index in 1..<(points.count - 1) {
+                let previous = slopes[index - 1]
+                let next = slopes[index]
+                guard previous * next > 0 else {
+                    tangents[index] = 0
+                    continue
+                }
+                let previousWidth = points[index].x - points[index - 1].x
+                let nextWidth = points[index + 1].x - points[index].x
+                let firstWeight = 2 * nextWidth + previousWidth
+                let secondWeight = nextWidth + 2 * previousWidth
+                tangents[index] = (firstWeight + secondWeight)
+                    / ((firstWeight / previous) + (secondWeight / next))
+            }
+        }
+
+        for index in slopes.indices {
+            let slope = slopes[index]
+            if abs(slope) < 0.000_001 {
+                tangents[index] = 0
+                tangents[index + 1] = 0
+                continue
+            }
+            let firstRatio = tangents[index] / slope
+            let secondRatio = tangents[index + 1] / slope
+            if firstRatio < 0 {
+                tangents[index] = 0
+            }
+            if secondRatio < 0 {
+                tangents[index + 1] = 0
+            }
+            let boundedFirst = tangents[index] / slope
+            let boundedSecond = tangents[index + 1] / slope
+            let magnitude = boundedFirst * boundedFirst + boundedSecond * boundedSecond
+            if magnitude > 9 {
+                let scale = 3 / magnitude.squareRoot()
+                tangents[index] = scale * boundedFirst * slope
+                tangents[index + 1] = scale * boundedSecond * slope
+            }
+        }
+
+        return slopes.indices.map { index in
+            let start = points[index]
+            let end = points[index + 1]
+            let width = end.x - start.x
+            let lowerY = min(start.y, end.y)
+            let upperY = max(start.y, end.y)
+            let firstY = min(
+                upperY,
+                max(lowerY, start.y + tangents[index] * width / 3)
+            )
+            let secondY = min(
+                upperY,
+                max(lowerY, end.y - tangents[index + 1] * width / 3)
+            )
+            return SparklineCubicSegment(
+                start: start,
+                control1: CGPoint(x: start.x + width / 3, y: firstY),
+                control2: CGPoint(x: end.x - width / 3, y: secondY),
+                end: end
+            )
+        }
+    }
+
+    static func nearestIndex(toX x: CGFloat, points: [CGPoint]) -> Int? {
+        points.indices.min {
+            abs(points[$0].x - x) < abs(points[$1].x - x)
+        }
+    }
+}
+
 public struct Sparkline: View {
 
     public var values: [Double]
@@ -114,7 +212,7 @@ public struct Sparkline: View {
 
                 // Hover affordance: crosshair + highlighted sample + tooltip.
                 if showsHover, !values.isEmpty, let hx = hoverX,
-                   let idx = ChartHoverMath.nearestIndex(toX: hx, count: values.count, width: geo.size.width),
+                   let idx = SparklineGeometry.nearestIndex(toX: hx, points: pts),
                    idx < pts.count {
                     let p = pts[idx]
                     let color = sampleColor(forIndex: idx)
@@ -168,8 +266,12 @@ public struct Sparkline: View {
         let (lo, hi) = bounds
         let span = max(hi - lo, 0.0001)
         let n = values.count
+        let inset = min(max(3, lineWidth * 1.6), max(0, size.width / 4))
+        let usableWidth = max(0, size.width - inset * 2)
         return values.enumerated().map { i, v in
-            let x = n > 1 ? CGFloat(i) / CGFloat(n - 1) * size.width : size.width / 2
+            let x = n > 1
+                ? inset + CGFloat(i) / CGFloat(n - 1) * usableWidth
+                : size.width / 2
             let norm = (v - lo) / span
             let y = size.height - CGFloat(norm) * size.height
             return CGPoint(x: x, y: y)
@@ -180,7 +282,20 @@ public struct Sparkline: View {
         var path = Path()
         guard let first = pts.first else { return path }
         path.move(to: first)
-        for p in pts.dropFirst() { path.addLine(to: p) }
+        let segments = SparklineGeometry.monotoneSegments(points: pts)
+        if segments.count == pts.count - 1 {
+            for segment in segments {
+                path.addCurve(
+                    to: segment.end,
+                    control1: segment.control1,
+                    control2: segment.control2
+                )
+            }
+        } else {
+            for point in pts.dropFirst() {
+                path.addLine(to: point)
+            }
+        }
         return path
     }
 

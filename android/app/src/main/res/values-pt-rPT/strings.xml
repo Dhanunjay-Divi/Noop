@@ -2970,4 +2970,10 @@
     <string name="managed_friends_deletion_scheduled_detail">O Friends e os serviços da conta estão em pausa durante o período de reflexão de 24 horas. Os dados de saúde locais permanecem neste telefone.</string>
     <string name="ownership_progress_step">Passo %1$d de %2$d</string>
     <string name="ownership_setup_complete">Configuração de propriedade concluída.</string>
+    <string name="noop_command_lens_move_left">Mover para a margem esquerda</string>
+    <string name="noop_command_lens_move_right">Mover para a margem direita</string>
+    <string name="noop_command_lens_move_up">Mover para cima</string>
+    <string name="noop_command_lens_move_down">Mover para baixo</string>
+    <string name="noop_command_lens_left_edge">Margem esquerda</string>
+    <string name="noop_command_lens_right_edge">Margem direita</string>
 </resources>

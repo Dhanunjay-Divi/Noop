@@ -555,4 +555,10 @@
     <string name="managed_cloud_error_document_conflict">NOOP сохранил текущие данные. Проверьте последние изменения, затем нажмите «Синхронизировать сейчас», чтобы повторить попытку.</string>
     <string name="ownership_progress_step">Шаг %1$d из %2$d</string>
     <string name="ownership_setup_complete">Настройка владения завершена.</string>
+    <string name="noop_command_lens_move_left">Переместить к левому краю</string>
+    <string name="noop_command_lens_move_right">Переместить к правому краю</string>
+    <string name="noop_command_lens_move_up">Переместить вверх</string>
+    <string name="noop_command_lens_move_down">Переместить вниз</string>
+    <string name="noop_command_lens_left_edge">Левый край</string>
+    <string name="noop_command_lens_right_edge">Правый край</string>
 </resources>

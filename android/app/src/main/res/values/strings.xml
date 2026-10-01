@@ -3006,4 +3006,10 @@
     <string name="app_report_delivery_in_progress">Feedback delivery is in progress.</string>
     <string name="ownership_progress_step">Step %1$d of %2$d</string>
     <string name="ownership_setup_complete">Ownership setup complete.</string>
+    <string name="noop_command_lens_move_left">Move to left edge</string>
+    <string name="noop_command_lens_move_right">Move to right edge</string>
+    <string name="noop_command_lens_move_up">Move up</string>
+    <string name="noop_command_lens_move_down">Move down</string>
+    <string name="noop_command_lens_left_edge">Left edge</string>
+    <string name="noop_command_lens_right_edge">Right edge</string>
 </resources>

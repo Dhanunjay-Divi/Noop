@@ -262,6 +262,27 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
 /// on iOS. The first-run onboarding/pairing wizard, the Terms acknowledgment gate, and the post-update
 /// "What's New" sheet that `ContentView` layers on are reproduced here as `iOSRootView`, wrapped around
 /// `RootTabView` so the iOS app keeps the same gating without depending on the macOS-only shell.
+#if DEBUG
+private enum FreshInstallUITestHarness {
+    static let launchArgument = "--ui-test-reset-first-run"
+
+    static func resetIfRequested(defaults: UserDefaults = .standard) {
+        guard CommandLine.arguments.contains(launchArgument) else { return }
+        [
+            "noop.onboarded",
+            "noop.lastSeenChangelogVersion",
+            "noop.acceptedTermsVersion",
+            "noop.acceptedTermsAt",
+            "noop.firstInstallWelcomePending",
+            "noop.completedFirstInstallWelcome",
+            "noop.lastAcknowledgedTrialBuild",
+            "noop.onboarding.progress.v1",
+            "noop.onboarding.progress.v2",
+        ].forEach { defaults.removeObject(forKey: $0) }
+    }
+}
+#endif
+
 @main
 struct StrandiOSApp: App {
     @UIApplicationDelegateAdaptor(ManagedFirebaseApplicationDelegate.self)
@@ -302,6 +323,9 @@ struct StrandiOSApp: App {
     private var liveActivityShowsEffort = UnitPrefs.liveActivityShowsEffort()
 
     init() {
+        #if DEBUG
+        FreshInstallUITestHarness.resetIfRequested()
+        #endif
         AppDiagnosticsRecorder.shared.start()
         Task {
             await FeedbackUploadCoordinator.shared.start()

@@ -37,12 +37,16 @@ class DailyActionTodayContractTest {
         assertTrue(today.contains("DailyPlanTargetSection("))
         assertTrue(today.contains("TodaySection.WATCH -> TodayDetailSection("))
         assertTrue(today.contains("DailyPlanWatchSection("))
-        assertTrue(
+        assertFalse(
             today.contains(
                 "compactAdjustment = dailyActionPlan.workoutAdjustment",
             ),
         )
-        assertTrue(today.contains("if (!expanded && compactAdjustment != null)"))
+        assertFalse(today.contains("if (!expanded && compactAdjustment != null)"))
+        assertFalse(today.contains("FitnessAgeHeroLane("))
+        assertTrue(today.contains("DashboardCard.FITNESS_AGE"))
+        assertTrue(today.contains("localizedReadinessSummary(readiness)"))
+        assertTrue(today.contains("R.string.appwide_daily_signal_a11y_hint"))
         assertTrue(today.contains("LocalDensity.current.fontScale >= 1.3f"))
         assertTrue(
             today.contains(
@@ -55,6 +59,8 @@ class DailyActionTodayContractTest {
             assertTrue("Missing $it presentation", today.contains("Availability.$it"))
         }
         assertTrue(today.contains("R.string.daily_plan_effort_scale"))
+        assertTrue(today.contains("label = uiString(R.string.l10n_intelligence_screen_effort_8c974bc6)"))
+        assertFalse(today.contains("label = uiString(R.string.l10n_today_screen_strain_79fe380e)"))
         assertFalse(today.contains("Your body can take a demanding session"))
         assertFalse(today.contains("A solid session is well supported"))
     }

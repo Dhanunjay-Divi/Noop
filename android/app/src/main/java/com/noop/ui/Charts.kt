@@ -38,6 +38,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 // MARK: - Charts (pure Compose Canvas — dark, instrument-grade, no external library)
 //
@@ -150,9 +151,89 @@ private fun DrawScope.drawBaseline(color: Color = Palette.hairline) {
 
 // MARK: - Sparkline
 
+internal data class SparklineCubicSegment(
+    val start: Offset,
+    val control1: Offset,
+    val control2: Offset,
+    val end: Offset,
+)
+
+/**
+ * Builds a monotone cubic Hermite curve through every point. Tangent limiting keeps each segment
+ * inside its endpoint values, so presentation smoothing cannot invent a higher peak or lower trough.
+ */
+internal fun monotoneSparklineSegments(points: List<Offset>): List<SparklineCubicSegment> {
+    if (points.size < 2) return emptyList()
+
+    val slopes = ArrayList<Float>(points.size - 1)
+    for (index in 0 until points.lastIndex) {
+        val width = points[index + 1].x - points[index].x
+        if (width <= 0f) return emptyList()
+        slopes += (points[index + 1].y - points[index].y) / width
+    }
+
+    val tangents = FloatArray(points.size)
+    tangents[0] = slopes.first()
+    tangents[points.lastIndex] = slopes.last()
+
+    for (index in 1 until points.lastIndex) {
+        val previous = slopes[index - 1]
+        val next = slopes[index]
+        if (previous * next <= 0f) {
+            tangents[index] = 0f
+            continue
+        }
+        val previousWidth = points[index].x - points[index - 1].x
+        val nextWidth = points[index + 1].x - points[index].x
+        val firstWeight = 2f * nextWidth + previousWidth
+        val secondWeight = nextWidth + 2f * previousWidth
+        tangents[index] = (firstWeight + secondWeight) /
+            ((firstWeight / previous) + (secondWeight / next))
+    }
+
+    for (index in slopes.indices) {
+        val slope = slopes[index]
+        if (abs(slope) < 0.000_001f) {
+            tangents[index] = 0f
+            tangents[index + 1] = 0f
+            continue
+        }
+        if (tangents[index] / slope < 0f) tangents[index] = 0f
+        if (tangents[index + 1] / slope < 0f) tangents[index + 1] = 0f
+        val firstRatio = tangents[index] / slope
+        val secondRatio = tangents[index + 1] / slope
+        val magnitude = firstRatio * firstRatio + secondRatio * secondRatio
+        if (magnitude > 9f) {
+            val scale = 3f / sqrt(magnitude)
+            tangents[index] = scale * firstRatio * slope
+            tangents[index + 1] = scale * secondRatio * slope
+        }
+    }
+
+    return slopes.indices.map { index ->
+        val start = points[index]
+        val end = points[index + 1]
+        val width = end.x - start.x
+        val lowerY = minOf(start.y, end.y)
+        val upperY = maxOf(start.y, end.y)
+        SparklineCubicSegment(
+            start = start,
+            control1 = Offset(
+                x = start.x + width / 3f,
+                y = (start.y + tangents[index] * width / 3f).coerceIn(lowerY, upperY),
+            ),
+            control2 = Offset(
+                x = end.x - width / 3f,
+                y = (end.y - tangents[index + 1] * width / 3f).coerceIn(lowerY, upperY),
+            ),
+            end = end,
+        )
+    }
+}
+
 /**
  * Tiny inline line, no axes — for use inside tiles and list rows. Draws a single
- * smooth-capped stroke spanning the full width. Empty/flat data renders a baseline.
+ * bounded smooth stroke with a subtle area wash and crisp latest-sample marker.
  */
 @Composable
 fun Sparkline(
@@ -175,18 +256,87 @@ fun Sparkline(
             .clearAndSetSemantics { contentDescription = axSummary }
             .drawWithCache {
                 val strokePx = 2f
-                val pad = strokePx
-                val pts = pointsFor(values, size.width, size.height, pad, pad)
+                val clean = values.filter { it.isFinite() }
+                val horizontalInset = maxOf(3f, strokePx * 1.6f)
+                    .coerceAtMost((size.width / 4f).coerceAtLeast(0f))
+                val verticalInset = maxOf(3f, strokePx * 1.5f)
+                val low = clean.minOrNull()
+                val high = clean.maxOrNull()
+                val domain = if (low != null && high != null) {
+                    if (low == high) {
+                        (low - 1.0) to (high + 1.0)
+                    } else {
+                        val domainPad = (high - low) * 0.12
+                        (low - domainPad) to (high + domainPad)
+                    }
+                } else {
+                    0.0 to 1.0
+                }
+                val pts = pointsFor(
+                    values = clean,
+                    width = (size.width - horizontalInset * 2f).coerceAtLeast(0f),
+                    height = size.height,
+                    topPad = verticalInset,
+                    bottomPad = verticalInset,
+                    minV = domain.first,
+                    maxV = domain.second,
+                ).map { Offset(it.x + horizontalInset, it.y) }
                 if (pts.isEmpty()) {
                     onDrawBehind { drawBaseline() }
                 } else {
-                    val path = Path().apply {
+                    val segments = monotoneSparklineSegments(pts)
+                    val linePath = Path().apply {
                         moveTo(pts.first().x, pts.first().y)
-                        for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y)
+                        if (segments.size == pts.size - 1) {
+                            segments.forEach { segment ->
+                                cubicTo(
+                                    segment.control1.x,
+                                    segment.control1.y,
+                                    segment.control2.x,
+                                    segment.control2.y,
+                                    segment.end.x,
+                                    segment.end.y,
+                                )
+                            }
+                        } else {
+                            for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y)
+                        }
+                    }
+                    val areaPath = Path().apply {
+                        moveTo(pts.first().x, pts.first().y)
+                        if (segments.size == pts.size - 1) {
+                            segments.forEach { segment ->
+                                cubicTo(
+                                    segment.control1.x,
+                                    segment.control1.y,
+                                    segment.control2.x,
+                                    segment.control2.y,
+                                    segment.end.x,
+                                    segment.end.y,
+                                )
+                            }
+                        } else {
+                            for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y)
+                        }
+                        lineTo(pts.last().x, size.height)
+                        lineTo(pts.first().x, size.height)
+                        close()
                     }
                     val stroke = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    val areaBrush = Brush.verticalGradient(
+                        colors = listOf(
+                            color.copy(alpha = 0.18f),
+                            Color.Transparent,
+                        ),
+                        startY = 0f,
+                        endY = size.height,
+                    )
+                    val head = pts.last()
                     onDrawBehind {
-                        drawPath(path = path, color = color, style = stroke)
+                        drawPath(path = areaPath, brush = areaBrush)
+                        drawPath(path = linePath, color = color, style = stroke)
+                        drawCircle(color = color, radius = strokePx * 1.55f, center = head)
+                        drawCircle(color = Palette.tipCore, radius = strokePx * 0.65f, center = head)
                     }
                 }
             },

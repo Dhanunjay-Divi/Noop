@@ -340,6 +340,10 @@ final class MoreListParityTests: XCTestCase {
     /// the opaque white plate or hide navigation names from assistive technology.
     func testiPhoneTabBarIsAdaptiveGlass() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
+        let tabBar = try XCTUnwrap(
+            shell.components(separatedBy: "private struct FloatingTabBar").last?
+                .components(separatedBy: "private extension Comparable").first
+        )
 
         XCTAssertTrue(shell.contains(".simultaneousGesture(scrollInteractionGesture)"))
         XCTAssertTrue(shell.contains("abs(dy) > abs(dx) * 1.15"),
@@ -381,7 +385,7 @@ final class MoreListParityTests: XCTestCase {
                       "Light mode needs a transparent smoke tint instead of a milk-white plate.")
         XCTAssertTrue(shell.contains("return .white.opacity(0.94)"),
                       "Light mode must obscure body copy beneath the shape while retaining glass highlights.")
-        XCTAssertTrue(shell.contains("navigationInk(active: active)"),
+        XCTAssertTrue(tabBar.contains("navigationInk(active: active, accent: accent)"),
                       "Navigation ink must adapt to light and dark glass.")
         XCTAssertTrue(shell.contains(".opacity(navigationGlassOpacity)"),
                       "Light mode must fade only the material layer, never the navigation ink.")
@@ -407,7 +411,7 @@ final class MoreListParityTests: XCTestCase {
                        "Accessibility sizes must never hide the persistent visual destination labels.")
         XCTAssertTrue(shell.contains(".font(StrandFont.footnote.weight("),
                       "Tab labels must use semantic Dynamic Type rather than a fixed point size.")
-        XCTAssertFalse(shell.contains(".font(.system(size: 11,"),
+        XCTAssertFalse(tabBar.contains(".font(.system(size: 11,"),
                        "The custom tab bar must not bypass Dynamic Type with a fixed label size.")
         // The rail used to shorten Workouts to a hard-coded "Train". That literal had no String Catalog
         // entry, so it rendered untranslated in all nine locales; it was removed. The rail now draws the

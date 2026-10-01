@@ -187,19 +187,19 @@ struct RootTabView: View {
         // rows render underneath the persistent controls while the user is reading them.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
-                tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
+                tab(todayTabRoot, "Today", "waveform.path.ecg.rectangle.fill", tag: IPhonePrimaryTab.today.rawValue,
                     path: $tabPaths[IPhonePrimaryTab.today.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.today.rawValue])
                     .tag(IPhonePrimaryTab.today.rawValue)
-                tab(TrendsView(), "Trends", "chart.line.uptrend.xyaxis", tag: IPhonePrimaryTab.trends.rawValue,
+                tab(TrendsView(), "Trends", "point.3.connected.trianglepath.dotted", tag: IPhonePrimaryTab.trends.rawValue,
                     path: $tabPaths[IPhonePrimaryTab.trends.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.trends.rawValue])
                     .tag(IPhonePrimaryTab.trends.rawValue)
-                tab(WorkoutsView(), "Workouts", "figure.run", tag: IPhonePrimaryTab.activity.rawValue,
+                tab(WorkoutsView(), "Workouts", "dumbbell.fill", tag: IPhonePrimaryTab.activity.rawValue,
                     path: $tabPaths[IPhonePrimaryTab.activity.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.activity.rawValue])
                     .tag(IPhonePrimaryTab.activity.rawValue)
-                tab(SleepView(), "Sleep", "bed.double", tag: IPhonePrimaryTab.sleep.rawValue,
+                tab(SleepView(), "Sleep", "moon.zzz.fill", tag: IPhonePrimaryTab.sleep.rawValue,
                     path: $tabPaths[IPhonePrimaryTab.sleep.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.sleep.rawValue])
                     .tag(IPhonePrimaryTab.sleep.rawValue)
@@ -249,39 +249,32 @@ struct RootTabView: View {
             }
 
             if !keyboardVisible {
-                HStack(
-                    alignment: .center,
-                    spacing: dynamicTypeSize.isAccessibilitySize ? 4 : 8
-                ) {
-                    FloatingTabBar(
-                        selection: $selectedTab,
-                        compact: tabBarCompact,
-                        onExpand: {
-                            demoCompactPinned = false
-                            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.28)) {
-                                tabBarCompact = false
-                            }
-                            resetTabBarScrollTracking()
-                        },
-                        onReselect: { tag in
-                            // Re-tapping the active tab is navigation-only: from a subpage it pops that tab's
-                            // stack to its root (#135); at the root it scrolls the existing screen to the top
-                            // (#198). Data refresh remains owned by explicit pull-to-refresh and the app's
-                            // launch/sync/staleness paths, so this frequent gesture never starts a broad
-                            // history read or invalidates an otherwise-current Today screen.
+                FloatingTabBar(
+                    selection: $selectedTab,
+                    compact: tabBarCompact,
+                    onExpand: {
+                        demoCompactPinned = false
+                        withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.28)) {
                             tabBarCompact = false
-                            if !tabPaths[tag].isEmpty {
-                                tabPaths[tag] = NavigationPath()
-                            } else {
-                                scrollTop[tag] += 1
-                            }
-                    })
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    FloatingQuickAddButton(compact: tabBarCompact) {
-                        withAnimation(Self.sheetEase) { quickAction = .menu }
+                        }
+                        resetTabBarScrollTracking()
+                    },
+                    onReselect: { tag in
+                        // Re-tapping the active tab is navigation-only: from a subpage it pops that tab's
+                        // stack to its root (#135); at the root it scrolls the existing screen to the top
+                        // (#198). Data refresh remains owned by explicit pull-to-refresh and the app's
+                        // launch/sync/staleness paths, so this frequent gesture never starts a broad
+                        // history read or invalidates an otherwise-current Today screen.
+                        tabBarCompact = false
+                        if !tabPaths[tag].isEmpty {
+                            tabPaths[tag] = NavigationPath()
+                        } else {
+                            scrollTop[tag] += 1
+                        }
                     }
-                }
+                )
+                .frame(maxWidth: 500)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 8 : 12)
                 .padding(.bottom, 8)
                 .background {
@@ -292,6 +285,14 @@ struct RootTabView: View {
                         )
                     }
                 }
+
+                MovableNoopCommandLens(
+                    bottomClearance: visibleTabBarHeight + 18
+                ) {
+                    withAnimation(Self.sheetEase) { quickAction = .menu }
+                }
+                .transition(.opacity)
+                .zIndex(4)
             }
 
             if !keyboardVisible, !contextualActions.visibleActions.isEmpty {
@@ -1099,7 +1100,7 @@ struct RootTabView: View {
         .environment(\.scrollPositionReporter, { offset in
             reportScrollPosition(offset, for: IPhonePrimaryTab.more.rawValue)
         })
-        .tabItem { Label("More", systemImage: "ellipsis.circle.fill") }
+        .tabItem { Label("More", systemImage: "circle.grid.2x2.fill") }
     }
 
     /// Account ownership and data continuity are setup-critical, so they stay visible above the
@@ -1684,7 +1685,7 @@ private struct QuickActionSheet: View {
                 .padding(.bottom, 14)
 
             HStack {
-                Text("QUICK ACTIONS")
+                Text("HOW CAN NOOP HELP?")
                     .font(StrandFont.overline)
                     .tracking(0)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1782,8 +1783,23 @@ private struct QuickActionSheet: View {
                     .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: 48, height: 48)
-                    .background(Circle().fill(StrandPalette.surfaceInset))
-                    .overlay(Circle().strokeBorder(StrandPalette.hairline, lineWidth: 0.8))
+                    .background {
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        tint.opacity(0.20),
+                                        StrandPalette.surfaceInset,
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .strokeBorder(tint.opacity(0.32), lineWidth: 0.8)
+                    )
                 Text(title)
                     .font(StrandFont.footnote.weight(.semibold))
                     .foregroundStyle(StrandPalette.textPrimary)
@@ -1811,9 +1827,10 @@ private struct FloatingTabBarHeightPreferenceKey: PreferenceKey {
     }
 }
 
-/// The signature bottom bar: one smoked glass navigation rail plus a separate quick-action button.
-/// The selected capsule moves inside the rail, then becomes the current-tab button when scrolling
-/// compacts navigation. Real iOS 26 Liquid Glass is used where available, with a material fallback.
+/// The signature bottom bar: one compact smoked-glass dock plus a separate movable edge action lens.
+/// Selection is an icon-sized halo rather than a full tab capsule, then becomes the current-tab
+/// disclosure when scrolling compacts navigation. Real iOS 26 Liquid Glass is used where available,
+/// with a material fallback.
 private struct FloatingTabBar: View {
     /// Reserve the expanded bar from the first layout pass. Its 48pt body plus bottom breathing room
     /// measures about 56pt; 76pt leaves an optical/touch margin and keeps the next card's rounded edge
@@ -1842,11 +1859,11 @@ private struct FloatingTabBar: View {
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
     private let nav = [
-        Item(title: "Today", icon: "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue),
-        Item(title: "Trends", icon: "chart.line.uptrend.xyaxis", tag: IPhonePrimaryTab.trends.rawValue),
-        Item(title: "Workouts", icon: "figure.run", tag: IPhonePrimaryTab.activity.rawValue),
-        Item(title: "Sleep", icon: "bed.double", tag: IPhonePrimaryTab.sleep.rawValue),
-        Item(title: "More", icon: "ellipsis", tag: IPhonePrimaryTab.more.rawValue),
+        Item(title: "Today", icon: "waveform.path.ecg.rectangle.fill", tag: IPhonePrimaryTab.today.rawValue),
+        Item(title: "Trends", icon: "point.3.connected.trianglepath.dotted", tag: IPhonePrimaryTab.trends.rawValue),
+        Item(title: "Workouts", icon: "dumbbell.fill", tag: IPhonePrimaryTab.activity.rawValue),
+        Item(title: "Sleep", icon: "moon.zzz.fill", tag: IPhonePrimaryTab.sleep.rawValue),
+        Item(title: "More", icon: "circle.grid.2x2.fill", tag: IPhonePrimaryTab.more.rawValue),
     ]
 
     private static let labelLineCount = 1
@@ -1884,6 +1901,23 @@ private struct FloatingTabBar: View {
 
     private var currentItem: Item {
         nav.first(where: { $0.tag == selection }) ?? nav[0]
+    }
+    private var currentAccent: Color {
+        navigationAccent(for: currentItem.tag)
+    }
+    private func navigationAccent(for tag: Int) -> Color {
+        switch tag {
+        case IPhonePrimaryTab.today.rawValue:
+            return StrandPalette.chargeColor
+        case IPhonePrimaryTab.trends.rawValue:
+            return StrandPalette.metricCyan
+        case IPhonePrimaryTab.activity.rawValue:
+            return StrandPalette.metricAmber
+        case IPhonePrimaryTab.sleep.rawValue:
+            return StrandPalette.restColor
+        default:
+            return StrandPalette.textPrimary
+        }
     }
     /// The label drawn in the rail. Deliberately the same localized title VoiceOver announces: a
     /// visible/spoken mismatch has to earn itself, and the previous hard-coded English shortening could
@@ -1926,24 +1960,30 @@ private struct FloatingTabBar: View {
                ? (appearanceMode == .black ? 0.76 : 0.72)
                : 0.62)
     }
-    private func navigationInk(active: Bool) -> Color {
-        if colorScheme == .dark {
-            return active
-                ? StrandPalette.chargeColor
-                : .white.opacity(colorSchemeContrast == .increased ? 0.82 : 0.70)
+    private func navigationInk(active: Bool, accent: Color) -> Color {
+        guard active else {
+            return colorScheme == .dark
+                ? .white.opacity(colorSchemeContrast == .increased ? 0.82 : 0.70)
+                : .black.opacity(colorSchemeContrast == .increased ? 0.76 : 0.62)
         }
-        return active ? .black.opacity(0.92) : .black.opacity(colorSchemeContrast == .increased ? 0.76 : 0.62)
+        return accent
     }
-    private var selectedPillFill: Color {
-        if reduceTransparency || colorSchemeContrast == .increased {
-            return colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10)
-        }
-        return colorScheme == .dark
-            ? .white.opacity(appearanceMode == .black ? 0.12 : 0.15)
-            : .black.opacity(0.075)
+    private func selectedHaloFill(accent: Color) -> LinearGradient {
+        LinearGradient(
+            colors: [
+                accent.opacity(colorScheme == .dark ? 0.28 : 0.18),
+                accent.opacity(colorScheme == .dark ? 0.10 : 0.07),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
-    private var selectedPillStroke: Color {
-        colorScheme == .dark ? .white.opacity(0.11) : .black.opacity(0.085)
+    private func selectedHaloStroke(accent: Color) -> Color {
+        accent.opacity(
+            reduceTransparency || colorSchemeContrast == .increased
+                ? 0.72
+                : (colorScheme == .dark ? 0.52 : 0.42)
+        )
     }
 
     var body: some View {
@@ -1966,9 +2006,12 @@ private struct FloatingTabBar: View {
                     .navigationGlass(in: Circle(), tint: navigationGlassTint)
                     .opacity(navigationGlassOpacity)
             } else {
-                Capsule()
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(.clear)
-                    .navigationGlass(in: Capsule(), tint: navigationGlassTint)
+                    .navigationGlass(
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous),
+                        tint: navigationGlassTint
+                    )
                     .opacity(navigationGlassOpacity)
             }
         }
@@ -1976,25 +2019,25 @@ private struct FloatingTabBar: View {
             if visuallyCompact {
                 Circle().fill(navigationScrim)
             } else {
-                Capsule().fill(navigationScrim)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(navigationScrim)
             }
         }
         .overlay {
             if visuallyCompact {
                 Circle().strokeBorder(
-                    colorScheme == .dark
-                        ? StrandPalette.chargeColor.opacity(0.30)
-                        : Color.black.opacity(0.10),
-                    lineWidth: 0.7
+                    currentAccent.opacity(colorScheme == .dark ? 0.55 : 0.36),
+                    lineWidth: 0.9
                 )
             } else {
-                Capsule().strokeBorder(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(
                     LinearGradient(colors: [
-                        .white.opacity(colorScheme == .dark ? 0.11 : 0.50),
-                        .white.opacity(colorScheme == .dark ? 0.025 : 0.10),
-                        .black.opacity(colorScheme == .dark ? 0.15 : 0.06),
-                    ], startPoint: .top, endPoint: .bottom),
-                    lineWidth: 0.7
+                        currentAccent.opacity(colorScheme == .dark ? 0.30 : 0.20),
+                        .white.opacity(colorScheme == .dark ? 0.13 : 0.42),
+                        currentAccent.opacity(colorScheme == .dark ? 0.14 : 0.08),
+                    ], startPoint: .leading, endPoint: .trailing),
+                    lineWidth: 0.8
                 )
             }
         }
@@ -2006,8 +2049,8 @@ private struct FloatingTabBar: View {
                    value: visuallyCompact)
     }
 
-    /// The full wayfinding state. The separate circular quick-action control is composed beside this
-    /// island by RootTabView, so it remains app-wide in both expanded and compact presentations.
+    /// The full wayfinding state. The movable action lens is composed independently by RootTabView,
+    /// so the dock always reads as exactly five destinations in expanded and compact presentations.
     private var expandedBar: some View {
         HStack(spacing: dynamicTypeSize.isAccessibilitySize ? 0 : IPhonePrimaryTab.itemSpacing) {
             ForEach(nav) { item in tabButton(item) }
@@ -2024,19 +2067,25 @@ private struct FloatingTabBar: View {
     /// the full rail; a downward content gesture does the same through the shell's scroll tracker.
     private var compactButton: some View {
         Button(action: onExpand) {
-            Image(systemName: selection == IPhonePrimaryTab.more.rawValue
-                  ? "ellipsis.circle"
-                  : currentItem.icon)
+            Image(systemName: currentItem.icon)
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(navigationInk(active: true))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(
+                    navigationInk(active: true, accent: currentAccent)
+                )
                 .frame(
                     width: IPhonePrimaryTab.compactControlDimension,
                     height: IPhonePrimaryTab.compactControlDimension
                 )
                 .background {
                     Circle()
-                        .fill(selectedPillFill)
-                        .overlay(Circle().strokeBorder(selectedPillStroke, lineWidth: 0.6))
+                        .fill(selectedHaloFill(accent: currentAccent))
+                        .overlay(
+                            Circle().strokeBorder(
+                                selectedHaloStroke(accent: currentAccent),
+                                lineWidth: 0.8
+                            )
+                        )
                         .padding(3)
                         .matchedGeometryEffect(
                             id: "selected-tab-indicator",
@@ -2057,6 +2106,7 @@ private struct FloatingTabBar: View {
 
     private func tabButton(_ item: Item) -> some View {
         let active = selection == item.tag
+        let accent = navigationAccent(for: item.tag)
         return Button {
             if active {
                 onReselect(item.tag)
@@ -2064,13 +2114,46 @@ private struct FloatingTabBar: View {
                 selection = item.tag
             }
         } label: {
-            VStack(spacing: 3) {
-                Image(systemName: item.icon)
-                    .font(.system(size: 18, weight: active ? .semibold : .regular))
-                    // Selection gets one brief, physical lift. It communicates the tab change without
-                    // turning navigation into another continuously moving part of the health dashboard.
-                    .scaleEffect(active ? 1.08 : 1)
-                    .offset(y: active ? -1 : 0)
+            VStack(spacing: 2) {
+                ZStack {
+                    if active {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(selectedHaloFill(accent: accent))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .strokeBorder(
+                                        selectedHaloStroke(accent: accent),
+                                        lineWidth: 0.8
+                                    )
+                            )
+                            .matchedGeometryEffect(
+                                id: "selected-tab-indicator",
+                                in: navigationMorph
+                            )
+                    }
+                    Image(systemName: item.icon)
+                        .font(.system(size: 17, weight: active ? .semibold : .regular))
+                        .symbolRenderingMode(.hierarchical)
+                        // Selection gets one brief, physical lift. It communicates the tab change without
+                        // turning navigation into another continuously moving part of the health dashboard.
+                        .scaleEffect(active ? 1.06 : 1)
+                        .offset(y: active ? -0.5 : 0)
+                }
+                .frame(width: 34, height: 24)
+                .overlay(alignment: .top) {
+                    if active {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [accent.opacity(0.45), accent],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: 16, height: 2)
+                            .offset(y: -3)
+                    }
+                }
                 Text(visualTitle(for: item))
                     // Fixed navigation remains one line like a native tab bar. The local Dynamic Type cap,
                     // tightening and bounded scaling keep every shipped localized title whole; tail
@@ -2087,26 +2170,12 @@ private struct FloatingTabBar: View {
                             * CGFloat(Self.labelLineCount)
                     )
             }
-            .foregroundStyle(navigationInk(active: active))
+            .foregroundStyle(navigationInk(active: active, accent: accent))
             .frame(maxWidth: .infinity)
             .frame(minWidth: IPhonePrimaryTab.minimumTouchDimension)
             .frame(minHeight: IPhonePrimaryTab.minimumTouchDimension)
             .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 0 : 2)
-            .background {
-                if active {
-                    Capsule(style: .continuous)
-                        .fill(selectedPillFill)
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .strokeBorder(selectedPillStroke, lineWidth: 0.6)
-                        )
-                        .matchedGeometryEffect(
-                            id: "selected-tab-indicator",
-                            in: navigationMorph
-                        )
-                }
-            }
-            .contentShape(Capsule(style: .continuous))
+            .contentShape(Rectangle())
             .animation(NoopMotion.gated(NoopMotion.value, reduced: reduceMotion), value: active)
         }
         .buttonStyle(.plain)
@@ -2122,13 +2191,104 @@ private struct FloatingTabBar: View {
 
 }
 
-private struct FloatingQuickAddButton: View {
-    var compact: Bool
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+private enum NoopCommandLensEdge: String {
+    case leading
+    case trailing
+}
+
+private struct NoopCommandLensLayout {
+    static let touchSize = CGSize(width: 48, height: 52)
+
+    let containerSize: CGSize
+    let safeAreaInsets: EdgeInsets
+    let bottomClearance: CGFloat
+
+    private var minimumX: CGFloat {
+        safeAreaInsets.leading + Self.touchSize.width / 2 + 2
+    }
+
+    private var maximumX: CGFloat {
+        max(
+            minimumX,
+            containerSize.width - safeAreaInsets.trailing - Self.touchSize.width / 2 - 2
+        )
+    }
+
+    private var minimumY: CGFloat {
+        max(
+            safeAreaInsets.top + Self.touchSize.height / 2 + 18,
+            86
+        )
+    }
+
+    private var maximumY: CGFloat {
+        max(
+            minimumY,
+            containerSize.height
+                - safeAreaInsets.bottom
+                - bottomClearance
+                - Self.touchSize.height / 2
+                - 12
+        )
+    }
+
+    func position(edge: NoopCommandLensEdge, verticalFraction: Double) -> CGPoint {
+        CGPoint(
+            x: edge == .leading ? minimumX : maximumX,
+            y: minimumY + (maximumY - minimumY) * CGFloat(verticalFraction.clamped(to: 0...1))
+        )
+    }
+
+    func clamped(_ point: CGPoint) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, minimumX), maximumX),
+            y: min(max(point.y, minimumY), maximumY)
+        )
+    }
+
+    func snappedEdge(for point: CGPoint) -> NoopCommandLensEdge {
+        point.x < containerSize.width / 2 ? .leading : .trailing
+    }
+
+    func verticalFraction(for y: CGFloat) -> Double {
+        let span = max(1, maximumY - minimumY)
+        return Double(((y - minimumY) / span).clamped(to: 0...1))
+    }
+}
+
+private struct NoopCommandMonogram: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + rect.width * 0.22, y: rect.maxY - rect.height * 0.20))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.22, y: rect.minY + rect.height * 0.20))
+        path.addLine(to: CGPoint(x: rect.maxX - rect.width * 0.22, y: rect.maxY - rect.height * 0.20))
+        path.addLine(to: CGPoint(x: rect.maxX - rect.width * 0.22, y: rect.minY + rect.height * 0.20))
+        return path
+    }
+}
+
+private struct MovableNoopCommandLens: View {
+    let bottomClearance: CGFloat
     let action: () -> Void
 
+    @AppStorage("noop.commandLens.edge") private var storedEdge = NoopCommandLensEdge.trailing.rawValue
+    @AppStorage("noop.commandLens.verticalFraction") private var verticalFraction = 0.76
+    @GestureState private var dragTranslation = CGSize.zero
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.noopAppearanceMode) private var appearanceMode
+
+    private var edge: NoopCommandLensEdge {
+        NoopCommandLensEdge(rawValue: storedEdge) ?? .trailing
+    }
+
     private var opticalScrim: Color {
         if reduceTransparency {
             return colorScheme == .dark ? .black.opacity(0.96) : .white.opacity(0.98)
@@ -2138,45 +2298,158 @@ private struct FloatingQuickAddButton: View {
             : .white.opacity(0.94)
     }
 
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "plus")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(colorScheme == .dark ? StrandPalette.chargeColor : Color.black.opacity(0.9))
-                .frame(width: 48, height: 48)
-                .background {
-                    Circle()
-                        .fill(opticalScrim)
-                        .navigationGlass(
-                            in: Circle(),
-                            tint: reduceTransparency
-                                ? (colorScheme == .dark ? .black.opacity(0.96) : .white.opacity(0.98))
-                                : (colorScheme == .dark
-                                   ? .black.opacity(appearanceMode == .black ? 0.30 : 0.24)
-                                   : .black.opacity(0.09))
-                        )
-                        .opacity(reduceTransparency ? 1 : (colorScheme == .dark ? 0.86 : 0.72))
-                }
-                .overlay(
-                    Circle().strokeBorder(
-                        colorScheme == .dark
-                            ? StrandPalette.chargeColor.opacity(0.46)
-                            : Color.black.opacity(0.10),
-                        lineWidth: 0.7
-                    )
-                )
-                .shadow(
-                    color: .black.opacity(colorScheme == .dark ? 0.20 : 0.10),
-                    radius: 9,
-                    x: 0,
-                    y: 4
-                )
-                .contentShape(Circle())
+    private var lensShape: UnevenRoundedRectangle {
+        let outerRadius: CGFloat = 7
+        let innerRadius: CGFloat = 16
+        return UnevenRoundedRectangle(
+            topLeadingRadius: edge == .leading ? outerRadius : innerRadius,
+            bottomLeadingRadius: edge == .leading ? outerRadius : innerRadius,
+            bottomTrailingRadius: edge == .trailing ? outerRadius : innerRadius,
+            topTrailingRadius: edge == .trailing ? outerRadius : innerRadius,
+            style: .continuous
+        )
+    }
+
+    private var lensFace: some View {
+        let glassTint: Color = if reduceTransparency {
+            colorScheme == .dark ? .black.opacity(0.96) : .white.opacity(0.98)
+        } else if colorScheme == .dark {
+            .black.opacity(appearanceMode == .black ? 0.28 : 0.22)
+        } else {
+            .black.opacity(0.08)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Quick actions")
-        .accessibilityIdentifier("noop.quick-actions")
-        .accessibilityHint("Opens Updates, workout, strength, meal, journal, hydration, HRV, breathing, intervals, and Live HR actions")
+        let surfaceOpacity = reduceTransparency ? 1 : (colorScheme == .dark ? 0.82 : 0.70)
+        let rimTop = Color.white.opacity(colorScheme == .dark ? 0.24 : 0.52)
+        let shadowOpacity = colorScheme == .dark ? 0.12 : 0.06
+
+        return NoopCommandMonogram()
+            .stroke(
+                LinearGradient(
+                    colors: [StrandPalette.chargeBright, StrandPalette.metricCyan],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                style: StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round)
+            )
+            .frame(width: 18, height: 22)
+            .offset(x: edge == .leading ? 1 : -1)
+            .frame(width: 28, height: 38)
+            .background {
+                lensShape
+                    .fill(opticalScrim)
+                    .navigationGlass(in: lensShape, tint: glassTint)
+                    .opacity(surfaceOpacity)
+            }
+            .overlay {
+                lensShape.strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            rimTop,
+                            StrandPalette.metricCyan.opacity(0.58),
+                            StrandPalette.chargeColor.opacity(0.34),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.75
+                )
+            }
+            .shadow(
+                color: StrandPalette.chargeColor.opacity(shadowOpacity),
+                radius: 7,
+                x: 0,
+                y: 2
+            )
+            .offset(x: edge == .leading ? -9 : 9)
+            .frame(
+                width: NoopCommandLensLayout.touchSize.width,
+                height: NoopCommandLensLayout.touchSize.height
+            )
+            .contentShape(Rectangle())
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let layout = NoopCommandLensLayout(
+                containerSize: geometry.size,
+                safeAreaInsets: geometry.safeAreaInsets,
+                bottomClearance: bottomClearance
+            )
+            let restingPosition = layout.position(
+                edge: edge,
+                verticalFraction: verticalFraction
+            )
+            let displayPosition = layout.clamped(
+                CGPoint(
+                    x: restingPosition.x + dragTranslation.width,
+                    y: restingPosition.y + dragTranslation.height
+                )
+            )
+            Button(action: action) { lensFace }
+            .buttonStyle(.plain)
+            .position(displayPosition)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 6)
+                    .updating($dragTranslation) { value, state, _ in
+                        state = value.translation
+                    }
+                    .onEnded { value in
+                        let finalPoint = layout.clamped(
+                            CGPoint(
+                                x: restingPosition.x + value.translation.width,
+                                y: restingPosition.y + value.translation.height
+                            )
+                        )
+                        updatePosition(
+                            edge: layout.snappedEdge(for: finalPoint),
+                            verticalFraction: layout.verticalFraction(for: finalPoint.y)
+                        )
+                    }
+            )
+            .accessibilityLabel("NOOP action center")
+            .accessibilityValue(edge == .leading ? "Left edge" : "Right edge")
+            .accessibilityIdentifier("noop.quick-actions")
+            .accessibilityHint("Double-tap to open. Drag to move.")
+            .accessibilityAction(named: Text("Move to left edge")) {
+                updatePosition(edge: .leading, verticalFraction: verticalFraction)
+            }
+            .accessibilityAction(named: Text("Move to right edge")) {
+                updatePosition(edge: .trailing, verticalFraction: verticalFraction)
+            }
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment:
+                    updatePosition(
+                        edge: edge,
+                        verticalFraction: min(1, verticalFraction + 0.10)
+                    )
+                case .decrement:
+                    updatePosition(
+                        edge: edge,
+                        verticalFraction: max(0, verticalFraction - 0.10)
+                    )
+                @unknown default:
+                    break
+                }
+            }
+        }
+    }
+
+    private func updatePosition(
+        edge: NoopCommandLensEdge,
+        verticalFraction: Double
+    ) {
+        let changes = {
+            storedEdge = edge.rawValue
+            self.verticalFraction = verticalFraction.clamped(to: 0...1)
+        }
+        if reduceMotion {
+            changes()
+        } else {
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
+                changes()
+            }
+        }
     }
 }
 

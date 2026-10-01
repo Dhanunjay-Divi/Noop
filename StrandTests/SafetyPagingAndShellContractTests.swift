@@ -1879,7 +1879,32 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(shell.contains(
             "case menu, workout, strength, nutrition, journal, hydration, hrv, breathe, intervals, live"
         ))
-        XCTAssertTrue(shell.contains("FloatingQuickAddButton(compact: tabBarCompact)"))
+        XCTAssertTrue(shell.contains("MovableNoopCommandLens("))
+        XCTAssertTrue(shell.contains(#"Item(title: "Trends", icon: "point.3.connected.trianglepath.dotted""#))
+        XCTAssertTrue(shell.contains(#"Item(title: "Workouts", icon: "dumbbell.fill""#))
+        XCTAssertTrue(shell.contains(#"Item(title: "Sleep", icon: "moon.zzz.fill""#))
+        XCTAssertTrue(shell.contains(#"Item(title: "More", icon: "circle.grid.2x2.fill""#))
+        let commandLens = try XCTUnwrap(
+            shell.components(separatedBy: "private struct MovableNoopCommandLens").last?
+                .components(separatedBy: "// MARK: - Contextual action rail").first
+        )
+        XCTAssertTrue(shell.contains("private struct NoopCommandMonogram: Shape"))
+        XCTAssertTrue(commandLens.contains("NoopCommandMonogram()"))
+        XCTAssertTrue(commandLens.contains("StrokeStyle(lineWidth: 2.8"))
+        XCTAssertFalse(commandLens.contains(#"Image(systemName: "message.fill")"#))
+        XCTAssertFalse(commandLens.contains(#"Image(systemName: "waveform.path.ecg")"#))
+        XCTAssertTrue(commandLens.contains("@AppStorage(\"noop.commandLens.edge\")"))
+        XCTAssertTrue(commandLens.contains("@AppStorage(\"noop.commandLens.verticalFraction\")"))
+        XCTAssertTrue(commandLens.contains("DragGesture(minimumDistance: 6)"))
+        XCTAssertTrue(commandLens.contains("layout.snappedEdge(for: finalPoint)"))
+        XCTAssertTrue(commandLens.contains(#".accessibilityIdentifier("noop.quick-actions")"#))
+        XCTAssertTrue(commandLens.contains(#"Text("Move to left edge")"#))
+        XCTAssertTrue(commandLens.contains(#"Text("Move to right edge")"#))
+        XCTAssertTrue(shell.contains("static let touchSize = CGSize(width: 48, height: 52)"))
+        XCTAssertTrue(commandLens.contains(".frame(width: 28, height: 38)"))
+        XCTAssertTrue(commandLens.contains(".offset(x: edge == .leading ? -9 : 9)"))
+        XCTAssertTrue(commandLens.contains("private var verticalFraction = 0.76"))
+        XCTAssertFalse(commandLens.contains(#"Image(systemName: "plus")"#))
         XCTAssertTrue(shell.contains("--demo-quick-actions"))
 
         let launcher = try XCTUnwrap(
@@ -1894,9 +1919,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             XCTAssertTrue(launcher.contains("tile(\"\(title)\""), title)
         }
         XCTAssertTrue(launcher.contains(#".accessibilityIdentifier("noop.quick-actions.updates")"#))
-        XCTAssertTrue(shell.contains(
-            "Opens Updates, workout, strength, meal, journal, hydration, HRV, breathing, intervals, and Live HR actions"
-        ))
+        XCTAssertTrue(shell.contains("Double-tap to open. Drag to move."))
     }
 
     func testBandRhythmClassifierCannotEscapeProtocolDiagnostics() throws {

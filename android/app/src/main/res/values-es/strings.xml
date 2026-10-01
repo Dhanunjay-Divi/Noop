@@ -2976,4 +2976,10 @@
     <string name="managed_friends_deletion_scheduled_detail">Friends y los servicios de la cuenta están en pausa durante el periodo de espera de 24 horas. Los datos de salud locales permanecen en este teléfono.</string>
     <string name="ownership_progress_step">Paso %1$d de %2$d</string>
     <string name="ownership_setup_complete">Configuración de propiedad completada.</string>
+    <string name="noop_command_lens_move_left">Mover al borde izquierdo</string>
+    <string name="noop_command_lens_move_right">Mover al borde derecho</string>
+    <string name="noop_command_lens_move_up">Mover hacia arriba</string>
+    <string name="noop_command_lens_move_down">Mover hacia abajo</string>
+    <string name="noop_command_lens_left_edge">Borde izquierdo</string>
+    <string name="noop_command_lens_right_edge">Borde derecho</string>
 </resources>

@@ -43,9 +43,11 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(today.contains(#""daily_plan.target.withheld""#))
         XCTAssertTrue(today.contains("@Environment(\\.dynamicTypeSize)"))
         XCTAssertTrue(today.contains("if !dynamicTypeSize.isAccessibilitySize"))
-        XCTAssertTrue(today.contains("let compactAdjustment = todayDetailsExpanded"))
-        XCTAssertTrue(today.contains("if let compactAdjustment"))
-        XCTAssertTrue(today.contains("dailyPlanWorkoutAdjustment(compactAdjustment)"))
+        XCTAssertFalse(today.contains("dailyPlanSummaryEvidenceLabels"))
+        XCTAssertFalse(today.contains("if let compactAdjustment"))
+        XCTAssertFalse(today.contains("dailyPlanWorkoutAdjustment(compactAdjustment)"))
+        XCTAssertFalse(today.contains("FitnessAgeHeroRow("))
+        XCTAssertTrue(today.contains("case .fitnessAge:"))
         XCTAssertTrue(today.contains("--demo-daily-plan-collapsed"))
         XCTAssertTrue(today.contains("if dynamicTypeSize.isAccessibilitySize"))
 
@@ -78,10 +80,14 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(today.contains("DailyPlanTargetSection("))
         XCTAssertTrue(today.contains("TodaySection.WATCH -> TodayDetailSection("))
         XCTAssertTrue(today.contains("DailyPlanWatchSection("))
-        XCTAssertTrue(today.contains(
+        XCTAssertFalse(today.contains(
             "compactAdjustment = dailyActionPlan.workoutAdjustment"
         ))
-        XCTAssertTrue(today.contains("if (!expanded && compactAdjustment != null)"))
+        XCTAssertFalse(today.contains("if (!expanded && compactAdjustment != null)"))
+        XCTAssertFalse(today.contains("FitnessAgeHeroLane("))
+        XCTAssertTrue(today.contains("DashboardCard.FITNESS_AGE"))
+        XCTAssertTrue(today.contains("localizedReadinessSummary(readiness)"))
+        XCTAssertTrue(today.contains("R.string.appwide_daily_signal_a11y_hint"))
         XCTAssertTrue(today.contains("LocalDensity.current.fontScale >= 1.3f"))
         XCTAssertTrue(today.contains("dailyPlanTargetStatusResource(plan)"))
         XCTAssertTrue(today.contains("R.string.daily_plan_target_withheld"))

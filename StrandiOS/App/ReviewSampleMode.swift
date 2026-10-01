@@ -199,11 +199,11 @@ private enum ReviewSampleTab: String, CaseIterable {
 
     var icon: String {
         switch self {
-        case .today: return "circle.hexagongrid.fill"
-        case .trends: return "chart.xyaxis.line"
-        case .workouts: return "figure.run"
-        case .sleep: return "moon.stars.fill"
-        case .more: return "ellipsis"
+        case .today: return "waveform.path.ecg.rectangle.fill"
+        case .trends: return "point.3.connected.trianglepath.dotted"
+        case .workouts: return "dumbbell.fill"
+        case .sleep: return "moon.zzz.fill"
+        case .more: return "circle.grid.2x2.fill"
         }
     }
 }

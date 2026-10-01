@@ -1075,57 +1075,28 @@ struct LiquidTodayView: View {
     }
 
     private var todayDetailsDisclosure: some View {
-        let evidenceLabels = dailyPlanSummaryEvidenceLabels
-        let compactAdjustment = todayDetailsExpanded
-            ? nil
-            : dailyActionPlan.workoutAdjustment
         return Button {
             withAnimation(StrandMotion.interactive) {
                 todayDetailsExpanded.toggle()
             }
         } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top, spacing: NoopMetrics.space3) {
-                    Image(systemName: dailyPlanSummarySymbol)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(dailyPlanSummaryTint)
-                        .padding(.top, 2)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(dailyPlanActionLabel(dailyActionPlan.action))
-                            .font(StrandFont.subhead)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if !evidenceLabels.isEmpty {
-                            Text(evidenceLabels.joined(separator: " / "))
-                                .font(StrandFont.footnote)
-                                .foregroundStyle(StrandPalette.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Text(todayDetailsExpanded
-                             ? "daily_plan.details.hide"
-                             : "daily_plan.details.show")
-                            .font(StrandFont.caption)
-                            .foregroundStyle(StrandPalette.textTertiary)
-                    }
-                    Spacer(minLength: NoopMetrics.space2)
-                    Image(systemName: todayDetailsExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(StrandPalette.textSecondary)
-                        .padding(.top, 4)
-                        .accessibilityHidden(true)
-                }
-                .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity, minHeight: 48)
-
-                if let compactAdjustment {
-                    dailyPlanDivider
-                        .padding(.horizontal, 16)
-                    dailyPlanWorkoutAdjustment(compactAdjustment)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
-                }
+            HStack(alignment: .center, spacing: NoopMetrics.space3) {
+                Image(systemName: dailyPlanSummarySymbol)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(dailyPlanSummaryTint)
+                    .accessibilityHidden(true)
+                Text(dailyPlanActionLabel(dailyActionPlan.action))
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: NoopMetrics.space2)
+                Image(systemName: todayDetailsExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .accessibilityHidden(true)
             }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 52)
             .background(FrostedCardSurface(cornerRadius: NoopMetrics.cardRadius))
             .contentShape(Rectangle())
         }
@@ -1314,27 +1285,6 @@ struct LiquidTodayView: View {
             }
             .frame(maxWidth: .infinity)
 
-            // Fitness Age is intentionally a compact long-term lane, not a fourth daily score. It only
-            // appears on Today: `fitnessAge` is the latest WEEKLY estimate across history, so showing it
-            // while browsing an older day would leak a future value into that day's card.
-            if selectedDayOffset == 0 {
-                let last7 = repo.days.suffix(7)
-                Divider().overlay(StrandPalette.onDarkSecondary.opacity(0.20))
-                FitnessAgeHeroRow(
-                    age: visibleFitnessAge,
-                    profileAge: profile.age,
-                    calibrationText: fitnessCalibrationCompactCopy(
-                        rhrDays: last7.compactMap { $0.restingHr }.count,
-                        activityDays: last7.compactMap { $0.strain }.count,
-                        hasAge: profile.ageInputConfirmed
-                            && FitnessAgeEngine.supports(age: Double(profile.age)),
-                        hasSex: profile.sexInputConfirmed
-                            && FitnessAgeEngine.supports(sex: profile.sex)
-                    ),
-                    onOpen: { openHeroMetric("fitness_age") },
-                    onExplain: { explainHeroMetric("fitness_age") }
-                )
-            }
         }
         .padding(.vertical, todayHeroVerticalPadding)
         .padding(.horizontal, todayHeroHorizontalPadding)
@@ -1960,15 +1910,6 @@ struct LiquidTodayView: View {
 
     private var dailyPlanWatchSignals: [ReadinessEngine.Signal] {
         readiness.signals.filter { $0.flag == .watch || $0.flag == .bad }
-    }
-
-    private var dailyPlanSummaryEvidenceLabels: [String] {
-        var sources: [DailyActionPlanner.EvidenceSource] = []
-        for evidence in dailyActionPlan.evidence where !sources.contains(evidence.source) {
-            sources.append(evidence.source)
-            if sources.count == 2 { break }
-        }
-        return sources.map { dailyPlanEvidenceLabel($0) }
     }
 
     private var dailyPlanSummarySymbol: String {
@@ -5449,98 +5390,6 @@ private struct DailySignalWaveformShape: Shape {
         return path
     }
 }
-
-/// The long-term lane under Daily Signal. Fitness Age is deliberately not rendered as a fourth equal
-/// score: it updates weekly and estimates cardiorespiratory fitness rather than today's readiness.
-private struct FitnessAgeHeroRow: View {
-    let age: Double?
-    let profileAge: Int
-    let calibrationText: String
-    let onOpen: () -> Void
-    let onExplain: () -> Void
-
-    private var valueText: String {
-        age.map(FitnessAgePresentation.value) ?? String(localized: "Calibrating")
-    }
-
-    private var comparisonText: String {
-        guard let age, profileAge > 0 else { return calibrationText }
-        return FitnessAgePresentation.comparison(estimate: age, profileAge: profileAge)
-    }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            HStack(alignment: .top, spacing: NoopMetrics.space3) {
-                MetricGlyph("figure.run", size: 34)
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Text("FITNESS AGE")
-                            .font(StrandFont.overlineScaled(10))
-                            .tracking(0)
-                            .fixedSize(horizontal: true, vertical: false)
-                        Text("WEEKLY")
-                            .font(StrandFont.overlineScaled(8))
-                            .tracking(0)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(StrandPalette.chargeColor.opacity(0.14), in: Capsule())
-                    }
-                    .foregroundStyle(StrandPalette.onDarkSecondary)
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(valueText)
-                            .font(StrandFont.number(18))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                            .fixedSize(horizontal: true, vertical: false)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(StrandPalette.onDarkSecondary)
-                            .accessibilityHidden(true)
-                    }
-                    Text(comparisonText)
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.onDarkSecondary.opacity(0.82))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: NoopMetrics.space2)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            .gesture(
-                TapGesture(count: 2)
-                    .exclusively(before: TapGesture(count: 1))
-                    .onEnded { value in
-                        switch value {
-                        case .first: onExplain()
-                        case .second: onOpen()
-                        }
-                    }
-            )
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityLabel("Fitness Age")
-            .accessibilityValue("\(valueText). \(comparisonText)")
-            .accessibilityHint("Opens the detailed weekly trend. An About button explains the metric.")
-            .accessibilityAction { onOpen() }
-            .accessibilityAction(named: Text("Explain Fitness Age")) { onExplain() }
-            .accessibilitySortPriority(1)
-            .accessibilityIdentifier("noop.today.fitness-age")
-
-            MetricInfoButton(
-                title: String(localized: "About Fitness Age"),
-                tint: StrandPalette.chargeColor,
-                visualSize: 24,
-                action: onExplain
-            )
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 
 // MARK: - Scene controls (LiveState-isolated leaves)
 

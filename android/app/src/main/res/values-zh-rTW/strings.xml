@@ -555,4 +555,10 @@
     <string name="managed_cloud_error_document_conflict">NOOP 保留了你目前的資料。請檢查最近的變更，然後點一下「立即同步」重試。</string>
     <string name="ownership_progress_step">第 %1$d 步，共 %2$d 步</string>
     <string name="ownership_setup_complete">所有權設定已完成。</string>
+    <string name="noop_command_lens_move_left">移到左側邊緣</string>
+    <string name="noop_command_lens_move_right">移到右側邊緣</string>
+    <string name="noop_command_lens_move_up">上移</string>
+    <string name="noop_command_lens_move_down">下移</string>
+    <string name="noop_command_lens_left_edge">左側邊緣</string>
+    <string name="noop_command_lens_right_edge">右側邊緣</string>
 </resources>

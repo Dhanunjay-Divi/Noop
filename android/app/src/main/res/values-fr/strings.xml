@@ -2976,4 +2976,10 @@
     <string name="managed_friends_deletion_scheduled_detail">Friends et les services du compte sont suspendus pendant le délai de réflexion de 24 heures. Les données de santé locales restent sur ce téléphone.</string>
     <string name="ownership_progress_step">Étape %1$d sur %2$d</string>
     <string name="ownership_setup_complete">Configuration de propriété terminée.</string>
+    <string name="noop_command_lens_move_left">Déplacer vers le bord gauche</string>
+    <string name="noop_command_lens_move_right">Déplacer vers le bord droit</string>
+    <string name="noop_command_lens_move_up">Déplacer vers le haut</string>
+    <string name="noop_command_lens_move_down">Déplacer vers le bas</string>
+    <string name="noop_command_lens_left_edge">Bord gauche</string>
+    <string name="noop_command_lens_right_edge">Bord droit</string>
 </resources>

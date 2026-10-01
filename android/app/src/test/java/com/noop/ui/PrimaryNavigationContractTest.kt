@@ -177,7 +177,7 @@ class PrimaryNavigationContractTest {
 
         val bottomBar = text
             .substringAfter("private fun GlassBottomBar(")
-            .substringBefore("\n@Composable\nprivate fun FloatingQuickAddButton")
+            .substringBefore("\ninternal enum class NoopCommandLensEdge")
         assertTrue(bottomBar.contains(".selectableGroup()"))
         assertTrue(bottomBar.contains(".height(labelLayout.barHeightDp.dp)"))
         assertTrue(bottomBar.contains(
@@ -191,11 +191,11 @@ class PrimaryNavigationContractTest {
             "val outerHorizontalPadding = if (compactNavigation) 8.dp else 12.dp",
         ))
         assertTrue(bottomBar.contains(
-            "val quickActionSpacing = if (compactNavigation) 4.dp else 8.dp",
+            "val barContentPadding = if (compactNavigation) 4.dp else 7.dp",
         ))
-        assertTrue(bottomBar.contains(
-            "val barContentPadding = if (compactNavigation) 4.dp else 6.dp",
-        ))
+        assertTrue(bottomBar.contains("RoundedCornerShape(22.dp)"))
+        assertFalse(bottomBar.contains("MovableNoopCommandLens("))
+        assertTrue(text.contains("MovableNoopCommandLens("))
     }
 
     @Test
@@ -205,8 +205,18 @@ class PrimaryNavigationContractTest {
         val text = source!!
 
         assertTrue(text.contains(
-            "BarTab(Destination.Workouts, Icons.AutoMirrored.Filled.DirectionsRun, R.string.nav_workouts)"
+            "BarTab(Destination.Workouts, Icons.Filled.FitnessCenter, R.string.nav_workouts)"
         ))
+        assertTrue(text.contains(
+            "BarTab(Destination.Today, Icons.Filled.MonitorHeart, R.string.nav_today)"
+        ))
+        assertTrue(text.contains(
+            "BarTab(Destination.Trends, Icons.Filled.Hub, R.string.nav_trends)"
+        ))
+        assertTrue(text.contains(
+            "BarTab(Destination.Sleep, Icons.Filled.NightsStay, R.string.nav_sleep)"
+        ))
+        assertTrue(text.contains("icon = Icons.Filled.Apps"))
         assertTrue(text.contains("active = selected == Destination.More"))
         assertFalse(text.contains(
             "Destination.Live, Destination.Workouts, Destination.Nutrition"
@@ -214,6 +224,77 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains(
             "composable(Destination.Workouts.route) { WorkoutsScreen(viewModel) }"
         ))
+    }
+
+    @Test
+    fun movableCommandLensClampsPersistsAndSnapsAtTheNearestEdge() {
+        val left = noopCommandLensRestingOffset(
+            containerWidthPx = 1_080,
+            containerHeightPx = 2_400,
+            touchWidthPx = 144,
+            touchHeightPx = 168,
+            topInsetPx = 120,
+            bottomClearancePx = 260,
+            edge = NoopCommandLensEdge.START,
+            verticalFraction = 0.5f,
+        )
+        val right = noopCommandLensRestingOffset(
+            containerWidthPx = 1_080,
+            containerHeightPx = 2_400,
+            touchWidthPx = 144,
+            touchHeightPx = 168,
+            topInsetPx = 120,
+            bottomClearancePx = 260,
+            edge = NoopCommandLensEdge.END,
+            verticalFraction = 0.5f,
+        )
+        assertEquals(2, left.x)
+        assertEquals(934, right.x)
+        assertEquals(left.y, right.y)
+
+        val clamped = noopCommandLensClampOffset(
+            x = 2_000f,
+            y = 3_000f,
+            containerWidthPx = 1_080,
+            containerHeightPx = 2_400,
+            touchWidthPx = 144,
+            touchHeightPx = 168,
+            topInsetPx = 120,
+            bottomClearancePx = 260,
+        )
+        assertEquals(right.x, clamped.x)
+        assertEquals(1_972, clamped.y)
+        assertEquals(
+            1f,
+            noopCommandLensVerticalFraction(
+                yPx = clamped.y,
+                containerHeightPx = 2_400,
+                touchHeightPx = 168,
+                topInsetPx = 120,
+                bottomClearancePx = 260,
+            ),
+            0.0001f,
+        )
+
+        val source = appRootSource()
+        assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
+        val text = source!!
+        val lens = text
+            .substringAfter("private fun MovableNoopCommandLens(")
+            .substringBefore("\n/**")
+        assertTrue(lens.contains("pointerInput("))
+        assertTrue(lens.contains("detectDragGestures("))
+        assertTrue(lens.contains("NoopCommandLensPrefs.write("))
+        assertTrue(lens.contains("CustomAccessibilityAction(moveLeftLabel)"))
+        assertTrue(lens.contains("CustomAccessibilityAction(moveRightLabel)"))
+        assertTrue(lens.contains("CustomAccessibilityAction(moveUpLabel)"))
+        assertTrue(lens.contains("CustomAccessibilityAction(moveDownLabel)"))
+        assertTrue(lens.contains(".width(28.dp)"))
+        assertTrue(lens.contains(".height(38.dp)"))
+        assertTrue(lens.contains("(-9).dp else 9.dp"))
+        assertTrue(lens.contains("val touchWidth = 48.dp"))
+        assertTrue(lens.contains("val touchHeight = 52.dp"))
+        assertTrue(text.contains("DEFAULT_VERTICAL_FRACTION = 0.76f"))
     }
 
     @Test

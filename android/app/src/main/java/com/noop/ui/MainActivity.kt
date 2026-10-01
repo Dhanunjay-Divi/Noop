@@ -1403,15 +1403,14 @@ fun NoopRoot(
         return
     }
 
-    // Review Sample is offered before Terms on a fresh install and remains entirely process-only. No
-    // production ViewModel, Room store, BLE client, worker, permission, cloud service, or notification
-    // scheduler is constructed while any of these three phases is visible.
+    // Review Sample is an explicit review/debug route, never an ordinary fresh-install intercept. When
+    // requested it remains entirely process-only: no production ViewModel, Room store, BLE client,
+    // worker, permission, cloud service, or notification scheduler is constructed while visible.
     var acceptedTerms by remember {
         mutableStateOf(prefs.getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, "") ?: "")
     }
     var reviewSamplePhase by remember { mutableStateOf(ReviewSamplePhase.ENTRY) }
-    val reviewSampleOffered =
-        !demoBypass && (forceReviewSample || acceptedTerms != Terms.CURRENT_VERSION)
+    val reviewSampleOffered = !demoBypass && forceReviewSample
     if (reviewSampleOffered && reviewSamplePhase != ReviewSamplePhase.CONTINUE_SETUP) {
         when (reviewSamplePhase) {
             ReviewSamplePhase.ENTRY -> ReviewSampleEntry(

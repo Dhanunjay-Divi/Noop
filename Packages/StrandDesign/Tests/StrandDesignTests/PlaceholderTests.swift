@@ -200,6 +200,56 @@ final class StrandDesignTests: XCTestCase {
         XCTAssertEqual(Sparkline.defaultValueString(64.5), "64.5")
     }
 
+    func testSparklineMonotoneCurveStaysInsideEachMeasuredSegment() {
+        let points = [
+            CGPoint(x: 0, y: 20),
+            CGPoint(x: 20, y: 4),
+            CGPoint(x: 40, y: 17),
+            CGPoint(x: 60, y: 7),
+            CGPoint(x: 80, y: 14),
+        ]
+
+        let segments = SparklineGeometry.monotoneSegments(points: points)
+
+        XCTAssertEqual(segments.count, points.count - 1)
+        for segment in segments {
+            let low = min(segment.start.y, segment.end.y)
+            let high = max(segment.start.y, segment.end.y)
+            XCTAssertGreaterThanOrEqual(segment.control1.y, low)
+            XCTAssertLessThanOrEqual(segment.control1.y, high)
+            XCTAssertGreaterThanOrEqual(segment.control2.y, low)
+            XCTAssertLessThanOrEqual(segment.control2.y, high)
+        }
+    }
+
+    func testSparklineFlatCurveRemainsFlat() throws {
+        let points = [
+            CGPoint(x: 0, y: 12),
+            CGPoint(x: 20, y: 12),
+            CGPoint(x: 40, y: 12),
+        ]
+
+        let segments = SparklineGeometry.monotoneSegments(points: points)
+
+        XCTAssertEqual(segments.count, 2)
+        for segment in segments {
+            XCTAssertEqual(segment.control1.y, 12, accuracy: 0.0001)
+            XCTAssertEqual(segment.control2.y, 12, accuracy: 0.0001)
+        }
+    }
+
+    func testSparklineNearestPointUsesInsetGeometry() {
+        let points = [
+            CGPoint(x: 4, y: 10),
+            CGPoint(x: 24, y: 8),
+            CGPoint(x: 44, y: 12),
+        ]
+
+        XCTAssertEqual(SparklineGeometry.nearestIndex(toX: 3, points: points), 0)
+        XCTAssertEqual(SparklineGeometry.nearestIndex(toX: 27, points: points), 1)
+        XCTAssertEqual(SparklineGeometry.nearestIndex(toX: 50, points: points), 2)
+    }
+
     // MARK: - TrendChart Y domain (#974 top-headroom fix)
 
     /// With no explicit yDomain the axis falls back to the gradient's valueRange.

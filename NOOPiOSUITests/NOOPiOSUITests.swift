@@ -82,6 +82,89 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["noop.terms.title"].waitForExistence(timeout: 10))
     }
 
+    func testFreshInstallOrdersTermsAccountBluetoothAndBandSetup() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-reset-first-run"]
+        app.launch()
+
+        let trialContinue = app.buttons["noop.trial.continue"]
+        if trialContinue.waitForExistence(timeout: 5) {
+            keepScreenshot(app, name: "fresh-install-trial")
+            trialContinue.tap()
+        }
+
+        let termsTitle = app.staticTexts["noop.terms.title"]
+        XCTAssertTrue(termsTitle.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.descendants(matching: .any)["noop.onboarding.page.welcome"].exists)
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        keepScreenshot(app, name: "fresh-install-terms")
+
+        for index in 0..<3 {
+            let attestation = app.switches["noop.terms.attestation.\(index)"]
+            XCTAssertTrue(attestation.waitForExistence(timeout: 5))
+            for _ in 0..<8 where !attestation.isHittable {
+                app.swipeUp()
+            }
+            XCTAssertTrue(attestation.isHittable)
+            attestation.tap()
+        }
+
+        let accept = app.buttons["noop.terms.accept"]
+        XCTAssertTrue(accept.waitForExistence(timeout: 5))
+        XCTAssertTrue(accept.isEnabled)
+        accept.tap()
+
+        let welcome = app.descendants(matching: .any)["noop.onboarding.page.welcome"]
+        XCTAssertTrue(welcome.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        let primary = app.buttons["noop.onboarding.primary"]
+        XCTAssertTrue(primary.waitForExistence(timeout: 5))
+        primary.tap()
+
+        let account = app.descendants(matching: .any)["noop.onboarding.page.account"]
+        XCTAssertTrue(account.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["noop.onboarding.account-unconfigured"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        keepScreenshot(app, name: "fresh-install-account")
+        primary.tap()
+
+        let bluetooth = app.descendants(matching: .any)["noop.onboarding.page.bluetooth"]
+        XCTAssertTrue(bluetooth.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        keepScreenshot(app, name: "fresh-install-bluetooth")
+        primary.tap()
+
+        let systemAlert = app.alerts.firstMatch
+        if systemAlert.waitForExistence(timeout: 3) {
+            let allow = systemAlert.buttons["Allow"]
+            if allow.exists {
+                allow.tap()
+            } else {
+                systemAlert.buttons.firstMatch.tap()
+            }
+        }
+
+        let bandSetup = app.descendants(matching: .any)["noop.onboarding.page.scan"]
+        XCTAssertTrue(bandSetup.waitForExistence(timeout: 15))
+        let chooseDevice = app.buttons["noop.onboarding.choose-device"]
+        XCTAssertTrue(chooseDevice.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        chooseDevice.tap()
+
+        XCTAssertTrue(
+            app.buttons["noop.device-wizard.type.whoop-5-mg"]
+                .waitForExistence(timeout: 10)
+        )
+        XCTAssertTrue(app.buttons["noop.device-wizard.type.whoop-4"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.heart-rate-strap"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.gym-equipment"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.oura"].exists)
+        keepScreenshot(app, name: "fresh-install-supported-bands")
+    }
+
     private func attachScreenshot(named name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name

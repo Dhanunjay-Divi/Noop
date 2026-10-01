@@ -10,6 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,8 +22,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,6 +46,7 @@ import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bed
 import androidx.compose.material.icons.filled.Bedtime
@@ -62,10 +67,12 @@ import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Hexagon
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Psychology
@@ -81,7 +88,6 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.outlined.Circle
-import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -124,15 +130,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -140,6 +150,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -155,6 +166,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 // MARK: - Navigation model
 //
@@ -520,8 +532,8 @@ fun AppRoot(
         Scaffold(
             containerColor = Palette.surfaceBase,
             bottomBar = {
-                // One translucent navigation island plus a separate persistent quick-add circle. The
-                // action stays reachable from every tab without crowding a page-specific header.
+                // One translucent five-destination dock. The movable NOOP action lens is composed
+                // separately below so it never reads as a sixth tab.
                 GlassBottomBar(
                     selected = selectedTab,
                     onTabSelected = { dest ->
@@ -533,7 +545,6 @@ fun AppRoot(
                             nav.navigateTopLevel(dest.route)
                         }
                     },
-                    onQuickActions = { showQuickActions = true },
                 )
             },
         ) { inner ->
@@ -723,6 +734,13 @@ fun AppRoot(
                     })
                 }
             }
+        }
+
+        if (!keyboardVisible && !showQuickActions) {
+            MovableNoopCommandLens(
+                onClick = { showQuickActions = true },
+                modifier = Modifier.fillMaxSize(),
+            )
         }
 
         if (!keyboardVisible && contextualActions.isNotEmpty()) {
@@ -1327,9 +1345,9 @@ private fun MoreRow(dest: Destination, onClick: () -> Unit) {
 
 // MARK: - Glass bottom bar
 //
-// The signature shell is one translucent five-tab island plus a separate circular quick-add control.
-// Both float over the page, preserving the user's requested glass treatment without turning the entire
-// navigation-safe area into an opaque slab.
+// The signature shell is one compact translucent five-tab dock plus a separate movable action lens.
+// Both float over the page, preserving the glass treatment without turning the navigation-safe area
+// into an opaque slab or making an app-wide command look like a sixth destination.
 
 /** A single bottom-bar nav slot: the destination it switches to, plus the bar-specific icon/label. */
 private data class BarTab(val dest: Destination, val icon: ImageVector, @StringRes val labelRes: Int)
@@ -1337,14 +1355,21 @@ private data class BarTab(val dest: Destination, val icon: ImageVector, @StringR
 /** The nav slots in iOS order. More is appended at the call site because its selected
  * state also represents destinations reached through the complete index. */
 private val barLeadingTabs = listOf(
-    BarTab(Destination.Today, Icons.Outlined.GridView, R.string.nav_today),
-    // chart.line.uptrend.xyaxis on iOS — the rising-trend glyph, not a flat bar chart.
-    BarTab(Destination.Trends, Icons.AutoMirrored.Filled.TrendingUp, R.string.nav_trends),
-    BarTab(Destination.Workouts, Icons.AutoMirrored.Filled.DirectionsRun, R.string.nav_workouts),
+    BarTab(Destination.Today, Icons.Filled.MonitorHeart, R.string.nav_today),
+    BarTab(Destination.Trends, Icons.Filled.Hub, R.string.nav_trends),
+    BarTab(Destination.Workouts, Icons.Filled.FitnessCenter, R.string.nav_workouts),
 )
 private val barTrailingTabs = listOf(
-    BarTab(Destination.Sleep, Icons.Filled.Bed, R.string.nav_sleep),
+    BarTab(Destination.Sleep, Icons.Filled.NightsStay, R.string.nav_sleep),
 )
+
+private fun bottomBarAccent(destination: Destination): Color = when (destination) {
+    Destination.Today -> Palette.chargeColor
+    Destination.Trends -> Palette.metricCyan
+    Destination.Workouts -> Palette.metricAmber
+    Destination.Sleep -> Palette.restColor
+    else -> Palette.textPrimary
+}
 
 internal data class BottomBarLabelLayout(
     val maxLines: Int,
@@ -1453,9 +1478,8 @@ internal fun rememberBottomBarLabelLayout(
 private fun GlassBottomBar(
     selected: Destination,
     onTabSelected: (Destination) -> Unit,
-    onQuickActions: () -> Unit,
 ) {
-    val barShape = RoundedCornerShape(50)
+    val barShape = RoundedCornerShape(22.dp)
     val barLabels = listOf(
         stringResource(R.string.nav_today),
         stringResource(R.string.nav_trends),
@@ -1471,115 +1495,406 @@ private fun GlassBottomBar(
     ) {
         val compactNavigation = maxWidth < CompactBottomBarWidthDp.dp
         val outerHorizontalPadding = if (compactNavigation) 8.dp else 12.dp
-        val quickActionSpacing = if (compactNavigation) 4.dp else 8.dp
-        val barContentPadding = if (compactNavigation) 4.dp else 6.dp
-        Row(
+        val barContentPadding = if (compactNavigation) 4.dp else 7.dp
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 548.dp)
+                .widthIn(max = 500.dp)
                 .padding(horizontal = outerHorizontalPadding)
                 .padding(top = 4.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(quickActionSpacing),
         ) {
-            BoxWithConstraints(
+            val labelLayout = rememberBottomBarLabelLayout(
+                labels = barLabels,
+                availableWidth = maxWidth,
+                horizontalContentPadding = barContentPadding,
+                interItemSpacing = 1.dp,
+                labelHorizontalSafetyPadding = 1.dp,
+            )
+            Row(
                 modifier = Modifier
-                    .weight(1f),
+                    .height(labelLayout.barHeightDp.dp)
+                    .fillMaxWidth()
+                    .navigationGlassSurface(
+                        shape = barShape,
+                        accentRim = bottomBarAccent(selected).copy(alpha = 0.26f),
+                    )
+                    .padding(horizontal = barContentPadding)
+                    .selectableGroup(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(1.dp),
             ) {
-                val labelLayout = rememberBottomBarLabelLayout(
-                    labels = barLabels,
-                    availableWidth = maxWidth,
-                    horizontalContentPadding = barContentPadding,
-                    interItemSpacing = 1.dp,
-                    labelHorizontalSafetyPadding = 1.dp,
-                )
-                Row(
-                    modifier = Modifier
-                        .height(labelLayout.barHeightDp.dp)
-                        .fillMaxWidth()
-                        .navigationGlassSurface(barShape)
-                        .padding(horizontal = barContentPadding)
-                        .selectableGroup(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(1.dp),
-                ) {
-                    barLeadingTabs.forEach { tab ->
-                        BarSlot(
-                            icon = tab.icon,
-                            label = stringResource(tab.labelRes),
-                            active = selected == tab.dest,
-                            testTag = "noop.tab.${tab.dest.route}",
-                            labelMaxLines = labelLayout.maxLines,
-                            labelScaleMultiplier = labelLayout.labelScaleMultiplier,
-                            modifier = Modifier.weight(1f),
-                            onClick = { onTabSelected(tab.dest) },
-                        )
-                    }
-                    barTrailingTabs.forEach { tab ->
-                        BarSlot(
-                            icon = tab.icon,
-                            label = stringResource(tab.labelRes),
-                            active = selected == tab.dest,
-                            testTag = "noop.tab.${tab.dest.route}",
-                            labelMaxLines = labelLayout.maxLines,
-                            labelScaleMultiplier = labelLayout.labelScaleMultiplier,
-                            modifier = Modifier.weight(1f),
-                            onClick = { onTabSelected(tab.dest) },
-                        )
-                    }
+                barLeadingTabs.forEach { tab ->
                     BarSlot(
-                        icon = Icons.Filled.MoreHoriz,
-                        label = stringResource(R.string.nav_more),
-                        active = selected == Destination.More,
-                        testTag = "noop.tab.more",
+                        icon = tab.icon,
+                        label = stringResource(tab.labelRes),
+                        active = selected == tab.dest,
+                        accent = bottomBarAccent(tab.dest),
+                        testTag = "noop.tab.${tab.dest.route}",
                         labelMaxLines = labelLayout.maxLines,
                         labelScaleMultiplier = labelLayout.labelScaleMultiplier,
                         modifier = Modifier.weight(1f),
-                        onClick = { onTabSelected(Destination.More) },
+                        onClick = { onTabSelected(tab.dest) },
                     )
                 }
+                barTrailingTabs.forEach { tab ->
+                    BarSlot(
+                        icon = tab.icon,
+                        label = stringResource(tab.labelRes),
+                        active = selected == tab.dest,
+                        accent = bottomBarAccent(tab.dest),
+                        testTag = "noop.tab.${tab.dest.route}",
+                        labelMaxLines = labelLayout.maxLines,
+                        labelScaleMultiplier = labelLayout.labelScaleMultiplier,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onTabSelected(tab.dest) },
+                    )
+                }
+                BarSlot(
+                    icon = Icons.Filled.Apps,
+                    label = stringResource(R.string.nav_more),
+                    active = selected == Destination.More,
+                    accent = bottomBarAccent(Destination.More),
+                    testTag = "noop.tab.more",
+                    labelMaxLines = labelLayout.maxLines,
+                    labelScaleMultiplier = labelLayout.labelScaleMultiplier,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onTabSelected(Destination.More) },
+                )
             }
-            FloatingQuickAddButton(onClick = onQuickActions)
         }
     }
 }
 
+internal enum class NoopCommandLensEdge {
+    START,
+    END,
+}
+
+internal object NoopCommandLensPrefs {
+    const val FILE = "noop.commandLens"
+    const val EDGE = "edge"
+    const val VERTICAL_FRACTION = "verticalFraction"
+    const val DEFAULT_VERTICAL_FRACTION = 0.76f
+
+    fun readEdge(prefs: android.content.SharedPreferences): NoopCommandLensEdge =
+        runCatching {
+            NoopCommandLensEdge.valueOf(
+                prefs.getString(EDGE, NoopCommandLensEdge.END.name)
+                    ?: NoopCommandLensEdge.END.name,
+            )
+        }.getOrDefault(NoopCommandLensEdge.END)
+
+    fun readVerticalFraction(prefs: android.content.SharedPreferences): Float =
+        prefs.getFloat(VERTICAL_FRACTION, DEFAULT_VERTICAL_FRACTION).coerceIn(0f, 1f)
+
+    fun write(
+        prefs: android.content.SharedPreferences,
+        edge: NoopCommandLensEdge,
+        verticalFraction: Float,
+    ) {
+        prefs.edit()
+            .putString(EDGE, edge.name)
+            .putFloat(VERTICAL_FRACTION, verticalFraction.coerceIn(0f, 1f))
+            .apply()
+    }
+}
+
+internal fun noopCommandLensRestingOffset(
+    containerWidthPx: Int,
+    containerHeightPx: Int,
+    touchWidthPx: Int,
+    touchHeightPx: Int,
+    topInsetPx: Int,
+    bottomClearancePx: Int,
+    edge: NoopCommandLensEdge,
+    verticalFraction: Float,
+): IntOffset {
+    val minimumX = 2
+    val maximumX = (containerWidthPx - touchWidthPx - 2).coerceAtLeast(minimumX)
+    val minimumY = topInsetPx.coerceAtLeast(0)
+    val maximumY = (
+        containerHeightPx - bottomClearancePx - touchHeightPx
+    ).coerceAtLeast(minimumY)
+    return IntOffset(
+        x = if (edge == NoopCommandLensEdge.START) minimumX else maximumX,
+        y = (
+            minimumY +
+                (maximumY - minimumY) * verticalFraction.coerceIn(0f, 1f)
+            ).roundToInt(),
+    )
+}
+
+internal fun noopCommandLensClampOffset(
+    x: Float,
+    y: Float,
+    containerWidthPx: Int,
+    containerHeightPx: Int,
+    touchWidthPx: Int,
+    touchHeightPx: Int,
+    topInsetPx: Int,
+    bottomClearancePx: Int,
+): IntOffset {
+    val minimumX = 2
+    val maximumX = (containerWidthPx - touchWidthPx - 2).coerceAtLeast(minimumX)
+    val minimumY = topInsetPx.coerceAtLeast(0)
+    val maximumY = (
+        containerHeightPx - bottomClearancePx - touchHeightPx
+    ).coerceAtLeast(minimumY)
+    return IntOffset(
+        x = x.roundToInt().coerceIn(minimumX, maximumX),
+        y = y.roundToInt().coerceIn(minimumY, maximumY),
+    )
+}
+
+internal fun noopCommandLensVerticalFraction(
+    yPx: Int,
+    containerHeightPx: Int,
+    touchHeightPx: Int,
+    topInsetPx: Int,
+    bottomClearancePx: Int,
+): Float {
+    val minimumY = topInsetPx.coerceAtLeast(0)
+    val maximumY = (
+        containerHeightPx - bottomClearancePx - touchHeightPx
+    ).coerceAtLeast(minimumY)
+    val span = (maximumY - minimumY).coerceAtLeast(1)
+    return ((yPx - minimumY).toFloat() / span).coerceIn(0f, 1f)
+}
+
 @Composable
-private fun FloatingQuickAddButton(onClick: () -> Unit) {
+private fun MovableNoopCommandLens(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember(context) {
+        context.getSharedPreferences(
+            NoopCommandLensPrefs.FILE,
+            android.content.Context.MODE_PRIVATE,
+        )
+    }
+    var storedEdge by rememberSaveable {
+        mutableStateOf(NoopCommandLensPrefs.readEdge(prefs).name)
+    }
+    var verticalFraction by rememberSaveable {
+        mutableStateOf(NoopCommandLensPrefs.readVerticalFraction(prefs))
+    }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    val edge = runCatching {
+        NoopCommandLensEdge.valueOf(storedEdge)
+    }.getOrDefault(NoopCommandLensEdge.END)
     val interaction = remember { MutableInteractionSource() }
     val quickActionsLabel = stringResource(
         R.string.l10n_today_screen_quick_actions_e47e8042,
     )
-    Box(
-        modifier = Modifier
-            .size(48.dp)
-            .testTag("noop.quick-actions")
-            .navigationGlassSurface(
-                shape = CircleShape,
-                accentRim = if (Palette.isLight) {
-                    Color.Black.copy(alpha = 0.10f)
-                } else {
-                    Palette.chargeColor.copy(alpha = 0.46f)
-                },
-            )
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClick = onClick,
-            )
-            .semantics { contentDescription = quickActionsLabel },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            Icons.Filled.Add,
-            contentDescription = null,
-            tint = if (Palette.isLight) {
-                Color.Black.copy(alpha = 0.90f)
-            } else {
-                Palette.chargeColor
-            },
-            modifier = Modifier.size(20.dp),
+    val moveLeftLabel = stringResource(R.string.noop_command_lens_move_left)
+    val moveRightLabel = stringResource(R.string.noop_command_lens_move_right)
+    val moveUpLabel = stringResource(R.string.noop_command_lens_move_up)
+    val moveDownLabel = stringResource(R.string.noop_command_lens_move_down)
+    val edgeLabel = stringResource(
+        if (edge == NoopCommandLensEdge.START) {
+            R.string.noop_command_lens_left_edge
+        } else {
+            R.string.noop_command_lens_right_edge
+        },
+    )
+
+    fun updatePosition(nextEdge: NoopCommandLensEdge, nextFraction: Float) {
+        val boundedFraction = nextFraction.coerceIn(0f, 1f)
+        storedEdge = nextEdge.name
+        verticalFraction = boundedFraction
+        NoopCommandLensPrefs.write(prefs, nextEdge, boundedFraction)
+    }
+
+    BoxWithConstraints(modifier = modifier) {
+        val density = LocalDensity.current
+        val touchWidth = 48.dp
+        val touchHeight = 52.dp
+        val touchWidthPx = with(density) { touchWidth.roundToPx() }
+        val touchHeightPx = with(density) { touchHeight.roundToPx() }
+        val topInsetPx =
+            WindowInsets.statusBars.getTop(density) + with(density) { 18.dp.roundToPx() }
+        val bottomClearancePx =
+            WindowInsets.navigationBars.getBottom(density) + with(density) { 82.dp.roundToPx() }
+        val containerWidthPx = constraints.maxWidth
+        val containerHeightPx = constraints.maxHeight
+        val restingOffset = noopCommandLensRestingOffset(
+            containerWidthPx = containerWidthPx,
+            containerHeightPx = containerHeightPx,
+            touchWidthPx = touchWidthPx,
+            touchHeightPx = touchHeightPx,
+            topInsetPx = topInsetPx,
+            bottomClearancePx = bottomClearancePx,
+            edge = edge,
+            verticalFraction = verticalFraction,
         )
+        val displayOffset = noopCommandLensClampOffset(
+            x = restingOffset.x + dragOffset.x,
+            y = restingOffset.y + dragOffset.y,
+            containerWidthPx = containerWidthPx,
+            containerHeightPx = containerHeightPx,
+            touchWidthPx = touchWidthPx,
+            touchHeightPx = touchHeightPx,
+            topInsetPx = topInsetPx,
+            bottomClearancePx = bottomClearancePx,
+        )
+        val lensShape = RoundedCornerShape(
+            topStart = if (edge == NoopCommandLensEdge.START) 7.dp else 16.dp,
+            bottomStart = if (edge == NoopCommandLensEdge.START) 7.dp else 16.dp,
+            topEnd = if (edge == NoopCommandLensEdge.END) 7.dp else 16.dp,
+            bottomEnd = if (edge == NoopCommandLensEdge.END) 7.dp else 16.dp,
+        )
+
+        Box(
+            modifier = Modifier
+                .offset { displayOffset }
+                .width(touchWidth)
+                .height(touchHeight)
+                .testTag("noop.quick-actions")
+                .pointerInput(
+                    restingOffset,
+                    containerWidthPx,
+                    containerHeightPx,
+                    topInsetPx,
+                    bottomClearancePx,
+                ) {
+                    detectDragGestures(
+                        onDragEnd = {
+                            val finalOffset = noopCommandLensClampOffset(
+                                x = restingOffset.x + dragOffset.x,
+                                y = restingOffset.y + dragOffset.y,
+                                containerWidthPx = containerWidthPx,
+                                containerHeightPx = containerHeightPx,
+                                touchWidthPx = touchWidthPx,
+                                touchHeightPx = touchHeightPx,
+                                topInsetPx = topInsetPx,
+                                bottomClearancePx = bottomClearancePx,
+                            )
+                            val finalEdge =
+                                if (finalOffset.x + touchWidthPx / 2 < containerWidthPx / 2) {
+                                    NoopCommandLensEdge.START
+                                } else {
+                                    NoopCommandLensEdge.END
+                                }
+                            updatePosition(
+                                finalEdge,
+                                noopCommandLensVerticalFraction(
+                                    yPx = finalOffset.y,
+                                    containerHeightPx = containerHeightPx,
+                                    touchHeightPx = touchHeightPx,
+                                    topInsetPx = topInsetPx,
+                                    bottomClearancePx = bottomClearancePx,
+                                ),
+                            )
+                            dragOffset = Offset.Zero
+                        },
+                        onDragCancel = { dragOffset = Offset.Zero },
+                    ) { change, amount ->
+                        change.consume()
+                        dragOffset += amount
+                    }
+                }
+                .clickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = onClick,
+                )
+                .semantics {
+                    contentDescription = quickActionsLabel
+                    stateDescription = edgeLabel
+                    customActions = listOf(
+                        CustomAccessibilityAction(moveLeftLabel) {
+                            updatePosition(NoopCommandLensEdge.START, verticalFraction)
+                            true
+                        },
+                        CustomAccessibilityAction(moveRightLabel) {
+                            updatePosition(NoopCommandLensEdge.END, verticalFraction)
+                            true
+                        },
+                        CustomAccessibilityAction(moveUpLabel) {
+                            updatePosition(edge, verticalFraction - 0.10f)
+                            true
+                        },
+                        CustomAccessibilityAction(moveDownLabel) {
+                            updatePosition(edge, verticalFraction + 0.10f)
+                            true
+                        },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(28.dp)
+                    .height(38.dp)
+                    .offset(
+                        x = if (edge == NoopCommandLensEdge.START) (-9).dp else 9.dp,
+                    )
+                    .navigationGlassSurface(
+                        shape = lensShape,
+                        accentRim = Palette.metricCyan.copy(alpha = 0.30f),
+                    )
+                    .border(
+                        width = 0.75.dp,
+                        brush = Brush.verticalGradient(
+                            listOf(
+                                Color.White.copy(alpha = if (Palette.isLight) 0.52f else 0.24f),
+                                Palette.metricCyan.copy(alpha = 0.58f),
+                                Palette.chargeColor.copy(alpha = 0.34f),
+                            ),
+                        ),
+                        shape = lensShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier.offset(
+                        x = if (edge == NoopCommandLensEdge.START) 1.dp else (-1).dp,
+                    ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Canvas(modifier = Modifier.size(width = 18.dp, height = 22.dp)) {
+                        val monogram = Path().apply {
+                            moveTo(size.width * 0.22f, size.height * 0.80f)
+                            lineTo(size.width * 0.22f, size.height * 0.20f)
+                            lineTo(size.width * 0.78f, size.height * 0.80f)
+                            lineTo(size.width * 0.78f, size.height * 0.20f)
+                        }
+                        drawPath(
+                            path = monogram,
+                            brush = Brush.linearGradient(
+                                colors = listOf(Palette.chargeBright, Palette.metricCyan),
+                                start = Offset.Zero,
+                                end = Offset(size.width, size.height),
+                            ),
+                            style = Stroke(
+                                width = 2.8.dp.toPx(),
+                                cap = StrokeCap.Round,
+                                join = StrokeJoin.Round,
+                            ),
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .align(
+                            if (edge == NoopCommandLensEdge.START) {
+                                Alignment.CenterStart
+                            } else {
+                                Alignment.CenterEnd
+                            },
+                        )
+                        .padding(
+                            start = if (edge == NoopCommandLensEdge.START) 3.dp else 0.dp,
+                            end = if (edge == NoopCommandLensEdge.END) 3.dp else 0.dp,
+                        )
+                        .width(1.5.dp)
+                        .height(12.dp)
+                        .clip(CircleShape)
+                        .background(Palette.textSecondary.copy(alpha = 0.56f)),
+                )
+            }
+        }
     }
 }
 
@@ -1671,21 +1986,22 @@ internal fun Modifier.navigationGlassSurface(
         }
 }
 
-/** One nav slot: an icon over a small label. Active = gold accent (semibold), inactive = textSecondary.
- *  The selected capsule and green ink mirror iOS's expanded FloatingTabBar. */
+/** One nav slot: an icon over a small label. Active = green accent (semibold), inactive =
+ * textSecondary. The icon-sized halo mirrors iOS without filling the whole touch target. */
 @Composable
 private fun BarSlot(
     icon: ImageVector,
     label: String,
     active: Boolean,
+    accent: Color,
     testTag: String,
     labelMaxLines: Int,
     labelScaleMultiplier: Float,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val tint = if (active) Palette.chargeColor else Palette.textSecondary
-    val shape = RoundedCornerShape(50)
+    val tint = if (active) accent else Palette.textSecondary
+    val haloShape = RoundedCornerShape(9.dp)
     val selectedTabLiftLabel = stringResource(R.string.nav_selected_tab_animation_label)
     val selectedScale by animateFloatAsState(
         targetValue = if (active) 1.08f else 1f,
@@ -1696,22 +2012,6 @@ private fun BarSlot(
         modifier = modifier
             .fillMaxHeight()
             .testTag(testTag)
-            .clip(shape)
-            .background(
-                if (active) Palette.textPrimary.copy(alpha = 0.15f) else Color.Transparent,
-                shape,
-            )
-            .then(
-                if (active) {
-                    Modifier.border(
-                        0.6.dp,
-                        Palette.textPrimary.copy(alpha = 0.11f),
-                        shape,
-                    )
-                } else {
-                    Modifier
-                },
-            )
             .selectable(
                 selected = active,
                 interactionSource = remember { MutableInteractionSource() },
@@ -1724,20 +2024,58 @@ private fun BarSlot(
                 contentDescription = label
             },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
+        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = tint,
+        Box(
             modifier = Modifier
-                .size(Metrics.iconSmall)
-                .graphicsLayer {
-                    scaleX = selectedScale
-                    scaleY = selectedScale
-                    translationY = if (active) -1.dp.toPx() else 0f
-                },
-        )
+                .width(34.dp)
+                .height(24.dp)
+                .clip(haloShape)
+                .background(
+                    if (active) accent.copy(alpha = 0.18f) else Color.Transparent,
+                    haloShape,
+                )
+                .then(
+                    if (active) {
+                        Modifier.border(
+                            0.8.dp,
+                            accent.copy(alpha = 0.48f),
+                            haloShape,
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (active) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .offset(y = (-3).dp)
+                        .width(16.dp)
+                        .height(2.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(accent.copy(alpha = 0.45f), accent),
+                            ),
+                        ),
+                )
+            }
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier
+                    .size(18.dp)
+                    .graphicsLayer {
+                        scaleX = selectedScale
+                        scaleY = selectedScale
+                        translationY = if (active) -0.5.dp.toPx() else 0f
+                    },
+            )
+        }
         Text(
             label,
             style = NoopType.footnote.copy(
@@ -1806,7 +2144,7 @@ private fun QuickActionLauncher(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Overline("Quick actions", color = Palette.textTertiary)
+            Overline("How can NOOP help?", color = Palette.textTertiary)
             Spacer(Modifier.weight(1f))
             UpdatesLauncherButton(unreadUpdates = unreadUpdates, onClick = onUpdates)
         }
@@ -1855,9 +2193,18 @@ private fun QuickActionTile(
         Box(
             modifier = Modifier
                 .size(46.dp)
-                .clip(CircleShape)
-                .background(Palette.surfaceInset)
-                .border(0.8.dp, Palette.hairline, CircleShape),
+                .clip(RoundedCornerShape(15.dp))
+                .background(
+                    brush = Brush.linearGradient(
+                        listOf(tint.copy(alpha = 0.20f), Palette.surfaceInset),
+                    ),
+                    shape = RoundedCornerShape(15.dp),
+                )
+                .border(
+                    0.8.dp,
+                    tint.copy(alpha = 0.32f),
+                    RoundedCornerShape(15.dp),
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

@@ -2,6 +2,7 @@ package com.noop.ui
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -54,7 +55,17 @@ class SafetyShellContractTest {
         )) {
             assertTrue(title, actions.contains("QuickAction(\"$title\""))
         }
-        assertTrue(text.contains("FloatingQuickAddButton(onClick = onQuickActions)"))
+        assertTrue(text.contains("MovableNoopCommandLens("))
+        assertTrue(text.contains("onClick = { showQuickActions = true }"))
+        val commandLens = text
+            .substringAfter("private fun MovableNoopCommandLens(")
+            .substringBefore("\n}\n\n/**")
+        assertTrue(commandLens.contains("Canvas(modifier = Modifier.size(width = 18.dp, height = 22.dp))"))
+        assertTrue(commandLens.contains("StrokeJoin.Round"))
+        assertFalse(commandLens.contains("Icons.Filled.ChatBubble"))
+        assertTrue(commandLens.contains("NoopCommandLensPrefs"))
+        assertTrue(commandLens.contains("detectDragGestures"))
+        assertFalse(commandLens.contains("Icons.Filled.Add"))
         assertTrue(text.contains("quickActions.chunked(3)"))
     }
 

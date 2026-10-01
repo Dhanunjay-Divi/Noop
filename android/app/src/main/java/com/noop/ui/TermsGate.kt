@@ -219,6 +219,7 @@ fun TermsGateScreen(onAccept: () -> Unit) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
+                            .testTag("noop.terms.attestation.$idx")
                             .clickable { checks[idx] = !checks[idx] },
                         shape = RoundedCornerShape(8.dp),
                         color = Palette.surfaceInset,
@@ -273,6 +274,7 @@ fun TermsGateScreen(onAccept: () -> Unit) {
                             .fillMaxWidth()
                             .widthIn(max = 560.dp)
                             .align(Alignment.CenterHorizontally)
+                            .testTag("noop.terms.accept")
                             .padding(horizontal = 24.dp, vertical = 16.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.accent,

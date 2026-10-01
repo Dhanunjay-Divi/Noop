@@ -2966,4 +2966,10 @@
     <string name="managed_friends_deletion_scheduled_detail">Friends 和账户服务将在 24 小时冷静期内暂停。本地健康数据仍保留在此手机上。</string>
     <string name="ownership_progress_step">第 %1$d 步，共 %2$d 步</string>
     <string name="ownership_setup_complete">所有权设置已完成。</string>
+    <string name="noop_command_lens_move_left">移到左侧边缘</string>
+    <string name="noop_command_lens_move_right">移到右侧边缘</string>
+    <string name="noop_command_lens_move_up">上移</string>
+    <string name="noop_command_lens_move_down">下移</string>
+    <string name="noop_command_lens_left_edge">左侧边缘</string>
+    <string name="noop_command_lens_right_edge">右侧边缘</string>
 </resources>

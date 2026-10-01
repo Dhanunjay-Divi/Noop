@@ -1,8 +1,74 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-30**
+Last updated: **2026-10-01**
 
 ## Authoritative context
+
+- The final mobile brand-lens integration is locally verified on
+  `codex/mobile-navigation-sparkline-redesign-20260930`. It replaces the
+  speech-bubble/ECG action glyph with a matched compact NOOP `N`, makes Today
+  metric-first by moving evidence and explanation behind expansion, removes
+  weekly Fitness Age from the daily hero while preserving it in `Your Cards`,
+  keeps Trends for distinct longitudinal value, and makes Android ordinary
+  first launch enter Terms/onboarding instead of Review Sample. The final
+  evidence passes 40/40 Android focused contracts, 81/81 Apple focused
+  contracts, an additional 27/27 Apple configured-account/discovery
+  contracts, 58/58 StrandDesign tests, the complete iPhone Simulator graph,
+  Full/Demo/instrumentation Android APK assembly, 21 iPhone visual scenarios,
+  and Android Today/Trends/launcher review. Cleared-state onboarding automation
+  passes 1/1 on Android API 35 with mutated preferences restored, and the
+  DEBUG-only hermetic iPhone XCTest passes 1/1 with a clean `TEST SUCCEEDED`,
+  proving Terms -> account -> Bluetooth -> scan -> supported-band setup before
+  the tab shell. Configured account-step selection is covered on both
+  platforms; a live provider registration request remains outside this local
+  simulator round. The final visual parity sweep also replaced Android Key
+  Metrics' last visible legacy `Strain` label with localized `Effort`; its
+  focused contract and Full/Demo compilation pass. The follow-up hermetic
+  Apple run's exact 5,538,976 KiB DerivedData was removed after evidence
+  capture with no owning process or open handle, leaving about 72 GiB free.
+  Hosted checks remain required.
+  Operations 108/108, localization, private-data, health-claims, and diff
+  hygiene gates pass. Protected integration and signed physical-phone
+  accessibility/frame-pacing validation remain. No formula, source, storage,
+  account-provider, network, BLE, release, or production behavior changed.
+
+- The mobile liquid-navigation refinement is locally complete on
+  `codex/mobile-navigation-sparkline-redesign-20260930`. The five-tab dock now
+  remains structurally separate from a compact `28x38` visible, `48x52`
+  interactive edge lens with bounded drag, nearest-edge snap, persisted side
+  and height, and accessibility movement alternatives. Android Trends now uses
+  connected-observation semantics instead of a decorative wand, More uses a
+  familiar app grid, and both dock rims are quieter. Exact local evidence
+  passes 58/58 StrandDesign tests, 19/19 Android focused contracts, Full/Demo
+  Kotlin compilation, Demo APK assembly, 90/90 Apple shell/state contracts,
+  and the complete iOS Simulator graph. Paired default, alternate-edge, and
+  nine-action-center screenshots were reviewed at 1206x2622 and 1080x2424;
+  Android drag persistence survived relaunch and its recent log sample had zero
+  matching fatal/ANR signatures. No formula, health data, network, BLE,
+  account, deployment, release, commit, or push behavior changed. Owner review,
+  normal protected integration, and signed physical-phone navigation,
+  accessibility, and frame-pacing checks remain. Full all-platform
+  localization, 107 operations records, and diff hygiene pass. After evidence
+  became durable, the exact 5.7 GiB iOS DerivedData, 623 MiB Android app build
+  output, and 170 MiB StrandDesign build output were removed; installed
+  synthetic candidates remain available for review.
+
+- The local mobile-navigation and sparkline redesign is branch
+  `codex/mobile-navigation-sparkline-redesign-20260930` from protected-main
+  commit `144e1bb904d4de1760a2d773e88d769bcf2f490d`. It aligns the iPhone and
+  Android five-tab signal docks, replaces the full-slot selected pill with an
+  icon-sized accent halo, and turns the ambiguous add control into a
+  speech-bubble/ECG NOOP action center that opens the existing nine vetted
+  actions under "How can NOOP help?". It also applies bounded monotone
+  interpolation to shared sparkline primitives without changing samples,
+  formulas, sources, or storage. Exact local evidence passes all 58
+  StrandDesign tests, Android focused contracts and Demo APK assembly, 85/85
+  Apple shell/state contracts, and the complete final iOS Simulator app graph.
+  Paired synthetic Today and action-center screenshots were reviewed at
+  1206x2622 and 1080x2424 for parity, clipping, readability, and overlap.
+  Android's recent log buffer had no matching fatal/ANR and both app processes
+  remained live. No commit, push, deployment, release, or physical-device
+  claim has been made; owner review and protected integration remain pending.
 
 - The current supplier-metrics replacement is branch
   `codex/supplier-metrics-main-verification-20260930`. PR `#22` reviewed exact
