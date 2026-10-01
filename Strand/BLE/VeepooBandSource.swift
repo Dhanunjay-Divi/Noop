@@ -749,6 +749,7 @@ final class VeepooBandSource: LiveHRSource {
     private var sleepReadTask: Task<Void, Never>?
     private var stepReadInFlight = false
     private var sleepReadInFlight = false
+    private var sleepReadPending = false
     private var credentialRetryTask: Task<Void, Never>?
     private var protectedDataCancellable: AnyCancellable?
     private var displayFreshnessTask: Task<Void, Never>?
@@ -978,9 +979,12 @@ final class VeepooBandSource: LiveHRSource {
             cancelLiveRestart(resetAttempt: true)
             adapter.startLiveHeartRate()
         case .steps(let reading):
+            guard stepReadInFlight else { return }
             stepReadInFlight = false
             persistSteps?(reading)
+            startPendingSleepReadIfPossible()
         case .sleep(let reading):
+            guard sleepReadInFlight else { return }
             sleepReadInFlight = false
             persistSleep?(reading)
         case .heartRate(let reading):
@@ -1082,6 +1086,7 @@ final class VeepooBandSource: LiveHRSource {
             }
             if stage == .steps {
                 stepReadInFlight = false
+                startPendingSleepReadIfPossible()
             } else if stage == .sleep {
                 sleepReadInFlight = false
             }
@@ -1281,7 +1286,10 @@ final class VeepooBandSource: LiveHRSource {
         stepPollTask = Task { @MainActor [weak self] in
             guard let self else { return }
             while !Task.isCancelled, !self.stopped {
-                if !self.stepReadInFlight {
+                if !self.stepReadInFlight
+                    && !self.sleepReadInFlight
+                    && !self.sleepReadPending
+                {
                     self.stepReadInFlight = true
                     self.adapter.readSteps()
                 }
@@ -1307,9 +1315,23 @@ final class VeepooBandSource: LiveHRSource {
                 )
             }
             guard !Task.isCancelled, !self.stopped else { return }
-            self.sleepReadInFlight = true
-            self.adapter.readSleep()
+            self.sleepReadPending = true
+            self.startPendingSleepReadIfPossible()
         }
+    }
+
+    /// Optional supplier commands share one lane. A due sleep read goes next
+    /// after the current step result, instead of overlapping it or starving
+    /// behind the next poll. Neither command changes the live-HR transport.
+    private func startPendingSleepReadIfPossible() {
+        guard !stopped,
+              sleepReadPending,
+              !stepReadInFlight,
+              !sleepReadInFlight
+        else { return }
+        sleepReadPending = false
+        sleepReadInFlight = true
+        adapter.readSleep()
     }
 
     private func cancelMetricReads() {
@@ -1319,6 +1341,7 @@ final class VeepooBandSource: LiveHRSource {
         sleepReadTask = nil
         stepReadInFlight = false
         sleepReadInFlight = false
+        sleepReadPending = false
     }
 
     private func enqueueHeartRateForPersistence(
