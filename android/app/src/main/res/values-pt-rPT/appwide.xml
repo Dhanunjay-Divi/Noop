@@ -520,6 +520,7 @@
     <string name="appwide_managed_safety_band_sos_request_rejected">A rede de Segurança da app não aceitou o pedido.</string>
     <string name="appwide_managed_safety_band_sos_sign_in">Inicia sessão no NOOP+ antes de ativar o SOS da bracelete.</string>
     <string name="appwide_metric_asleep_time">Tempo de sono</string>
+    <string name="appwide_metric_metadata_format">%1$s · %2$s</string>
     <string name="appwide_metric_origin_measured_imported">Medido e importado</string>
     <string name="appwide_metric_origin_measured_imported_detail">De um wearable compatível, dados de Saúde ou um registo confirmado.</string>
     <string name="appwide_metric_origin_measured_short">Medido</string>

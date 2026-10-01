@@ -62,8 +62,8 @@ insights.
   - `Measured & imported`: a compatible wearable, Apple Health, Health Connect,
     or a confirmed log.
   - `NOOP insights`: values computed from available measurements and history.
-- Selected rows use compact metadata such as `Vitals - Measured` and
-  `Wellbeing - NOOP`; the full provenance explanation remains in the group
+- Selected rows use compact metadata such as `Vitals · Measured` and
+  `Wellbeing · NOOP`; the full provenance explanation remains in the group
   header.
 - Average heart rate and maximum heart rate use the cross-source resolver with
   the active/imported compatible-band lane preferred and compatible Health data
@@ -91,8 +91,10 @@ insights.
 | Apple focused tests | `xcodebuild` exited 0 for `KeyMetricProgressSemanticsTests`, `KeyMetricPrefsTests`, and `LiquidKeyMetricTrendTests` | The 18-choice contract, default Steps visibility, origin classification, bounded-progress semantics, measured metric trends, and motion-only Steps exclusion | Signed-device HealthKit or BLE behavior |
 | macOS app graph | `Strand` build exited 0 | The shared Apple catalog and classic Today exhaustive switches compile | Physical Apple Watch or wearable import behavior |
 | iPhone Simulator graph | `NOOPiOS` build exited 0 for iPhone 17 Pro Simulator, including Watch and app extensions | Current Apple mobile graph compiles with the new choices and localization | Apple Watch sensor delivery, background sync, battery, or accuracy |
-| iPhone visual review | Current 1206x2622 editor capture reviewed; Vision OCR confirmed `Vitals - Measured`, `Activity - Measured`, `Available Metrics`, and `18 supported` | The selected rows no longer wrap their provenance metadata and the source grouping is visible | Every locale, Dynamic Type size, or physical display |
-| App-wide localization generation | `Generated 993 app-wide strings and 45 Android-only resources for 9 locales` | Apple and Android generated resources are synchronized | Human linguistic review of every translation |
+| iPhone visual review | Current 1206x2622 editor capture reviewed; Vision OCR confirmed `Vitals · Measured`, `Activity · Measured`, `Available Metrics`, and `18 supported` | The selected rows no longer wrap their provenance metadata and the source grouping is visible | Every locale, Dynamic Type size, or physical display |
+| App-wide localization generation | `Generated 994 app-wide strings and 45 Android-only resources for 9 locales` | Apple and Android generated resources are synchronized, including the localized compact metadata formatter | Human linguistic review of every translation |
+| Localization regression gate | `FeedbackLocalization/generate.py --check` and `i18n_audit.py --ci origin/main` exited 0 | No new hardcoded Android UI copy, no new unextracted Apple copy, focus-locale completeness, and customer-facing brand boundary | Runtime layout in every locale |
+| Android post-localization focused wall | `BUILD SUCCESSFUL` in 44 seconds for Full Kotlin compilation plus `KeyMetricPrefsTest` and `TodayMetricCatalogContractTest` | The generated formatter resource resolves and the metric catalog contracts remain green | Physical Health Connect, WHOOP, or supplier-band reads |
 | Diff hygiene | `git diff --check` passed | No whitespace-error regression in the working patch | Runtime correctness outside the tested scope |
 
 ## Data, privacy, and medical truth
@@ -119,10 +121,9 @@ insights.
 
 ## Git and release state
 
-- Branch is locally dirty with this round plus the hydration and compact-status
-  work owned by the same active branch.
-- Protected integration, exact-head hosted checks, and clean-main verification
-  remain pending.
+- Branch implementation and the localization-gate repair are committed on the
+  same active branch.
+- Protected integration and clean-main verification remain pending.
 - No deployment, store upload, signed build, firmware action, or production
   traffic was dispatched.
 

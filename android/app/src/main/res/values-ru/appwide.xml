@@ -520,6 +520,7 @@
     <string name="appwide_managed_safety_band_sos_request_rejected">Сеть безопасности приложения не приняла запрос.</string>
     <string name="appwide_managed_safety_band_sos_sign_in">Войдите в NOOP+, прежде чем включать SOS с браслета.</string>
     <string name="appwide_metric_asleep_time">Время сна</string>
+    <string name="appwide_metric_metadata_format">%1$s · %2$s</string>
     <string name="appwide_metric_origin_measured_imported">Измерено и импортировано</string>
     <string name="appwide_metric_origin_measured_imported_detail">С совместимого устройства, из данных о здоровье или подтвержденной записи.</string>
     <string name="appwide_metric_origin_measured_short">Измерено</string>

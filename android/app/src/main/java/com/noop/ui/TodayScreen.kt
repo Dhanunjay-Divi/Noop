@@ -10034,7 +10034,11 @@ private fun KeyMetricSelectedEditorRow(
                 color = Palette.textPrimary,
             )
             Text(
-                "${keyMetricGroupTitle(metric.group)} · ${keyMetricOriginCompactTitle(metric.origin)}",
+                uiString(
+                    R.string.appwide_metric_metadata_format,
+                    keyMetricGroupTitle(metric.group),
+                    keyMetricOriginCompactTitle(metric.origin),
+                ),
                 style = NoopType.caption,
                 color = Palette.textTertiary,
                 maxLines = 1,

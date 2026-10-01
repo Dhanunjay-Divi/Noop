@@ -520,6 +520,7 @@
     <string name="appwide_managed_safety_band_sos_request_rejected">The app Safety network did not accept the request.</string>
     <string name="appwide_managed_safety_band_sos_sign_in">Sign in to NOOP+ before enabling band SOS.</string>
     <string name="appwide_metric_asleep_time">Asleep Time</string>
+    <string name="appwide_metric_metadata_format">%1$s · %2$s</string>
     <string name="appwide_metric_origin_measured_imported">Measured &amp; imported</string>
     <string name="appwide_metric_origin_measured_imported_detail">From a compatible wearable, Health data, or a confirmed log.</string>
     <string name="appwide_metric_origin_measured_short">Measured</string>

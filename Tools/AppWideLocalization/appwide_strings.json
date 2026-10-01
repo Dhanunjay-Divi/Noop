@@ -373,6 +373,17 @@
     "zh-Hans": "睡眠时长",
     "zh-Hant": "睡眠時長"
   },
+  "appwide.metric.metadata_format": {
+    "de": "%1$s · %2$s",
+    "en": "%1$s · %2$s",
+    "es": "%1$s · %2$s",
+    "fr": "%1$s · %2$s",
+    "it": "%1$s · %2$s",
+    "pt-PT": "%1$s · %2$s",
+    "ru": "%1$s · %2$s",
+    "zh-Hans": "%1$s · %2$s",
+    "zh-Hant": "%1$s · %2$s"
+  },
   "appwide.metric.origin.measured_imported": {
     "de": "Gemessen und importiert",
     "en": "Measured & imported",

@@ -520,6 +520,7 @@
     <string name="appwide_managed_safety_band_sos_request_rejected">应用内安全网络未接受该请求。</string>
     <string name="appwide_managed_safety_band_sos_sign_in">启用手环 SOS 前，请先登录 NOOP+。</string>
     <string name="appwide_metric_asleep_time">睡眠时长</string>
+    <string name="appwide_metric_metadata_format">%1$s · %2$s</string>
     <string name="appwide_metric_origin_measured_imported">测量与导入</string>
     <string name="appwide_metric_origin_measured_imported_detail">来自兼容穿戴设备、健康数据或已确认记录。</string>
     <string name="appwide_metric_origin_measured_short">测量</string>

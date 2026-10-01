@@ -108,7 +108,7 @@ Make Hydration understandable and safely correctable on Apple and Android:
 | Apple focused tests | Consolidated focused `xcodebuild` exited 0, including `HydrationEntriesTests`; `HydrationGoalTests` had passed in the same implementation round | Apple formula breakdown, transactional entry correction, source preservation, and UI contracts compile and pass | Physical notification delivery or provider behavior |
 | Android Full focused wall | `BUILD SUCCESSFUL`; hydration goal, persistence, accessibility, catalog, and compact-status tests passed with Full Kotlin/resource compilation | Android formula parity, confirmation/accessibility contracts, persistence boundaries, and compilation | Android visual appearance or physical Health Connect behavior |
 | Apple app graphs | macOS `Strand` and complete `NOOPiOS` Simulator builds exited 0 | Shared Apple source and iPhone/Watch extension graphs compile with the hydration changes | Signed installation, physical notifications, or band cues |
-| App-wide localization generation | `Generated 993 app-wide strings and 45 Android-only resources for 9 locales` | Apple and Android generated resources remain synchronized | Human linguistic review of every translation |
+| App-wide localization generation | `Generated 994 app-wide strings and 45 Android-only resources for 9 locales` | Apple and Android generated resources remain synchronized | Human linguistic review of every translation |
 | Operations and diff hygiene | All 114 round records validate and `git diff --check` passes | Durable handoff format and patch hygiene | Runtime behavior outside the tested scope |
 
 ## Physical device and deployment
