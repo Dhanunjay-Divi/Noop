@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `final candidate committed and under protected review`
+- State: `final local candidate verified; protected review pending`
 - Owner: project team
 - Branch: `codex/mobile-navigation-sparkline-redesign-20260930`
 - Start commit: `144e1bb904d4de1760a2d773e88d769bcf2f490d`
-- End implementation commit: `d210b7ba6`
+- End implementation commit: `96fdef2c2`
 - Record commit or PR: PR `#25`
 
 ## Objective
@@ -70,6 +70,15 @@ Success requires:
 - Reduced the default Today surface to Daily Signal, Recovery, Sleep, Effort,
   and one adaptive action. Evidence lists, workout-adjustment explanation, and
   detailed rationale now remain behind expansion.
+- Replaced the oversized ring hierarchy with three equal, number-first
+  Recovery, Sleep, and Effort readouts on both phones. The default lower cards
+  are now HRV, Resting HR, and Blood Oxygen, avoiding duplicate Recovery,
+  Sleep, and Effort cards while keeping every metric available through
+  customization and history.
+- Preserved calibration, missing-data, trend, provenance, and detail access in
+  the compact surface. Accessibility sizes stack the three signals instead of
+  shrinking or clipping them, and spoken provenance retains the complete source
+  summary even when the visible label is condensed.
 - Removed weekly Fitness Age from the daily hero; it remains in the default
   lower `Your Cards` metric set and its detailed history.
 - Removed Android's exposed low-Effort educational paragraph and the unused
@@ -84,6 +93,10 @@ Success requires:
   while the operational tab shell remains unavailable. The supported picker
   retains compatible 5/MG and 4.0 comparison transports and excludes unrelated
   generic HR, gym, and Oura choices from this mandatory path.
+- Added explicit configured-provider test lanes that exercise create/sign-in
+  controls, synthetic supported-band selection, ownership confirmation,
+  profile, plan, completion, and final shell entry without contacting a live
+  provider or pretending a simulator performed Bluetooth discovery.
 - Matched Android Daily Signal accessibility output to iPhone by including the
   readiness summary and Health Monitor navigation purpose.
 - Corrected the remaining Android Key Metrics label from the legacy visible
@@ -122,17 +135,16 @@ Success requires:
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | Source and state preflight | Passed | Work continues in the isolated verified branch and unrelated step-count work remains untouched | Final rendering or hosted integration |
-| Android focused contracts | 40/40 passed: 22 shell/presentation cases plus 18 configured-account ownership-selection cases | Daily Action hierarchy, compact `N`, primary navigation, Review Sample policy, bounded sparkline geometry, localized Effort vocabulary, and configured/unconfigured account-step selection compile and pass together | Live provider registration, physical TalkBack, or band behavior |
+| Android focused contracts | 46/46 passed | Compact number-first Daily Signal hierarchy, key-metric defaults, compact `N`, primary navigation, Review Sample policy, bounded sparkline geometry, localized Effort vocabulary, provenance, and configured/unconfigured account-step selection compile and pass together | Live provider registration, physical TalkBack, or band behavior |
 | Apple focused contracts | 81/81 passed | Daily Action hierarchy, Review Sample policy, onboarding discovery, and shell/action contracts remain coherent | Physical VoiceOver or band behavior |
 | Apple configured-account and discovery contracts | 27/27 passed | Configured, signed-out, ready-account, supplier-claim, and unconfigured exploration states select the intended account/onboarding step | A live registration request against the deployed provider |
 | StrandDesign package | 58/58 passed | Shared bounded monotone sparkline geometry and existing design-system behavior remain green | Every product dataset or physical rendering |
 | iPhone Simulator app graph | Build passed | The changed shared Today view, iOS shell, Watch app, complications, widgets, and packages compile in the real app graph | Signed phone behavior |
-| iPhone visual matrix | 21/21 scenarios captured and reviewed | Today hierarchy, Trends, action launcher, bottom states, keyboard, alert, Safety, nutrition, and accessibility-size states have no observed incoherent clipping or overlap | Physical OLED rendering, VoiceOver, or frame pacing |
-| iPhone fresh-install UI automation | 1/1 passed in 36.699 seconds; enclosing `xcodebuild` exited with `TEST SUCCEEDED` | A DEBUG-only launch harness clears every first-run gate before launch, then proves Terms, welcome, account exploration, Bluetooth, scan, and supported comparison bands before exposing the tab shell | Release builds cannot invoke the reset harness; this is not live-provider or signed-device proof |
-| Android Full, Demo, and instrumentation APKs | All assembled | Both shipped variants and the connected-test candidate compile and package the changed UI | OEM rendering or physical TalkBack |
-| Android fresh-install instrumentation | 1/1 passed on API 35 with every mutated first-run preference snapshotted and restored | Terms, account, Bluetooth, scan, and supported-band setup precede the operational shell without leaking test state into the installed candidate | Physical permissions, BLE discovery, live-provider registration, or OEM behavior |
-| Android visual review and diagnostics | Today, Trends, and nine-action launcher reviewed at 1080x2424; no matching fatal/ANR in the bounded recent sample | The final hierarchy and compact edge lens render without observed content overlap in the tested synthetic states | Absence of all runtime defects |
-| Repository controls | Operations 108/108, localization audit, private-data filename guard, health-claims scan of 2,321 files, and diff hygiene passed | The durable record is valid, supported locale keysets remain complete, and no new private-data/claim gate failure was introduced | Hosted protected checks or release approval |
+| Paired current Today review | iPhone 1206x2622 and Android 1080x2424 captures reviewed | Both phones show the same compact three-signal hierarchy, HRV/RHR/Blood Oxygen defaults, lower movable `N`, and matched five-tab semantics without observed clipping or chart overlap | Physical OLED rendering, VoiceOver/TalkBack, or frame pacing |
+| iPhone configured full-onboarding UI automation | 1/1 passed; enclosing `xcodebuild` exited with `TEST SUCCEEDED` | A DEBUG-only hermetic lane proves Terms -> welcome -> create/sign in -> Bluetooth -> supported simulated band -> ownership -> profile -> plan -> completion -> tabs, with tabs unavailable before completion | Release builds cannot invoke the harness; no live provider, BLE discovery, signed install, or physical claim occurred |
+| Android complete app wall | Full and Demo each passed 5,242 unit tests with seven intentional skips; both Kotlin variants, lint variants, APKs, and the Full instrumentation APK passed | The changed production source, mirrored tests, localization, and shipped variants compile and pass together | OEM rendering, physical TalkBack, or physical band behavior |
+| Android configured full-onboarding instrumentation | 1/1 passed on API 35 with every mutated preference restored; the corrected Recovery-detail shell case also passed 1/1 | A hermetic configured-provider lane proves the same gated sequence before a lightweight test shell, while a separate real-shell test proves the compact Recovery detail opens without changing tabs | Physical permissions, BLE discovery, live-provider registration, or OEM behavior |
+| Repository controls | Operations 108/108, required-CI 10-context policy, nine release controls, terminology ratchet, full localization, app-report localization, private-data filename guard, health-claims scan of 1,312 files, and diff hygiene passed | The durable record and generated resources are coherent, required workflow ownership is pinned, and no private-data or unsafe-claim regression was introduced | Hosted protected checks or release approval |
 
 ## Physical device and deployment
 
@@ -144,22 +156,24 @@ Success requires:
 - Unrun hardware gates: all signed physical-device and band-dependent cases
 - Simulator-only accessibility coverage: source contracts and large-text visual
   states passed; VoiceOver and TalkBack traversal remain physical-device gates
-- Resource cleanup: after the exact results above were recorded, the
-  round-owned 9.9 GiB build/log/screenshot directory was removed. Installed
-  synthetic simulator and emulator candidates were left intact for review. A
-  later hermetic iPhone rerun created another 5,538,976 KiB DerivedData tree;
-  after its clean `TEST SUCCEEDED` became durable and no process or open handle
-  owned the path, that exact tree was also removed, leaving about 72 GiB free.
+- Resource cleanup: after the exact results above were recorded, the idle
+  round-owned Gradle daemon was stopped and the exact two DerivedData trees,
+  isolated Gradle cache, and corrupt superseded result bundle were removed.
+  The round directory fell from about 10 GiB to 13 MiB and Data-volume free
+  space rose to about 57 GiB. Small bounded logs, status files, and the paired
+  screenshots remain temporarily for protected-review diagnosis.
 
 ## Git and release state
 
 - Changed paths: shared Apple Today hierarchy and sparkline primitives, iPhone
   shell/review sample, Android Today/shell/review sample/charts, mirrored
   tests/localization, and operations records
-- Commits: implementation candidate `d210b7ba6`; documentation pin follows on
-  the same PR branch
-- Branch and remote state: final locally verified branch pushed from exact
-  protected `main`; PR `#25`, hosted checks, and protected integration pending
+- Commits: initial implementation `d210b7ba6`; final metric-first and
+  onboarding-proof implementation `96fdef2c2`; documentation pin follows on the
+  same PR branch
+- Branch and remote state: final locally verified branch is one consolidated
+  push ahead of PR `#25`; hosted checks and protected integration remain
+  pending
 - Repository visibility verified: unchanged
 - Version/build impact: no version change planned
 - Release or distribution impact: source integration only; no store release

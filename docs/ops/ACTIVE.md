@@ -7,31 +7,31 @@ Last updated: **2026-10-01**
 - The final mobile brand-lens integration is locally verified on
   `codex/mobile-navigation-sparkline-redesign-20260930`. It replaces the
   speech-bubble/ECG action glyph with a matched compact NOOP `N`, makes Today
-  metric-first by moving evidence and explanation behind expansion, removes
-  weekly Fitness Age from the daily hero while preserving it in `Your Cards`,
-  keeps Trends for distinct longitudinal value, and makes Android ordinary
-  first launch enter Terms/onboarding instead of Review Sample. The final
-  evidence passes 40/40 Android focused contracts, 81/81 Apple focused
-  contracts, an additional 27/27 Apple configured-account/discovery
-  contracts, 58/58 StrandDesign tests, the complete iPhone Simulator graph,
-  Full/Demo/instrumentation Android APK assembly, 21 iPhone visual scenarios,
-  and Android Today/Trends/launcher review. Cleared-state onboarding automation
-  passes 1/1 on Android API 35 with mutated preferences restored, and the
-  DEBUG-only hermetic iPhone XCTest passes 1/1 with a clean `TEST SUCCEEDED`,
-  proving Terms -> account -> Bluetooth -> scan -> supported-band setup before
-  the tab shell. Configured account-step selection is covered on both
-  platforms; a live provider registration request remains outside this local
-  simulator round. The final visual parity sweep also replaced Android Key
-  Metrics' last visible legacy `Strain` label with localized `Effort`; its
-  focused contract and Full/Demo compilation pass. The follow-up hermetic
-  Apple run's exact 5,538,976 KiB DerivedData was removed after evidence
-  capture with no owning process or open handle, leaving about 72 GiB free.
-  Implementation candidate `d210b7ba6` is pushed in protected-review PR `#25`;
-  hosted checks and protected integration remain required.
-  Operations 108/108, localization, private-data, health-claims, and diff
-  hygiene gates pass. Protected integration and signed physical-phone
-  accessibility/frame-pacing validation remain. No formula, source, storage,
-  account-provider, network, BLE, release, or production behavior changed.
+  number-first by replacing the oversized ring and duplicate lower defaults
+  with an equal Recovery/Sleep/Effort summary followed by HRV, Resting HR, and
+  Blood Oxygen. Evidence and explanation remain behind detail, weekly Fitness
+  Age remains in the customizable catalog, Trends retains distinct
+  longitudinal value, and Android ordinary first launch enters Terms and
+  onboarding instead of Review Sample. The final evidence passes 46/46 Android
+  focused contracts, 5,242 Full and 5,242 Demo tests with seven intentional
+  skips each, both Android compile/lint/APK variants and the instrumentation
+  APK, 81/81 Apple focused contracts, 27/27 configured-account/discovery
+  contracts, 58/58 StrandDesign tests, and the complete iPhone Simulator
+  graph. Paired current Today captures were reviewed at 1206x2622 and
+  1080x2424. Hermetic configured-provider automation passes 1/1 per platform
+  and proves Terms -> welcome -> create/sign in -> Bluetooth -> supported
+  simulated band -> ownership -> profile -> plan -> completion before the tab
+  shell; it does not contact the live provider or prove BLE. Implementation
+  commit `96fdef2c2` is the locally verified candidate for PR `#25`; one
+  consolidated push, hosted checks, and protected integration remain.
+  Operations 108/108, required-CI, release-control, terminology, localization,
+  app-report localization, private-data, health-claims, and diff hygiene gates
+  pass. Exact round-owned build outputs were removed after evidence became
+  durable, reducing the round directory from about 10 GiB to 13 MiB and
+  leaving about 57 GiB free. Signed physical-phone accessibility/frame-pacing
+  and all physical-band behavior remain external. No formula, source
+  selection, storage, account-provider, network, BLE, release, or production
+  behavior changed.
 
 - The mobile liquid-navigation refinement is locally complete on
   `codex/mobile-navigation-sparkline-redesign-20260930`. The five-tab dock now
