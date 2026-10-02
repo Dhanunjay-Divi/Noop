@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.noop.ui
 
 import android.app.Activity
@@ -8,16 +10,24 @@ import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -49,18 +59,37 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.autofill.AutofillNode
+import androidx.compose.ui.autofill.AutofillType
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.platform.LocalAutofill
+import androidx.compose.ui.platform.LocalAutofillTree
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.NoopApplication
@@ -78,7 +107,28 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.sin
+
+internal val ManagedVerificationCodeLengthRange = 4..8
+internal const val ManagedVerificationCodeMaximumLength = 8
+
+internal fun sanitizeManagedVerificationCode(
+    rawValue: String,
+    maximumLength: Int = ManagedVerificationCodeMaximumLength,
+): String = buildString {
+    rawValue.forEach { character ->
+        val digit = Character.digit(character, 10)
+        if (digit in 0..9 && length < maximumLength.coerceAtLeast(0)) {
+            append(digit)
+        }
+    }
+}
+
+internal fun isManagedVerificationCodeComplete(code: String): Boolean =
+    code.length in ManagedVerificationCodeLengthRange
 
 @Composable
 internal fun NoopPlusScreen() {
@@ -247,6 +297,9 @@ private fun ManagedCloudSetupSheet(
     var confirmHistoryImport by remember { mutableStateOf(false) }
     var pendingRevoke by remember { mutableStateOf<ManagedInstallation?>(null) }
     var historyImportJob by remember { mutableStateOf<Job?>(null) }
+    var verificationFailureToken by remember { mutableIntStateOf(0) }
+    var verificationSuccessVisible by remember { mutableStateOf(false) }
+    var verificationSuccessJob by remember { mutableStateOf<Job?>(null) }
     val historyExportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
@@ -277,18 +330,43 @@ private fun ManagedCloudSetupSheet(
     }
 
     DisposableEffect(Unit) {
-        onDispose { historyImportJob?.cancel() }
+        onDispose {
+            historyImportJob?.cancel()
+            verificationSuccessJob?.cancel()
+        }
     }
 
     LaunchedEffect(state.phase) {
         if (state.phase == ManagedCloudPhase.ENROLLED) service.refreshOverview()
+        val verificationConfirmed = (
+            state.phase == ManagedCloudPhase.CONSENT_REQUIRED ||
+                state.phase == ManagedCloudPhase.ENROLLED
+            ) && code.isNotEmpty()
+        if (verificationConfirmed) {
+            code = ""
+            verificationSuccessJob?.cancel()
+            verificationSuccessVisible = true
+            verificationSuccessJob = scope.launch {
+                delay(680)
+                verificationSuccessVisible = false
+                verificationSuccessJob = null
+            }
+        } else if (
+            state.phase == ManagedCloudPhase.SIGNED_OUT ||
+            state.phase == ManagedCloudPhase.CODE_SENT
+        ) {
+            verificationSuccessJob?.cancel()
+            verificationSuccessJob = null
+            verificationSuccessVisible = false
+        }
     }
 
     NoopBottomSheet(onDismiss = onDismiss) {
-        Column(
-            modifier = Modifier.testTag("noop.noop-plus.sheet"),
-            verticalArrangement = Arrangement.spacedBy(Metrics.sectionGap),
-        ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.testTag("noop.noop-plus.sheet"),
+                verticalArrangement = Arrangement.spacedBy(Metrics.sectionGap),
+            ) {
             Text(
                 stringResource(R.string.managed_cloud_brand),
                 style = NoopType.title2,
@@ -322,20 +400,14 @@ private fun ManagedCloudSetupSheet(
                         colors = remoteSyncFieldColors(),
                     )
                     if (state.phase == ManagedCloudPhase.CODE_SENT) {
-                        OutlinedTextField(
+                        ManagedVerificationCodeField(
                             value = code,
-                            onValueChange = { code = it },
+                            onValueChange = { code = sanitizeManagedVerificationCode(it) },
+                            enabled = !state.busy,
+                            failureToken = verificationFailureToken,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("noop.noop-plus.code"),
-                            enabled = !state.busy,
-                            singleLine = true,
-                            label = {
-                                Text(stringResource(R.string.managed_cloud_code_label))
-                            },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            textStyle = NoopType.body,
-                            colors = remoteSyncFieldColors(),
                         )
                         NoopButton(
                             text = if (state.busy) {
@@ -345,9 +417,20 @@ private fun ManagedCloudSetupSheet(
                             },
                             leadingIcon = Icons.Filled.CheckCircle,
                             fullWidth = true,
-                            enabled = !state.busy && code.isNotBlank(),
+                            enabled = !state.busy &&
+                                isManagedVerificationCodeComplete(code),
                             modifier = Modifier.testTag("noop.noop-plus.verify-code"),
-                            onClick = { scope.launch { service.verifyCode(code) } },
+                            onClick = {
+                                scope.launch {
+                                    service.verifyCode(code)
+                                    if (
+                                        service.state.value.phase ==
+                                        ManagedCloudPhase.CODE_SENT
+                                    ) {
+                                        verificationFailureToken += 1
+                                    }
+                                }
+                            },
                         )
                         NoopButton(
                             text = stringResource(R.string.managed_cloud_use_different_number),
@@ -698,6 +781,12 @@ private fun ManagedCloudSetupSheet(
                     )
                 }
             }
+            }
+            if (verificationSuccessVisible) {
+                ManagedVerificationSuccessOverlay(
+                    modifier = Modifier.matchParentSize(),
+                )
+            }
         }
     }
 
@@ -810,6 +899,233 @@ private fun ManagedCloudSetupSheet(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun ManagedVerificationCodeField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    enabled: Boolean,
+    failureToken: Int,
+    modifier: Modifier = Modifier,
+) {
+    val reduceMotion = rememberReduceMotion()
+    val characters = value.toList()
+    val label = stringResource(R.string.managed_cloud_code_label)
+    val nudgePhase by animateFloatAsState(
+        targetValue = failureToken.toFloat(),
+        animationSpec = if (reduceMotion) {
+            snap()
+        } else {
+            tween(durationMillis = 240)
+        },
+        label = "Verification code invalid nudge",
+    )
+    val nudgeDistancePx = with(LocalDensity.current) {
+        Metrics.space4.toPx()
+    }
+
+    BasicTextField(
+        value = value,
+        onValueChange = { onValueChange(sanitizeManagedVerificationCode(it)) },
+        enabled = enabled,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        textStyle = NoopType.body.copy(color = Color.Transparent),
+        cursorBrush = SolidColor(Color.Transparent),
+        modifier = modifier
+            .managedCloudOtpAutofill(onValueChange)
+            .graphicsLayer {
+                translationX = if (reduceMotion) {
+                    0f
+                } else {
+                    nudgeDistancePx * sin(nudgePhase * PI.toFloat() * 4f)
+                }
+            }
+            .semantics {
+                contentDescription = label
+            },
+        decorationBox = { innerTextField ->
+            Box {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.space4),
+                ) {
+                    repeat(ManagedVerificationCodeMaximumLength) { index ->
+                        val populated = index < characters.size
+                        val current = enabled &&
+                            index == minOf(
+                                characters.size,
+                                ManagedVerificationCodeMaximumLength - 1,
+                            )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(Metrics.verificationCodeSlotHeight)
+                                .clip(
+                                    RoundedCornerShape(
+                                        Metrics.verificationCodeSlotRadius,
+                                    ),
+                                )
+                                .background(
+                                    if (current) {
+                                        Palette.accent.copy(alpha = 0.10f)
+                                    } else {
+                                        Palette.surfaceRaised
+                                    },
+                                )
+                                .border(
+                                    width = if (current) 1.4.dp else 0.8.dp,
+                                    color = if (current) {
+                                        Palette.accent
+                                    } else {
+                                        Palette.hairlineStrong
+                                    },
+                                    shape = RoundedCornerShape(
+                                        Metrics.verificationCodeSlotRadius,
+                                    ),
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = if (populated) {
+                                    characters[index].toString()
+                                } else {
+                                    "·"
+                                },
+                                style = NoopType.title2.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                ),
+                                color = if (populated) {
+                                    Palette.textPrimary
+                                } else {
+                                    Palette.textTertiary.copy(alpha = 0.48f)
+                                },
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .alpha(0.01f),
+                ) {
+                    innerTextField()
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun ManagedVerificationSuccessOverlay(
+    modifier: Modifier = Modifier,
+) {
+    val reduceMotion = rememberReduceMotion()
+    val verifiedLabel = stringResource(R.string.ownership_phone_verified_label)
+    var showCheck by remember { mutableStateOf(reduceMotion) }
+    val checkScale by animateFloatAsState(
+        targetValue = if (showCheck) 1f else 0.42f,
+        animationSpec = if (reduceMotion) {
+            snap()
+        } else {
+            NoopMotion.value()
+        },
+        label = "Verification success check",
+    )
+
+    LaunchedEffect(reduceMotion) {
+        if (reduceMotion) return@LaunchedEffect
+        showCheck = true
+    }
+
+    Box(
+        modifier = modifier
+            .background(Palette.surfaceBase.copy(alpha = 0.88f))
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent().changes.forEach { it.consume() }
+                    }
+                }
+            }
+            .semantics(mergeDescendants = true) {
+                contentDescription = verifiedLabel
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Metrics.space12),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(Metrics.verificationSuccessDiameter)
+                    .clip(CircleShape)
+                    .background(Palette.surfaceRaised)
+                    .border(
+                        1.dp,
+                        Palette.accent.copy(alpha = 0.64f),
+                        CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    tint = Palette.accent,
+                    modifier = Modifier
+                        .size(Metrics.controlHeight + Metrics.space8)
+                        .graphicsLayer {
+                            scaleX = checkScale
+                            scaleY = checkScale
+                            alpha = if (showCheck) 1f else 0f
+                        },
+                )
+            }
+            Text(
+                text = verifiedLabel,
+                style = NoopType.headline,
+                color = Palette.textPrimary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = Metrics.space24),
+            )
+        }
+    }
+}
+
+@Suppress("DEPRECATION")
+@Composable
+private fun Modifier.managedCloudOtpAutofill(
+    onFill: (String) -> Unit,
+): Modifier {
+    val autofill = LocalAutofill.current
+    val autofillTree = LocalAutofillTree.current
+    val currentOnFill by rememberUpdatedState(onFill)
+    val node = remember {
+        AutofillNode(
+            autofillTypes = listOf(AutofillType.SmsOtpCode),
+            onFill = {
+                currentOnFill(sanitizeManagedVerificationCode(it))
+            },
+        )
+    }
+    DisposableEffect(autofillTree, node) {
+        autofillTree += node
+        onDispose {
+            autofillTree.children.remove(node.id)
+        }
+    }
+    return onGloballyPositioned {
+        node.boundingBox = it.boundsInWindow()
+    }.onFocusChanged {
+        if (it.isFocused) {
+            autofill?.requestAutofillForNode(node)
+        } else {
+            autofill?.cancelAutofillForNode(node)
+        }
     }
 }
 

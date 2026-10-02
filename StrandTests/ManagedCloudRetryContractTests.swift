@@ -22,6 +22,50 @@ final class ManagedCloudRetryContractTests: XCTestCase {
         return (try XCTUnwrap(UserDefaults(suiteName: name)), name)
     }
 
+    #if os(iOS)
+    func testManagedVerificationCodeAcceptsFourToEightLocalizedDigits() {
+        XCTAssertEqual(
+            sanitizedManagedVerificationCode(" 12a3-4567 "),
+            "1234567"
+        )
+        XCTAssertEqual(
+            sanitizedManagedVerificationCode("١٢٣456"),
+            "123456"
+        )
+        XCTAssertEqual(
+            sanitizedManagedVerificationCode("１２３456"),
+            "123456"
+        )
+        XCTAssertEqual(
+            sanitizedManagedVerificationCode("123456", maximumLength: 4),
+            "1234"
+        )
+        XCTAssertEqual(
+            sanitizedManagedVerificationCode("123", maximumLength: 0),
+            ""
+        )
+        XCTAssertTrue(isManagedVerificationCodeComplete("1234"))
+        XCTAssertTrue(isManagedVerificationCodeComplete("12345678"))
+        XCTAssertFalse(isManagedVerificationCodeComplete("123"))
+        XCTAssertFalse(isManagedVerificationCodeComplete("123456789"))
+    }
+    #endif
+
+    func testManagedVerificationUIKeepsAutofillAndServerConfirmedSuccess() throws {
+        let source = try source("StrandiOS/System/ManagedCloudViews.swift")
+
+        XCTAssertTrue(source.contains(".textContentType(.oneTimeCode)"))
+        XCTAssertTrue(source.contains("managedVerificationCodeLengthRange = 4...8"))
+        XCTAssertTrue(source.contains("ManagedVerificationCodeSlot("))
+        XCTAssertTrue(source.contains("ManagedVerificationNudge("))
+        XCTAssertTrue(source.contains("service.phase == .consentRequired"))
+        XCTAssertTrue(source.contains("ManagedVerificationSuccessOverlay()"))
+        XCTAssertTrue(source.contains("verificationSuccessVisible"))
+        XCTAssertFalse(source.contains("verificationSuccessCode"))
+        XCTAssertTrue(source.contains("@Environment(\\.accessibilityReduceMotion)"))
+        XCTAssertFalse(source.contains("AppDiagnosticsRecorder"))
+    }
+
     func testScopedRetryStateClearsWithoutTouchingOtherScopesOrDefaults()
         throws
     {

@@ -468,6 +468,14 @@ object Metrics {
     val iconSmall = 18.dp
     val selectorPadding = 10.dp
     val selectorSpacing = 8.dp
+    val controlHeight = 48.dp
+    val navigationBarRadius = 22.dp
+    val navigationLensSize = 44.dp
+    val navigationBarTopInset = 10.dp
+    val navigationBarReservedHeight = 88.dp
+    val verificationCodeSlotRadius = 12.dp
+    val verificationCodeSlotHeight = 56.dp
+    val verificationSuccessDiameter = 96.dp
     val sparkWidthWide = 48.dp   // inline trend beside a tile value — kept compact so the value (which
                                  // shrinks to fit, #332) keeps enough room to stay legible at full size
     val sparkWidth = 58.dp

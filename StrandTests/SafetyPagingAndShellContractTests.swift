@@ -1926,6 +1926,27 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(shell.contains("Double-tap to open. Drag to move."))
     }
 
+    func testPrimaryTabBarUsesOneRaisedMovingLensWithoutLosingSemantics() throws {
+        let shell = try source("StrandiOS/App/RootTabView.swift")
+        let tabBar = try XCTUnwrap(
+            shell.components(separatedBy: "private struct FloatingTabBar: View").last?
+                .components(separatedBy: "private extension Comparable").first
+        )
+
+        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensSize"))
+        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationBarTopInset"))
+        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationBarRadius"))
+        XCTAssertTrue(tabBar.contains("matchedGeometryEffect("))
+        XCTAssertTrue(tabBar.contains(#"id: "selected-tab-indicator""#))
+        XCTAssertTrue(tabBar.contains("Circle()"))
+        XCTAssertTrue(tabBar.contains("@Environment(\\.accessibilityReduceMotion)"))
+        XCTAssertTrue(tabBar.contains("NoopMotion.gated("))
+        XCTAssertTrue(tabBar.contains(".accessibilityAddTraits(.isButton)"))
+        XCTAssertTrue(tabBar.contains(".accessibilityAddTraits(active ? .isSelected : [])"))
+        XCTAssertTrue(tabBar.contains("IPhonePrimaryTab.minimumTouchDimension"))
+        XCTAssertFalse(tabBar.contains("sweepAngle"))
+    }
+
     func testBandRhythmClassifierCannotEscapeProtocolDiagnostics() throws {
         let allowedDecoders: Set<String> = [
             "Packages/WhoopProtocol/Sources/WhoopProtocol/Whoop5Ecg.swift",

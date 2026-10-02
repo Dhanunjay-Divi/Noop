@@ -193,7 +193,9 @@ class PrimaryNavigationContractTest {
         assertTrue(bottomBar.contains(
             "val barContentPadding = if (compactNavigation) 4.dp else 7.dp",
         ))
-        assertTrue(bottomBar.contains("RoundedCornerShape(22.dp)"))
+        assertTrue(bottomBar.contains(
+            "RoundedCornerShape(Metrics.navigationBarRadius)"
+        ))
         assertFalse(bottomBar.contains("MovableNoopCommandLens("))
         assertTrue(text.contains("MovableNoopCommandLens("))
     }
@@ -216,8 +218,10 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains(
             "BarTab(Destination.Sleep, Icons.Filled.NightsStay, R.string.nav_sleep)"
         ))
-        assertTrue(text.contains("icon = Icons.Filled.Apps"))
-        assertTrue(text.contains("active = selected == Destination.More"))
+        assertTrue(text.contains(
+            "BarTab(Destination.More, Icons.Filled.Apps, R.string.nav_more)"
+        ))
+        assertTrue(text.contains("active = selected == tab.dest"))
         assertFalse(text.contains(
             "Destination.Live, Destination.Workouts, Destination.Nutrition"
         ))
@@ -396,5 +400,46 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains("restoreState = false"))
         assertTrue(text.contains("nav.navigate(it) { launchSingleTop = true }"))
         assertFalse(text.contains("MoreScreen(onNavigate = { nav.navigateTopLevel(it) })"))
+    }
+
+    @Test
+    fun managedVerificationCodeAcceptsFourToEightLocalizedDigits() {
+        assertEquals("1234567", sanitizeManagedVerificationCode(" 12a3-4567 "))
+        assertEquals("123456", sanitizeManagedVerificationCode("١٢٣456"))
+        assertEquals("123456", sanitizeManagedVerificationCode("１２３456"))
+        assertEquals("1234", sanitizeManagedVerificationCode("123456", 4))
+        assertEquals("", sanitizeManagedVerificationCode("123", 0))
+        assertTrue(isManagedVerificationCodeComplete("1234"))
+        assertTrue(isManagedVerificationCodeComplete("12345678"))
+        assertFalse(isManagedVerificationCodeComplete("123"))
+        assertFalse(isManagedVerificationCodeComplete("123456789"))
+    }
+
+    @Test
+    fun navigationAndOtpUseSharedMotionWithAccessibleFallbacks() {
+        val root = appRootSource()
+        assumeTrue("AppRoot.kt unavailable", root != null)
+        val appRoot = root!!
+        val bottomBar = appRoot
+            .substringAfter("private fun GlassBottomBar(")
+            .substringBefore("\ninternal enum class NoopCommandLensEdge")
+
+        assertTrue(bottomBar.contains("animateDpAsState("))
+        assertTrue(bottomBar.contains("raisedNavigationLens(lensAccent)"))
+        assertTrue(bottomBar.contains("rememberReduceMotion()"))
+        assertTrue(bottomBar.contains("if (reduceMotion) snap()"))
+        assertTrue(bottomBar.contains(".selectableGroup()"))
+        assertTrue(appRoot.contains("role = Role.Tab"))
+
+        val managed = uiSource("ManagedCloudCard.kt")
+        assertTrue("ManagedCloudCard.kt is missing", managed != null)
+        val text = managed!!.readText()
+        assertTrue(text.contains("BasicTextField("))
+        assertTrue(text.contains("AutofillType.SmsOtpCode"))
+        assertTrue(text.contains("ManagedVerificationSuccessOverlay("))
+        assertTrue(text.contains("ManagedCloudPhase.CONSENT_REQUIRED"))
+        assertTrue(text.contains("rememberReduceMotion()"))
+        assertTrue(text.contains("verificationSuccessVisible"))
+        assertFalse(text.contains("verificationSuccessCode"))
     }
 }

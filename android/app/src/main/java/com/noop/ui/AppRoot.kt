@@ -2,9 +2,12 @@ package com.noop.ui
 
 import androidx.annotation.StringRes
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -1465,15 +1468,13 @@ private fun MoreRow(dest: Destination, onClick: () -> Unit) {
 /** A single bottom-bar nav slot: the destination it switches to, plus the bar-specific icon/label. */
 private data class BarTab(val dest: Destination, val icon: ImageVector, @StringRes val labelRes: Int)
 
-/** The nav slots in iOS order. More is appended at the call site because its selected
- * state also represents destinations reached through the complete index. */
-private val barLeadingTabs = listOf(
+/** The five persistent destinations, in the same order as iOS. */
+private val bottomBarTabs = listOf(
     BarTab(Destination.Today, Icons.Filled.MonitorHeart, R.string.nav_today),
     BarTab(Destination.Trends, Icons.Filled.Hub, R.string.nav_trends),
     BarTab(Destination.Workouts, Icons.Filled.FitnessCenter, R.string.nav_workouts),
-)
-private val barTrailingTabs = listOf(
     BarTab(Destination.Sleep, Icons.Filled.NightsStay, R.string.nav_sleep),
+    BarTab(Destination.More, Icons.Filled.Apps, R.string.nav_more),
 )
 
 private fun bottomBarAccent(destination: Destination): Color = when (destination) {
@@ -1592,14 +1593,9 @@ private fun GlassBottomBar(
     selected: Destination,
     onTabSelected: (Destination) -> Unit,
 ) {
-    val barShape = RoundedCornerShape(22.dp)
-    val barLabels = listOf(
-        stringResource(R.string.nav_today),
-        stringResource(R.string.nav_trends),
-        stringResource(R.string.nav_workouts),
-        stringResource(R.string.nav_sleep),
-        stringResource(R.string.nav_more),
-    )
+    val barShape = RoundedCornerShape(Metrics.navigationBarRadius)
+    val barLabels = bottomBarTabs.map { stringResource(it.labelRes) }
+    val reduceMotion = rememberReduceMotion()
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
@@ -1623,59 +1619,118 @@ private fun GlassBottomBar(
                 interItemSpacing = 1.dp,
                 labelHorizontalSafetyPadding = 1.dp,
             )
-            Row(
+            val barHeight = labelLayout.barHeightDp.dp + Metrics.space12
+            val slotWidth = (
+                maxWidth - (barContentPadding * 2)
+            ) / bottomBarTabs.size
+            val selectedIndex = bottomBarTabs
+                .indexOfFirst { it.dest == selected }
+                .coerceAtLeast(0)
+            val lensOffset by animateDpAsState(
+                targetValue = barContentPadding +
+                    (slotWidth * selectedIndex) +
+                    ((slotWidth - Metrics.navigationLensSize) / 2),
+                animationSpec = if (reduceMotion) snap() else NoopMotion.value(),
+                label = "Selected tab lens position",
+            )
+            val lensAccent by animateColorAsState(
+                targetValue = bottomBarAccent(selected),
+                animationSpec = if (reduceMotion) {
+                    snap()
+                } else {
+                    tween(durationMillis = 180, easing = NavEasing)
+                },
+                label = "Selected tab lens color",
+            )
+            Box(
                 modifier = Modifier
-                    .height(labelLayout.barHeightDp.dp)
+                    .height(barHeight)
                     .fillMaxWidth()
-                    .navigationGlassSurface(
-                        shape = barShape,
-                        accentRim = bottomBarAccent(selected).copy(alpha = 0.26f),
-                    )
-                    .padding(horizontal = barContentPadding)
-                    .selectableGroup(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(1.dp),
             ) {
-                barLeadingTabs.forEach { tab ->
-                    BarSlot(
-                        icon = tab.icon,
-                        label = stringResource(tab.labelRes),
-                        active = selected == tab.dest,
-                        accent = bottomBarAccent(tab.dest),
-                        testTag = "noop.tab.${tab.dest.route}",
-                        labelMaxLines = labelLayout.maxLines,
-                        labelScaleMultiplier = labelLayout.labelScaleMultiplier,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onTabSelected(tab.dest) },
-                    )
-                }
-                barTrailingTabs.forEach { tab ->
-                    BarSlot(
-                        icon = tab.icon,
-                        label = stringResource(tab.labelRes),
-                        active = selected == tab.dest,
-                        accent = bottomBarAccent(tab.dest),
-                        testTag = "noop.tab.${tab.dest.route}",
-                        labelMaxLines = labelLayout.maxLines,
-                        labelScaleMultiplier = labelLayout.labelScaleMultiplier,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onTabSelected(tab.dest) },
-                    )
-                }
-                BarSlot(
-                    icon = Icons.Filled.Apps,
-                    label = stringResource(R.string.nav_more),
-                    active = selected == Destination.More,
-                    accent = bottomBarAccent(Destination.More),
-                    testTag = "noop.tab.more",
-                    labelMaxLines = labelLayout.maxLines,
-                    labelScaleMultiplier = labelLayout.labelScaleMultiplier,
-                    modifier = Modifier.weight(1f),
-                    onClick = { onTabSelected(Destination.More) },
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .height(labelLayout.barHeightDp.dp)
+                        .fillMaxWidth()
+                        .navigationGlassSurface(
+                            shape = barShape,
+                            accentRim = lensAccent.copy(alpha = 0.26f),
+                        ),
                 )
+                Box(
+                    modifier = Modifier
+                        .offset(x = lensOffset)
+                        .size(Metrics.navigationLensSize)
+                        .raisedNavigationLens(lensAccent),
+                )
+                Row(
+                    modifier = Modifier
+                        .height(barHeight)
+                        .fillMaxWidth()
+                        .padding(horizontal = barContentPadding)
+                        .selectableGroup(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    bottomBarTabs.forEach { tab ->
+                    BarSlot(
+                        icon = tab.icon,
+                        label = stringResource(tab.labelRes),
+                        active = selected == tab.dest,
+                        accent = bottomBarAccent(tab.dest),
+                        testTag = "noop.tab.${tab.dest.route}",
+                        labelMaxLines = labelLayout.maxLines,
+                        labelScaleMultiplier = labelLayout.labelScaleMultiplier,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onTabSelected(tab.dest) },
+                    )
+                }
+                }
             }
         }
     }
+}
+
+private fun Modifier.raisedNavigationLens(accent: Color): Modifier = composed {
+    val light = Palette.isLight
+    val body = Brush.linearGradient(
+        colors = listOf(
+            accent.copy(alpha = if (light) 0.24f else 0.30f),
+            accent.copy(alpha = if (light) 0.10f else 0.14f),
+        ),
+        start = Offset.Zero,
+        end = Offset.Infinite,
+    )
+    this
+        .shadow(
+            elevation = 9.dp,
+            shape = CircleShape,
+            clip = false,
+        )
+        .clip(CircleShape)
+        .drawWithCache {
+            val rimWidth = 0.8.dp.toPx()
+            val highlightWidth = 1.1.dp.toPx()
+            onDrawBehind {
+                drawCircle(brush = body)
+                drawCircle(
+                    color = accent.copy(alpha = if (light) 0.58f else 0.68f),
+                    style = Stroke(width = rimWidth),
+                )
+                drawArc(
+                    color = Color.White.copy(alpha = if (light) 0.56f else 0.28f),
+                    startAngle = 205f,
+                    sweepAngle = 74f,
+                    useCenter = false,
+                    style = Stroke(width = highlightWidth, cap = StrokeCap.Round),
+                    topLeft = Offset(3.dp.toPx(), 3.dp.toPx()),
+                    size = Size(
+                        this.size.width - 6.dp.toPx(),
+                        this.size.height - 6.dp.toPx(),
+                    ),
+                )
+            }
+        }
 }
 
 internal enum class NoopCommandLensEdge {
@@ -2128,12 +2183,24 @@ private fun BarSlot(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val tint = if (active) accent else Palette.textSecondary
-    val haloShape = RoundedCornerShape(9.dp)
+    val reduceMotion = rememberReduceMotion()
+    val tint by animateColorAsState(
+        targetValue = if (active) accent else Palette.textSecondary,
+        animationSpec = if (reduceMotion) {
+            snap()
+        } else {
+            tween(durationMillis = 180, easing = NavEasing)
+        },
+        label = "Bottom navigation item color",
+    )
     val selectedTabLiftLabel = stringResource(R.string.nav_selected_tab_animation_label)
     val selectedScale by animateFloatAsState(
-        targetValue = if (active) 1.08f else 1f,
-        animationSpec = tween(durationMillis = 260, easing = NavEasing),
+        targetValue = if (active) 1.04f else 1f,
+        animationSpec = if (reduceMotion) {
+            snap()
+        } else {
+            tween(durationMillis = 260, easing = NavEasing)
+        },
         label = selectedTabLiftLabel,
     )
     Column(
@@ -2152,45 +2219,14 @@ private fun BarSlot(
                 contentDescription = label
             },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+        verticalArrangement = Arrangement.Top,
     ) {
         Box(
             modifier = Modifier
-                .width(34.dp)
-                .height(24.dp)
-                .clip(haloShape)
-                .background(
-                    if (active) accent.copy(alpha = 0.18f) else Color.Transparent,
-                    haloShape,
-                )
-                .then(
-                    if (active) {
-                        Modifier.border(
-                            0.8.dp,
-                            accent.copy(alpha = 0.48f),
-                            haloShape,
-                        )
-                    } else {
-                        Modifier
-                    },
-                ),
+                .width(Metrics.navigationLensSize)
+                .height(Metrics.navigationLensSize - Metrics.space2),
             contentAlignment = Alignment.Center,
         ) {
-            if (active) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .offset(y = (-3).dp)
-                        .width(16.dp)
-                        .height(2.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(accent.copy(alpha = 0.45f), accent),
-                            ),
-                        ),
-                )
-            }
             Icon(
                 icon,
                 contentDescription = null,
@@ -2200,7 +2236,7 @@ private fun BarSlot(
                     .graphicsLayer {
                         scaleX = selectedScale
                         scaleY = selectedScale
-                        translationY = if (active) -0.5.dp.toPx() else 0f
+                        translationY = if (active) -4.dp.toPx() else 0f
                     },
             )
         }

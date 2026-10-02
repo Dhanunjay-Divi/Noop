@@ -1871,7 +1871,8 @@ private struct FloatingTabBar: View {
     /// fully below the fold instead of peeking into the navigation mask at the initial scroll position.
     /// A larger Dynamic Type measurement can still raise this value, and the shell intentionally preserves
     /// that largest value when the bar compacts.
-    static let expandedReservedHeight: CGFloat = 76
+    static let expandedReservedHeight =
+        NoopMetrics.navigationBarReservedHeight
 
     @Binding var selection: Int
     /// Scroll-reactive presentation supplied by the shell. Compact mode keeps the same 48pt target and
@@ -1902,6 +1903,12 @@ private struct FloatingTabBar: View {
 
     private static let labelLineCount = 1
     private static let labelMinimumScaleFactor: CGFloat = 0.56
+    private static let raisedLensDimension =
+        NoopMetrics.navigationLensSize
+    private static let expandedRailTopInset =
+        NoopMetrics.navigationBarTopInset
+    private static let expandedRailCornerRadius =
+        NoopMetrics.navigationBarRadius
 
     /// Compaction is suppressed at accessibility text sizes. Sighted low-vision users retain the same
     /// five persistent localized wayfinding labels; only this fixed navigation chrome receives a bounded
@@ -1920,7 +1927,13 @@ private struct FloatingTabBar: View {
     ) -> CGFloat {
         let labelHeight = boundedLabelLineHeight(labelLineHeight)
             * CGFloat(max(1, labelLineCount))
-        return max(48, 12 + 18 + 3 + labelHeight)
+        return max(
+            NoopMetrics.controlHeight + NoopMetrics.space4,
+            NoopMetrics.space3
+                + NoopMetrics.space8
+                + NoopMetrics.space1
+                + labelHeight
+        )
     }
 
     private static func boundedLabelLineHeight(_ scaledLineHeight: CGFloat) -> CGFloat {
@@ -2034,24 +2047,38 @@ private struct FloatingTabBar: View {
                alignment: .leading)
         .background {
             if !visuallyCompact {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(
+                    cornerRadius: Self.expandedRailCornerRadius,
+                    style: .continuous
+                )
                     .fill(.clear)
                     .navigationGlass(
-                        in: RoundedRectangle(cornerRadius: 20, style: .continuous),
+                        in: RoundedRectangle(
+                            cornerRadius: Self.expandedRailCornerRadius,
+                            style: .continuous
+                        ),
                         tint: navigationGlassTint
                     )
                     .opacity(navigationGlassOpacity)
+                    .padding(.top, Self.expandedRailTopInset)
             }
         }
         .background {
             if !visuallyCompact {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(
+                    cornerRadius: Self.expandedRailCornerRadius,
+                    style: .continuous
+                )
                     .fill(navigationScrim)
+                    .padding(.top, Self.expandedRailTopInset)
             }
         }
         .overlay {
             if !visuallyCompact {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(
+                    cornerRadius: Self.expandedRailCornerRadius,
+                    style: .continuous
+                )
                     .strokeBorder(
                     LinearGradient(colors: [
                         currentAccent.opacity(colorScheme == .dark ? 0.30 : 0.20),
@@ -2060,6 +2087,7 @@ private struct FloatingTabBar: View {
                     ], startPoint: .leading, endPoint: .trailing),
                     lineWidth: 0.8
                 )
+                .padding(.top, Self.expandedRailTopInset)
             }
         }
         .shadow(
@@ -2103,14 +2131,21 @@ private struct FloatingTabBar: View {
                     .foregroundStyle(
                         navigationInk(active: true, accent: currentAccent)
                     )
-                    .frame(width: 26, height: 26)
+                    .frame(width: 28, height: 28)
                     .background {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        Circle()
                             .fill(selectedHaloFill(accent: currentAccent))
-                        .matchedGeometryEffect(
-                            id: "selected-tab-indicator",
-                            in: navigationMorph
-                        )
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(
+                                        selectedHaloStroke(accent: currentAccent),
+                                        lineWidth: 0.8
+                                    )
+                            }
+                            .matchedGeometryEffect(
+                                id: "selected-tab-indicator",
+                                in: navigationMorph
+                            )
                     }
 
                 Text(visualTitle(for: currentItem))
@@ -2150,17 +2185,35 @@ private struct FloatingTabBar: View {
                 selection = item.tag
             }
         } label: {
-            VStack(spacing: 2) {
+            VStack(spacing: 1) {
                 ZStack {
                     if active {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        Circle()
                             .fill(selectedHaloFill(accent: accent))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                Circle()
                                     .strokeBorder(
                                         selectedHaloStroke(accent: accent),
                                         lineWidth: 0.8
                                     )
+                            )
+                            .overlay(alignment: .topLeading) {
+                                Circle()
+                                    .trim(from: 0.06, to: 0.30)
+                                    .stroke(
+                                        .white.opacity(colorScheme == .dark ? 0.30 : 0.54),
+                                        style: StrokeStyle(
+                                            lineWidth: 1.1,
+                                            lineCap: .round
+                                        )
+                                    )
+                                    .padding(3)
+                            }
+                            .shadow(
+                                color: accent.opacity(colorScheme == .dark ? 0.24 : 0.16),
+                                radius: 8,
+                                x: 0,
+                                y: 4
                             )
                             .matchedGeometryEffect(
                                 id: "selected-tab-indicator",
@@ -2170,26 +2223,13 @@ private struct FloatingTabBar: View {
                     Image(systemName: item.icon)
                         .font(.system(size: 17, weight: active ? .semibold : .regular))
                         .symbolRenderingMode(.hierarchical)
-                        // Selection gets one brief, physical lift. It communicates the tab change without
-                        // turning navigation into another continuously moving part of the health dashboard.
-                        .scaleEffect(active ? 1.06 : 1)
-                        .offset(y: active ? -0.5 : 0)
+                        .scaleEffect(active ? 1.04 : 1)
                 }
-                .frame(width: 34, height: 24)
-                .overlay(alignment: .top) {
-                    if active {
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [accent.opacity(0.45), accent],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: 16, height: 2)
-                            .offset(y: -3)
-                    }
-                }
+                .frame(
+                    width: Self.raisedLensDimension,
+                    height: Self.raisedLensDimension
+                )
+                .offset(y: active ? -7 : 0)
                 Text(visualTitle(for: item))
                     // Fixed navigation remains one line like a native tab bar. The local Dynamic Type cap,
                     // tightening and bounded scaling keep every shipped localized title whole; tail
@@ -2205,6 +2245,7 @@ private struct FloatingTabBar: View {
                         minHeight: Self.boundedLabelLineHeight(scaledLabelLineHeight)
                             * CGFloat(Self.labelLineCount)
                     )
+                    .offset(y: -2)
             }
             .foregroundStyle(navigationInk(active: active, accent: accent))
             .frame(maxWidth: .infinity)

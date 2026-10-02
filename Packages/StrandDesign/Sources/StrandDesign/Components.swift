@@ -49,6 +49,15 @@ public enum NoopMetrics {
     public static let rowSpacing: CGFloat = 10
     /// Standard interactive-control height (buttons, fields, segmented controls).
     public static let controlHeight: CGFloat = 48
+    /// Persistent mobile navigation rail and selected-lens geometry.
+    public static let navigationBarRadius: CGFloat = 22
+    public static let navigationLensSize: CGFloat = 44
+    public static let navigationBarTopInset: CGFloat = 10
+    public static let navigationBarReservedHeight: CGFloat = 88
+    /// Verification-code entry and confirmation geometry.
+    public static let verificationCodeSlotRadius: CGFloat = 12
+    public static let verificationCodeSlotHeight: CGFloat = 56
+    public static let verificationSuccessDiameter: CGFloat = 96
     /// Fully-rounded corner radius — pills, chips, capsule buttons.
     public static let pillRadius: CGFloat = 999
 }

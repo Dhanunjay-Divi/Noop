@@ -4,6 +4,28 @@ import SwiftUI
 import StrandDesign
 import UniformTypeIdentifiers
 
+let managedVerificationCodeLengthRange = 4...8
+let managedVerificationCodeMaximumLength =
+    managedVerificationCodeLengthRange.upperBound
+
+func sanitizedManagedVerificationCode(
+    _ rawValue: String,
+    maximumLength: Int = managedVerificationCodeMaximumLength
+) -> String {
+    let digits = rawValue.compactMap { character -> Character? in
+        guard let value = character.wholeNumberValue,
+              (0...9).contains(value) else {
+            return nil
+        }
+        return Character(String(value))
+    }
+    return String(digits.prefix(max(0, maximumLength)))
+}
+
+func isManagedVerificationCodeComplete(_ code: String) -> Bool {
+    managedVerificationCodeLengthRange.contains(code.count)
+}
+
 struct NoopPlusView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var service = ManagedCloudService.shared
@@ -167,11 +189,14 @@ private struct ManagedCloudSetupSheet: View {
     @State private var confirmHistoryImport = false
     @State private var showHistoryImporter = false
     @State private var pendingRevoke: ManagedInstallation?
+    @State private var verificationFailureToken = 0
+    @State private var verificationSuccessVisible = false
+    @State private var verificationSuccessTask: Task<Void, Never>?
     @FocusState private var focusedAuthenticationField: AuthenticationField?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum AuthenticationField: Hashable {
         case phone
-        case code
     }
 
     var body: some View {
@@ -195,6 +220,10 @@ private struct ManagedCloudSetupSheet: View {
                     }
                     .screenPadding()
                     .padding(.vertical, NoopMetrics.space5)
+                }
+                if verificationSuccessVisible {
+                    ManagedVerificationSuccessOverlay()
+                    .zIndex(1)
                 }
             }
             .navigationTitle("NOOP+")
@@ -290,13 +319,48 @@ private struct ManagedCloudSetupSheet: View {
         .task(id: service.phase) {
             if service.phase == .codeSent {
                 await Task.yield()
-                focusedAuthenticationField = .code
+                focusedAuthenticationField = nil
             } else if service.phase != .signedOut {
                 focusedAuthenticationField = nil
+            }
+            let verificationConfirmed =
+                (service.phase == .consentRequired || service.phase == .enrolled)
+                && !code.isEmpty
+            if verificationConfirmed {
+                code = ""
+                verificationSuccessTask?.cancel()
+                if reduceMotion {
+                    verificationSuccessVisible = true
+                } else {
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        verificationSuccessVisible = true
+                    }
+                }
+                verificationSuccessTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 680_000_000)
+                    guard !Task.isCancelled else { return }
+                    if reduceMotion {
+                        verificationSuccessVisible = false
+                    } else {
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            verificationSuccessVisible = false
+                        }
+                    }
+                }
+            } else if service.phase == .signedOut || service.phase == .codeSent {
+                verificationSuccessTask?.cancel()
+                verificationSuccessTask = nil
+                verificationSuccessVisible = false
             }
             if service.phase == .enrolled {
                 await service.refreshOverview()
             }
+        }
+        .onDisappear {
+            verificationSuccessTask?.cancel()
+            verificationSuccessTask = nil
+            verificationSuccessVisible = false
+            code = ""
         }
     }
 
@@ -319,14 +383,12 @@ private struct ManagedCloudSetupSheet: View {
                     .accessibilityIdentifier("noop.noop-plus.phone")
 
                 if service.phase == .codeSent {
-                    TextField("Verification code", text: $code)
-                        .textContentType(.oneTimeCode)
-                        .keyboardType(.numberPad)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(service.isBusy)
-                        .focused($focusedAuthenticationField, equals: .code)
-                        .accessibilityLabel("NOOP+ verification code")
-                        .accessibilityIdentifier("noop.noop-plus.code")
+                    ManagedVerificationCodeEntry(
+                        code: $code,
+                        isBusy: service.isBusy,
+                        failureToken: verificationFailureToken,
+                        requestsFocus: true
+                    )
 
                     NoopButton(
                         service.isBusy ? "Verifying…" : "Verify code",
@@ -334,9 +396,17 @@ private struct ManagedCloudSetupSheet: View {
                         kind: .primary,
                         fullWidth: true
                     ) {
-                        Task { await service.verifyCode(code) }
+                        Task {
+                            await service.verifyCode(code)
+                            if service.phase == .codeSent {
+                                verificationFailureToken += 1
+                            }
+                        }
                     }
-                    .disabled(service.isBusy || code.isEmpty)
+                    .disabled(
+                        service.isBusy
+                            || !isManagedVerificationCodeComplete(code)
+                    )
                     .accessibilityIdentifier("noop.noop-plus.verify-code")
 
                     Button("Use a different number") {
@@ -752,6 +822,219 @@ private struct ManagedCloudSetupSheet: View {
             }
         }
         .padding(.vertical, 6)
+    }
+}
+
+private struct ManagedVerificationCodeEntry: View {
+    @Binding var code: String
+    let isBusy: Bool
+    let failureToken: Int
+    let requestsFocus: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var focused: Bool
+
+    private var characters: [Character] { Array(code) }
+
+    private func slot(at index: Int) -> some View {
+        let value = index < characters.count
+            ? String(characters[index])
+            : nil
+        let current = focused
+            && index == min(
+                characters.count,
+                managedVerificationCodeMaximumLength - 1
+            )
+        return ManagedVerificationCodeSlot(
+            value: value,
+            current: current
+        )
+    }
+
+    var body: some View {
+        TextField(
+            "",
+            text: Binding(
+                get: { code },
+                set: { code = sanitizedManagedVerificationCode($0) }
+            )
+        )
+        .textContentType(.oneTimeCode)
+        .keyboardType(.numberPad)
+        .textFieldStyle(.plain)
+        .foregroundStyle(.clear)
+        .tint(.clear)
+        .focused($focused)
+        .disabled(isBusy)
+        .frame(height: NoopMetrics.verificationCodeSlotHeight)
+        .overlay {
+            HStack(spacing: NoopMetrics.space1) {
+                ForEach(
+                    0..<managedVerificationCodeMaximumLength,
+                    id: \.self
+                ) { index in
+                    slot(at: index)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+        .modifier(
+            ManagedVerificationNudge(
+                animatableData: reduceMotion ? 0 : CGFloat(failureToken)
+            )
+        )
+        .animation(
+            reduceMotion ? nil : .linear(duration: 0.24),
+            value: failureToken
+        )
+        .animation(
+            reduceMotion ? nil : NoopMotion.value,
+            value: code
+        )
+        .opacity(isBusy ? 0.72 : 1)
+        .accessibilityLabel("NOOP+ verification code")
+        .accessibilityValue(
+            code.isEmpty
+                ? String(localized: "No verification code digits entered")
+                : String(
+                    localized: "\(code.count) verification code digits entered"
+                )
+        )
+        .accessibilityHint(
+            String(localized: "Enter or paste the verification code from Messages")
+        )
+        .accessibilityIdentifier("noop.noop-plus.code")
+        .task(id: requestsFocus) {
+            guard requestsFocus else { return }
+            await Task.yield()
+            focused = true
+        }
+    }
+}
+
+private struct ManagedVerificationCodeSlot: View {
+    let value: String?
+    let current: Bool
+
+    var body: some View {
+        RoundedRectangle(
+            cornerRadius: NoopMetrics.verificationCodeSlotRadius,
+            style: .continuous
+        )
+            .fill(
+                current
+                    ? StrandPalette.accent.opacity(0.10)
+                    : StrandPalette.surfaceRaised
+            )
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: NoopMetrics.verificationCodeSlotRadius,
+                    style: .continuous
+                )
+                    .strokeBorder(
+                        current
+                            ? StrandPalette.accent
+                            : StrandPalette.hairlineStrong,
+                        lineWidth: current ? 1.4 : 0.8
+                    )
+            }
+            .overlay {
+                if let value {
+                    Text(value)
+                        .font(StrandFont.title2.monospacedDigit())
+                        .fontWeight(.semibold)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .transition(
+                            .scale(scale: 0.72).combined(with: .opacity)
+                        )
+                } else {
+                    Circle()
+                        .fill(StrandPalette.textTertiary.opacity(0.42))
+                        .frame(
+                            width: NoopMetrics.space1,
+                            height: NoopMetrics.space1
+                        )
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: NoopMetrics.verificationCodeSlotHeight)
+    }
+}
+
+private struct ManagedVerificationNudge: GeometryEffect {
+    var animatableData: CGFloat
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(
+            CGAffineTransform(
+                translationX: NoopMetrics.space1
+                    * sin(animatableData * .pi * 4),
+                y: 0
+            )
+        )
+    }
+}
+
+private struct ManagedVerificationSuccessOverlay: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showCheck = false
+
+    private var verifiedLabel: String {
+        String(localized: "Mobile number verified")
+    }
+
+    var body: some View {
+        ZStack {
+            StrandPalette.surfaceBase.opacity(0.82)
+                .ignoresSafeArea()
+
+            VStack(spacing: NoopMetrics.cardInnerSpacing) {
+                ZStack {
+                    Circle()
+                        .fill(StrandPalette.surfaceRaised)
+                        .frame(
+                            width: NoopMetrics.verificationSuccessDiameter,
+                            height: NoopMetrics.verificationSuccessDiameter
+                        )
+                        .overlay {
+                            Circle()
+                                .strokeBorder(
+                                    StrandPalette.accent.opacity(0.64),
+                                    lineWidth: 1
+                                )
+                        }
+                        .scaleEffect(showCheck ? 1 : 0.84)
+
+                    Image(systemName: "checkmark")
+                        .font(
+                            .system(
+                                size: NoopMetrics.space10,
+                                weight: .bold
+                            )
+                        )
+                        .foregroundStyle(StrandPalette.accent)
+                        .scaleEffect(showCheck ? 1 : 0.42)
+                        .opacity(showCheck ? 1 : 0)
+                }
+
+                Text(verifiedLabel)
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .opacity(showCheck ? 1 : 0)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(verifiedLabel)
+        .task {
+            if reduceMotion {
+                showCheck = true
+                return
+            }
+            withAnimation(NoopMotion.value) {
+                showCheck = true
+            }
+        }
     }
 }
 
