@@ -1639,17 +1639,21 @@ final class NOOPiOSUITests: XCTestCase {
             NSPredicate(format: "value CONTAINS[c] %@", "points")
         ).firstMatch
         XCTAssertTrue(summaryNode.waitForExistence(timeout: 5))
-        let initialSummary = String(describing: summaryNode.value)
+        let initialSummary = summaryNode.value as? String ?? String(describing: summaryNode.value)
         XCTAssertTrue(initialSummary.localizedCaseInsensitiveContains("points"))
 
-        let july29Area = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.71, dy: 0.50))
-        let nearby = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.50))
+        let scrubStartCoordinate = chart.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.71, dy: 0.50)
+        )
+        let scrubEndCoordinate = chart.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.84, dy: 0.50)
+        )
         let scrubStart = CGPoint(
             x: chartFrame.minX + chartFrame.width * 0.71,
             y: chartFrame.midY
         )
         let scrubEnd = CGPoint(
-            x: chartFrame.minX + chartFrame.width * 0.76,
+            x: chartFrame.minX + chartFrame.width * 0.84,
             y: chartFrame.midY
         )
         XCTAssertFalse(
@@ -1660,7 +1664,7 @@ final class NOOPiOSUITests: XCTestCase {
             quickActions.frame.contains(scrubEnd),
             "The date-scrub path must remain clear of the movable action lens."
         )
-        july29Area.press(forDuration: 0.35, thenDragTo: nearby)
+        scrubStartCoordinate.press(forDuration: 0.8, thenDragTo: scrubEndCoordinate)
 
         // SwiftUI may replace the chart's accessibility node after its value changes.
         // Re-query without pinning the stale pre-scrub element type.
@@ -1671,9 +1675,39 @@ final class NOOPiOSUITests: XCTestCase {
             )
         ).firstMatch
         XCTAssertTrue(selectedChart.waitForExistence(timeout: 5))
-        let selectedValue = String(describing: selectedChart.value)
+        let selectedValue = selectedChart.value as? String ?? String(describing: selectedChart.value)
         XCTAssertNotEqual(selectedValue, initialSummary)
         XCTAssertFalse(selectedValue.localizedCaseInsensitiveContains("points"))
+        let rangeDates = app.staticTexts["noop.trends.range-dates"]
+        XCTAssertTrue(rangeDates.waitForExistence(timeout: 5))
+        guard let rangeEnd = rangeDates.label.range(
+            of: #"[A-Za-z]+ [0-9]{1,2}, [0-9]{4}$"#,
+            options: .regularExpression
+        ) else {
+            return XCTFail("Unexpected Trends range: \(rangeDates.label)")
+        }
+        let rangeEndFormatter = DateFormatter()
+        rangeEndFormatter.locale = Locale(identifier: "en_US_POSIX")
+        rangeEndFormatter.dateFormat = "MMM d, yyyy"
+        guard let rangeEndDate = rangeEndFormatter.date(
+            from: String(rangeDates.label[rangeEnd])
+        ) else {
+            return XCTFail("Could not parse Trends range: \(rangeDates.label)")
+        }
+        let expectedSelectedDate = Calendar.current.date(
+            byAdding: .day,
+            value: -17,
+            to: rangeEndDate
+        )
+        let selectedDateFormatter = DateFormatter()
+        selectedDateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        selectedDateFormatter.dateFormat = "EEE d MMM"
+        XCTAssertTrue(
+            expectedSelectedDate.map {
+                selectedValue.hasPrefix("\(selectedDateFormatter.string(from: $0)),")
+            } == true,
+            "Unexpected scrubbed date: \(selectedValue)"
+        )
         XCTAssertFalse(app.navigationBars["Recovery"].exists)
         keepScreenshot(app, name: "trends-recovery-date-selection")
     }

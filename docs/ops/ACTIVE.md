@@ -22,9 +22,17 @@ Last updated: **2026-10-02**
   SHA-256 `3a134fc284b029c82afb2e9859191f0cdbd01d055d145a5761b12808ec6ada05`,
   Apple focused 86/86, direct dock-boundary UI 1/1, the complete iPhone graph,
   clean first-run 2/2, all-platform i18n, and reviewed `1080x2424` /
-  `1206x2622` captures. The final re-review found no remaining code defect.
-  Private native-pilot assertions compile but were not executed without their
-  private inputs. Protected integration and exact-main verification remain.
+  `1206x2622` captures. The final re-review found no remaining product-code
+  defect. Private native-pilot assertions compile but were not executed without
+  their private inputs. PR `#32` first passed Android, macOS, packages, policy,
+  and repository controls, then isolated one threshold-adjacent iOS Recovery-
+  chart scrub gesture in the production shell. The failure reproduced locally
+  without a product change. A clean regenerated project and fresh DerivedData
+  pass the widened, longer exact-date UI-test gesture 5/5 in `118.707` seconds
+  with every iteration confirming the replacement duration, coordinates, and
+  seeded `Tue 15 Sep` selection. One
+  replacement checkpoint, exact-head protected checks, normal merge, and
+  exact-main verification remain.
   Real OTP, signed-device accessibility, and every physical band/source gate
   remain pending.
 

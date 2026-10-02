@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `local final verification and independent re-review complete; protected integration pending`
+- State: `hosted iOS failure reproduced and corrected in the UI harness; replacement protected integration pending`
 - Owner: project team
 - Branch: `codex/mobile-liquid-tab-otp-motion-20261002`
 - Start commit: `dbd23c25e4f681c4a087642b41441270fa15c3a0`
@@ -123,6 +123,7 @@ formulas, band transport, account authority, or server behavior.
 | Complete iPhone graph | Exact-current bounded `NOOPiOS` Simulator build passed, including Watch and widgets | The iOS-conditional verification view and shared design package compile in the mobile graph | Signing, physical Watch, BLE, or background behavior |
 | Clean iPhone first-run journey | `testFreshInstallOrdersTermsBluetoothAndBandSetupBeforeAccount` and `testConfiguredProviderAndSyntheticBandCompleteFullOnboarding` passed 2/2 | Terms, Bluetooth, supported-band setup, account, and configured synthetic completion remain in the required order | Real provider, carrier, physical band, or signed-phone behavior |
 | iPhone dock-boundary regression | `testTodayOrdinaryTextViewportReservesExpandedNavigation` passed 1/1 using the minimum tab `frame.minY` as the actual navigation boundary | The ordinary-text Today viewport ends above every expanded persistent tab control | Other screens, physical display scaling, or touch comfort |
+| Hosted Recovery scrub correction | PR `#32` run `37022388421` reproduced a single iOS shell failure in `testRecoveryTrendSupportsExactDateScrubbing`: the chart was present and hittable, but the short `0.35`-second, five-percent-width gesture did not consistently publish the selected-date accessibility value. The production chart was not changed. A clean regenerated project and fresh DerivedData first passed the replacement `0.8`-second, thirteen-percent-width gesture 5/5. Independent review then required the harness to prove the expected seeded date rather than only a changed value. The final exact-date regression passed 5/5 in `118.707` seconds with zero failures; every iteration confirms the new duration, coordinates, and seeded `Tue 15 Sep` selection | The replacement harness deterministically exercises the existing long-press scrub interaction and x-to-date mapping on the current simulator graph instead of relying on a threshold-adjacent gesture | Physical touch latency, other devices, or the replacement hosted head until protected CI reruns |
 | Private native pilot sources | Apple and Android private-pilot assertions compile and verify masked/password semantics, success-overlay appearance, and secret-field removal after the confirmed phase transition | The opt-in physical/provider pilot will fail if those semantics regress | Runtime provider behavior because private pilot inputs were unavailable and the cases were not executed |
 | iPhone visual review | iPhone 17 Pro Simulator `1206x2622` Today capture SHA-256 `61bf5f650a6781ec3e4a1d1f511b77791683312efe380213a8fb2080b455af34` | The matched selected lens, labels, cards, movable N, and reserved dock region render without observed clipping or incoherent overlap | Every locale, Dynamic Type size, or physical display |
 | All-platform i18n | Full audit passed with zero translated-key gaps in supported Apple catalogs | New localized Apple accessibility text and existing Android resources remain within coverage policy | Human linguistic review |
@@ -143,10 +144,14 @@ formulas, band transport, account authority, or server behavior.
 - Changed paths: shared design tokens and verification-success policy,
   iPhone/Android shell navigation, iPhone/Android managed-cloud verification
   views, focused contracts, and this operations record.
-- Implementation commit: pending final checkpoint.
+- Implementation commit: pending replacement checkpoint after the hosted scrub
+  harness correction.
 - Branch and remote state: local branch includes protected `main`
-  `a8a617593b4b81485fca672353ebcebe2d073f55`; one consolidated protected pull
-  request and exact-main verification remain.
+  `a8a617593b4b81485fca672353ebcebe2d073f55`; PR `#32` is open with auto-merge
+  armed. Its first exact-head run passed Android, macOS, packages, policy, and
+  repository controls but failed the threshold-adjacent iOS Recovery scrub
+  gesture. One replacement push, exact-head protected checks, normal merge,
+  and exact-main verification remain.
 - Repository visibility: unchanged; public-source exclusions remain in force.
 - Version/build impact: none.
 - Release impact: source integration only; no store upload or production
@@ -170,8 +175,9 @@ formulas, band transport, account authority, or server behavior.
 
 ## Next round
 
-1. Complete repository controls, one protected pull request, normal merge, and
-   exact-main verification.
+1. Commit and push the deterministic Recovery scrub harness correction, then
+   require the replacement exact head to pass every protected context before
+   normal merge and exact-main verification.
 2. Run real OTP/autofill and physical-device accessibility in the signed-phone
    validation round.
 
