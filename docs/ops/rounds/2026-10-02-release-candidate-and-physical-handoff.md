@@ -117,7 +117,9 @@ evidence as physical proof.
 | Local Xcode teardown | XCTest completed successfully for the green UI runs, then local Xcode did not exit and the bounded process was terminated | Product assertions completed before cleanup | A clean command exit for those two UI invocations |
 | StrandDesign package | 58/58 | Shared chart and design contracts remain green | App integration by itself |
 | Android exact-branch contract | `PrimaryNavigationContractTest` 12/12 plus Full production and Android-test Kotlin compilation; build successful | Android tab/OTP semantics and both source sets compile on the combined branch | Emulator rendering, TalkBack, or physical phone behavior |
+| Android API 35 first run | 3/3 managed-device cases passed in 10.663 seconds: post-Terms band-first order, true fresh-install Terms/Bluetooth/band-before-account order, and configured synthetic completion | The exact consolidated branch preserves the required Android first-run sequence in a clean managed emulator | Real account provider, physical band discovery, ownership, OEM behavior, or signed-phone behavior |
 | Android environment retry | First invocation failed before compilation because the temporary worktree had no SDK path; rerun with the installed SDK path passed | The first result was environment configuration, not product behavior | Other developer environments |
+| Consolidated UI equivalence and visual review | `git diff --quiet 628554748..HEAD` passed for shared design, iPhone UI, Android UI/resources, and mobile UI tests; the source-equivalent revision previously passed paired `1206x2622` iPhone and `1080x2424` Android review without observed clipping or overlap | No later supplier or handoff commit changed the visually reviewed mobile UI implementation | Physical display behavior, every locale/font size, or accessibility-service interaction |
 | Supplier and quarantine Python tests | 62/62 | Public neutral SDK, artifact, wrapper, iOS slice, Android verifier, and compatibility boundaries remain coherent | External binary approval |
 | Repository controls | 119 operations records, private-data guard, 1,325-file claims scan, 230 runtime plus 3 container legal inventory, 9 release controls, 10 required contexts, and trusted-release self-check passed | Release metadata and policy controls remain coherent | Hosted checks for a future remote head |
 | Diff hygiene | Pass | No whitespace errors | Runtime correctness |
@@ -129,7 +131,8 @@ checked again so line numbers and historical counts match the final tree.
 
 - Install/update action: not run.
 - Generalized device and OS class: local macOS build host, iPhone 17 Pro
-  Simulator, and Android JVM compilation/tests only.
+  Simulator, Android JVM compilation/tests, and an Android API 35 managed
+  emulator.
 - Data-preservation result: synthetic simulator state only; no user or phone
   data was cleared.
 - BLE/background/haptic/battery scenarios exercised: not run.

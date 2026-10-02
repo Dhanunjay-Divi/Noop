@@ -62,9 +62,12 @@ device-connected agent:
   complete iPhone Simulator graph, two first-run UI cases, the Recovery
   exact-date UI case on the dedicated review simulator, 58 StrandDesign tests,
   12 Android navigation/OTP tests with production and Android-test compilation,
-  62 supplier/quarantine Python tests, and the repository release controls.
-  The green UI assertions completed before a known local Xcode teardown hang;
-  protected exact-head checks remain the integration authority.
+  three Android API 35 managed-device first-run cases, 62 supplier/quarantine
+  Python tests, and the repository release controls. The exact consolidated UI
+  paths are unchanged from the paired `1206x2622` iPhone and `1080x2424`
+  Android visual-review revision, which had no observed clipping or overlap.
+  The green iPhone UI assertions completed before a known local Xcode teardown
+  hang; protected exact-head checks remain the integration authority.
 - This local branch has not been pushed or merged, and no Actions workflow or
   deployment mutation was dispatched from it. Do not install it as a release
   candidate until normal protected integration produces an exact protected

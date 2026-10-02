@@ -11,9 +11,12 @@ Last updated: **2026-10-02**
   88/88, the complete iPhone Simulator graph, clean first-run 2/2, the Recovery
   exact-date case 1/1 on the dedicated review simulator, StrandDesign 58/58,
   Android navigation/OTP 12/12 with production and Android-test compilation,
-  supplier/quarantine Python 62/62, and repository controls. The retained PR27
-  simulator did not preserve the selected trend value while the dedicated
-  review simulator did; protected exact-head execution remains authoritative.
+  Android API 35 first-run 3/3, supplier/quarantine Python 62/62, and
+  repository controls. The exact consolidated UI paths are unchanged from the
+  paired `1206x2622` iPhone and `1080x2424` Android visual-review revision,
+  which had no observed clipping or overlap. The retained PR27 simulator did
+  not preserve the selected trend value while the dedicated review simulator
+  did; protected exact-head execution remains authoritative.
   No push, merge, workflow dispatch, deployment mutation, signed install, or
   physical claim occurred. Private staging remains at protected merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
