@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.util
+import io
 import re
 import sys
 from contextlib import asynccontextmanager
@@ -50,6 +51,93 @@ def test_migration_and_runtime_principals_and_secrets_are_distinct() -> None:
     )
     assert script.MIGRATION_USER not in script.RUNTIME_PROFILE_USERS.values()
     assert script.MIGRATION_SECRET not in script.RUNTIME_PROFILE_SECRETS.values()
+
+
+def test_google_api_refreshes_an_expired_access_token_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = load_script()
+    authorizations: list[str | None] = []
+    refreshes = 0
+
+    class FakeResponse(io.BytesIO):
+        status = 200
+
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            del args
+            self.close()
+
+    def fake_urlopen(request: object, *, timeout: int) -> FakeResponse:
+        assert timeout == 60
+        authorization = request.get_header("Authorization")
+        authorizations.append(authorization)
+        if len(authorizations) == 1:
+            raise script.urllib.error.HTTPError(
+                request.full_url,
+                401,
+                "Unauthorized",
+                {},
+                None,
+            )
+        return FakeResponse(b'{"status":"ok"}')
+
+    def fake_google_token() -> str:
+        nonlocal refreshes
+        refreshes += 1
+        return "fresh-token"
+
+    monkeypatch.setattr(script.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(script, "google_token", fake_google_token)
+
+    assert script.api_request(
+        "expired-token",
+        "GET",
+        "https://example.invalid/resource",
+    ) == {"status": "ok"}
+    assert authorizations == ["Bearer expired-token", "Bearer fresh-token"]
+    assert refreshes == 1
+
+
+def test_google_api_does_not_retry_unauthorized_more_than_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = load_script()
+    attempts = 0
+    refreshes = 0
+
+    def fake_urlopen(request: object, *, timeout: int) -> None:
+        nonlocal attempts
+        del timeout
+        attempts += 1
+        raise script.urllib.error.HTTPError(
+            request.full_url,
+            401,
+            "Unauthorized",
+            {},
+            None,
+        )
+
+    def fake_google_token() -> str:
+        nonlocal refreshes
+        refreshes += 1
+        return "still-unauthorized"
+
+    monkeypatch.setattr(script.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(script, "google_token", fake_google_token)
+
+    with pytest.raises(script.GoogleAPIError) as error:
+        script.api_request(
+            "expired-token",
+            "GET",
+            "https://example.invalid/resource",
+        )
+
+    assert error.value.status_code == 401
+    assert attempts == 2
+    assert refreshes == 1
 
 
 def test_runtime_function_allowlist_matches_direct_server_calls() -> None:

@@ -187,27 +187,35 @@ def api_request(
     payload: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     body = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=body,
-        method=method,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            if response.status == 204:
-                return {}
-            result = json.load(response)
-            if not isinstance(result, dict):
-                raise ProvisioningError("Google API returned an invalid response")
-            return result
-    except urllib.error.HTTPError as error:
-        raise GoogleAPIError(error.code) from None
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-        raise ProvisioningError("Google API request could not complete") from error
+    access_token = token
+    for attempt in range(2):
+        request = urllib.request.Request(
+            url,
+            data=body,
+            method=method,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                if response.status == 204:
+                    return {}
+                result = json.load(response)
+                if not isinstance(result, dict):
+                    raise ProvisioningError("Google API returned an invalid response")
+                return result
+        except urllib.error.HTTPError as error:
+            status_code = error.code
+            error.close()
+            if status_code == 401 and attempt == 0:
+                access_token = google_token()
+                continue
+            raise GoogleAPIError(status_code) from None
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            raise ProvisioningError("Google API request could not complete") from error
+    raise AssertionError("Google API retry loop exited unexpectedly")
 
 
 def secret_resource_url(project: str, secret_id: str) -> str:
