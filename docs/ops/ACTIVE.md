@@ -40,6 +40,21 @@ Last updated: **2026-10-02**
   Real OTP, signed-device accessibility, and every physical band/source gate
   remain pending.
 
+- Supplier optional step/sleep read serialization is completed locally on
+  branch `codex/supplier-read-serialization-20261002` from protected-main
+  baseline `a8a617593b4b81485fca672353ebcebe2d073f55`. A due sleep read now
+  queues behind the active step result or failure, step polling pauses while
+  sleep is pending or in flight, and every command carries an app-owned request
+  ID through the wrapper callback. Late or duplicate callbacks cannot satisfy a
+  newer request, bounded step/sleep timeouts release the lane and reset the
+  transport, and disconnect/stop clear every optional-read state. Existing
+  supplier qualification, persistence, fixed-category diagnostics, existing
+  comparison-transport behavior, formulas, source routing, and SDK artifact
+  boundaries are unchanged. Focused Apple supplier tests pass 75/75 and the
+  complete iPhone Simulator graph builds. No raw logging, push, merge,
+  deployment, or physical BLE/accuracy/background/battery/retention claim is
+  part of this round.
+
 - The mobile command-lens regression repair is integrated on protected `main`
   through PR `#30` at squash merge
   `a8a617593b4b81485fca672353ebcebe2d073f55`. It restores one matched
