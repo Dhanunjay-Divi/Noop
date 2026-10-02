@@ -4,8 +4,8 @@ Last updated: **2026-10-02**
 
 ## Authoritative context
 
-- The matched mobile tab/OTP motion refinement is locally final with
-  exact-current independent re-review complete on branch
+- The matched mobile tab/OTP motion refinement has one local hosted-failure
+  correction on branch
   `codex/mobile-liquid-tab-otp-motion-20261002`. iPhone and Android use one
   raised selected lens across the same five labeled tabs while preserving
   reselect behavior, touch targets, accessibility roles, Reduced Motion, and
@@ -22,17 +22,21 @@ Last updated: **2026-10-02**
   SHA-256 `3a134fc284b029c82afb2e9859191f0cdbd01d055d145a5761b12808ec6ada05`,
   Apple focused 86/86, direct dock-boundary UI 1/1, the complete iPhone graph,
   clean first-run 2/2, all-platform i18n, and reviewed `1080x2424` /
-  `1206x2622` captures. The final re-review found no remaining product-code
-  defect. Private native-pilot assertions compile but were not executed without
-  their private inputs. PR `#32` first passed Android, macOS, packages, policy,
-  and repository controls, then isolated one threshold-adjacent iOS Recovery-
-  chart scrub gesture in the production shell. The failure reproduced locally
-  without a product change. A clean regenerated project and fresh DerivedData
-  pass the widened, longer exact-date UI-test gesture 5/5 in `118.707` seconds
-  with every iteration confirming the replacement duration, coordinates, and
-  seeded `Tue 15 Sep` selection. One
-  replacement checkpoint, exact-head protected checks, normal merge, and
-  exact-main verification remain.
+  `1206x2622` captures. Private native-pilot assertions compile but were not
+  executed without their private inputs. PR `#32` replacement run
+  `37033095763` passed every Android, macOS, package, policy, and repository-
+  control boundary but failed one iOS shell case after 41 passes and one
+  intentional skip: touch scrub selected the exact Recovery date, then a
+  synthetic iOS hover-end lifecycle cleared the shared chart state after finger
+  release. Local commit `3d8256978` preserves the documented touch-pinned
+  selection while leaving macOS hover behavior unchanged. The exact-date UI
+  case passes 1/1 in `23.557` seconds and `StrandDesign` passes 58/58. XCTest
+  completed before an abnormal local Xcode teardown, so full replacement
+  hosted execution remains the integration authority. The remote PR head
+  remains `1d2543ba1`; the local correction has not been pushed under the
+  current no-push/no-Actions handoff. One authorized replacement push,
+  exact-head protected checks, normal merge, and exact-main verification
+  remain.
   Real OTP, signed-device accessibility, and every physical band/source gate
   remain pending.
 

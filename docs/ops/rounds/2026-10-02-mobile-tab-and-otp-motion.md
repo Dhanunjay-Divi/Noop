@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `hosted iOS failure reproduced and corrected in the UI harness; replacement protected integration pending`
+- State: `hosted iOS product-state failure corrected locally; replacement protected integration pending`
 - Owner: project team
 - Branch: `codex/mobile-liquid-tab-otp-motion-20261002`
 - Start commit: `dbd23c25e4f681c4a087642b41441270fa15c3a0`
-- End implementation commit: `7aab946dce3eaf2af8e1b894d18e471547cbb278`
+- End implementation commit: `3d825697825cd4881436126d024bdd006e7d9fa3`
 - Record commit or PR: pending protected pull request
 
 ## Objective
@@ -80,6 +80,10 @@ formulas, band transport, account authority, or server behavior.
   keyboard is hidden. The dock still reads as floating glass, but metric cards
   no longer render beneath persistent navigation; Android already obtained the
   equivalent non-overlap from `Scaffold`.
+- The shared iOS trend chart now preserves a touch-scrubbed exact-date
+  selection after finger release. A synthetic iOS hover-ended lifecycle can no
+  longer clear that pinned touch state; macOS pointer-hover behavior is
+  unchanged.
 
 ## Data, privacy, and medical truth
 
@@ -123,7 +127,7 @@ formulas, band transport, account authority, or server behavior.
 | Complete iPhone graph | Exact-current bounded `NOOPiOS` Simulator build passed, including Watch and widgets | The iOS-conditional verification view and shared design package compile in the mobile graph | Signing, physical Watch, BLE, or background behavior |
 | Clean iPhone first-run journey | `testFreshInstallOrdersTermsBluetoothAndBandSetupBeforeAccount` and `testConfiguredProviderAndSyntheticBandCompleteFullOnboarding` passed 2/2 | Terms, Bluetooth, supported-band setup, account, and configured synthetic completion remain in the required order | Real provider, carrier, physical band, or signed-phone behavior |
 | iPhone dock-boundary regression | `testTodayOrdinaryTextViewportReservesExpandedNavigation` passed 1/1 using the minimum tab `frame.minY` as the actual navigation boundary | The ordinary-text Today viewport ends above every expanded persistent tab control | Other screens, physical display scaling, or touch comfort |
-| Hosted Recovery scrub correction | PR `#32` run `37022388421` reproduced a single iOS shell failure in `testRecoveryTrendSupportsExactDateScrubbing`: the chart was present and hittable, but the short `0.35`-second, five-percent-width gesture did not consistently publish the selected-date accessibility value. The production chart was not changed. A clean regenerated project and fresh DerivedData first passed the replacement `0.8`-second, thirteen-percent-width gesture 5/5. Independent review then required the harness to prove the expected seeded date rather than only a changed value. The final exact-date regression passed 5/5 in `118.707` seconds with zero failures; every iteration confirms the new duration, coordinates, and seeded `Tue 15 Sep` selection | The replacement harness deterministically exercises the existing long-press scrub interaction and x-to-date mapping on the current simulator graph instead of relying on a threshold-adjacent gesture | Physical touch latency, other devices, or the replacement hosted head until protected CI reruns |
+| Recovery exact-date scrub correction | PR `#32` replacement run `37033095763`, iOS job `110924681062`, executed the complete shell and isolated one failure: 41 tests passed, one was intentionally skipped, and `testRecoveryTrendSupportsExactDateScrubbing` failed because the expected selected-date accessibility value was absent after finger release. Investigation showed that touch scrub selected the point, then an iOS synthetic `onContinuousHover(.ended)` lifecycle cleared the shared chart's pinned selection. Commit `3d8256978` preserves touch-pinned state while leaving macOS hover behavior unchanged. The exact focused UI case passed 1/1 in `23.557` seconds and confirmed the seeded selected date; the complete `StrandDesign` package passed 58/58. XCTest completed successfully before the bounded local runner required termination during Xcode teardown, so the product assertion is green but the local command status file is not used as complete-job evidence. | The shared chart now keeps the selected exact date visible after a touch scrub, and package behavior remains green | Physical touch latency, pointer/touch interaction on signed hardware, or complete replacement-head hosted status |
 | Private native pilot sources | Apple and Android private-pilot assertions compile and verify masked/password semantics, success-overlay appearance, and secret-field removal after the confirmed phase transition | The opt-in physical/provider pilot will fail if those semantics regress | Runtime provider behavior because private pilot inputs were unavailable and the cases were not executed |
 | iPhone visual review | iPhone 17 Pro Simulator `1206x2622` Today capture SHA-256 `61bf5f650a6781ec3e4a1d1f511b77791683312efe380213a8fb2080b455af34` | The matched selected lens, labels, cards, movable N, and reserved dock region render without observed clipping or incoherent overlap | Every locale, Dynamic Type size, or physical display |
 | All-platform i18n | Full audit passed with zero translated-key gaps in supported Apple catalogs | New localized Apple accessibility text and existing Android resources remain within coverage policy | Human linguistic review |
@@ -144,13 +148,16 @@ formulas, band transport, account authority, or server behavior.
 - Changed paths: shared design tokens and verification-success policy,
   iPhone/Android shell navigation, iPhone/Android managed-cloud verification
   views, focused contracts, and this operations record.
-- Implementation commit: `7aab946dce3eaf2af8e1b894d18e471547cbb278`.
+- Implementation commit: `3d825697825cd4881436126d024bdd006e7d9fa3`.
 - Branch and remote state: local branch includes protected `main`
   `a8a617593b4b81485fca672353ebcebe2d073f55`; PR `#32` is open with auto-merge
-  armed. Its first exact-head run passed Android, macOS, packages, policy, and
-  repository controls but failed the threshold-adjacent iOS Recovery scrub
-  gesture. One replacement push, exact-head protected checks, normal merge,
-  and exact-main verification remain.
+  armed at remote head `1d2543ba1e4311ef462195714044a31d07407f20`.
+  Replacement run `37033095763` passed Android, macOS, packages, policy, and
+  repository controls, then failed only the iOS Recovery touch-pinned state.
+  The local product correction is one commit ahead and has not been pushed
+  under the current no-push/no-Actions handoff. One authorized replacement
+  push, exact-head protected checks, normal merge, and exact-main verification
+  remain.
 - Repository visibility: unchanged; public-source exclusions remain in force.
 - Version/build impact: none.
 - Release impact: source integration only; no store upload or production
@@ -174,9 +181,9 @@ formulas, band transport, account authority, or server behavior.
 
 ## Next round
 
-1. Commit and push the deterministic Recovery scrub harness correction, then
-   require the replacement exact head to pass every protected context before
-   normal merge and exact-main verification.
+1. When remote mutation is authorized, push the single local product correction
+   and require the replacement exact head to pass every protected context
+   before normal merge and exact-main verification.
 2. Run real OTP/autofill and physical-device accessibility in the signed-phone
    validation round.
 
