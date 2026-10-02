@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `implementation and focused verification complete; visual and protected integration pending`
+- State: `integrated and exact-main verified; hydration-specific device review pending`
 - Owner: project team
 - Branch: `codex/today-metric-catalog-fitness-age-20261001`
 - Start commit: `232f746e045d2755947579c3408efc5c3b84ff69`
-- End implementation commit: commit containing this round record
-- Record commit or PR: PR `#27`
+- End implementation commit: `f57d2de9373d0656a36052674e50a55007ea1c5e`
+- Record commit or PR: PR `#27`; squash merge
+  `5a287b50423b921d408833392b6dfdeadf14a8ae`
 
 ## Objective
 
@@ -125,12 +126,15 @@ Make Hydration understandable and safely correctable on Apple and Android:
 
 - Changed paths: shared analytics formula breakdown, Apple/Android hydration
   store and UI, focused tests, generated localization, and operations records.
-- Commits: pending consolidated commit.
-- Branch and remote state: local isolated clone ahead of the current PR `#27`
-  head.
+- Final implementation head:
+  `f57d2de9373d0656a36052674e50a55007ea1c5e`.
+- Branch and remote state: PR `#27` passed all ten required contexts and
+  merged normally through protected `main` as
+  `5a287b50423b921d408833392b6dfdeadf14a8ae`.
 - Repository visibility verified: unchanged.
 - Version/build impact: no version bump.
-- Release or distribution impact: protected source integration only after gates.
+- Release or distribution impact: source integrated; no store, signed-device,
+  firmware, or production-traffic action.
 
 ## Decisions
 
@@ -151,8 +155,8 @@ Make Hydration understandable and safely correctable on Apple and Android:
 ## Next round
 
 1. Run hydration-specific iPhone and Android visual/accessibility review.
-2. Push the consolidated replacement and require all protected contexts before
-   merge.
+2. Validate notification delivery, imported-provider preservation, and
+   physical-band behavior on signed devices.
 
 ## Privacy check
 

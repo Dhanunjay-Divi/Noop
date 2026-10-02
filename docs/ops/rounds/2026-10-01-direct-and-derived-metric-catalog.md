@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `locally verified after hosted-gate repair; replacement hosted checks pending`
+- State: `integrated and exact-main verified; physical validation pending`
 - Owner: project team
 - Branch: `codex/today-metric-catalog-fitness-age-20261001`
 - Start commit: `232f746e045d2755947579c3408efc5c3b84ff69`
-- End implementation commit: commit containing this round record
-- Record commit or PR: PR `#27`
+- End implementation commit: `f57d2de9373d0656a36052674e50a55007ea1c5e`
+- Record commit or PR: PR `#27`; squash merge
+  `5a287b50423b921d408833392b6dfdeadf14a8ae`
 
 ## Objective
 
@@ -153,13 +154,14 @@ insights.
   exposed bounded stale contract and localization failures after the metric
   implementation itself had passed the focused local walls.
 - Replacement head `5b011341e96c4fbfcc32ee2cbc496d2632808bd5`
-  was pushed and began exact-head checks. Its release-control job correctly
-  rejected the stale terminology snapshot while the remaining heavy jobs
-  continued.
-- The reviewed inventory and required-CI digest repair passes the complete
-  258-test release-control wall locally. One final replacement push,
-  exact-head required checks, protected integration, and clean-main
-  verification remain pending.
+  correctly rejected the stale terminology snapshot. Final head
+  `f57d2de9373d0656a36052674e50a55007ea1c5e` included the reviewed
+  inventory and digest repair, passed the complete 258-test local
+  release-control wall, and passed all ten required hosted contexts.
+- PR `#27` merged normally through protected `main` as
+  `5a287b50423b921d408833392b6dfdeadf14a8ae`. That exact commit
+  completed 38 checks with 33 successes, five intentional skips, and zero
+  failures; strict required-CI verification passed 10/10.
 - No deployment, store upload, signed build, firmware action, or production
   traffic was dispatched.
 
@@ -198,11 +200,9 @@ insights.
 
 ## Next round
 
-1. Integrate the consolidated branch through protected review and exact-head
-   checks.
-2. Run the signed iPhone and Android physical-source matrix from the band
+1. Run the signed iPhone and Android physical-source matrix from the band
    validation handoff.
-3. Record Apple Watch, WHOOP, supplier-band, HealthKit, and Health Connect
+2. Record Apple Watch, WHOOP, supplier-band, HealthKit, and Health Connect
    availability and missing-data behavior without weakening source gates.
 
 ## Hosted check follow-up
@@ -229,7 +229,10 @@ insights.
   1,646 path/category groups with zero forbidden mappings. Its own audit passes,
   and the complete 258-test release-control wall passes after updating the two
   reviewed-source digests.
-- One final exact-head hosted run remains required before protected integration.
+- Final head `f57d2de9373d0656a36052674e50a55007ea1c5e`
+  passed all ten required contexts. Protected merge
+  `5a287b50423b921d408833392b6dfdeadf14a8ae` then passed the exact-main
+  verification described above.
 
 ## Privacy check
 

@@ -2,11 +2,13 @@
 
 ## Status
 
-- State: `locally verified after Android and Apple hosted-contract repair; protected integration pending`
+- State: `integrated and exact-main verified; physical validation pending`
 - Owner: project team
 - Branch: `codex/today-metric-catalog-fitness-age-20261001`
 - Start commit: `5f0a798d3aada03ee2999ca6e18b2984aa184a5f`
-- Record commit or PR: PR `#27`; final replacement commit pending
+- End implementation commit: `f57d2de9373d0656a36052674e50a55007ea1c5e`
+- Record commit or PR: PR `#27`; squash merge
+  `5a287b50423b921d408833392b6dfdeadf14a8ae`
 
 ## Objective
 
@@ -126,13 +128,14 @@ dashboard:
 - Rebased implementation commits:
   `2ccee6bd7` (metric catalog and Fitness Age) and
   `0592900f2` (localization), followed by `6980dc324` (release-gate repair)
-  and `30524ac09` (complete Android contract repair); the next replacement
-  commit carries the Apple hosted-contract repair and updated evidence.
-- Branch and remote state: PR `#27` is open from
-  `codex/today-metric-catalog-fitness-age-20261001`, rebased on protected-main
-  closeout `08ad0f472a577e66fd612281550f549fa09c7703`; all non-Apple
-  hosted contexts pass at `30524ac09`, the exact Apple failures are repaired
-  and focused green locally, and one replacement push remains.
+  and `30524ac09` (complete Android contract repair), followed by final
+  replacement `f57d2de9373d0656a36052674e50a55007ea1c5e`.
+- Branch and remote state: final PR `#27` head
+  `f57d2de9373d0656a36052674e50a55007ea1c5e` passed all ten required
+  contexts and merged normally through protected `main` as
+  `5a287b50423b921d408833392b6dfdeadf14a8ae`. The exact main commit
+  completed 38 checks with 33 successes, five intentional skips, and zero
+  failures; strict required-CI verification passed 10/10.
 - Repository visibility verified: unchanged.
 - Version/build impact: none planned.
 - Release or distribution impact: source integration only after all protected
@@ -153,9 +156,7 @@ dashboard:
 
 ## Next round
 
-1. Push one replacement and require all protected contexts to pass.
-2. Merge PR `#27` normally through protected `main`.
-3. Re-run exact-main verification and retain signed-phone, physical-band,
+1. Retain signed-phone, physical-band,
    battery, background, haptic, and sensor-accuracy work as external gates.
 
 ## Privacy check
