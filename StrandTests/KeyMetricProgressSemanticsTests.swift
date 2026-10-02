@@ -4,12 +4,13 @@ import XCTest
 final class KeyMetricProgressSemanticsTests: XCTestCase {
     func testOnlyTrueScoresUseProgressRails() {
         XCTAssertEqual(Set(KeyMetric.allCases.filter(\.isBoundedProgress)),
-                       Set([.charge, .effort, .rest]))
+                       Set([.charge, .effort, .rest, .hydration]))
     }
 
     func testRawVitalsAndAssumedGoalsNeverLookLikeCompletion() {
         for metric in [KeyMetric.hrv, .restingHr, .bloodOxygen, .respiratory,
-                       .steps, .weight, .calories] {
+                       .averageHr, .maxHr, .asleepTime, .vo2Max, .steps, .weight,
+                       .calories, .stress, .vitality, .skinTemp] {
             XCTAssertFalse(metric.isBoundedProgress, "\(metric.rawValue) is not a fixed progress scale")
         }
     }
@@ -27,18 +28,63 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(keyMetrics.contains(".toggleStyle(KeyMetricSelectionToggleStyle())"))
-        XCTAssertTrue(keyMetrics.contains(".disabled(toggleLocked)"))
-        XCTAssertTrue(keyMetrics.contains("? StrandPalette.statusPositive"))
-        XCTAssertTrue(keyMetrics.contains(".fill(Color.white)"))
+        XCTAssertTrue(keyMetrics.contains("TextField(\"Search metrics\""))
+        XCTAssertTrue(keyMetrics.contains("minus.circle.fill"))
+        XCTAssertTrue(keyMetrics.contains("plus.circle.fill"))
+        XCTAssertTrue(keyMetrics.contains("KeyMetric.Origin.allCases"))
+        XCTAssertTrue(keyMetrics.contains("selected.count <= KeyMetricPrefs.minimumSelectionCount"))
+        XCTAssertTrue(keyMetrics.contains("selected.count >= KeyMetricPrefs.maximumSelectionCount"))
         XCTAssertTrue(keyMetrics.contains(".foregroundStyle(Color.black)"))
         XCTAssertTrue(keyMetrics.contains(
-            #".accessibilityIdentifier("noop.key-metric.toggle.\(item.metric.rawValue)")"#
+            #".accessibilityIdentifier("noop.key-metric.add.\(metric.rawValue)")"#
         ))
         XCTAssertTrue(dashboard.contains(".toggleStyle(.noopSwitch)"))
         XCTAssertTrue(dashboard.contains(
             "enabled ? StrandPalette.statusPositive : StrandPalette.textTertiary"
         ))
+    }
+
+    func testEditorCopyIsLocalizedAcrossEverySupportedLocale() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let editor = try String(
+            contentsOf: root.appendingPathComponent("Strand/Screens/KeyMetricsEditorSheet.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(editor.contains(#"String(localized: "Choose your snapshot")"#))
+        XCTAssertTrue(editor.contains(#"String(localized: "All supported metrics are selected.")"#))
+        XCTAssertTrue(editor.contains(#"String(localized: "Remove \(metric.title) from Today")"#))
+
+        let data = try Data(
+            contentsOf: root.appendingPathComponent("Strand/Resources/Localizable.xcstrings")
+        )
+        let catalog = try XCTUnwrap(
+            (JSONSerialization.jsonObject(with: data) as? [String: Any])?["strings"]
+                as? [String: Any]
+        )
+        let requiredKeys = [
+            "Choose your snapshot",
+            "Show 3 to 6 metrics on Today. Every other supported metric stays available here and in history.",
+            "%lld/%lld",
+            "%lld of %lld selected",
+            "Clear metric search",
+            "All supported metrics are selected.",
+            "No metrics match this search.",
+            "Remove %@ from Today",
+            "Enable hydration tracking in Settings",
+            "Add %@ to Today",
+        ]
+        let locales = Set(["de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
+
+        for key in requiredKeys {
+            let entry = try XCTUnwrap(catalog[key] as? [String: Any], key)
+            let localizations = try XCTUnwrap(
+                entry["localizations"] as? [String: Any],
+                key
+            )
+            XCTAssertEqual(Set(localizations.keys), locales, key)
+        }
     }
 }
 
@@ -59,6 +105,38 @@ final class KeyMetricPrefsTests: XCTestCase {
         XCTAssertEqual(KeyMetricPrefs.minimumSelectionCount, 3)
         XCTAssertEqual(KeyMetricPrefs.maximumSelectionCount, 6)
         XCTAssertEqual(Set(KeyMetric.defaultOrder), Set(KeyMetric.allCases))
+        XCTAssertEqual(KeyMetric.allCases.count, 18)
+        XCTAssertEqual(
+            Set(KeyMetric.allCases),
+            Set([
+                .charge, .effort, .rest, .hrv, .restingHr, .bloodOxygen,
+                .averageHr, .maxHr, .respiratory, .asleepTime, .steps, .weight,
+                .calories, .vo2Max, .stress, .vitality, .skinTemp, .hydration,
+            ])
+        )
+        XCTAssertEqual(
+            Set(KeyMetric.allCases.filter { $0.category == .dailySignal }),
+            Set([.charge, .effort, .rest])
+        )
+        XCTAssertEqual(
+            Set(KeyMetric.allCases.filter { $0.category == .vitals }),
+            Set([
+                .hrv, .restingHr, .averageHr, .maxHr, .bloodOxygen, .respiratory,
+                .vo2Max, .skinTemp,
+            ])
+        )
+        XCTAssertEqual(
+            Set(KeyMetric.allCases.filter { $0.category == .sleep }),
+            Set([.asleepTime])
+        )
+        XCTAssertEqual(
+            Set(KeyMetric.allCases.filter { $0.origin == .noopInsight }),
+            Set([.charge, .rest, .effort, .stress, .vitality])
+        )
+        XCTAssertEqual(
+            Set(KeyMetric.allCases.filter { $0.origin == .sourceDependent }),
+            Set([.calories])
+        )
     }
 
     func testShortLegacySelectionKeepsUserOrderAndFillsToThree() {

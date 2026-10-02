@@ -160,4 +160,41 @@ class HydrationGoalTest {
             ),
         )
     }
+
+    @Test fun personalized_breakdown_explains_the_exact_goal_inputs() {
+        assertEquals(
+            HydrationGoal.PersonalizedBreakdown(
+                baselineSource = HydrationGoal.BaselineSource.CONFIRMED_WEIGHT,
+                baselineMl = 2450,
+                effortBumpMl = 350,
+                goalMl = 2800,
+            ),
+            HydrationGoal.personalizedBreakdown(
+                age = 30,
+                ageConfirmed = true,
+                sex = "female",
+                sexConfirmed = true,
+                weightKg = 70.0,
+                weightConfirmed = true,
+                effort = 50.0,
+            ),
+        )
+        assertEquals(
+            HydrationGoal.PersonalizedBreakdown(
+                baselineSource = HydrationGoal.BaselineSource.CONFIRMED_PROFILE,
+                baselineMl = 2160,
+                effortBumpMl = 0,
+                goalMl = 2150,
+            ),
+            HydrationGoal.personalizedBreakdown(
+                age = 30,
+                ageConfirmed = true,
+                sex = "female",
+                sexConfirmed = true,
+                weightKg = null,
+                weightConfirmed = false,
+                effort = null,
+            ),
+        )
+    }
 }

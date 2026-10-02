@@ -3,10 +3,29 @@ package com.noop.ui
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TodayCompactHeroContractTest {
+    @Test
+    fun sleepStatusUsesShortScoreBands() {
+        assertEquals(CompactDailyMetricStatus.NEED_MORE_REST, compactSleepMetricStatus(59.9))
+        assertEquals(CompactDailyMetricStatus.STEADY, compactSleepMetricStatus(60.0))
+        assertEquals(CompactDailyMetricStatus.STEADY, compactSleepMetricStatus(79.9))
+        assertEquals(CompactDailyMetricStatus.WELL_RESTED, compactSleepMetricStatus(80.0))
+        assertNull(compactSleepMetricStatus(Double.NaN))
+    }
+
+    @Test
+    fun effortStatusUsesCanonicalHundredPointScale() {
+        assertEquals(CompactDailyMetricStatus.LIGHT, compactEffortMetricStatus(29.9))
+        assertEquals(CompactDailyMetricStatus.MODERATE, compactEffortMetricStatus(30.0))
+        assertEquals(CompactDailyMetricStatus.MODERATE, compactEffortMetricStatus(69.9))
+        assertEquals(CompactDailyMetricStatus.HIGH, compactEffortMetricStatus(70.0))
+        assertNull(compactEffortMetricStatus(Double.POSITIVE_INFINITY))
+    }
+
     @Test
     fun recoveryValueKeepsScoreCalibrationAndMissingStatesDistinct() {
         assertEquals("72", compactRecoveryHeroValue(recovery = 72.4, calibrationNights = null))

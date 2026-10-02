@@ -54,13 +54,16 @@ internal fun lastWorkoutsFeed(rows: List<WorkoutRow>): List<WorkoutRow> =
 internal data class WeightTileText(val value: String, val caption: String?)
 
 /**
- * The newest body weight across the two Apple-side sources (apple-health + health-connect), or null
- * when neither carries one. Days are ISO `yyyy-MM-dd`, which sorts chronologically, so the lexically
- * greatest day with a non-null `weightKg` is the most recent, no date parsing needed. (#107)
+ * The newest measured body weight at or before [throughDay] across Apple Health and Health Connect.
+ * A future reading must never appear while the user is viewing an earlier day.
  */
-internal fun latestWeightKg(apple: List<AppleDaily>, healthConnect: List<AppleDaily>): Double? =
+internal fun latestWeightKg(
+    apple: List<AppleDaily>,
+    healthConnect: List<AppleDaily>,
+    throughDay: String,
+): Double? =
     (apple + healthConnect)
-        .filter { it.weightKg != null }
+        .filter { it.day <= throughDay && it.weightKg != null }
         .maxByOrNull { it.day }
         ?.weightKg
 
@@ -87,17 +90,31 @@ internal fun stepsForDay(apple: List<AppleDaily>, healthConnect: List<AppleDaily
  */
 @Suppress("UNUSED_PARAMETER")
 internal fun resolvedSteps(imported: Int?, motionDerived: Int?, calibratedEstimate: Int?): Int? =
-    imported
+    resolvedSteps(
+        imported = imported,
+        supplierMeasured = null,
+        motionDerived = motionDerived,
+        calibratedEstimate = calibratedEstimate,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+internal fun resolvedSteps(
+    imported: Int?,
+    supplierMeasured: Int?,
+    motionDerived: Int?,
+    calibratedEstimate: Int?,
+): Int? = imported ?: supplierMeasured
 
 /** Per-day primary Steps arbitration for Today sparklines. */
 @Suppress("UNUSED_PARAMETER")
 internal fun resolvedStepsSeries(
     imported: Map<String, Int>,
+    supplierMeasured: Map<String, Int> = emptyMap(),
     motionDerived: Map<String, Int>,
     calibratedEstimate: Map<String, Int>,
 ): List<Pair<String, Double>> =
-    imported.keys.toSortedSet().mapNotNull { day ->
-        imported[day]?.let { day to it.toDouble() }
+    (imported.keys + supplierMeasured.keys).toSortedSet().mapNotNull { day ->
+        (imported[day] ?: supplierMeasured[day])?.let { day to it.toDouble() }
     }
 
 /**
@@ -108,9 +125,11 @@ internal fun resolvedStepsSeries(
 internal fun stepsSourceCaption(
     motionDerived: Int?,
     imported: Int?,
+    supplierMeasured: Int? = null,
     calibratedEstimate: Int?,
 ): String? = when {
     imported != null -> "Measured · Apple Health / Health Connect"
+    supplierMeasured != null -> "Measured · Compatible band"
     else -> null
 }
 
@@ -120,17 +139,14 @@ internal fun stepsTileLabel(motionDerived: Int?, imported: Int?, calibratedEstim
     "Steps"
 
 /**
- * Resolve the Weight tile text: prefer the latest Apple/Health-Connect weight, else fall back to the
- * SI profile weight with a "from profile" caption so the source stays honest. Both are formatted
- * through the shared [UnitFormatter] so the independent weight-unit toggle reaches this tile too. (#107)
+ * Resolve the measured Weight tile. Profile setup weight is not a dated measurement and must not fill a
+ * card grouped under measured/imported data.
  */
-internal fun weightTile(latestWeightKg: Double?, profileWeightKg: Double, unit: MassUnit): WeightTileText =
-    if (latestWeightKg != null) {
-        WeightTileText(UnitFormatter.massFromKilograms(latestWeightKg, unit), "latest")
-    } else {
-        WeightTileText(UnitFormatter.massFromKilograms(profileWeightKg, unit), "from profile")
-    }
+internal fun weightTile(latestWeightKg: Double?, unit: MassUnit): WeightTileText =
+    latestWeightKg?.let {
+        WeightTileText(UnitFormatter.massFromKilograms(it, unit), "latest measured")
+    } ?: WeightTileText(NoopDisplayFormat.MISSING, null)
 
 /** Source-compatible bridge for older tests/callers; resolves exactly like the pre-split preference. */
-internal fun weightTile(latestWeightKg: Double?, profileWeightKg: Double, system: UnitSystem): WeightTileText =
-    weightTile(latestWeightKg, profileWeightKg, UnitPrefs.resolveMass(system, null))
+internal fun weightTile(latestWeightKg: Double?, system: UnitSystem): WeightTileText =
+    weightTile(latestWeightKg, UnitPrefs.resolveMass(system, null))

@@ -232,6 +232,9 @@
     <string name="key_metrics_show_selected">Mostra metriche selezionate</string>
     <string name="key_metrics_show_all_count">Mostra tutte le metriche (%1$d)</string>
     <string name="key_metrics_open_history">Apri tutta la cronologia delle metriche</string>
+    <string name="key_metrics_fitness_age_accessibility">%1$s, %2$s, %3$s, %4$s</string>
+    <string name="key_metrics_remove_from_today">Rimuovi %1$s da Oggi</string>
+    <string name="key_metrics_hydration_tracking_off">Monitoraggio dell’idratazione · Disattivato</string>
     <string name="hydration_adaptive_timing_label">Programmazione adattiva</string>
     <string name="hydration_adaptive_timing_help">Regola l’intervallo di oggi usando lo Sforzo e l’assunzione confermata. I dati mancanti non vengono mai stimati.</string>
     <string name="hydration_adaptive_timing_status">Attualmente ogni %1$d min. La programmazione cambia solo quando i dati di oggi lo supportano.</string>

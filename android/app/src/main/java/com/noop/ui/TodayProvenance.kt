@@ -117,12 +117,12 @@ internal fun provenanceDisplayLabel(
     return FusionSource.entries.firstOrNull { it.id == rawSource }?.displayName ?: rawSource
 }
 
-/** Today uses the audience-facing sensor name for Apple Health scores, matching the Swift Today lane. */
+/** Apple Health aggregates can include phone, watch, scale, and app records, so keep the source generic. */
 internal fun todayProvenanceChipLabel(
     rawSource: String,
     deviceId: String = WhoopRepository.WHOOP_SOURCE,
 ): String = if (rawSource == WhoopRepository.APPLE_HEALTH_SOURCE) {
-    "Apple Watch"
+    "Apple Health"
 } else {
     provenanceDisplayLabel(rawSource, deviceId).let {
         if (it == "Imported") WhoopModel.CUSTOMER_NAME else it
@@ -211,16 +211,15 @@ internal fun readinessWord(level: ReadinessEngine.Level): String? = when (level)
 }
 
 /**
- * S5: the collapsed Data Sources footer summary, "Synced from: WHOOP, Apple Watch", listing only sources
- * with data (Apple Health reads as "Apple Watch", the device the audience knows), or "No sources yet".
+ * S5: the collapsed Data Sources footer summary, listing only source partitions with data.
  * PURE + unit-tested. Twin of the Swift TodayView.syncedFromSummary, plus the Android-only
- * hasHealthConnect source - Health Connect is named for what it is, never folded under "Apple Watch"
+ * hasHealthConnect source - Health Connect remains distinct from Apple Health
  * (issue #176).
  */
 internal fun syncedFromSummary(hasWhoop: Boolean, hasApple: Boolean, hasHealthConnect: Boolean = false, hasXiaomi: Boolean): String {
     val names = buildList {
         if (hasWhoop) add(WhoopModel.CUSTOMER_NAME)
-        if (hasApple) add("Apple Watch")
+        if (hasApple) add("Apple Health")
         if (hasHealthConnect) add("Health Connect")
         if (hasXiaomi) add("Mi Band")
     }

@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocalDrink
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.WaterDrop
@@ -54,6 +56,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -352,8 +355,8 @@ fun HydrationScreen(
     val profile = remember { ProfileStore.from(context) }
     // Body weight can personalise the baseline, and Effort can adjust it modestly. Wrist skin temperature
     // is deliberately excluded because it is not validated evidence of an individual's fluid requirement.
-    val goalMl = remember(profile.ageMetricStateToken, strain) {
-        HydrationGoal.personalizedDailyGoalMl(
+    val goalBreakdown = remember(profile.ageMetricStateToken, strain) {
+        HydrationGoal.personalizedBreakdown(
             age = profile.age,
             ageConfirmed = profile.ageInputConfirmed,
             sex = profile.sex,
@@ -363,6 +366,7 @@ fun HydrationScreen(
             effort = strain,
         )
     }
+    val goalMl = goalBreakdown?.goalMl
 
     // The liquid sky backdrop honours the SAME opt-out pref as the liquid Today (a user who turned the
     // day-cycle sky off gets the flat canvas here too). Mirrors iOS `showDayCycleBackground ? ... : nil`.
@@ -460,6 +464,8 @@ fun HydrationScreen(
 
     var showCustom by remember { mutableStateOf(false) }
     var editingEntry by remember { mutableStateOf<HydrationStore.Entry?>(null) }
+    var showTargetDetails by remember { mutableStateOf(false) }
+    var showClearConfirmation by remember { mutableStateOf(false) }
 
     val log: (Int) -> Unit = { amount ->
         if (!correctionRequired) {
@@ -559,6 +565,50 @@ fun HydrationScreen(
                 showCustom = false
                 editingEntry = null
                 if (entry == null) log(ml) else updateEntry(entry, ml)
+            },
+        )
+    }
+    if (showClearConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmation = false },
+            containerColor = Palette.surfaceOverlay,
+            title = {
+                Text(
+                    uiString(R.string.appwide_hydration_clear_confirm_title),
+                    style = NoopType.title2,
+                    color = Palette.textPrimary,
+                )
+            },
+            text = {
+                Text(
+                    uiString(
+                        R.string.appwide_hydration_clear_confirm_message,
+                        selectedDayTitle,
+                    ),
+                    style = NoopType.body,
+                    color = Palette.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirmation = false
+                        clearEntries()
+                    },
+                ) {
+                    Text(
+                        uiString(R.string.appwide_hydration_clear_confirm_action),
+                        color = Palette.statusWarning,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirmation = false }) {
+                    Text(
+                        uiString(R.string.l10n_hydration_screen_cancel_77dfd213),
+                        color = Palette.textSecondary,
+                    )
+                }
             },
         )
     }
@@ -834,21 +884,78 @@ fun HydrationScreen(
             )
         }
 
-        // 7-DAY HISTORY — flat mini bars, today on the right. Kept CRISP: this is a multi-bar mini chart
-        // (one bar per day), not a single-value progress bar, so a tube would flatten it — leave it as-is.
-        item {
-            NoopCard(padding = 18.dp) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Overline(lastSevenDaysText)
-                    HydrationHistoryBars(
-                        history = history,
-                        goalMl = goalMl,
-                        accent = accent,
-                        missingText = missingStateText,
-                        title = lastSevenDaysText,
-                        locale = locale,
-                        accessibilityCopy = hydrationAccessibilityCopy,
-                    )
+        goalBreakdown?.let { breakdown ->
+            item {
+                NoopCard(padding = 14.dp) {
+                    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(role = Role.Button) {
+                                    showTargetDetails = !showTargetDetails
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                uiString(R.string.appwide_hydration_target_details_title),
+                                style = NoopType.subhead.copy(fontWeight = FontWeight.SemiBold),
+                                color = Palette.textPrimary,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Icon(
+                                if (showTargetDetails) {
+                                    Icons.Filled.KeyboardArrowUp
+                                } else {
+                                    Icons.Filled.KeyboardArrowDown
+                                },
+                                contentDescription = null,
+                                tint = Palette.textSecondary,
+                            )
+                        }
+                        if (showTargetDetails) {
+                            val baselineLitres = hydrationLitreNumberFormat(locale)
+                                .format(breakdown.baselineMl / 1000.0)
+                            Text(
+                                uiString(
+                                    if (
+                                        breakdown.baselineSource ==
+                                        HydrationGoal.BaselineSource.CONFIRMED_WEIGHT
+                                    ) {
+                                        R.string.appwide_hydration_target_details_weight_baseline_format
+                                    } else {
+                                        R.string.appwide_hydration_target_details_profile_baseline_format
+                                    },
+                                    baselineLitres,
+                                ),
+                                style = NoopType.footnote,
+                                color = Palette.textSecondary,
+                            )
+                            Text(
+                                if (breakdown.effortBumpMl > 0) {
+                                    uiString(
+                                        R.string.appwide_hydration_target_details_effort_format,
+                                        breakdown.effortBumpMl,
+                                    )
+                                } else {
+                                    uiString(
+                                        R.string.appwide_hydration_target_details_effort_none,
+                                    )
+                                },
+                                style = NoopType.footnote,
+                                color = Palette.textSecondary,
+                            )
+                            Text(
+                                uiString(R.string.appwide_hydration_target_details_exclusions),
+                                style = NoopType.footnote,
+                                color = Palette.textSecondary,
+                            )
+                            Text(
+                                uiString(R.string.appwide_hydration_target_details_guidance),
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1034,9 +1141,28 @@ fun HydrationScreen(
                                 leadingIcon = Icons.Filled.Delete,
                                 kind = NoopButtonKind.Secondary,
                                 modifier = Modifier.fillMaxWidth(),
-                            ) { clearEntries() }
+                            ) { showClearConfirmation = true }
                         }
                     }
+                }
+            }
+        }
+
+        // 7-DAY HISTORY — flat mini bars, today on the right. This follows the correction controls so an
+        // accidental quick log can be fixed without scrolling past analytics first.
+        item {
+            NoopCard(padding = 18.dp) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Overline(lastSevenDaysText)
+                    HydrationHistoryBars(
+                        history = history,
+                        goalMl = goalMl,
+                        accent = accent,
+                        missingText = missingStateText,
+                        title = lastSevenDaysText,
+                        locale = locale,
+                        accessibilityCopy = hydrationAccessibilityCopy,
+                    )
                 }
             }
         }

@@ -3,7 +3,8 @@ import SwiftUI
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
-// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to six in
+// The Today screen's "Key Metrics" grid has a curated catalog of Today-ready tiles. This lets the user
+// pin three to six in
 // their preferred order. A fresh install starts with six useful secondary signals so the grid is complete
 // without repeating the Recovery, Sleep, and Effort summary immediately above it. Every other metric
 // remains in the complete catalog. Persistence is display-only: no metric is computed or stored differently.
@@ -21,22 +22,123 @@ enum KeyMetric: String, CaseIterable, Identifiable {
     case rest
     case hrv
     case restingHr
+    case averageHr
+    case maxHr
     case bloodOxygen
     case respiratory
+    case asleepTime
     case steps
     case weight
     case calories
+    case vo2Max
+    case stress
+    case vitality
+    case skinTemp
+    case hydration
 
     var id: String { rawValue }
+
+    enum Category: String, CaseIterable, Identifiable {
+        case dailySignal
+        case vitals
+        case sleep
+        case activity
+        case wellbeing
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .dailySignal: return String(localized: "Daily Signal")
+            case .vitals: return String(localized: "Vitals")
+            case .sleep: return String(localized: "Sleep")
+            case .activity: return String(localized: "Activity")
+            case .wellbeing: return String(localized: "Wellbeing")
+            }
+        }
+    }
+
+    enum Origin: String, CaseIterable, Identifiable {
+        case measuredImported
+        case sourceDependent
+        case noopInsight
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .measuredImported:
+                return String(localized: "appwide.metric.origin.measured_imported")
+            case .sourceDependent:
+                return String(localized: "appwide.metric.origin.source_dependent")
+            case .noopInsight:
+                return String(localized: "appwide.metric.origin.noop_insight")
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .measuredImported:
+                return String(localized: "appwide.metric.origin.measured_imported_detail")
+            case .sourceDependent:
+                return String(localized: "appwide.metric.origin.source_dependent_detail")
+            case .noopInsight:
+                return String(localized: "appwide.metric.origin.noop_insight_detail")
+            }
+        }
+
+        var compactTitle: String {
+            switch self {
+            case .measuredImported:
+                return String(localized: "appwide.metric.origin.measured_short")
+            case .sourceDependent:
+                return String(localized: "appwide.metric.origin.source_dependent_short")
+            case .noopInsight:
+                return String(localized: "appwide.metric.origin.noop_short")
+            }
+        }
+    }
+
+    var origin: Origin {
+        switch self {
+        case .charge, .effort, .rest, .stress, .vitality:
+            return .noopInsight
+        case .calories:
+            return .sourceDependent
+        case .hrv, .restingHr, .averageHr, .maxHr, .bloodOxygen, .respiratory,
+             .asleepTime, .steps, .weight, .vo2Max, .skinTemp, .hydration:
+            return .measuredImported
+        }
+    }
+
+    var category: Category {
+        switch self {
+        case .charge, .effort, .rest:
+            return .dailySignal
+        case .hrv, .restingHr, .averageHr, .maxHr, .bloodOxygen, .respiratory,
+             .vo2Max, .skinTemp:
+            return .vitals
+        case .asleepTime:
+            return .sleep
+        case .steps, .weight, .calories, .hydration:
+            return .activity
+        case .stress, .vitality:
+            return .wellbeing
+        }
+    }
 
     /// Whether the metric has a truthful, fixed progress scale. Raw physiology is deliberately false:
     /// HRV/heart rate/respiration/SpO₂ are readings to compare with a personal baseline, not goals where
     /// a fuller bar means healthier. Steps and calories also stay false until the user owns an explicit
-    /// goal rather than NOOP silently assuming 10,000 steps or 800 kcal.
+    /// goal rather than NOOP silently assuming 10,000 steps or 800 kcal. Hydration is the exception because
+    /// its existing opt-in flow owns an explicit personalized daily goal.
     var isBoundedProgress: Bool {
         switch self {
-        case .charge, .effort, .rest: return true
-        case .hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .weight, .calories: return false
+        case .charge, .effort, .rest, .hydration: return true
+        case .hrv, .restingHr, .averageHr, .maxHr, .bloodOxygen, .respiratory,
+             .asleepTime, .steps, .weight, .calories, .vo2Max, .stress, .vitality,
+             .skinTemp:
+            return false
         }
     }
 
@@ -48,11 +150,19 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         case .rest:        return String(localized: "Sleep")
         case .hrv:         return "HRV"
         case .restingHr:   return String(localized: "Resting HR")
+        case .averageHr:   return String(localized: "Average Heart Rate")
+        case .maxHr:       return String(localized: "Max Heart Rate")
         case .bloodOxygen: return String(localized: "Blood Oxygen")
         case .respiratory: return String(localized: "Respiratory")
+        case .asleepTime:  return String(localized: "Asleep Time")
         case .steps:       return String(localized: "Steps")
         case .weight:      return String(localized: "Weight")
         case .calories:    return String(localized: "Calories")
+        case .vo2Max:      return String(localized: "VO₂ Max")
+        case .stress:      return String(localized: "Stress")
+        case .vitality:    return String(localized: "Vitality")
+        case .skinTemp:    return String(localized: "Skin Temp")
+        case .hydration:   return String(localized: "Hydration")
         }
     }
 
@@ -65,18 +175,29 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         case .rest:        return "moon.stars.fill"
         case .hrv:         return "waveform.path.ecg"
         case .restingHr:   return "heart.fill"
+        case .averageHr:   return "heart.text.square.fill"
+        case .maxHr:       return "bolt.heart.fill"
         case .bloodOxygen: return "drop.fill"
         case .respiratory: return "lungs.fill"
+        case .asleepTime:  return "moon.zzz.fill"
         case .steps:       return "figure.walk"
         case .weight:      return "scalemass.fill"
         case .calories:    return "flame.circle.fill"
+        case .vo2Max:      return "lungs.fill"
+        case .stress:      return "bolt.heart"
+        case .vitality:    return "sparkles"
+        case .skinTemp:    return "thermometer.medium"
+        case .hydration:   return "waterbottle.fill"
         }
     }
 
     /// Canonical catalog order. This includes every choice and is also used to order unselected options.
     static let defaultOrder: [KeyMetric] = [
-        .charge, .effort, .rest, .hrv, .restingHr,
-        .bloodOxygen, .respiratory, .steps, .weight, .calories,
+        .charge, .rest, .effort,
+        .hrv, .restingHr, .averageHr, .maxHr, .bloodOxygen, .respiratory, .vo2Max,
+        .skinTemp, .asleepTime,
+        .steps, .calories, .weight, .hydration,
+        .stress, .vitality,
     ]
 
     /// NOOP's useful fresh-install starting point. These complement the three Daily Signal scores instead

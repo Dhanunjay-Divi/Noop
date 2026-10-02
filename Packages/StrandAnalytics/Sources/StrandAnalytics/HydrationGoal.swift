@@ -158,6 +158,67 @@ public enum HydrationGoal {
         dailyGoalML(sex: sex, weightKg: weightKg, effort: effort)
     }
 
+    public enum BaselineSource: Equatable, Sendable {
+        case confirmedWeight
+        case confirmedProfile
+    }
+
+    public struct PersonalizedBreakdown: Equatable, Sendable {
+        public let baselineSource: BaselineSource
+        public let baselineML: Int
+        public let effortBumpML: Int
+        public let goalML: Int
+
+        public init(
+            baselineSource: BaselineSource,
+            baselineML: Int,
+            effortBumpML: Int,
+            goalML: Int
+        ) {
+            self.baselineSource = baselineSource
+            self.baselineML = baselineML
+            self.effortBumpML = effortBumpML
+            self.goalML = goalML
+        }
+    }
+
+    /// Explainable product-facing target. This is the single source for both the displayed goal and the
+    /// optional "How this target is set" disclosure, so the UI can never describe different inputs than
+    /// the formula actually used.
+    public static func personalizedBreakdown(
+        age: Int,
+        ageConfirmed: Bool,
+        sex: String,
+        sexConfirmed: Bool,
+        weightKg: Double?,
+        weightConfirmed: Bool,
+        effort: Double?
+    ) -> PersonalizedBreakdown? {
+        guard ageConfirmed, age >= BodyProfilePolicy.adultMinimumAge else { return nil }
+
+        let baselineSource: BaselineSource
+        let baselineML: Int
+        if weightConfirmed,
+           let weightKg,
+           weightKg.isFinite,
+           (20.0...400.0).contains(weightKg) {
+            baselineSource = .confirmedWeight
+            baselineML = weightBaselineML(sex: sex, weightKg: weightKg)
+        } else {
+            guard sexConfirmed else { return nil }
+            baselineSource = .confirmedProfile
+            baselineML = baselineForSex(sex)
+        }
+
+        let bumpML = effortBump(effort: effort)
+        return PersonalizedBreakdown(
+            baselineSource: baselineSource,
+            baselineML: baselineML,
+            effortBumpML: bumpML,
+            goalML: roundToNearest(baselineML + bumpML, step: roundToML)
+        )
+    }
+
     /// Product-facing adult hydration estimate. Unlike the compatibility overloads above, this returns
     /// `nil` until the profile inputs used to derive a target are explicitly confirmed. Manual intake
     /// logging remains available without a target.
@@ -173,15 +234,15 @@ public enum HydrationGoal {
         weightConfirmed: Bool,
         effort: Double?
     ) -> Int? {
-        guard ageConfirmed, age >= BodyProfilePolicy.adultMinimumAge else { return nil }
-        if weightConfirmed,
-           let weightKg,
-           weightKg.isFinite,
-           (20.0...400.0).contains(weightKg) {
-            return dailyGoalML(sex: sex, weightKg: weightKg, effort: effort)
-        }
-        guard sexConfirmed else { return nil }
-        return dailyGoalML(sex: sex, effort: effort)
+        personalizedBreakdown(
+            age: age,
+            ageConfirmed: ageConfirmed,
+            sex: sex,
+            sexConfirmed: sexConfirmed,
+            weightKg: weightKg,
+            weightConfirmed: weightConfirmed,
+            effort: effort
+        )?.goalML
     }
 
     // MARK: - R3: smart reminder schedule (pure; platform notification wiring consumes this)

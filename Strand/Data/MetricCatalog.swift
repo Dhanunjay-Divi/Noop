@@ -253,6 +253,9 @@ enum MetricCatalog {
         d("avg_hr", String(localized: "Average Heart Rate"), "Heart", "bpm", "my-whoop", "heart", 0, nil),
         d("max_hr", String(localized: "Max Heart Rate"), "Heart", "bpm", "my-whoop", "bolt.heart", 0, nil),
         d("energy_kcal", String(localized: "Calories"), "Heart", "kcal", "my-whoop", "flame", 0, nil),
+        d("avg_hr", String(localized: "Average Heart Rate"), "Heart", "bpm", "apple-health", "heart", 0, nil),
+        d("max_hr", String(localized: "Max Heart Rate"), "Heart", "bpm", "apple-health", "bolt.heart", 0, nil),
+        d("walking_hr", String(localized: "Walking Heart Rate"), "Heart", "bpm", "apple-health", "figure.walk", 0, nil),
         d("vo2max", String(localized: "VO₂ Max"), "Heart", "", "apple-health", "lungs.fill", 1, true),
         d("fitness_age", String(localized: "Fitness Age"), "Heart", "", "my-whoop", "figure.run", 0, false),
         d("vo2max_est", String(localized: "VO₂ Max (estimated)"), "Heart", "", "my-whoop", "lungs", 1, true),
@@ -267,6 +270,11 @@ enum MetricCatalog {
         d("resp_rate", String(localized: "Respiratory Rate"), "Charge", "rpm", "my-whoop", "lungs", 1, nil),
         d("spo2", String(localized: "Blood Oxygen"), "Charge", "%", "my-whoop", "drop", 0, true),
         d("skin_temp", String(localized: "Skin Temperature"), "Charge", "°C", "my-whoop", "thermometer", 1, nil),
+        d("hrv", String(localized: "Heart Rate Variability"), "Charge", "ms", "apple-health", "waveform.path.ecg", 0, true,
+          String(localized: "Apple Health records HRV as SDNN. Keep it separate from RMSSD reported by other sources.")),
+        d("resting_hr", String(localized: "Resting Heart Rate"), "Charge", "bpm", "apple-health", "heart", 0, false),
+        d("resp_rate", String(localized: "Respiratory Rate"), "Charge", "rpm", "apple-health", "lungs", 1, nil),
+        d("spo2", String(localized: "Blood Oxygen"), "Charge", "%", "apple-health", "drop", 0, true),
 
         // ── Rest (was Sleep)
         d("sleep_performance", String(localized: "Sleep Score"), "Rest", "%", "my-whoop", "moon.stars", 0, true,
@@ -283,6 +291,12 @@ enum MetricCatalog {
         d("sleep_light_min", String(localized: "Light Sleep"), "Rest", "min", "my-whoop", "moon", 0, nil),
         d("sleep_need_min", String(localized: "Sleep Need"), "Rest", "min", "my-whoop", "gauge", 0, nil),
         d("sleep_debt_min", String(localized: "Sleep Debt"), "Rest", "min", "my-whoop", "exclamationmark.circle", 0, false),
+        d("in_bed_min", String(localized: "Time in Bed"), "Rest", "min", "apple-health", "bed.double", 0, nil),
+        d("asleep_min", String(localized: "Asleep Time"), "Rest", "min", "apple-health", "moon.zzz", 0, true),
+        d("deep_min", String(localized: "Deep Sleep"), "Rest", "min", "apple-health", "moon.fill", 0, true),
+        d("rem_min", String(localized: "REM Sleep"), "Rest", "min", "apple-health", "moon.haze", 0, true),
+        d("core_min", String(localized: "Core Sleep"), "Rest", "min", "apple-health", "moon", 0, nil),
+        d("awake_min", String(localized: "Awake Time"), "Rest", "min", "apple-health", "sun.max", 0, nil),
 
         // ── Effort (was Strain)
         d("strain", String(localized: "Effort"), "Effort", "/100", "my-whoop", "flame", 1, nil,
@@ -322,6 +336,7 @@ enum MetricCatalog {
         d("stress", String(localized: "Day Stress"), "Health", "/3", "my-whoop", "gauge.with.dots.needle.50percent", 1, false),
 
         // ── Nutrition (editable manual meals + migrated CSV daily summaries).
+        d("hydration", String(localized: "Hydration"), "Nutrition", "mL", "apple-health", "waterbottle.fill", 0, nil),
         d("calories_in", String(localized: "Calories In"), "Nutrition", "kcal", "nutrition-log", "fork.knife", 0, nil),
         d("protein_g", String(localized: "Protein"), "Nutrition", "g", "nutrition-log", "p.circle", 0, nil),
         d("carbs_g", String(localized: "Carbs"), "Nutrition", "g", "nutrition-log", "c.circle", 0, nil),

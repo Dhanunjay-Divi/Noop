@@ -1098,31 +1098,41 @@ struct TodayView: View {
         }
     }
 
-    // MARK: Apple Watch provenance (M1): "the watch is the sensor, NOOP is the brain"
+    // MARK: Apple Health provenance
 
     /// True when the selected day's value for `metricKey` was supplied by the Apple-Health source (a
-    /// watch-only user's Charge/Rest). The store source stays `apple-health` so the engines and the
-    /// multi-source resolver are unchanged; the friendlier "Apple Watch" label + its confidence are a
-    /// Today-only presentation layer over that source. We don't touch the cross-lane
-    /// `provenanceDisplayLabel` (it's Kotlin-mirrored and feeds the Data Sources footer's "Apple Health").
+    /// Health-sourced user's Charge/Rest). The store source stays `apple-health`; it can include iPhone,
+    /// Watch, scale, and third-party app records, so the UI must not claim Apple Watch without retained
+    /// source-device metadata.
     private func isWatchSourced(_ metricKey: String) -> Bool {
         Self.isWatchSource(provenanceByMetric[metricKey], appleHealthSource: Repository.appleHealthSource)
     }
 
-    /// PURE (unit-testable), whether a resolved raw source id is the Apple-Health/watch source. Kept
-    /// separate from the cross-lane `provenanceDisplayLabel` so the Today-only "Apple Watch" relabel never
-    /// leaks into the Kotlin-mirrored footer mapping.
+    /// PURE (unit-testable), whether a resolved raw source id is the Apple Health source.
     static func isWatchSource(_ rawSource: String?, appleHealthSource: String) -> Bool {
         rawSource == appleHealthSource
     }
 
-    /// PURE (unit-testable), the Today chip label for a resolved source, relabelling the Apple-Health
-    /// source as "Apple Watch" (the device the audience knows), the legacy compatibility lane using its
-    /// customer-facing adapter name, and otherwise deferring to the shared provenance label.
+    /// PURE (unit-testable), the Today chip label for a resolved source. Apple Health remains Apple Health
+    /// because the aggregated source can include non-Watch records.
     static func todayProvenanceChipLabel(rawSource: String, deviceId: String, appleHealthSource: String) -> String {
-        if rawSource == appleHealthSource { return "Apple Watch" }
+        if rawSource == appleHealthSource { return "Apple Health" }
         let shared = provenanceDisplayLabel(rawSource: rawSource, deviceId: deviceId)
         return shared == "Imported" ? WhoopModel.customerName : shared
+    }
+
+    static func accessibilitySourceLabel(_ source: String) -> String {
+        String.localizedStringWithFormat(
+            String(localized: "Source: %@"),
+            source
+        )
+    }
+
+    static func accessibilityNeedsMoreDataLabel(source: String) -> String {
+        [
+            accessibilitySourceLabel(source),
+            String(localized: "Needs more data"),
+        ].joined(separator: ". ")
     }
 
     /// True for a watch-context user with no strap supplying scores (Apple-Health days present and no WHOOP
@@ -1134,9 +1144,7 @@ struct TodayView: View {
         !appleDays.isEmpty && !repo.days.contains { $0.recovery != nil }
     }
 
-    /// The Today chip label for a watch-sourced score: the audience knows the device, not the framework,
-    /// so a watch-derived number reads "Apple Watch" rather than the generic "Apple Health" the footer uses.
-    /// Delegates to the pure `todayProvenanceChipLabel` so the relabel logic is unit-tested.
+    /// The Today chip label for an Apple Health-sourced score.
     private func watchProvenanceLabel(_ metricKey: String) -> String {
         let raw = provenanceByMetric[metricKey] ?? Repository.appleHealthSource
         return Self.todayProvenanceChipLabel(rawSource: raw, deviceId: repo.deviceId,
@@ -1166,7 +1174,7 @@ struct TodayView: View {
     /// Whether a watch-context score is still calibrating for the selected day, so the chip area shows an
     /// honest "Needs more data" rather than a bare dash/number. Only meaningful on today (a past day with no
     /// value is missing data, not mid-calibration), mirroring `recoveryCalibration`'s today-only gate, and
-    /// only when the value itself is absent (a scored watch day shows its "Apple Watch" chip + confidence).
+    /// only when the value itself is absent (a scored Health day shows its source chip + confidence).
     private func watchNeedsMoreData(_ metricKey: String) -> Bool {
         guard selectedDayOffset == 0, isWatchOnlyContext, !ringHasValue(metricKey) else { return false }
         return watchScoreState(metricKey) == .calibrating
@@ -3196,9 +3204,9 @@ struct TodayView: View {
                                                   : "See what shaped your Recovery")
             // Component 4, the real per-day source under the ring (only when this score has a value for
             // the day AND we resolved its winner; a calibrating / empty ring shows no provenance badge).
-            // Apple Watch (M1): a watch-sourced score reads "Apple Watch" with its confidence bound to the
-            // shared ScoreStatePill dot/label, and a calibrating watch score shows "Needs more data" rather
-            // than a bare ring, the honest "the watch can't support this yet" state, never a fake number.
+            // Apple Health: a Health-sourced score shows source provenance with its confidence bound to the
+            // shared ScoreStatePill dot/label. A calibrating score shows "Needs more data" rather than a
+            // bare ring, never a fabricated value.
             if let key = provenanceKey {
                 if ringHasValue(key), isWatchSourced(key) {
                     VStack(spacing: 4) {
@@ -3206,13 +3214,23 @@ struct TodayView: View {
                         ScoreStatePill(watchScoreState(key))
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Source: Apple Watch")
+                    .accessibilityLabel(
+                        Self.accessibilitySourceLabel(
+                            String(localized: "Apple Health")
+                        )
+                    )
                 } else if watchNeedsMoreData(key) {
                     SourceBadge("Needs more data", tint: StrandPalette.textTertiary)
-                        .accessibilityLabel("Apple Watch. Needs more data to score this yet.")
+                        .accessibilityLabel(
+                            Self.accessibilityNeedsMoreDataLabel(
+                                source: String(localized: "Apple Health")
+                            )
+                        )
                 } else if ringHasValue(key), let label = provenanceLabel(key) {
                     SourceBadge("\(label)", tint: provenanceTint(key))
-                        .accessibilityLabel("Source: \(label)")
+                        .accessibilityLabel(
+                            Self.accessibilitySourceLabel(label)
+                        )
                 }
             }
         }
@@ -3676,7 +3694,17 @@ struct TodayView: View {
     /// Every classic tile opens the same source-pinned Metric Explorer dossier as its Liquid twin.
     @ViewBuilder
     private func keyMetricTile(_ metric: KeyMetric) -> some View {
-        if let descriptor = keyMetricDescriptor(metric) {
+        if metric == .stress {
+            NavigationLink(value: TabRoute.stress) {
+                keyMetricTileContent(metric)
+            }
+            .buttonStyle(.plain)
+        } else if metric == .hydration, hydrationEnabled {
+            NavigationLink(value: TabRoute.hydration(day: selectedDayKey)) {
+                keyMetricTileContent(metric)
+            }
+            .buttonStyle(.plain)
+        } else if let descriptor = keyMetricDescriptor(metric) {
             NavigationLink(value: TabRoute.metricSourced(key: descriptor.key, source: descriptor.source)) {
                 keyMetricTileContent(metric)
             }
@@ -3693,6 +3721,8 @@ struct TodayView: View {
         case .rest:        return MetricCatalog.metric(key: "sleep_performance", source: "my-whoop")
         case .hrv:         return MetricCatalog.metric(key: "hrv", source: "my-whoop")
         case .restingHr:   return MetricCatalog.metric(key: "rhr", source: "my-whoop")
+        case .averageHr:   return MetricCatalog.metric(key: "avg_hr", source: "my-whoop")
+        case .maxHr:       return MetricCatalog.metric(key: "max_hr", source: "my-whoop")
         case .bloodOxygen: return MetricCatalog.metric(key: "spo2", source: "my-whoop")
         case .respiratory:
             let reading = Self.respiratoryDashboardReading(
@@ -3700,9 +3730,16 @@ struct TodayView: View {
                 priorWhoop: lastVitalsDay?.respRateBpm,
                 apple: sparks["resp_rate"]?.last)
             return MetricCatalog.metric(key: "resp_rate", source: reading.source)
+        case .asleepTime:
+            return MetricCatalog.metric(key: "sleep_total_min", source: "my-whoop")
         case .steps:       return selectedStepsMetric
         case .weight:      return MetricCatalog.metric(key: "weight", source: "apple-health")
         case .calories:    return selectedEnergyMetric
+        case .vo2Max:      return MetricCatalog.metric(key: "vo2max", source: "apple-health")
+        case .vitality:    return MetricCatalog.metric(key: "vitality", source: "my-whoop")
+        case .skinTemp:    return MetricCatalog.metric(key: "skin_temp", source: "my-whoop")
+        case .stress, .hydration:
+            return nil
         }
     }
 
@@ -3796,6 +3833,28 @@ struct TodayView: View {
                     ? StrandPalette.textPrimary
                     : StrandPalette.metricRose
             )
+        case .averageHr:
+            let value = aSelected?.avgHr
+            StatTile(
+                label: "Average Heart Rate",
+                value: value.map(String.init) ?? StrandFormat.missing,
+                systemImage: systemImage,
+                caption: value == nil
+                    ? (Self.emptyVitalCaption(unit: "bpm", isToday: selectedDayOffset == 0) ?? "bpm")
+                    : String(localized: "Apple Health"),
+                accent: value == nil ? StrandPalette.textPrimary : StrandPalette.metricRose
+            )
+        case .maxHr:
+            let value = aSelected?.maxHr
+            StatTile(
+                label: "Max Heart Rate",
+                value: value.map(String.init) ?? StrandFormat.missing,
+                systemImage: systemImage,
+                caption: value == nil
+                    ? (Self.emptyVitalCaption(unit: "bpm", isToday: selectedDayOffset == 0) ?? "bpm")
+                    : String(localized: "Apple Health"),
+                accent: value == nil ? StrandPalette.textPrimary : StrandPalette.metricAmber
+            )
         case .bloodOxygen:
             // PER-FIELD carry (perField: lastSpo2Day): the whole-row `lastScoredRecoveryDay` carry lands on a
             // row whose spo2Pct is nil (computed rows never bank a percentage), so the tile falls through to
@@ -3826,6 +3885,20 @@ struct TodayView: View {
                 accent: respValue == StrandFormat.missing
                     ? StrandPalette.textPrimary
                     : StrandPalette.accent
+            )
+        case .asleepTime:
+            let minutes = d?.totalSleepMin
+            StatTile(
+                label: "Asleep Time",
+                value: minutes.map {
+                    let total = Int($0.rounded())
+                    return "\(total / 60)h \(total % 60)m"
+                } ?? StrandFormat.missing,
+                systemImage: systemImage,
+                caption: minutes == nil
+                    ? Self.needsStrapCaption
+                    : String(localized: "appwide.metric.origin.measured_imported"),
+                accent: minutes == nil ? StrandPalette.textPrimary : StrandPalette.metricPurple
             )
         case .steps:
             // Primary Steps requires a measured Apple Health count for the selected day. Never use a stale
@@ -3860,6 +3933,71 @@ struct TodayView: View {
             )
         case .calories:
             energyKeyMetricTile(systemImage: systemImage)
+        case .vo2Max:
+            let latest = appleDays
+                .filter { $0.day <= selectedDayKey && $0.vo2max != nil }
+                .max(by: { $0.day < $1.day })?
+                .vo2max
+            StatTile(
+                label: "VO₂ Max",
+                value: latest.map { String(format: "%.1f", $0) } ?? StrandFormat.missing,
+                systemImage: systemImage,
+                caption: latest == nil
+                    ? (Self.emptyVitalCaption(
+                        unit: "ml/kg/min",
+                        isToday: selectedDayOffset == 0
+                    ) ?? "ml/kg/min")
+                    : String(localized: "Apple Health"),
+                accent: latest == nil ? StrandPalette.textPrimary : StrandPalette.metricCyan
+            )
+        case .stress:
+            let value = dashboardValue(.stress)
+            StatTile(
+                label: "Stress",
+                value: value,
+                systemImage: systemImage,
+                caption: DashboardCard.stress.subtitle,
+                accent: value == Self.calibratingPlaceholder
+                    ? StrandPalette.textPrimary
+                    : StrandPalette.accent
+            )
+        case .vitality:
+            let value = dashboardValue(.vitality)
+            StatTile(
+                label: "Vitality",
+                value: value,
+                systemImage: systemImage,
+                caption: DashboardCard.vitality.subtitle,
+                accent: value == StrandFormat.missing
+                    ? StrandPalette.textPrimary
+                    : StrandPalette.metricPurple
+            )
+        case .skinTemp:
+            let value = dashboardValue(.skinTemp)
+            StatTile(
+                label: "Skin Temp",
+                value: value,
+                systemImage: systemImage,
+                caption: DashboardCard.skinTemp.subtitle,
+                accent: value == StrandFormat.missing
+                    ? StrandPalette.textPrimary
+                    : StrandPalette.metricAmber
+            )
+        case .hydration:
+            let value = hydrationEnabled
+                ? dashboardValue(.hydration)
+                : String(localized: "Not enabled")
+            StatTile(
+                label: "Hydration",
+                value: value,
+                systemImage: systemImage,
+                caption: hydrationEnabled
+                    ? DashboardCard.hydration.subtitle
+                    : String(localized: "Enable hydration tracking in Settings"),
+                accent: hydrationEnabled
+                    ? StrandPalette.metricCyan
+                    : StrandPalette.textPrimary
+            )
         }
     }
 
@@ -4030,7 +4168,7 @@ struct TodayView: View {
         }
     }
 
-    /// S5: the collapsed Data Sources footer: a single "Synced from: WHOOP, Apple Watch >" line that taps
+    /// S5: the collapsed Data Sources footer: a single source summary line that taps
     /// to expand the full per-source rows. Lists only the sources that actually have data (so a strap-only
     /// user doesn't read "Apple Health"), and falls back to an honest "No sources yet" when nothing's banked.
     private var sourcesSummaryRow: some View {
@@ -4062,14 +4200,14 @@ struct TodayView: View {
     }
 
     /// PURE: the "Synced from: …" summary string for the collapsed footer (S5). Names the sources with
-    /// data using audience-facing words (the compatibility adapter name, "Apple Watch" for Apple Health,
-    /// "Mi Band"); "No sources yet" when nothing is banked. Unit-testable so the collapsed copy can't
+    /// data using source-accurate words (the compatibility adapter name, Apple Health, Mi Band);
+    /// "No sources yet" when nothing is banked. Unit-testable so the collapsed copy can't
     /// drift. The expanded card still uses the existing per-source rows, so the Apple-Health provenance
     /// footer is unchanged.
     static func syncedFromSummary(hasWhoop: Bool, hasApple: Bool, hasXiaomi: Bool) -> String {
         var names: [String] = []
         if hasWhoop { names.append(WhoopModel.customerName) }
-        if hasApple { names.append("Apple Watch") }
+        if hasApple { names.append("Apple Health") }
         if hasXiaomi { names.append("Mi Band") }
         guard !names.isEmpty else { return String(localized: "No sources yet") }
         return String(localized: "Synced from: \(names.joined(separator: ", "))")

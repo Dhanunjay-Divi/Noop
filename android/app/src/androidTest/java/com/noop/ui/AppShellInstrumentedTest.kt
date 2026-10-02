@@ -38,11 +38,15 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.TestName
 
 @RunWith(AndroidJUnit4::class)
 class AppShellInstrumentedTest {
     @get:Rule
     val compose = createEmptyComposeRule()
+
+    @get:Rule
+    val testName = TestName()
 
     private lateinit var scenario: ActivityScenario<MainActivity>
     private var originalAnimatorScale: String? = null
@@ -72,6 +76,9 @@ class AppShellInstrumentedTest {
             Settings.System.FONT_SCALE,
         )
         runShellCommand(instrumentation, "settings put global animator_duration_scale 0")
+        if (testName.methodName == "primaryTabsRemainVisibleAndOperableAtLargeFontScale") {
+            runShellCommand(instrumentation, "settings put system font_scale 2.0")
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             instrumentation.uiAutomation.grantRuntimePermission(
                 context.packageName,
@@ -150,14 +157,6 @@ class AppShellInstrumentedTest {
 
     @Test
     fun primaryTabsRemainVisibleAndOperableAtLargeFontScale() {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        scenario.close()
-        runShellCommand(instrumentation, "settings put system font_scale 2.0")
-        scenario = ActivityScenario.launch(MainActivity::class.java)
-
-        compose.waitUntil(timeoutMillis = 20_000) {
-            compose.onAllNodesWithTag("noop.tab.today").fetchSemanticsNodes().isNotEmpty()
-        }
         listOf(
             "noop.tab.today" to "Today",
             "noop.tab.trends" to "Trends",

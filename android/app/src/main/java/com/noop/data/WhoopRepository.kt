@@ -2534,6 +2534,10 @@ class WhoopRepository internal constructor(
     suspend fun latestAppleDailyWeight(deviceId: String): AppleDaily? =
         dao.latestAppleDailyWeight(deviceId)
 
+    /** Latest measured weight from one source at or before the selected ISO day. */
+    suspend fun latestAppleDailyWeightAtOrBefore(deviceId: String, throughDay: String): AppleDaily? =
+        dao.latestAppleDailyWeightAtOrBefore(deviceId, throughDay)
+
     /** Scalar COUNT twin of [appleDaily] for count badges. */
     suspend fun appleDailyCount(deviceId: String, from: String, to: String): Int =
         dao.appleDailyCount(deviceId, from, to)

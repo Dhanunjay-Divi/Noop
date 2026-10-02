@@ -1,8 +1,80 @@
 # Active NOOP handoff
 
-Last updated: **2026-10-01**
+Last updated: **2026-10-02**
 
 ## Authoritative context
+
+- The direct-and-derived Today metric expansion is locally verified on
+  `codex/today-metric-catalog-fitness-age-20261001`. Apple and Android now
+  expose the same 18 Today-ready choices, retain Steps in the fresh-install
+  six, and group the editor into measured/imported, source-dependent, and NOOP
+  insight values. Average HR, maximum HR, asleep time, and measured VO2 max are
+  directly selectable; measured VO2 max never falls back to `vo2max_est`.
+  `Open all metric history` is source-qualified on both platforms: Apple Health,
+  Health Connect, compatible-band, and NOOP series with the same key remain
+  separate. Every persisted Apple Health history key has a catalog entry.
+  Primary Steps accepts Apple Health/Health Connect or a registry-qualified
+  supplier-native total, but excludes motion estimates; WHOOP Steps is
+  deliberately unavailable because neither the current BLE nor export path
+  supplies a validated value. Generic aggregated records remain labelled
+  `Apple Health`, not `Apple Watch`, because source-device identity is not
+  retained. Android measured Weight is bounded to the selected day and never
+  borrows profile setup weight. Exact hosted head `fd8f10ac6` passed Swift
+  packages, macOS, server, release controls, production shell, and review
+  sample; its failures isolated one stale Android performance assertion,
+  localized Android/Apple presentation contracts, and stale Apple onboarding
+  and chart UI observations. The replacement repair passes bounded Full Kotlin
+  compilation plus the focused Android performance/localization tests,
+  complete local i18n audit, and the paired configured-onboarding and
+  exact-date chart-scrub iPhone UI cases. Pushed head `5b011341e` then isolated
+  one stale terminology inventory as its first completed failure; the
+  regenerated zero-forbidden-mapping inventory and both reviewed-source pins
+  pass the complete 258-test release-control wall locally. A final replacement
+  push and exact-head checks remain pending. Physical Apple Watch, WHOOP,
+  supplier-band, HealthKit, Health Connect, background, battery, and accuracy
+  behavior remains unvalidated and unclaimed.
+
+- The hydration target/correction implementation is focused-test and
+  build-verified on the same branch. Apple and Android now explain the existing
+  confirmed-profile/weight plus bounded-Effort target, keep body composition
+  and wrist temperature outside that estimate, place editable NOOP entries
+  immediately after quick logging, and require confirmation before an atomic
+  clear of only NOOP-owned entries. Apple and Android focused hydration tests,
+  Full Kotlin/resources, Apple app graphs, nine-locale generation, all 114
+  operations records, and diff hygiene pass. Hydration-specific phone visual
+  review, real provider preservation, notification delivery, and physical-band
+  behavior remain pending and unclaimed.
+
+- Daily Signal compact statuses are locally verified on
+  `codex/today-metric-catalog-fitness-age-20261001`. Recovery retains its
+  existing `Low / Steady / Strong` and calibration semantics; Sleep now uses
+  `Need more rest / Steady / Well rested`; Effort now uses
+  `Light / Moderate / High`. Apple focused tests pass 50/50, Android Full
+  resources/Kotlin/unit tests build successfully, and the complete iPhone
+  Simulator graph builds. A current 1206x2622 iPhone capture with values
+  `43 / 85 / 45` was reviewed showing `Steady / Well rested / Moderate`
+  without observed clipping or overlap. No Android emulator was attached, so
+  Android visual review remains pending. No formula, source, storage, account,
+  network, BLE, or physical-device behavior changed or was claimed.
+
+- The Today metric-catalog refinement is locally verified after complete
+  Android Full and Apple hosted-contract repair on
+  `codex/today-metric-catalog-fitness-age-20261001`. Apple and Android now
+  expose the same 14 Today-ready metrics in a selected-first, searchable,
+  grouped editor while keeping the dashboard bounded to three through six
+  cards. Fitness Age is a compact today-only weekly lane under Daily Signal.
+  Apple dual-architecture build and focused contracts pass; Android focused
+  contracts and all 5,262 Full-flavor unit tests pass; visual review found no
+  observed clipping or overlap. Hosted head `30524ac09` passed every non-Apple
+  required context, including the complete Android wall. Apple run
+  `36899526468` isolated only stale source/UI contracts for the renamed compact
+  Fitness Age lane, the replaced Key Metric switches, and Recovery-chart
+  interaction around the movable action lens. The macOS repair wall passes
+  5/5; the repaired iOS Key Metric boundary and exact-date Recovery scrub cases
+  pass independently on a dedicated iPhone 17 Pro simulator. Protected
+  integration remains pending one replacement push and exact-head checks. No
+  formula, source, storage, account, BLE, notification, or physical-device
+  behavior changed or was claimed.
 
 - Band-first required-account onboarding is integrated on protected `main`
   through PR `#25` at merge commit

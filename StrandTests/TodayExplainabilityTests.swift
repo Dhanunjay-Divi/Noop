@@ -386,7 +386,7 @@ final class TodayExplainabilityTests: XCTestCase {
                        "Mi Band")
     }
 
-    // MARK: - Apple Watch provenance (M1) — Today-only "Apple Watch" relabel of the apple-health source
+    // MARK: - Apple Health provenance
 
     func testIsWatchSource_appleHealthSource_isTrue() {
         XCTAssertTrue(TodayView.isWatchSource("apple-health", appleHealthSource: "apple-health"))
@@ -398,12 +398,11 @@ final class TodayExplainabilityTests: XCTestCase {
         XCTAssertFalse(TodayView.isWatchSource(nil, appleHealthSource: "apple-health"))
     }
 
-    func testTodayChipLabel_appleHealthSource_readsAppleWatch() {
-        // The audience knows the device, not the framework — a watch-sourced score reads "Apple Watch".
+    func testTodayChipLabel_appleHealthSource_staysSourceAccurate() {
         XCTAssertEqual(
             TodayView.todayProvenanceChipLabel(rawSource: "apple-health", deviceId: "my-whoop",
                                                appleHealthSource: "apple-health"),
-            "Apple Watch")
+            "Apple Health")
     }
 
     func testTodayChipLabel_usesProductFacingBandNameAndPreservesOtherSources() {
@@ -452,7 +451,7 @@ final class TodayExplainabilityTests: XCTestCase {
                 rawSources: raw,
                 deviceId: "my-whoop"
             ),
-            "Compatible band + Apple Watch"
+            "Compatible band + Apple Health"
         )
         XCTAssertEqual(
             LiquidTodayView.heroSourceLabel(
@@ -460,7 +459,7 @@ final class TodayExplainabilityTests: XCTestCase {
                 deviceId: "my-whoop",
                 maximumDistinctLabels: nil
             ),
-            "Compatible band + Apple Watch + On-device"
+            "Compatible band + Apple Health + On-device"
         )
     }
 

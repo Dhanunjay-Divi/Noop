@@ -381,6 +381,31 @@ class HydrationPersistenceTest {
     }
 
     @Test
+    fun clearRemovesOnlyNoopEntriesAndKeepsImportedHydration() = runBlocking {
+        val day = "2026-09-10"
+        val fixture = fixture(
+            seed = listOf(
+                MetricSeriesRow(HydrationStore.SOURCE_ID, day, HydrationStore.KEY, 500.0),
+                MetricSeriesRow(
+                    WhoopRepository.HEALTH_CONNECT_SOURCE,
+                    day,
+                    HydrationStore.KEY,
+                    700.0,
+                ),
+            ),
+        )
+
+        HydrationStore.clearEntriesForDay(fixture.repo, day)
+        val reading = requireNotNull(HydrationStore.readingForDay(fixture.repo, day))
+
+        assertTrue(fixture.entries.values.none { it.day == day })
+        assertEquals(HydrationStore.ReadingSource.HEALTH_CONNECT, reading.source)
+        assertEquals(700.0, reading.valueMl, 0.0)
+        assertEquals(0.0, reading.noopMl, 0.0)
+        assertEquals(700.0, reading.healthConnectMl, 0.0)
+    }
+
+    @Test
     fun explicitDayReadUsesTheDisplayedDayInsteadOfTheCurrentClock() = runBlocking {
         val fixture = fixture(
             seed = listOf(

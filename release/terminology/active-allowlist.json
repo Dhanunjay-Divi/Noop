@@ -1253,12 +1253,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 14,
+      "occurrenceCount": 16,
       "owner": "project team",
       "path": "Strand/Liquid/LiquidTodayView.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "d357f6f4a6f66a66841fbf90ce5492fc7c58ae833b012a7ccc59a3947ba00a16"
+      "sha256": "46c917c8b153fcc730d2c11a2ee741846437912f513f2a67f8461d41db4faf5d"
     },
     {
       "category": "core",
@@ -1793,12 +1793,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 54,
+      "occurrenceCount": 53,
       "owner": "project team",
       "path": "Strand/Screens/TodayView.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "782949d06a95c06fbca768d966ecd140d46116598b368c81dd6a3345aa91581c"
+      "sha256": "ae2e9ec506ebe1f18a4f22c738f53bc10803b71441f3b05b85d7b3fa7020d56e"
     },
     {
       "category": "customer",
@@ -3773,12 +3773,21 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 27,
+      "occurrenceCount": 25,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/CompareScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "ff6fabeaece179d030c09b72bf54cad12b74f9b724a46e07518a8c405e3f2a37"
+      "sha256": "3ce5719e4843fd70617206a21a69ec15ccd71005c19c679a214a15a9bebac622"
+    },
+    {
+      "category": "customer",
+      "occurrenceCount": 1,
+      "owner": "project team",
+      "path": "android/app/src/main/java/com/noop/ui/CompareScreen.kt",
+      "reason": "Existing customer wording pending reviewed provenance/localization migration.",
+      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
+      "sha256": "b207700224f4723548d8bb49995f0d97bd67048c48fa50b2aa00cd0be5bbf4f9"
     },
     {
       "category": "core",
@@ -4304,12 +4313,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 23,
+      "occurrenceCount": 22,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/TodayProvenance.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "010ca7274b4949c6daeef2a24c2b6a812edf9535fe2f548435c825443627289c"
+      "sha256": "60d403f9227e6b030987efeb6847b5c549188509e0f7989cc538f52f81b1d8a7"
     },
     {
       "category": "customer",
@@ -4331,12 +4340,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 54,
+      "occurrenceCount": 56,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "e4cdda828e215f30338112e2ca1d1c6824ea0680466879dbc66c9535508e967d"
+      "sha256": "8e889ca1e378e6d0893a1cc2226ff4fd31d591d7bbcc97f0b19070bd0be547e1"
     },
     {
       "category": "customer",
@@ -4349,21 +4358,21 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 15,
+      "occurrenceCount": 11,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/TrendsExploreScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "ec4e9695c04f7b424c292f589e500ae351c28a1412c25542dffdb5f2357c545f"
+      "sha256": "a877e04c04a5f5bc6ba4160bff455dc53ec68cb49c59965002c353f5bff2af8b"
     },
     {
       "category": "customer",
-      "occurrenceCount": 3,
+      "occurrenceCount": 4,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/TrendsExploreScreen.kt",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "eefe980b43826a95c45503889d54a803370d9ab2a7b2f601bbf386e21ac00c85"
+      "sha256": "e2bfaffd8c2deb98e07a9a9c9f0d7c8901ccf59ea1cf8f183f775b724959f637"
     },
     {
       "category": "core",

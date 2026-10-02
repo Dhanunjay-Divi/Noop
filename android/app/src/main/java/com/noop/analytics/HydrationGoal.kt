@@ -130,6 +130,53 @@ object HydrationGoal {
         @Suppress("UNUSED_PARAMETER") skinTempDevC: Double?,
     ): Int = dailyGoalMl(sex, weightKg, effort)
 
+    enum class BaselineSource {
+        CONFIRMED_WEIGHT,
+        CONFIRMED_PROFILE,
+    }
+
+    data class PersonalizedBreakdown(
+        val baselineSource: BaselineSource,
+        val baselineMl: Int,
+        val effortBumpMl: Int,
+        val goalMl: Int,
+    )
+
+    /**
+     * Explainable product-facing target. The UI reads this same result for both the visible goal and its
+     * optional provenance disclosure, preventing copy from drifting away from the formula.
+     */
+    fun personalizedBreakdown(
+        age: Int,
+        ageConfirmed: Boolean,
+        sex: String,
+        sexConfirmed: Boolean,
+        weightKg: Double?,
+        weightConfirmed: Boolean,
+        effort: Double?,
+    ): PersonalizedBreakdown? {
+        if (!ageConfirmed || age < BodyProfilePolicy.ADULT_MINIMUM_AGE) return null
+
+        val baselineSource: BaselineSource
+        val baselineMl: Int
+        if (weightConfirmed && weightKg != null && weightKg.isFinite() && weightKg in 20.0..400.0) {
+            baselineSource = BaselineSource.CONFIRMED_WEIGHT
+            baselineMl = weightBaselineMl(sex, weightKg)
+        } else {
+            if (!sexConfirmed) return null
+            baselineSource = BaselineSource.CONFIRMED_PROFILE
+            baselineMl = baselineForSex(sex)
+        }
+
+        val bumpMl = effortBump(effort)
+        return PersonalizedBreakdown(
+            baselineSource = baselineSource,
+            baselineMl = baselineMl,
+            effortBumpMl = bumpMl,
+            goalMl = roundToNearest(baselineMl + bumpMl, ROUND_TO),
+        )
+    }
+
     /**
      * Product-facing adult hydration estimate. Returns null until the profile inputs used for the target
      * are explicitly confirmed. Manual intake logging remains available without a target.
@@ -145,14 +192,15 @@ object HydrationGoal {
         weightKg: Double?,
         weightConfirmed: Boolean,
         effort: Double?,
-    ): Int? {
-        if (!ageConfirmed || age < BodyProfilePolicy.ADULT_MINIMUM_AGE) return null
-        if (weightConfirmed && weightKg != null && weightKg.isFinite() && weightKg in 20.0..400.0) {
-            return dailyGoalMl(sex, weightKg, effort)
-        }
-        if (!sexConfirmed) return null
-        return dailyGoalMl(sex, effort)
-    }
+    ): Int? = personalizedBreakdown(
+        age = age,
+        ageConfirmed = ageConfirmed,
+        sex = sex,
+        sexConfirmed = sexConfirmed,
+        weightKg = weightKg,
+        weightConfirmed = weightConfirmed,
+        effort = effort,
+    )?.goalMl
 
     /** Evenly spaced reminder minutes-of-day within waking hours [wakeHour, sleepHour); quiet hours
      *  (sleep) are never disturbed. [count] reminders at the interior boundaries of count equal segments.

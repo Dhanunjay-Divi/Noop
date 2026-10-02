@@ -35,6 +35,60 @@ class KeyMetricPrefsTest {
         assertEquals(3, KeyMetricPrefs.MIN_SELECTION_COUNT)
         assertEquals(6, KeyMetricPrefs.MAX_SELECTION_COUNT)
         assertEquals(KeyMetric.entries.toSet(), KeyMetric.defaultOrder.toSet())
+        assertEquals(
+            listOf(
+                "charge",
+                "rest",
+                "effort",
+                "hrv",
+                "restingHr",
+                "averageHr",
+                "maxHr",
+                "bloodOxygen",
+                "respiratory",
+                "vo2Max",
+                "skinTemp",
+                "asleepTime",
+                "steps",
+                "calories",
+                "weight",
+                "hydration",
+                "stress",
+                "vitality",
+            ),
+            KeyMetric.defaultOrder.map(KeyMetric::raw),
+        )
+    }
+
+    @Test
+    fun newTodayReadyMetricsUseStableAppleParityIdsAndGroups() {
+        assertEquals(KeyMetric.STRESS, KeyMetric.fromRaw("stress"))
+        assertEquals(KeyMetric.VITALITY, KeyMetric.fromRaw("vitality"))
+        assertEquals(KeyMetric.SKIN_TEMP, KeyMetric.fromRaw("skinTemp"))
+        assertEquals(KeyMetric.HYDRATION, KeyMetric.fromRaw("hydration"))
+        assertEquals(KeyMetricGroup.WELLBEING, KeyMetric.STRESS.group)
+        assertEquals(KeyMetricGroup.WELLBEING, KeyMetric.VITALITY.group)
+        assertEquals(KeyMetricGroup.VITALS, KeyMetric.SKIN_TEMP.group)
+        assertEquals(KeyMetricGroup.VITALS, KeyMetric.AVERAGE_HR.group)
+        assertEquals(KeyMetricGroup.SLEEP, KeyMetric.ASLEEP_TIME.group)
+        assertEquals(KeyMetricGroup.ACTIVITY, KeyMetric.WEIGHT.group)
+        assertEquals(KeyMetricGroup.ACTIVITY, KeyMetric.HYDRATION.group)
+        assertEquals(KeyMetricOrigin.MEASURED_IMPORTED, KeyMetric.STEPS.origin)
+        assertEquals(KeyMetricOrigin.SOURCE_DEPENDENT, KeyMetric.CALORIES.origin)
+        assertEquals(KeyMetricOrigin.NOOP_INSIGHT, KeyMetric.STRESS.origin)
+        assertEquals(false, KeyMetric.VITALITY.isBoundedProgress)
+    }
+
+    @Test
+    fun savedSelectionsContainingNewMetricsRoundTripWithoutReordering() {
+        val selection = listOf(
+            KeyMetric.STRESS,
+            KeyMetric.SKIN_TEMP,
+            KeyMetric.HYDRATION,
+            KeyMetric.VITALITY,
+        )
+        assertEquals(selection, KeyMetricPrefs.decodeEnabled(KeyMetricPrefs.encode(selection)))
+        assertEquals("stress,skinTemp,hydration,vitality", KeyMetricPrefs.encode(selection))
     }
 
     @Test
