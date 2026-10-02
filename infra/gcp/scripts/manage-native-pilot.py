@@ -74,19 +74,24 @@ def tofu_output(name: str, *, raw: bool = False) -> Any:
         raise PilotFailure("OpenTofu output was invalid") from None
 
 
-def preflight() -> tuple[str, dict[str, Any], dict[str, Any]]:
+def preflight(
+    *,
+    require_runtime: bool = False,
+) -> tuple[str, dict[str, Any], dict[str, Any] | None]:
     if os.getenv("NOOP_ALLOW_PRIVATE_NATIVE_PILOT") != EXPECTED_OPT_IN:
         raise PilotFailure("explicit private synthetic pilot opt-in is required")
     project_id = str(tofu_output("project_id", raw=True))
     identity = tofu_output("managed_identity")
-    managed_api = tofu_output("managed_api")
-    if (
-        not project_id
-        or not isinstance(identity, dict)
-        or not isinstance(managed_api, dict)
+    managed_api = tofu_output("managed_api") if require_runtime else None
+    if not project_id or not isinstance(identity, dict):
+        raise PilotFailure("private staging identity outputs are incomplete")
+    if managed_api is not None and (
+        not isinstance(managed_api, dict)
         or managed_api.get("public") is not False
         or not str(managed_api.get("uri") or "").startswith("https://")
     ):
+        raise PilotFailure("private staging runtime output is invalid")
+    if require_runtime and managed_api is None:
         raise PilotFailure("private staging outputs are incomplete")
     if command("gcloud", "config", "get-value", "project") != project_id:
         raise PilotFailure("active Google Cloud project does not match staging")
@@ -557,7 +562,9 @@ def cleanup_debug() -> None:
 
 
 def verify_pilot() -> None:
-    project_id, identity, managed_api = preflight()
+    project_id, identity, managed_api = preflight(require_runtime=True)
+    if managed_api is None:
+        raise PilotFailure("private staging outputs are incomplete")
     access_token = command("gcloud", "auth", "print-access-token")
     local_id, _ = authenticate_tester(project_id, identity, access_token)
     attributes = custom_attributes(user_record(project_id, access_token, local_id))

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.util
+import io
 import re
 import sys
 from contextlib import asynccontextmanager
@@ -50,6 +51,93 @@ def test_migration_and_runtime_principals_and_secrets_are_distinct() -> None:
     )
     assert script.MIGRATION_USER not in script.RUNTIME_PROFILE_USERS.values()
     assert script.MIGRATION_SECRET not in script.RUNTIME_PROFILE_SECRETS.values()
+
+
+def test_google_api_refreshes_an_expired_access_token_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = load_script()
+    authorizations: list[str | None] = []
+    refreshes = 0
+
+    class FakeResponse(io.BytesIO):
+        status = 200
+
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            del args
+            self.close()
+
+    def fake_urlopen(request: object, *, timeout: int) -> FakeResponse:
+        assert timeout == 60
+        authorization = request.get_header("Authorization")
+        authorizations.append(authorization)
+        if len(authorizations) == 1:
+            raise script.urllib.error.HTTPError(
+                request.full_url,
+                401,
+                "Unauthorized",
+                {},
+                None,
+            )
+        return FakeResponse(b'{"status":"ok"}')
+
+    def fake_google_token() -> str:
+        nonlocal refreshes
+        refreshes += 1
+        return "fresh-token"
+
+    monkeypatch.setattr(script.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(script, "google_token", fake_google_token)
+
+    assert script.api_request(
+        "expired-token",
+        "GET",
+        "https://example.invalid/resource",
+    ) == {"status": "ok"}
+    assert authorizations == ["Bearer expired-token", "Bearer fresh-token"]
+    assert refreshes == 1
+
+
+def test_google_api_does_not_retry_unauthorized_more_than_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = load_script()
+    attempts = 0
+    refreshes = 0
+
+    def fake_urlopen(request: object, *, timeout: int) -> None:
+        nonlocal attempts
+        del timeout
+        attempts += 1
+        raise script.urllib.error.HTTPError(
+            request.full_url,
+            401,
+            "Unauthorized",
+            {},
+            None,
+        )
+
+    def fake_google_token() -> str:
+        nonlocal refreshes
+        refreshes += 1
+        return "still-unauthorized"
+
+    monkeypatch.setattr(script.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(script, "google_token", fake_google_token)
+
+    with pytest.raises(script.GoogleAPIError) as error:
+        script.api_request(
+            "expired-token",
+            "GET",
+            "https://example.invalid/resource",
+        )
+
+    assert error.value.status_code == 401
+    assert attempts == 2
+    assert refreshes == 1
 
 
 def test_runtime_function_allowlist_matches_direct_server_calls() -> None:
@@ -135,6 +223,9 @@ def test_runtime_grants_are_dml_only_and_function_specific() -> None:
             "managed_social_profiles",
             "feedback_reports",
             "ownership_accounts",
+            "unified_account_principals",
+            "unified_managed_account_links",
+            "unified_ownership_account_links",
         ),
         sequences=(
             ("managed_social_profiles_id_seq", "managed_social_profiles"),
@@ -166,8 +257,27 @@ def test_runtime_grants_are_dml_only_and_function_specific() -> None:
         "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
         'public."feedback_reports" TO "noop_managed_api"'
     ) in statements
+    assert (
+        "GRANT SELECT, INSERT ON TABLE "
+        'public."unified_account_principals" TO "noop_managed_api"'
+    ) in statements
+    assert (
+        "GRANT SELECT, INSERT ON TABLE "
+        'public."unified_managed_account_links" TO "noop_managed_api"'
+    ) in statements
+    assert (
+        'GRANT UPDATE ("principal_id") ON TABLE '
+        'public."unified_account_principals" TO "noop_managed_api"'
+    ) in statements
+    assert (
+        'GRANT UPDATE ("principal_id") ON TABLE '
+        'public."unified_managed_account_links" TO "noop_managed_api"'
+    ) in statements
     assert not any("daily_metrics" in statement for statement in statements)
     assert not any("ownership_accounts" in statement for statement in statements)
+    assert not any(
+        "unified_ownership_account_links" in statement for statement in statements
+    )
     assert (
         "GRANT SELECT, UPDATE, USAGE ON SEQUENCE "
         'public."managed_social_profiles_id_seq" TO "noop_managed_api"'
@@ -202,7 +312,9 @@ def test_runtime_profiles_separate_legacy_managed_feedback_and_ownership_data() 
         "managed_social_profiles",
         "feedback_reports",
         "ownership_accounts",
+        "unified_account_principals",
         "unified_managed_account_links",
+        "unified_ownership_account_links",
     }
 
     allowed = {
@@ -225,6 +337,7 @@ def test_runtime_profiles_separate_legacy_managed_feedback_and_ownership_data() 
         "managed_accounts",
         "managed_social_profiles",
         "feedback_reports",
+        "unified_account_principals",
         "unified_managed_account_links",
     }
     assert allowed["managed-processor"] == {
@@ -243,6 +356,10 @@ def test_runtime_profiles_separate_legacy_managed_feedback_and_ownership_data() 
         "ownership_accounts" not in profile_relations
         for profile_relations in allowed.values()
     )
+    assert all(
+        "unified_ownership_account_links" not in profile_relations
+        for profile_relations in allowed.values()
+    )
 
 
 def test_runtime_verifier_covers_membership_ownership_and_ddl_boundaries() -> None:
@@ -259,11 +376,230 @@ def test_runtime_verifier_covers_membership_ownership_and_ddl_boundaries() -> No
     assert "FROM pg_namespace" in source
     assert "FROM pg_proc" in source
     assert "FROM pg_database" in source
+    assert "has_column_privilege" in source
+    assert "AS column_update" in source
+    assert "SELECT has_column_privilege($1, $2, $3)" not in source
     assert "NOT has_database_privilege(current_database(), 'CREATE')" in source
     assert "NOT has_database_privilege(current_database(), 'TEMPORARY')" in source
     assert "NOT has_schema_privilege('public', 'CREATE')" in source
     assert "REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC" in source
     assert "Runtime database function uses security definer" in source
+
+
+def test_cloud_sql_role_narrowing_uses_provider_role_without_reserved_flags() -> None:
+    script = load_script()
+    statements: list[str] = []
+
+    class FakeTransaction:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+    class FakeConnection:
+        async def fetchrow(
+            self,
+            statement: str,
+            role: str,
+        ) -> dict[str, bool]:
+            assert "rolsuper" in statement
+            assert role == script.RUNTIME_USER
+            return {
+                "rolsuper": False,
+                "rolreplication": False,
+                "rolbypassrls": False,
+            }
+
+        def transaction(self) -> FakeTransaction:
+            return FakeTransaction()
+
+        async def fetch(
+            self,
+            statement: str,
+            role: str,
+        ) -> list[dict[str, str]]:
+            assert "pg_auth_members" in statement
+            assert role == script.RUNTIME_USER
+            return [{"rolname": script.CLOUD_SQL_ADMIN_ROLE}]
+
+        async def execute(self, statement: str) -> None:
+            statements.append(statement)
+
+    asyncio.run(
+        script.narrow_cloud_sql_role(
+            FakeConnection(),
+            script.RUNTIME_USER,
+            login=True,
+        )
+    )
+
+    assert statements == [
+        'SET LOCAL ROLE "cloudsqlsuperuser"',
+        'ALTER ROLE "noop_app_runtime" WITH LOGIN NOINHERIT NOCREATEDB NOCREATEROLE',
+        'REVOKE "cloudsqlsuperuser" FROM "noop_app_runtime"',
+        "RESET ROLE",
+    ]
+    assert all("NOSUPERUSER" not in statement for statement in statements)
+    assert all("NOREPLICATION" not in statement for statement in statements)
+    assert all("NOBYPASSRLS" not in statement for statement in statements)
+
+
+def test_unlisted_quarantined_runtime_role_is_removed_before_recreation() -> None:
+    script = load_script()
+    statements: list[str] = []
+
+    class FakeTransaction:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+    class FakeConnection:
+        async def fetchrow(
+            self,
+            statement: str,
+            role: str,
+        ) -> dict[str, bool]:
+            assert "rolcanlogin" in statement
+            assert role == "noop_managed_api"
+            return {
+                "rolcanlogin": False,
+                "rolsuper": False,
+                "rolcreaterole": False,
+                "rolcreatedb": False,
+                "rolreplication": False,
+                "rolbypassrls": False,
+                "rolinherit": False,
+            }
+
+        async def fetch(
+            self,
+            statement: str,
+            role: str,
+        ) -> list[dict[str, int]]:
+            assert "pg_auth_members" in statement
+            assert role == "noop_managed_api"
+            return []
+
+        async def fetchval(self, statement: str, role: str) -> bool:
+            assert "pg_class" in statement
+            assert role == "noop_managed_api"
+            return False
+
+        def transaction(self) -> FakeTransaction:
+            return FakeTransaction()
+
+        async def execute(self, statement: str) -> None:
+            statements.append(statement)
+
+    asyncio.run(
+        script.recover_unlisted_quarantined_runtime_role(
+            FakeConnection(),
+            "noop_managed_api",
+            migration_role=script.MIGRATION_USER,
+            database="noop",
+            cloud_sql_user_listed=False,
+            secret_exists=False,
+        )
+    )
+
+    assert statements == [
+        'REVOKE ALL PRIVILEGES ON DATABASE "noop" FROM "noop_managed_api"',
+        'REVOKE ALL PRIVILEGES ON SCHEMA public FROM "noop_managed_api"',
+        (
+            "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM "
+            '"noop_managed_api"'
+        ),
+        (
+            "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM "
+            '"noop_managed_api"'
+        ),
+        (
+            "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM "
+            '"noop_managed_api"'
+        ),
+        (
+            'ALTER DEFAULT PRIVILEGES FOR ROLE "noop_migration" IN SCHEMA '
+            'public REVOKE ALL PRIVILEGES ON TABLES FROM "noop_managed_api"'
+        ),
+        (
+            'ALTER DEFAULT PRIVILEGES FOR ROLE "noop_migration" IN SCHEMA '
+            'public REVOKE ALL PRIVILEGES ON SEQUENCES FROM "noop_managed_api"'
+        ),
+        (
+            'ALTER DEFAULT PRIVILEGES FOR ROLE "noop_migration" IN SCHEMA '
+            'public REVOKE ALL PRIVILEGES ON FUNCTIONS FROM "noop_managed_api"'
+        ),
+        'SET LOCAL ROLE "cloudsqlsuperuser"',
+        'DROP ROLE "noop_managed_api"',
+        "RESET ROLE",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("cloud_sql_user_listed", "secret_exists", "rolcanlogin", "membership"),
+    (
+        (False, True, False, False),
+        (False, False, True, False),
+        (False, False, False, True),
+    ),
+)
+def test_unlisted_runtime_role_recovery_fails_closed(
+    cloud_sql_user_listed: bool,
+    secret_exists: bool,
+    rolcanlogin: bool,
+    membership: bool,
+) -> None:
+    script = load_script()
+    statements: list[str] = []
+
+    class FakeConnection:
+        async def fetchrow(
+            self,
+            statement: str,
+            role: str,
+        ) -> dict[str, bool]:
+            del statement, role
+            return {
+                "rolcanlogin": rolcanlogin,
+                "rolsuper": False,
+                "rolcreaterole": False,
+                "rolcreatedb": False,
+                "rolreplication": False,
+                "rolbypassrls": False,
+                "rolinherit": False,
+            }
+
+        async def fetch(
+            self,
+            statement: str,
+            role: str,
+        ) -> list[dict[str, int]]:
+            del statement, role
+            return [{"present": 1}] if membership else []
+
+        async def fetchval(self, statement: str, role: str) -> bool:
+            del statement, role
+            return False
+
+        async def execute(self, statement: str) -> None:
+            statements.append(statement)
+
+    with pytest.raises(script.ProvisioningError):
+        asyncio.run(
+            script.recover_unlisted_quarantined_runtime_role(
+                FakeConnection(),
+                "noop_managed_api",
+                migration_role=script.MIGRATION_USER,
+                database="noop",
+                cloud_sql_user_listed=cloud_sql_user_listed,
+                secret_exists=secret_exists,
+            )
+        )
+
+    assert statements == []
 
 
 @pytest.mark.parametrize("failure_stage", ("connect", "verify"))
@@ -326,6 +662,14 @@ def test_runtime_verification_failure_quarantines_role_before_secret_publish(
         del connection, runtime_profile
         raise script.ProvisioningError("Runtime verification failed")
 
+    async def fake_narrow_cloud_sql_role(
+        connection: FakeConnection,
+        role: str,
+        *,
+        login: bool,
+    ) -> None:
+        events.append((f"{connection.name}.narrow", f"{role}:{login}"))
+
     def fail_if_secret_is_published(*args: object, **kwargs: object) -> str:
         nonlocal secret_published
         del args, kwargs
@@ -344,10 +688,17 @@ def test_runtime_verification_failure_quarantines_role_before_secret_publish(
     monkeypatch.setattr(script, "cloud_sql_proxy", fake_proxy)
     monkeypatch.setattr(script, "connect_with_retry", fake_connect_with_retry)
     monkeypatch.setattr(
-        script, "configure_cloud_sql_user", lambda *args, **kwargs: None
+        script,
+        "configure_runtime_cloud_sql_user",
+        lambda *args, **kwargs: asyncio.sleep(0),
     )
     monkeypatch.setattr(script, "provision_runtime_role", fake_provision_runtime_role)
     monkeypatch.setattr(script, "verify_runtime_role", fake_verify_runtime_role)
+    monkeypatch.setattr(
+        script,
+        "narrow_cloud_sql_role",
+        fake_narrow_cloud_sql_role,
+    )
     monkeypatch.setattr(script, "add_secret_version", fail_if_secret_is_published)
 
     args = SimpleNamespace(
@@ -371,9 +722,9 @@ def test_runtime_verification_failure_quarantines_role_before_secret_publish(
     with pytest.raises(script.ProvisioningError, match=expected_message):
         asyncio.run(script.configure_runtime(args, "token"))
 
-    assert events[0][0] == "migration.execute"
-    assert "WITH NOLOGIN" in events[0][1]
-    assert events[1] == ("migration.fetch", "memberships")
+    assert events == [
+        ("migration.narrow", f"{script.RUNTIME_USER}:False"),
+    ]
     assert migration_connection.closed is True
     assert runtime_connection.closed is (failure_stage == "verify")
     assert secret_published is False
@@ -418,6 +769,14 @@ def test_runtime_secret_publish_failure_restores_previous_credential(
     )
     monkeypatch.setattr(script, "cloud_sql_proxy", fake_proxy)
     monkeypatch.setattr(script, "connect_with_retry", fake_connect_with_retry)
+    monkeypatch.setattr(
+        script,
+        "configure_runtime_cloud_sql_user",
+        lambda _connection, _token, **kwargs: asyncio.sleep(
+            0,
+            result=configured_passwords.append(kwargs["password"]),
+        ),
+    )
     monkeypatch.setattr(
         script,
         "configure_cloud_sql_user",
@@ -556,6 +915,7 @@ def test_database_url_round_trips_without_credential_arguments() -> None:
     source = SCRIPT_PATH.read_text(encoding="utf-8")
     assert "--password" not in source
     assert "PGPASSWORD" not in source
+    assert 'TemporaryDirectory(prefix="noop-db-", dir="/tmp")' in source
 
 
 def test_operator_wrapper_requires_two_explicit_disabled_runtime_phases() -> None:
@@ -586,5 +946,7 @@ def test_operator_wrapper_requires_two_explicit_disabled_runtime_phases() -> Non
     assert "--confirm-runtime-disabled" in shell
     assert "--confirm-migrations-complete" in shell
     assert "NOOP_REQUIRED_NULL_OUTPUTS" in shell
+    assert "missing = [" not in shell
+    assert "if active:" in shell
     assert "--password" not in shell
     assert "--data-file=-" in shell

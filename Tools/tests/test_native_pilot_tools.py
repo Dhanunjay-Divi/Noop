@@ -35,6 +35,56 @@ relay = load_script(
 
 
 class NativePilotToolTests(unittest.TestCase):
+    def test_preflight_allows_identity_before_runtime(self) -> None:
+        outputs = {
+            "project_id": "project",
+            "managed_identity": {"apple_app_id": "app"},
+        }
+
+        def output(name: str, *, raw: bool = False):
+            self.assertEqual(raw, name == "project_id")
+            return outputs[name]
+
+        with (
+            mock.patch.dict(
+                "os.environ",
+                {"NOOP_ALLOW_PRIVATE_NATIVE_PILOT": pilot.EXPECTED_OPT_IN},
+                clear=True,
+            ),
+            mock.patch.object(pilot, "tofu_output", side_effect=output),
+            mock.patch.object(pilot, "command", return_value="project"),
+        ):
+            self.assertEqual(
+                pilot.preflight(),
+                ("project", {"apple_app_id": "app"}, None),
+            )
+
+    def test_preflight_requires_runtime_only_for_runtime_verification(self) -> None:
+        outputs = {
+            "project_id": "project",
+            "managed_identity": {"apple_app_id": "app"},
+            "managed_api": None,
+        }
+
+        def output(name: str, *, raw: bool = False):
+            self.assertEqual(raw, name == "project_id")
+            return outputs[name]
+
+        with (
+            mock.patch.dict(
+                "os.environ",
+                {"NOOP_ALLOW_PRIVATE_NATIVE_PILOT": pilot.EXPECTED_OPT_IN},
+                clear=True,
+            ),
+            mock.patch.object(pilot, "tofu_output", side_effect=output),
+            mock.patch.object(pilot, "command", return_value="project"),
+        ):
+            with self.assertRaisesRegex(
+                pilot.PilotFailure,
+                "private staging outputs are incomplete",
+            ):
+                pilot.preflight(require_runtime=True)
+
     def test_google_oauth_control_request_sets_quota_project(self) -> None:
         response = mock.MagicMock()
         response.status = 200

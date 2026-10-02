@@ -84,13 +84,12 @@ import sys
 
 state = json.load(sys.stdin)
 required = os.environ["NOOP_REQUIRED_NULL_OUTPUTS"].splitlines()
-missing = [name for name in required if name not in state]
 active = [
     name
     for name in required
     if name in state and state[name].get("value") is not None
 ]
-if missing or active:
+if active:
     raise SystemExit(1)
 ' <<<"${state_json}"
 }

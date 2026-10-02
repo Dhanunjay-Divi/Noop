@@ -53,6 +53,9 @@ enable_ownership_identity           = false
 managed_test_phone_numbers          = {}
 enable_managed_runtime              = false
 enable_public_managed_api           = false
+# Signed upload capabilities remain valid until expiry. Use 60 only for a
+# disposable synthetic smoke environment; normal staging defaults to 900.
+managed_upload_ttl_seconds          = 900
 # The ownership runtime remains IAM-only and its production possession verifier
 # intentionally returns unavailable until the supplier SDK is integrated.
 enable_ownership_runtime            = false

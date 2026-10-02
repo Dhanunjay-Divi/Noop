@@ -581,6 +581,12 @@ class FakeUnifiedIdentityAuthorityRepository:
         self,
         claims: ManagedIdentityClaims,
     ) -> UnifiedPrincipal:
+        raise AssertionError("managed API must use managed-only reconciliation")
+
+    async def reconcile_managed_identity(
+        self,
+        claims: ManagedIdentityClaims,
+    ) -> UnifiedPrincipal:
         self.reconciled_claims.append(claims)
         return self.principal
 
