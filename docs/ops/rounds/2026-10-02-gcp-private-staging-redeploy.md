@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `in progress`
+- State: `private synthetic staging deployed and verified; protected integration pending`
 - Owner: project team
 - Branch: `codex/gcp-staging-redeploy-20261002`
 - Start commit: `e840874872f5e7eb7f38afcecd7aaa826b12288e`
@@ -105,11 +105,48 @@ claim.
 - Removed six applied `.tfplan` files after use because provider plans can
   retain synthetic credentials. Remote state and the exact applied resources
   remain intact.
+- Built and scanned one immutable runtime image at digest
+  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;
+  the deployed image scan reported zero vulnerabilities.
+- Created the new empty Cloud SQL database, applied all guarded migrations, and
+  provisioned separate runtime principals for the API, managed API, processor,
+  managed lifecycle, feedback lifecycle, and migration job. Runtime roles use
+  bounded socket URLs and cannot read the migration credential.
+- Deployed the private API, private managed API, managed processor, migration
+  job, managed lifecycle job, and feedback lifecycle job. App Check is
+  `ENFORCED`, Cloud Run has no public invoker, and all deployed services and
+  jobs reached their ready or successful state.
+- Removed `NOOP_MANAGED_STORAGE_ENABLED` from the lifecycle job. That worker
+  imports lifecycle settings, not the managed API startup contract; setting
+  the flag caused the first live lifecycle execution to reject otherwise valid
+  worker-only configuration.
+- Added a bounded managed-upload capability lifetime input. Normal staging
+  remains `900` seconds; this disposable synthetic environment uses the
+  allowed `60`-second minimum so the smoke can prove erasure after every signed
+  upload capability expires instead of weakening the capability fence.
+- Extended the private smoke with temporary fictional push destinations. The
+  Safety path now proves invite/request/contact setup, two-contact incident
+  targeting, request replay idempotency, and fail-closed cancellation when the
+  fictional destinations are rejected. It explicitly revokes those
+  destinations and does not claim real APNs/FCM delivery.
+- Passed the complete private managed-runtime smoke in `210` seconds: three
+  fictional phone OTP identities, App Check, pilot claims, enrollment,
+  upload/processing/idempotency/isolation/restore, object erasure, social
+  identity and sharing, disposable Safety destinations, account erasure, and
+  provider-identity cleanup.
+- Restored Identity Platform to exactly one retained fictional phone and
+  verified that zero App Check debug tokens remain.
+- Resumed the every-minute managed lifecycle scheduler after smoke completion.
+  Execution `noop-staging-managed-lifecycle-2ckzw` completed successfully in
+  `17.33` seconds, and the scheduler remains enabled.
+- Re-ran the private-runtime verifier and an OpenTofu
+  `-detailed-exitcode` plan. The private checks passed and the final plan
+  reported `No changes`.
 
 ## Data, privacy, and medical truth
 
-- Schema or migration impact: pending guarded migrations in a new empty
-  synthetic PostgreSQL database.
+- Schema or migration impact: all guarded migrations were applied to a new
+  empty synthetic PostgreSQL database.
 - Existing-data retention impact: none; no prior project data is imported.
 - Source/provenance or formula impact: none.
 - Permissions/network disclosure impact: private IAM-only staging is in scope;
@@ -157,11 +194,23 @@ claim.
 | Ownership account identity plan/apply | Passed; one update, zero creates or deletes | Email/password account creation is enabled on the same staged identity service | Ownership claim, possession proof, or public account availability |
 | Pilot sequencing regression tests | Passed 8/8 | Identity-only operations no longer incorrectly require an undeployed runtime; runtime verification remains fail-closed | Deployed runtime correctness |
 | Legal inventory | Passed for 230 runtime components and three container inputs | Updated runtime inputs have matching notices and distribution provenance | Image vulnerability scan |
+| Immutable runtime image | Passed; one digest deployed and scan reported zero vulnerabilities | The live workloads use the reviewed server image and the registry scan found no known image vulnerability | Unknown future disclosures or runtime behavior |
+| Cloud SQL, migrations, and workload roles | Passed | The new database is migrated and each workload uses a separate bounded runtime credential | Production load, prior-project migration, or customer data |
+| Private workload deployment | Passed; API, managed API, processor, migration, managed lifecycle, and feedback lifecycle ready/successful | The guarded runtime can start with App Check enforced and no public invoker | Public traffic, physical clients, or real provider delivery |
+| Private managed-runtime smoke | Passed in 210 seconds | Fictional OTP, identity, enrollment, storage, processing, isolation, erasure, social, Safety fail-closed behavior, and cleanup work end to end | Real SMS, APNs/FCM reachability, signed-device attestation, or physical-band behavior |
+| Synthetic configuration restoration | Passed; one fictional phone retained and zero debug tokens remain | Temporary smoke identity/App Check configuration was removed | Production identity recovery or carrier behavior |
+| Managed lifecycle schedule | Passed; resumed execution completed successfully in 17.33 seconds | The scheduled lifecycle invoker can run the deployed job | Long-duration reliability or production volume |
+| Private-boundary verifier | Passed | Public invocation remains disabled and expected IAM-only boundaries are present | Application correctness behind the boundary |
+| Final OpenTofu plan | Passed with exit code 0 and `No changes` | Applied infrastructure matches the reviewed configuration | Future provider drift |
+| Final OpenTofu test wall | Passed 21/21 | Database-secret separation, lifecycle/API configuration, ownership defaults, feedback bounds, and required-service ordering remain enforced after the live fixes | Provider behavior beyond the applied staging project |
+| Final server wall | Ruff and both dependency audits passed; complete pytest wall passed with documented external-database/provider skips | Server source, lock files, smoke contract, and non-external API behavior remain green | Signed clients, production load, or unavailable external providers |
+| Final repository controls | 115 operations records, 258 release-control tests, 10 required contexts, calibration, legal/distribution, private-data, and 1,324-file health-claims scan passed | The exact branch remains within repository release, privacy, provenance, and health-claim policy | Hosted exact-SHA checks or physical-device evidence |
+| Terminology ratchet | Passed with 18,600 classified occurrences across 1,646 groups, zero forbidden mappings, and an unchanged customer/core allowlist | Documentation line shifts were regenerated and reviewed without adding customer-facing legacy terminology | Future source changes |
 
 ## Physical device and deployment
 
-- Install/update action: identity foundation applied; no app install or runtime
-  deployment yet.
+- Install/update action: private synthetic cloud runtime deployed; no signed
+  mobile app was installed.
 - Generalized device and OS class: not run.
 - Data-preservation result: new empty project; no prior data imported.
 - BLE/background/haptic/battery scenarios exercised: not run.
@@ -170,10 +219,13 @@ claim.
 
 ## Git and release state
 
-- Changed paths: GCP IAM sequencing/tests and pilot tooling/tests, server PyJWT
-  runtime inputs and notices, terminology inventory, and operations records.
-- Commits: pre-image source commit pending.
-- Branch and remote state: local deployment branch; not pushed.
+- Changed paths: GCP foundation/runtime/identity/IAM/database configuration and
+  tests, synthetic deployment/smoke tooling, server PyJWT runtime inputs and
+  notices, terminology inventory, and operations records.
+- Commits: implementation commits `783568e75` through `9eb61ad20`; final
+  smoke/TTL/documentation commit pending.
+- Branch and remote state: local deployment branch from exact GitHub protected
+  `main`; protected pull request pending.
 - Repository visibility verified: public repository; private credentials and
   generated configuration remain excluded.
 - Version/build impact: none.
@@ -190,28 +242,32 @@ claim.
 
 - Trial credit is a billing credit, not a hard cap; the repository budget is an
   alert and does not automatically stop resources.
-- Cloud SQL and vulnerability scanning are the next billable stages and have
-  not started.
-- Authentication App Check remains `UNENFORCED` until reviewed native debug
-  assertions or signed attestation are available; managed runtime validation
-  requires a deliberate transition to `ENFORCED`.
+- This project now has cost-bearing Cloud SQL, Cloud Run, storage, scheduler,
+  registry, logging, KMS, and related resources. The USD 50 budget is an alert,
+  not a hard stop.
+- Authentication App Check is `ENFORCED` for the staged identity service.
+  Simulator smoke uses a temporary debug assertion that is deleted; signed
+  App Attest and Play Integrity behavior remains unverified.
 - Real OTP delivery, mobile App Check attestation, push delivery, public
   ingress, and physical ownership remain prohibited and unverified.
-- The broad Tools wall has one unrelated existing brand-localization count
-  failure. The deployment-owned terminology snapshot was regenerated; final
-  repository walls will be rerun after current mobile UI integration lands.
+- Fictional Safety destinations intentionally fail closed and therefore do not
+  validate live APNs/FCM delivery, responder actions, alert sound, or physical
+  notification behavior.
+- The synthetic environment uses a `60`-second signed-upload TTL solely to
+  keep destructive smoke bounded. The documented normal staging default
+  remains `900` seconds.
 
 ## Next round
 
-1. Commit the reviewed source so the image builder can enforce a clean input.
-2. Build and scan one immutable runtime digest.
-3. Apply Cloud SQL, migrations, and least-privilege workload secrets.
-4. Transition Authentication App Check deliberately, deploy IAM-only managed
-   workloads, and keep public invocation false.
-5. Run synthetic managed-runtime, authorization/isolation/lifecycle,
-   private-boundary, and zero-drift verification.
-6. Record exact evidence, close the protected pull request, and remove
-   temporary credentials, logs, plans, and test data.
+1. Run the complete source/release/privacy operations gates on the exact branch
+   head.
+2. Push one protected pull request, allow required hosted checks to complete,
+   and merge without bypass.
+3. Verify exact protected `main` and remove round-owned temporary logs and
+   build output after evidence is durable.
+4. Configure signed iPhone and Android candidates against this private staging
+   project and run the physical-device handoff without enabling public
+   invocation or real health data.
 
 ## Privacy check
 

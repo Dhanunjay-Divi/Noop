@@ -197,6 +197,23 @@ run "private_runtimes_cannot_read_the_migration_credential" {
   }
 
   assert {
+    condition = alltrue([
+      for environment in google_cloud_run_v2_job.managed_lifecycle[0].template[0].template[0].containers[0].env :
+      environment.name != "NOOP_MANAGED_STORAGE_ENABLED"
+    ])
+    error_message = "The managed lifecycle job must not opt into the managed API startup contract."
+  }
+
+  assert {
+    condition = anytrue([
+      for environment in google_cloud_run_v2_service.managed_api[0].template[0].containers[0].env :
+      environment.name == "NOOP_MANAGED_UPLOAD_TTL_SECONDS"
+      && environment.value == tostring(var.managed_upload_ttl_seconds)
+    ])
+    error_message = "The managed API must receive the bounded signed-upload capability lifetime."
+  }
+
+  assert {
     condition = (
       google_secret_manager_secret_iam_member.migration_database_url.secret_id
       == google_secret_manager_secret.migration_database_url.secret_id
