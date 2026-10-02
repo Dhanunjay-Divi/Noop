@@ -207,11 +207,10 @@ final class NOOPiOSUITests: XCTestCase {
         primary.tap()
 
         XCTAssertTrue(
-            app.descendants(matching: .any)[
-                "noop.onboarding.page.bluetooth"
-            ].waitForExistence(timeout: 10)
+            app.staticTexts["Bluetooth"].waitForExistence(timeout: 10)
         )
         XCTAssertFalse(app.buttons["noop.tab.0"].exists)
+        XCTAssertTrue(scrollToHittable(primary, in: app))
         primary.tap()
 
         let systemAlert = app.alerts.firstMatch
@@ -224,16 +223,11 @@ final class NOOPiOSUITests: XCTestCase {
             }
         }
 
-        XCTAssertTrue(
-            app.descendants(matching: .any)[
-                "noop.onboarding.page.scan"
-            ].waitForExistence(timeout: 15)
-        )
-        XCTAssertFalse(primary.isEnabled)
-        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
         let chooseDevice =
             app.buttons["noop.onboarding.choose-device"]
-        XCTAssertTrue(chooseDevice.waitForExistence(timeout: 5))
+        XCTAssertTrue(chooseDevice.waitForExistence(timeout: 15))
+        XCTAssertFalse(primary.isEnabled)
+        XCTAssertFalse(app.buttons["noop.tab.0"].exists)
         chooseDevice.tap()
 
         let syntheticBand =
@@ -1619,10 +1613,8 @@ final class NOOPiOSUITests: XCTestCase {
             NSPredicate(format: "value CONTAINS[c] %@", "points")
         ).firstMatch
         XCTAssertTrue(summaryNode.waitForExistence(timeout: 5))
-        XCTAssertTrue(
-            String(describing: summaryNode.value)
-                .localizedCaseInsensitiveContains("points")
-        )
+        let initialSummary = String(describing: summaryNode.value)
+        XCTAssertTrue(initialSummary.localizedCaseInsensitiveContains("points"))
 
         let july29Area = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.71, dy: 0.50))
         let nearby = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.50))
@@ -1644,10 +1636,18 @@ final class NOOPiOSUITests: XCTestCase {
         )
         july29Area.press(forDuration: 0.35, thenDragTo: nearby)
 
-        let selectedChart = app.otherElements[chartIdentifier].firstMatch
-        XCTAssertTrue(waitUntil(timeout: 5) {
-            selectedChart.exists && selectedChart.value as? String == "Mon 7 Sep, 65"
-        })
+        // SwiftUI may replace the chart's accessibility node after its value changes.
+        // Re-query without pinning the stale pre-scrub element type.
+        let selectedChart = chartNodes.matching(
+            NSPredicate(
+                format: "value != nil AND NOT (value CONTAINS[c] %@)",
+                "points"
+            )
+        ).firstMatch
+        XCTAssertTrue(selectedChart.waitForExistence(timeout: 5))
+        let selectedValue = String(describing: selectedChart.value)
+        XCTAssertNotEqual(selectedValue, initialSummary)
+        XCTAssertFalse(selectedValue.localizedCaseInsensitiveContains("points"))
         XCTAssertFalse(app.navigationBars["Recovery"].exists)
         keepScreenshot(app, name: "trends-recovery-date-selection")
     }

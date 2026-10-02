@@ -1220,7 +1220,11 @@ private fun FlowChips(
                 rowChips.forEach { metric ->
                     MetricChip(
                         modifier = Modifier.weight(1f),
-                        title = "${metric.title} · ${metric.sourceLabel}",
+                        title = uiString(
+                            R.string.appwide_metric_metadata_format,
+                            metric.title,
+                            metric.sourceLabel,
+                        ),
                         color = colorFor(metric),
                         onRemove = { onRemove(metric) },
                     )

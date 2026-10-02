@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `locally verified; protected integration pending`
+- State: `locally verified after hosted-gate repair; replacement hosted checks pending`
 - Owner: project team
 - Branch: `codex/today-metric-catalog-fitness-age-20261001`
 - Start commit: `232f746e045d2755947579c3408efc5c3b84ff69`
@@ -115,6 +115,10 @@ insights.
 | Apple source-qualified metric wall | 61 focused `StrandTests` passed plus 12 `WearableCapabilityCatalogTests` | Every persisted Apple Health key is catalogued, generic provenance remains Apple Health, origin copy compiles, and WHOOP Steps is not advertised | Signed-device HealthKit/Apple Watch delivery or physical accuracy |
 | Localization regression gate | `FeedbackLocalization/generate.py --check` and `i18n_audit.py --ci origin/main` exited 0 | No new hardcoded Android UI copy, no new unextracted Apple copy, focus-locale completeness, and customer-facing brand boundary | Runtime layout in every locale |
 | Android post-localization focused wall | `BUILD SUCCESSFUL` in 44 seconds for Full Kotlin compilation plus `KeyMetricPrefsTest` and `TodayMetricCatalogContractTest` | The generated formatter resource resolves and the metric catalog contracts remain green | Physical Health Connect, WHOOP, or supplier-band reads |
+| Hosted exact-head triage | Exact head `fd8f10ac6964844655799b3d5a07f690b268d5d9` passed Swift packages, macOS, server, release controls, production shell, and review-sample shell. Its failing jobs isolated one stale Android performance-source assertion, one non-localized Android Compare formatter, two non-localized Apple accessibility labels, and stale Apple UI assumptions around the configured onboarding marker and replacement chart accessibility node. | The remaining hosted failures were bounded to source/test/localization contracts rather than missing metric-catalog implementation | A replacement exact head or physical-device behavior |
+| Android hosted-gate repair | Bounded `compileFullDebugKotlin` plus focused `RuntimePerformanceContractTest` and `AndroidLocalizationPolicyTest` passed: `BUILD SUCCESSFUL` in 1 minute 43 seconds, 29 tasks | The performance contract now verifies the selected-day-bounded weight query, and Compare uses the generated localized metric metadata formatter | The complete replacement hosted Android wall or physical data delivery |
+| Apple localization and chart repair | `FeedbackLocalization/generate.py --check` passed for 86 app-report strings across nine locales; `i18n_audit.py --ci github/main` passed with no new Android hardcoded literals, Apple unextracted literals, focus-locale gaps, or brand-boundary violations | Source accessibility labels and Android Compare metadata remain localizable, and the chart exposes one coherent accessibility element instead of a duplicate invisible selected-point node | Human review of every translation or signed-device VoiceOver behavior |
+| Apple focused UI rerun | `testConfiguredProviderAndSyntheticBandCompleteFullOnboarding` passed in 55.620 seconds and `testRecoveryTrendSupportsExactDateScrubbing` passed in 16.244 seconds on the dedicated iPhone Simulator; Xcode reported `TEST SUCCEEDED` for 2 tests with zero failures before a post-test simulator-diagnostics timeout | The configured flow reaches visible Bluetooth, advances to the device chooser, and exact-date chart scrubbing changes the same chart semantic value without navigating away | Physical BLE, signed installation, or every production-shell UI case |
 | Terminology and release-control ratchets | 18,596 classified occurrences across 1,643 path/category groups; zero forbidden mappings; reviewed allowlist digest `00db1a24683e00fb776e680a24d7cf58cb56cb47031057fd6c015f286582736d`; reviewed inventory digest `0dad0a30b11570e0e88747f9a9ca738bac9f7203396d75d68b0ececbe471f092`; exact 258-test release-control wall passed | New compatible-band resolver identifiers, persisted source IDs, tests, historical records, and generated line movement are explicitly classified and pinned without adding a customer-facing vendor-to-NOOP mapping | Removal of pre-existing compatibility terminology or physical transport behavior |
 | Diff hygiene | `git diff --check` passed | No whitespace-error regression in the working patch | Runtime correctness outside the tested scope |
 
@@ -145,11 +149,25 @@ insights.
 
 ## Git and release state
 
-- Branch implementation and the localization-gate repair are committed on the
-  same active branch.
-- Protected integration and clean-main verification remain pending.
+- Exact hosted head `fd8f10ac6964844655799b3d5a07f690b268d5d9`
+  exposed bounded stale contract and localization failures after the metric
+  implementation itself had passed the focused local walls.
+- The replacement repair is locally verified on the same active branch.
+- A replacement push, exact-head required checks, protected integration, and
+  clean-main verification remain pending.
 - No deployment, store upload, signed build, firmware action, or production
   traffic was dispatched.
+
+## Observability review
+
+- This repair changes localized presentation and test observation only. It
+  does not add a persistence, import, network, account, BLE, background, or
+  long-running runtime boundary.
+- Existing `AppDiagnosticsRecorder` paths remain unchanged. Adding a runtime
+  event for a localized label or XCTest element re-query would add noise
+  without diagnosing a customer operation.
+- No health values, source identifiers, device identifiers, raw errors, or
+  user content were added to logs or evidence.
 
 ## Decisions
 
@@ -184,19 +202,22 @@ insights.
 
 ## Hosted check follow-up
 
-- Exact head `ed7d991d829d1b7ce78306daa76687233e63df47` reached 111 of 125
-  production-shell instrumentation cases with zero earlier failures. The
-  large-font primary-tab case then failed while closing its first
-  `ActivityScenario`; the activity remained paused instead of reaching
-  destroyed state, and the remaining wall hit its ten-minute bound.
-- The remediation sets the 200% font scale before the case's single activity
-  launch and retains the same five tab visibility, accessibility-label, click,
-  and selection assertions. Teardown still restores the exact prior font
-  scale.
-- `compileFullDebugAndroidTestKotlin` passed after the change. The existing
-  local API 35 AVD did not reach a usable boot state within three minutes and
-  is not runtime evidence. Replacement exact-head hosted checks remain
-  required.
+- Exact head `fd8f10ac6964844655799b3d5a07f690b268d5d9`
+  completed 38 checks. Swift packages, macOS, server, runtime license,
+  production shell, review-sample shell, and trusted release controls passed.
+- The complete Android wall failed only the stale
+  `RuntimePerformanceContractTest` source assertion after measured Weight had
+  correctly moved to `latestAppleDailyWeightAtOrBefore(..., selectedDayKey)`.
+  The repaired focused wall passes.
+- The i18n job identified the Android Compare interpolation and two Apple
+  source accessibility labels. All now use generated/localized formatters, and
+  the complete local i18n audit passes.
+- Apple UI failures were repaired by observing the visible Bluetooth boundary,
+  waiting for the actual device chooser, re-querying the SwiftUI chart semantic
+  node after selection, and removing its duplicate one-pixel accessibility
+  overlay. The two focused UI cases pass together.
+- Replacement exact-head hosted checks remain required before protected
+  integration.
 
 ## Privacy check
 

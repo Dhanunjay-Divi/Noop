@@ -213,15 +213,24 @@ class RuntimePerformanceContractTest {
         val weightEnd = today.indexOf("// Steps for the selected day", weightStart)
         assertTrue(weightStart >= 0 && weightEnd > weightStart)
         val weightBlock = today.substring(weightStart, weightEnd)
-        assertTrue(weightBlock.contains("latestAppleDailyWeight(\"apple-health\")"))
-        assertTrue(weightBlock.contains("latestAppleDailyWeight(\"health-connect\")"))
+        assertTrue(
+            weightBlock.contains(
+                "latestAppleDailyWeightAtOrBefore(\"apple-health\", selectedDayKey)",
+            ),
+        )
+        assertTrue(
+            weightBlock.contains(
+                "latestAppleDailyWeightAtOrBefore(\"health-connect\", selectedDayKey)",
+            ),
+        )
         assertFalse(weightBlock.contains("\"0000-01-01\""))
         assertFalse(weightBlock.contains("\"9999-12-31\""))
-        assertTrue(repository.contains("suspend fun latestAppleDailyWeight"))
+        assertTrue(repository.contains("suspend fun latestAppleDailyWeightAtOrBefore"))
         assertTrue(
-            dao.contains(
-                "ORDER BY day DESC LIMIT 1",
-            ),
+            dao.contains("day <= :throughDay"),
+        )
+        assertTrue(
+            dao.contains("AND weightKg IS NOT NULL ORDER BY day DESC LIMIT 1"),
         )
 
         val stepsStart = today.indexOf("// Steps for the selected day")

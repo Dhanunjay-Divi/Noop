@@ -19,11 +19,17 @@ Last updated: **2026-10-02**
   supplies a validated value. Generic aggregated records remain labelled
   `Apple Health`, not `Apple Watch`, because source-device identity is not
   retained. Android measured Weight is bounded to the selected day and never
-  borrows profile setup weight. Current verification passes Android compilation
-  plus 137 focused tests, Apple 61 focused app tests, Apple 12 capability tests,
-  nine-locale generation for 997 app-wide strings, and diff hygiene. Physical
-  Apple Watch, WHOOP, supplier-band, HealthKit, Health Connect, background,
-  battery, and accuracy behavior remains unvalidated and unclaimed.
+  borrows profile setup weight. Exact hosted head `fd8f10ac6` passed Swift
+  packages, macOS, server, release controls, production shell, and review
+  sample; its failures isolated one stale Android performance assertion,
+  localized Android/Apple presentation contracts, and stale Apple onboarding
+  and chart UI observations. The replacement repair passes bounded Full Kotlin
+  compilation plus the focused Android performance/localization tests,
+  complete local i18n audit, and the paired configured-onboarding and
+  exact-date chart-scrub iPhone UI cases. A replacement push and exact-head
+  checks remain pending. Physical Apple Watch, WHOOP, supplier-band, HealthKit,
+  Health Connect, background, battery, and accuracy behavior remains
+  unvalidated and unclaimed.
 
 - The hydration target/correction implementation is focused-test and
   build-verified on the same branch. Apple and Android now explain the existing

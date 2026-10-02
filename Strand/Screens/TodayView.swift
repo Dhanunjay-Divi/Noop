@@ -1121,6 +1121,20 @@ struct TodayView: View {
         return shared == "Imported" ? WhoopModel.customerName : shared
     }
 
+    static func accessibilitySourceLabel(_ source: String) -> String {
+        String.localizedStringWithFormat(
+            String(localized: "Source: %@"),
+            source
+        )
+    }
+
+    static func accessibilityNeedsMoreDataLabel(source: String) -> String {
+        [
+            accessibilitySourceLabel(source),
+            String(localized: "Needs more data"),
+        ].joined(separator: ". ")
+    }
+
     /// True for a watch-context user with no strap supplying scores (Apple-Health days present and no WHOOP
     /// recovery banked anywhere). Used for the calibrating case, where there's no value yet so the resolver
     /// returns no winning source for `provenanceByMetric`, `isWatchSourced` can only fire once a number
@@ -3200,13 +3214,23 @@ struct TodayView: View {
                         ScoreStatePill(watchScoreState(key))
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Source: Apple Health")
+                    .accessibilityLabel(
+                        Self.accessibilitySourceLabel(
+                            String(localized: "Apple Health")
+                        )
+                    )
                 } else if watchNeedsMoreData(key) {
                     SourceBadge("Needs more data", tint: StrandPalette.textTertiary)
-                        .accessibilityLabel("Apple Health. Needs more data to score this yet.")
+                        .accessibilityLabel(
+                            Self.accessibilityNeedsMoreDataLabel(
+                                source: String(localized: "Apple Health")
+                            )
+                        )
                 } else if ringHasValue(key), let label = provenanceLabel(key) {
                     SourceBadge("\(label)", tint: provenanceTint(key))
-                        .accessibilityLabel("Source: \(label)")
+                        .accessibilityLabel(
+                            Self.accessibilitySourceLabel(label)
+                        )
                 }
             }
         }

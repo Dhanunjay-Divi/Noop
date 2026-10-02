@@ -453,17 +453,6 @@ public struct TrendChart: View {
         .accessibilityHint(Text("Hold and drag to inspect each date", bundle: .module))
         .accessibilityIdentifier(accessibilityIdentifier ?? "")
         .accessibilityHidden(!showsHover && accessibilityLabel == nil)
-        #if os(iOS)
-        .overlay(alignment: .topLeading) {
-            if let selectedPoint {
-                Color.clear
-                    .frame(width: 1, height: 1)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Text(verbatim: dateFormat(selectedPoint.date)))
-                    .accessibilityValue(Text(verbatim: valueFormat(selectedPoint.value)))
-            }
-        }
-        #endif
     }
 }
 
