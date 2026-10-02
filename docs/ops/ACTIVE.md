@@ -4,10 +4,26 @@ Last updated: **2026-10-02**
 
 ## Authoritative context
 
+- The mobile command-lens regression repair is locally verified on branch
+  `codex/mobile-command-n-visual-close-20261002` and is being synchronized with
+  protected `main` `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`. The prior
+  protected source had
+  replaced the previously approved geometric NOOP `N` with an 80-percent arc
+  and center dot that read as an activity ring. The local repair restores one
+  matched rounded-stroke N on iPhone and Android while preserving the
+  `48x52` target, bounded drag, edge snap, persistence, nine-action launcher,
+  and accessibility movement actions. Android focused compile/unit and APK
+  assembly pass; Apple focused shell 1/1 and the complete iPhone Simulator
+  graph pass. Current `1080x2424` Android and `1206x2622` iPhone captures were
+  reviewed without observed clipping or overlap. The Android follow-up also
+  closes the stale Today/editor visual gap: Steps is in the default six and
+  all 18 choices remain grouped as measured/imported, source-dependent, and
+  NOOP insights. Protected checks, normal merge, exact-main verification, and
+  every signed physical-device/source gate remain pending.
+
 - A replacement private synthetic GCP staging deployment is live and locally
-  verified on
-  branch `codex/gcp-staging-redeploy-20261002` from exact protected `main`
-  `e840874872f5e7eb7f38afcecd7aaa826b12288e`. The owner-selected replacement
+  verified and its source is integrated through PR `#31` at protected merge
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`. The owner-selected replacement
   account is authenticated, a dedicated billing-enabled project exists, and
   CLI plus application-default quota context are pinned to it. No prior state,
   credential, user, database, or health data is being imported. Protected
@@ -26,8 +42,9 @@ Last updated: **2026-10-02**
   configuration was restored to one retained fictional phone, zero App Check
   debug tokens remain, a scheduled lifecycle execution completed in 17.33
   seconds, the private-runtime verifier passes, and OpenTofu reports no drift.
-  Exact branch gates, protected pull-request integration, signed native
-  clients, real OTP/push, and all physical-device claims remain pending.
+  Every PR `#31` required context passed before merge. Exact-main Apple and
+  server jobs are still running; signed native clients, real OTP/push, and all
+  physical-device claims remain pending.
   Public invocation, real health data, payment entitlement, and physical-band
   claims remain disabled.
 
@@ -61,7 +78,10 @@ Last updated: **2026-10-02**
   reviewed-source pins passed the complete 258-test release-control wall.
   Protected merge `5a287b50423b921d408833392b6dfdeadf14a8ae`
   completed 38 exact-main checks with 33 successes, five intentional skips,
-  zero failures, and strict required-CI verification passed 10/10. Physical
+  zero failures, and strict required-CI verification passed 10/10. A current
+  Android API 35 follow-up reviewed Today plus the upper/lower metric editor at
+  `1080x2424`, confirming all 18 choices and the three source groups without
+  observed clipping or overlap. Physical
   Apple Watch, WHOOP, supplier-band, HealthKit, Health Connect, background,
   battery, and accuracy behavior remains unvalidated and unclaimed.
 
@@ -84,13 +104,14 @@ Last updated: **2026-10-02**
   resources/Kotlin/unit tests build successfully, and the complete iPhone
   Simulator graph builds. A current 1206x2622 iPhone capture with values
   `43 / 85 / 45` was reviewed showing `Steady / Well rested / Moderate`
-  without observed clipping or overlap. No Android emulator was attached, so
-  Android visual review remains pending. No formula, source, storage, account,
-  network, BLE, or physical-device behavior changed or was claimed.
+  without observed clipping or overlap. A current 1080x2424 Android API 35
+  follow-up also shows the matched compact hierarchy without observed clipping
+  or overlap. No formula, source, storage, account, network, BLE, or
+  physical-device behavior changed or was claimed.
 
 - The Today metric-catalog and Fitness Age refinement is integrated through
   the same PR `#27` and exact-main verification. Apple and Android now
-  expose the same 14 Today-ready metrics in a selected-first, searchable,
+  expose the same 18 Today-ready metrics in a selected-first, searchable,
   grouped editor while keeping the dashboard bounded to three through six
   cards. Fitness Age is a compact today-only weekly lane under Daily Signal.
   Apple dual-architecture build and focused contracts pass; Android focused

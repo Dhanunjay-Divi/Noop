@@ -2298,31 +2298,36 @@ private struct NoopCommandLensLayout {
     }
 }
 
-private struct NoopCommandSignalMark: View {
+private struct NoopCommandNMark: View {
     var body: some View {
-        ZStack {
-            Circle()
-                .trim(from: 0, to: 0.80)
-                .stroke(
-                    AngularGradient(
-                        colors: [
-                            StrandPalette.chargeBright,
-                            StrandPalette.metricCyan,
-                            StrandPalette.chargeColor,
-                        ],
-                        center: .center
-                    ),
-                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+        GeometryReader { geometry in
+            Path { path in
+                let inset = max(2.2, geometry.size.width * 0.18)
+                let left = inset
+                let right = geometry.size.width - inset
+                let top = inset
+                let bottom = geometry.size.height - inset
+                path.move(to: CGPoint(x: left, y: bottom))
+                path.addLine(to: CGPoint(x: left, y: top))
+                path.addLine(to: CGPoint(x: right, y: bottom))
+                path.addLine(to: CGPoint(x: right, y: top))
+            }
+            .stroke(
+                LinearGradient(
+                    colors: [
+                        StrandPalette.chargeBright,
+                        StrandPalette.metricCyan,
+                        StrandPalette.chargeColor,
+                    ],
+                    startPoint: .bottomLeading,
+                    endPoint: .topTrailing
+                ),
+                style: StrokeStyle(
+                    lineWidth: 2.5,
+                    lineCap: .round,
+                    lineJoin: .round
                 )
-                .rotationEffect(.degrees(-90))
-
-            Circle()
-                .fill(StrandPalette.textPrimary)
-                .frame(width: 4.5, height: 4.5)
-                .shadow(
-                    color: StrandPalette.metricCyan.opacity(0.38),
-                    radius: 3
-                )
+            )
         }
         .frame(width: 14, height: 14)
     }
@@ -2377,7 +2382,7 @@ private struct MovableNoopCommandLens: View {
         let rimTop = Color.white.opacity(colorScheme == .dark ? 0.24 : 0.52)
         let shadowOpacity = colorScheme == .dark ? 0.12 : 0.06
 
-        return NoopCommandSignalMark()
+        return NoopCommandNMark()
             .offset(x: edge == .leading ? 1 : -1)
             .frame(width: 18, height: 38)
             .background {

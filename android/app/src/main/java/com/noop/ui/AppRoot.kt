@@ -1966,31 +1966,7 @@ private fun MovableNoopCommandLens(
                     ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Canvas(modifier = Modifier.size(14.dp)) {
-                        val strokeWidth = 2.5.dp.toPx()
-                        val radius = (size.minDimension - strokeWidth) / 2f
-                        drawArc(
-                            brush = Brush.linearGradient(
-                                colors = listOf(Palette.chargeBright, Palette.metricCyan),
-                                start = Offset.Zero,
-                                end = Offset(size.width, size.height),
-                            ),
-                            startAngle = -90f,
-                            sweepAngle = 288f,
-                            useCenter = false,
-                            topLeft = Offset(center.x - radius, center.y - radius),
-                            size = Size(radius * 2f, radius * 2f),
-                            style = Stroke(
-                                width = strokeWidth,
-                                cap = StrokeCap.Round,
-                            ),
-                        )
-                        drawCircle(
-                            color = Palette.textPrimary,
-                            radius = 2.25.dp.toPx(),
-                            center = center,
-                        )
-                    }
+                    NoopCommandNMark()
                 }
                 Box(
                     modifier = Modifier
@@ -2012,6 +1988,41 @@ private fun MovableNoopCommandLens(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun NoopCommandNMark() {
+    Canvas(modifier = Modifier.size(14.dp)) {
+        val strokeWidth = 2.5.dp.toPx()
+        val inset = maxOf(2.2.dp.toPx(), size.width * 0.18f)
+        val left = inset
+        val right = size.width - inset
+        val top = inset
+        val bottom = size.height - inset
+        val path = Path().apply {
+            moveTo(left, bottom)
+            lineTo(left, top)
+            lineTo(right, bottom)
+            lineTo(right, top)
+        }
+        drawPath(
+            path = path,
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Palette.chargeBright,
+                    Palette.metricCyan,
+                    Palette.chargeColor,
+                ),
+                start = Offset(left, bottom),
+                end = Offset(right, top),
+            ),
+            style = Stroke(
+                width = strokeWidth,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            ),
+        )
     }
 }
 
