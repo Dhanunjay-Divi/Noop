@@ -266,6 +266,65 @@ def test_runtime_verifier_covers_membership_ownership_and_ddl_boundaries() -> No
     assert "Runtime database function uses security definer" in source
 
 
+def test_cloud_sql_role_narrowing_uses_provider_role_without_reserved_flags() -> None:
+    script = load_script()
+    statements: list[str] = []
+
+    class FakeTransaction:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+    class FakeConnection:
+        async def fetchrow(
+            self,
+            statement: str,
+            role: str,
+        ) -> dict[str, bool]:
+            assert "rolsuper" in statement
+            assert role == script.RUNTIME_USER
+            return {
+                "rolsuper": False,
+                "rolreplication": False,
+                "rolbypassrls": False,
+            }
+
+        def transaction(self) -> FakeTransaction:
+            return FakeTransaction()
+
+        async def fetch(
+            self,
+            statement: str,
+            role: str,
+        ) -> list[dict[str, str]]:
+            assert "pg_auth_members" in statement
+            assert role == script.RUNTIME_USER
+            return [{"rolname": script.CLOUD_SQL_ADMIN_ROLE}]
+
+        async def execute(self, statement: str) -> None:
+            statements.append(statement)
+
+    asyncio.run(
+        script.narrow_cloud_sql_role(
+            FakeConnection(),
+            script.RUNTIME_USER,
+            login=True,
+        )
+    )
+
+    assert statements == [
+        'SET LOCAL ROLE "cloudsqlsuperuser"',
+        'ALTER ROLE "noop_app_runtime" WITH LOGIN NOINHERIT NOCREATEDB NOCREATEROLE',
+        'REVOKE "cloudsqlsuperuser" FROM "noop_app_runtime"',
+        "RESET ROLE",
+    ]
+    assert all("NOSUPERUSER" not in statement for statement in statements)
+    assert all("NOREPLICATION" not in statement for statement in statements)
+    assert all("NOBYPASSRLS" not in statement for statement in statements)
+
+
 @pytest.mark.parametrize("failure_stage", ("connect", "verify"))
 def test_runtime_verification_failure_quarantines_role_before_secret_publish(
     monkeypatch: pytest.MonkeyPatch,
@@ -326,6 +385,14 @@ def test_runtime_verification_failure_quarantines_role_before_secret_publish(
         del connection, runtime_profile
         raise script.ProvisioningError("Runtime verification failed")
 
+    async def fake_narrow_cloud_sql_role(
+        connection: FakeConnection,
+        role: str,
+        *,
+        login: bool,
+    ) -> None:
+        events.append((f"{connection.name}.narrow", f"{role}:{login}"))
+
     def fail_if_secret_is_published(*args: object, **kwargs: object) -> str:
         nonlocal secret_published
         del args, kwargs
@@ -348,6 +415,11 @@ def test_runtime_verification_failure_quarantines_role_before_secret_publish(
     )
     monkeypatch.setattr(script, "provision_runtime_role", fake_provision_runtime_role)
     monkeypatch.setattr(script, "verify_runtime_role", fake_verify_runtime_role)
+    monkeypatch.setattr(
+        script,
+        "narrow_cloud_sql_role",
+        fake_narrow_cloud_sql_role,
+    )
     monkeypatch.setattr(script, "add_secret_version", fail_if_secret_is_published)
 
     args = SimpleNamespace(
@@ -371,9 +443,9 @@ def test_runtime_verification_failure_quarantines_role_before_secret_publish(
     with pytest.raises(script.ProvisioningError, match=expected_message):
         asyncio.run(script.configure_runtime(args, "token"))
 
-    assert events[0][0] == "migration.execute"
-    assert "WITH NOLOGIN" in events[0][1]
-    assert events[1] == ("migration.fetch", "memberships")
+    assert events == [
+        ("migration.narrow", f"{script.RUNTIME_USER}:False"),
+    ]
     assert migration_connection.closed is True
     assert runtime_connection.closed is (failure_stage == "verify")
     assert secret_published is False

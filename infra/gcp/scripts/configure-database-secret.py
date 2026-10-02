@@ -25,6 +25,7 @@ import asyncpg
 
 MIGRATION_USER = "noop_migration"
 MIGRATION_SECRET = "noop-staging-database-url"
+CLOUD_SQL_ADMIN_ROLE = "cloudsqlsuperuser"
 RUNTIME_PROFILES = frozenset(
     {
         "private-api",
@@ -407,6 +408,41 @@ async def remove_role_memberships(
         )
 
 
+async def narrow_cloud_sql_role(
+    connection: asyncpg.Connection,
+    role: str,
+    *,
+    login: bool,
+) -> None:
+    attributes = await connection.fetchrow(
+        """
+        SELECT rolsuper, rolreplication, rolbypassrls
+        FROM pg_roles
+        WHERE rolname = $1
+        """,
+        role,
+    )
+    if attributes is None:
+        raise ProvisioningError("Database role is unavailable")
+    if any(
+        bool(attributes[name])
+        for name in ("rolsuper", "rolreplication", "rolbypassrls")
+    ):
+        raise ProvisioningError("Database role has provider-restricted privileges")
+    login_clause = "LOGIN" if login else "NOLOGIN"
+    async with connection.transaction():
+        await connection.execute(
+            "SET LOCAL ROLE " + quote_identifier(CLOUD_SQL_ADMIN_ROLE)
+        )
+        await connection.execute(
+            "ALTER ROLE "
+            + quote_identifier(role)
+            + f" WITH {login_clause} NOINHERIT NOCREATEDB NOCREATEROLE"
+        )
+        await remove_role_memberships(connection, role)
+        await connection.execute("RESET ROLE")
+
+
 async def assert_role_owns_no_objects(
     connection: asyncpg.Connection,
     role: str,
@@ -501,11 +537,10 @@ async def provision_migration_role(
             f"GRANT USAGE, CREATE ON SCHEMA public TO {quoted_migration}"
         )
         if legacy_role is not None and legacy_role != migration_role:
-            await connection.execute(
-                "ALTER ROLE "
-                + quote_identifier(legacy_role)
-                + " WITH NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
-                + "NOREPLICATION NOBYPASSRLS"
+            await narrow_cloud_sql_role(
+                connection,
+                legacy_role,
+                login=False,
             )
     await require_migration_ownership(connection, migration_role)
 
@@ -685,21 +720,10 @@ async def quarantine_runtime_role(
     role: str,
 ) -> None:
     try:
-        await connection.execute(
-            "ALTER ROLE "
-            + quote_identifier(role)
-            + " WITH NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
-            + "NOREPLICATION NOBYPASSRLS"
-        )
+        await narrow_cloud_sql_role(connection, role, login=False)
     except Exception as error:
         raise ProvisioningError(
             "Runtime database role could not be disabled"
-        ) from error
-    try:
-        await remove_role_memberships(connection, role)
-    except Exception as error:
-        raise ProvisioningError(
-            "Runtime database role quarantine could not be completed"
         ) from error
 
 
@@ -719,13 +743,7 @@ async def provision_runtime_role(
     quoted_role = quote_identifier(runtime_role)
     quoted_database = quote_identifier(database)
     async with connection.transaction():
-        await connection.execute(
-            "ALTER ROLE "
-            + quoted_role
-            + " WITH LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
-            + "NOREPLICATION NOBYPASSRLS"
-        )
-        await remove_role_memberships(connection, runtime_role)
+        await narrow_cloud_sql_role(connection, runtime_role, login=True)
         await assert_role_owns_no_objects(connection, runtime_role)
         await connection.execute(
             f"REVOKE CREATE, TEMPORARY ON DATABASE {quoted_database} FROM PUBLIC"

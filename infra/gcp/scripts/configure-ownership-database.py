@@ -24,6 +24,9 @@ from typing import Any, AsyncIterator
 import asyncpg
 
 
+CLOUD_SQL_ADMIN_ROLE = "cloudsqlsuperuser"
+
+
 OWNERSHIP_TABLE_PRIVILEGES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ownership_accounts", ("SELECT", "INSERT")),
     ("ownership_external_identities", ("SELECT", "INSERT")),
@@ -658,6 +661,38 @@ async def remove_role_memberships(
         )
 
 
+async def narrow_cloud_sql_role(
+    connection: asyncpg.Connection,
+    role: str,
+) -> None:
+    attributes = await connection.fetchrow(
+        """
+        SELECT rolsuper, rolreplication, rolbypassrls
+        FROM pg_roles
+        WHERE rolname = $1
+        """,
+        role,
+    )
+    if attributes is None:
+        raise ProvisioningError("Ownership role is unavailable")
+    if any(
+        bool(attributes[name])
+        for name in ("rolsuper", "rolreplication", "rolbypassrls")
+    ):
+        raise ProvisioningError("Ownership role has provider-restricted privileges")
+    async with connection.transaction():
+        await connection.execute(
+            "SET LOCAL ROLE " + quote_identifier(CLOUD_SQL_ADMIN_ROLE)
+        )
+        await connection.execute(
+            "ALTER ROLE "
+            + quote_identifier(role)
+            + " WITH LOGIN NOINHERIT NOCREATEDB NOCREATEROLE"
+        )
+        await remove_role_memberships(connection, role)
+        await connection.execute("RESET ROLE")
+
+
 async def remove_column_privileges(
     connection: asyncpg.Connection,
     role: str,
@@ -733,18 +768,13 @@ async def provision_role(
             await connection.execute(
                 "CREATE ROLE "
                 + quoted_role
-                + " LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
-                + "NOREPLICATION NOBYPASSRLS"
+                + " LOGIN NOINHERIT NOCREATEDB NOCREATEROLE"
             )
         else:
-            await connection.execute(
-                "ALTER ROLE "
-                + quoted_role
-                + " WITH LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
-                + "NOREPLICATION NOBYPASSRLS"
-            )
+            await narrow_cloud_sql_role(connection, role)
         await assert_role_owns_no_objects(connection, role)
-        await remove_role_memberships(connection, role)
+        if not exists:
+            await remove_role_memberships(connection, role)
         await remove_column_privileges(connection, role)
         await connection.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
         await connection.execute(
