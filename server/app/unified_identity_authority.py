@@ -178,6 +178,22 @@ class PostgresUnifiedIdentityAuthorityRepository:
         self,
         claims: ManagedIdentityClaims,
     ) -> UnifiedPrincipal:
+        return await self._reconcile_identity(claims, include_ownership=True)
+
+    async def reconcile_managed_identity(
+        self,
+        claims: ManagedIdentityClaims,
+    ) -> UnifiedPrincipal:
+        """Reconcile the managed domain without requiring ownership-table access."""
+
+        return await self._reconcile_identity(claims, include_ownership=False)
+
+    async def _reconcile_identity(
+        self,
+        claims: ManagedIdentityClaims,
+        *,
+        include_ownership: bool,
+    ) -> UnifiedPrincipal:
         lock_key = unified_identity_lock_key(claims)
         outcome = "failed"
         managed_linked = False
@@ -246,22 +262,24 @@ class PostgresUnifiedIdentityAuthorityRepository:
                         claims.provider_tenant,
                         claims.subject_hash,
                     )
-                    ownership_identity = await connection.fetchrow(
-                        """
-                        SELECT identity.account_id, identity.identity_id
-                        FROM ownership_external_identities AS identity
-                        JOIN ownership_accounts AS account
-                          ON account.account_id = identity.account_id
-                        WHERE identity.issuer = $1
-                          AND identity.provider_tenant = $2
-                          AND identity.subject_hash = $3
-                          AND identity.status = 'active'
-                          AND account.status = 'active'
-                        """,
-                        claims.issuer,
-                        claims.provider_tenant,
-                        claims.subject_hash,
-                    )
+                    ownership_identity = None
+                    if include_ownership:
+                        ownership_identity = await connection.fetchrow(
+                            """
+                            SELECT identity.account_id, identity.identity_id
+                            FROM ownership_external_identities AS identity
+                            JOIN ownership_accounts AS account
+                              ON account.account_id = identity.account_id
+                            WHERE identity.issuer = $1
+                              AND identity.provider_tenant = $2
+                              AND identity.subject_hash = $3
+                              AND identity.status = 'active'
+                              AND account.status = 'active'
+                            """,
+                            claims.issuer,
+                            claims.provider_tenant,
+                            claims.subject_hash,
+                        )
                     if managed_identity is not None:
                         await self._reconcile_managed_link(
                             connection,
@@ -282,10 +300,16 @@ class PostgresUnifiedIdentityAuthorityRepository:
                             linked_at=now,
                         )
                         ownership_linked = True
-                    result = await self._principal(
-                        connection,
-                        principal_id=principal["principal_id"],
-                    )
+                    if include_ownership:
+                        result = await self._principal(
+                            connection,
+                            principal_id=principal["principal_id"],
+                        )
+                    else:
+                        result = await self._managed_principal(
+                            connection,
+                            principal_id=principal["principal_id"],
+                        )
             outcome = "reconciled"
             return result
         except UnifiedIdentityAuthorityError:
@@ -302,6 +326,7 @@ class PostgresUnifiedIdentityAuthorityRepository:
             self._event(
                 "unified_identity.reconciliation",
                 outcome=outcome,
+                scope="full" if include_ownership else "managed",
                 managed_linked=managed_linked,
                 ownership_linked=ownership_linked,
             )
@@ -969,6 +994,38 @@ class PostgresUnifiedIdentityAuthorityRepository:
             managed_identity_id=row["managed_identity_id"],
             ownership_account_id=row["ownership_account_id"],
             ownership_identity_id=row["ownership_identity_id"],
+        )
+
+    async def _managed_principal(
+        self,
+        connection: Any,
+        *,
+        principal_id: UUID,
+    ) -> UnifiedPrincipal:
+        row = await connection.fetchrow(
+            """
+            SELECT principal.principal_id,
+                   principal.status,
+                   managed.managed_account_id,
+                   managed.managed_identity_id
+            FROM unified_account_principals AS principal
+            LEFT JOIN unified_managed_account_links AS managed
+              USING (principal_id)
+            WHERE principal.principal_id = $1
+            """,
+            principal_id,
+        )
+        if row is None:
+            raise UnifiedIdentityUnavailableError(
+                "unified identity root is unavailable"
+            )
+        return UnifiedPrincipal(
+            principal_id=row["principal_id"],
+            status=str(row["status"]),
+            managed_account_id=row["managed_account_id"],
+            managed_identity_id=row["managed_identity_id"],
+            ownership_account_id=None,
+            ownership_identity_id=None,
         )
 
     async def _ensure_authority_state(

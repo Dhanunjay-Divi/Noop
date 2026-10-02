@@ -392,7 +392,7 @@ def test_gcp_managed_safety_push_is_private_encrypted_and_state_safe() -> None:
     assert "--data-file=-" in configure_script
 
 
-def test_private_staging_smoke_covers_managed_safety_without_real_push_targets() -> (
+def test_private_staging_smoke_covers_managed_safety_with_fictional_push_targets() -> (
     None
 ):
     smoke = (
@@ -418,7 +418,14 @@ def test_private_staging_smoke_covers_managed_safety_without_real_push_targets()
     assert "/v1/managed/safety/contacts" in smoke
     assert "/v1/managed/safety/incidents" in smoke
     assert "latest-only location" in smoke
-    assert "/v1/managed/push/installations/current" not in smoke
+    assert "fictional-destination fail-closed handling" in smoke
+    assert 'created.get("status") == "canceled"' in smoke
+    assert "PASS disposable fictional push destinations" in smoke
+    assert smoke.count("/v1/managed/push/installations/current") >= 3
+    assert '"environment": "development"' in smoke
+    assert '"token": "noop-synthetic-staging-"' in smoke
+    assert "account.synthetic_push_registered = True" in smoke
+    assert "account.synthetic_push_registered = False" in smoke
 
     path = REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "smoke-managed-runtime.py"
     spec = importlib.util.spec_from_file_location("noop_managed_smoke_test", path)

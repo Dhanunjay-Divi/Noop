@@ -686,6 +686,21 @@ variable "managed_entitlement_mode" {
   }
 }
 
+variable "managed_upload_ttl_seconds" {
+  description = "Lifetime of a signed managed-upload capability. Synthetic staging may use the 60-second minimum; normal staging defaults to 15 minutes."
+  type        = number
+  default     = 900
+
+  validation {
+    condition = (
+      floor(var.managed_upload_ttl_seconds) == var.managed_upload_ttl_seconds
+      && var.managed_upload_ttl_seconds >= 60
+      && var.managed_upload_ttl_seconds <= 3600
+    )
+    error_message = "managed_upload_ttl_seconds must be an integer from 60 through 3600."
+  }
+}
+
 variable "managed_push_token_write_version" {
   description = "Push-token envelope written by every managed API and lifecycle revision. Keep v1 for the dual-reader rollout, then promote all revisions together to v2."
   type        = string

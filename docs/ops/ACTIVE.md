@@ -5,8 +5,9 @@ Last updated: **2026-10-02**
 ## Authoritative context
 
 - The mobile command-lens regression repair is locally verified on branch
-  `codex/mobile-command-n-visual-close-20261002` from exact protected
-  `main` `e840874872f5e7eb7f38afcecd7aaa826b12288e`. Current main had
+  `codex/mobile-command-n-visual-close-20261002` and is being synchronized with
+  protected `main` `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`. The prior
+  protected source had
   replaced the previously approved geometric NOOP `N` with an 80-percent arc
   and center dot that read as an activity ring. The local repair restores one
   matched rounded-stroke N on iPhone and Android while preserving the
@@ -19,6 +20,33 @@ Last updated: **2026-10-02**
   all 18 choices remain grouped as measured/imported, source-dependent, and
   NOOP insights. Protected checks, normal merge, exact-main verification, and
   every signed physical-device/source gate remain pending.
+
+- A replacement private synthetic GCP staging deployment is live and locally
+  verified and its source is integrated through PR `#31` at protected merge
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`. The owner-selected replacement
+  account is authenticated, a dedicated billing-enabled project exists, and
+  CLI plus application-default quota context are pinned to it. No prior state,
+  credential, user, database, or health data is being imported. Protected
+  remote state, the zero-runtime foundation, budget alerts, Firebase iOS and
+  Android registrations, App Check registration, synthetic phone OTP, the
+  retained fictional pilot claim, and email/password account identity are
+  applied. Generated native pilot configuration is ignored and mode `0600`.
+  The server dependency gate also moved PyJWT to the first non-vulnerable
+  release after the live audit finding. One immutable image digest scanned with
+  zero findings; Cloud SQL, migrations, workload-specific credentials, the
+  private API, managed API, processor, managed lifecycle, feedback lifecycle,
+  App Check enforcement, and the enabled lifecycle scheduler are deployed.
+  The final three-account fictional OTP/runtime smoke passed in 210 seconds,
+  including upload/processing/isolation/restore/erasure, social, and Safety
+  fail-closed behavior with disposable fictional push destinations. Identity
+  configuration was restored to one retained fictional phone, zero App Check
+  debug tokens remain, a scheduled lifecycle execution completed in 17.33
+  seconds, the private-runtime verifier passes, and OpenTofu reports no drift.
+  Every PR `#31` required context passed before merge. Exact-main Apple and
+  server jobs are still running; signed native clients, real OTP/push, and all
+  physical-device claims remain pending.
+  Public invocation, real health data, payment entitlement, and physical-band
+  claims remain disabled.
 
 - The direct-and-derived Today metric expansion is integrated on protected
   `main` through PR `#27` at squash merge

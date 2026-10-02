@@ -25,6 +25,7 @@ import asyncpg
 
 MIGRATION_USER = "noop_migration"
 MIGRATION_SECRET = "noop-staging-database-url"
+CLOUD_SQL_ADMIN_ROLE = "cloudsqlsuperuser"
 RUNTIME_PROFILES = frozenset(
     {
         "private-api",
@@ -69,6 +70,7 @@ RUNTIME_PROFILE_FUNCTIONS = {
 }
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE")
 FORBIDDEN_TABLE_PRIVILEGES = ("TRUNCATE", "REFERENCES", "TRIGGER")
+COLUMN_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "REFERENCES")
 SEQUENCE_PRIVILEGES = ("SELECT", "UPDATE", "USAGE")
 ROLE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 RESOURCE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]{1,255}$")
@@ -186,27 +188,35 @@ def api_request(
     payload: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     body = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=body,
-        method=method,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            if response.status == 204:
-                return {}
-            result = json.load(response)
-            if not isinstance(result, dict):
-                raise ProvisioningError("Google API returned an invalid response")
-            return result
-    except urllib.error.HTTPError as error:
-        raise GoogleAPIError(error.code) from None
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-        raise ProvisioningError("Google API request could not complete") from error
+    access_token = token
+    for attempt in range(2):
+        request = urllib.request.Request(
+            url,
+            data=body,
+            method=method,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                if response.status == 204:
+                    return {}
+                result = json.load(response)
+                if not isinstance(result, dict):
+                    raise ProvisioningError("Google API returned an invalid response")
+                return result
+        except urllib.error.HTTPError as error:
+            status_code = error.code
+            error.close()
+            if status_code == 401 and attempt == 0:
+                access_token = google_token()
+                continue
+            raise GoogleAPIError(status_code) from None
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            raise ProvisioningError("Google API request could not complete") from error
+    raise AssertionError("Google API retry loop exited unexpectedly")
 
 
 def secret_resource_url(project: str, secret_id: str) -> str:
@@ -289,6 +299,26 @@ def wait_for_sql_operation(
     raise ProvisioningError("Cloud SQL user operation timed out")
 
 
+def cloud_sql_user_names(
+    token: str,
+    *,
+    project: str,
+    instance: str,
+) -> set[str]:
+    project_path = urllib.parse.quote(project, safe="")
+    instance_path = urllib.parse.quote(instance, safe="")
+    users_url = (
+        "https://sqladmin.googleapis.com/sql/v1beta4/projects/"
+        f"{project_path}/instances/{instance_path}/users"
+    )
+    users = api_request(token, "GET", users_url)
+    return {
+        name
+        for item in users.get("items", [])
+        if isinstance(item, dict) and isinstance((name := item.get("name")), str)
+    }
+
+
 def configure_cloud_sql_user(
     token: str,
     *,
@@ -296,6 +326,7 @@ def configure_cloud_sql_user(
     instance: str,
     role: str,
     password: str,
+    known_users: set[str] | None = None,
 ) -> None:
     project_path = urllib.parse.quote(project, safe="")
     instance_path = urllib.parse.quote(instance, safe="")
@@ -304,10 +335,15 @@ def configure_cloud_sql_user(
         "https://sqladmin.googleapis.com/sql/v1beta4/projects/"
         f"{project_path}/instances/{instance_path}/users"
     )
-    users = api_request(token, "GET", users_url)
-    names = {
-        item.get("name") for item in users.get("items", []) if isinstance(item, dict)
-    }
+    names = (
+        cloud_sql_user_names(
+            token,
+            project=project,
+            instance=instance,
+        )
+        if known_users is None
+        else known_users
+    )
     payload: dict[str, object] = {"name": role, "password": password}
     if role in names:
         operation = api_request(
@@ -328,12 +364,120 @@ def configure_cloud_sql_user(
     )
 
 
+async def recover_unlisted_quarantined_runtime_role(
+    connection: asyncpg.Connection,
+    role: str,
+    *,
+    migration_role: str,
+    database: str,
+    cloud_sql_user_listed: bool,
+    secret_exists: bool,
+) -> None:
+    attributes = await connection.fetchrow(
+        """
+        SELECT rolcanlogin,
+               rolsuper,
+               rolcreaterole,
+               rolcreatedb,
+               rolreplication,
+               rolbypassrls,
+               rolinherit
+        FROM pg_roles
+        WHERE rolname = $1
+        """,
+        role,
+    )
+    if attributes is None or cloud_sql_user_listed:
+        return
+    if secret_exists:
+        raise ProvisioningError(
+            "Published runtime role is missing from the Cloud SQL user catalog"
+        )
+    if any(
+        bool(attributes[name])
+        for name in (
+            "rolcanlogin",
+            "rolsuper",
+            "rolcreaterole",
+            "rolcreatedb",
+            "rolreplication",
+            "rolbypassrls",
+            "rolinherit",
+        )
+    ):
+        raise ProvisioningError(
+            "Unlisted runtime database role is not safely quarantined"
+        )
+    memberships = await connection.fetch(
+        """
+        SELECT 1
+        FROM pg_auth_members membership
+        JOIN pg_roles member
+          ON member.oid = membership.member
+        WHERE member.rolname = $1
+        LIMIT 1
+        """,
+        role,
+    )
+    if memberships:
+        raise ProvisioningError("Unlisted runtime database role retains memberships")
+    await assert_role_owns_no_objects(connection, role)
+    quoted_role = quote_identifier(role)
+    async with connection.transaction():
+        for statement in runtime_revoke_statements(
+            role,
+            migration_role=migration_role,
+            database=database,
+        ):
+            await connection.execute(statement)
+        await connection.execute(
+            "SET LOCAL ROLE " + quote_identifier(CLOUD_SQL_ADMIN_ROLE)
+        )
+        await connection.execute(f"DROP ROLE {quoted_role}")
+        await connection.execute("RESET ROLE")
+
+
+async def configure_runtime_cloud_sql_user(
+    connection: asyncpg.Connection,
+    token: str,
+    *,
+    project: str,
+    instance: str,
+    role: str,
+    password: str,
+    secret_exists: bool,
+    migration_role: str,
+    database: str,
+) -> None:
+    known_users = cloud_sql_user_names(
+        token,
+        project=project,
+        instance=instance,
+    )
+    await recover_unlisted_quarantined_runtime_role(
+        connection,
+        role,
+        migration_role=migration_role,
+        database=database,
+        cloud_sql_user_listed=role in known_users,
+        secret_exists=secret_exists,
+    )
+    configure_cloud_sql_user(
+        token,
+        project=project,
+        instance=instance,
+        role=role,
+        password=password,
+        known_users=known_users,
+    )
+
+
 @asynccontextmanager
 async def cloud_sql_proxy(
     binary: str,
     connection_name: str,
 ) -> AsyncIterator[tuple[str, subprocess.Popen[bytes]]]:
-    with tempfile.TemporaryDirectory(prefix="noop-database-roles-") as socket_root:
+    with tempfile.TemporaryDirectory(prefix="noop-db-", dir="/tmp") as socket_root:
         process = subprocess.Popen(
             [
                 binary,
@@ -405,6 +549,41 @@ async def remove_role_memberships(
         await connection.execute(
             "REVOKE " + quote_identifier(parent) + " FROM " + quote_identifier(role)
         )
+
+
+async def narrow_cloud_sql_role(
+    connection: asyncpg.Connection,
+    role: str,
+    *,
+    login: bool,
+) -> None:
+    attributes = await connection.fetchrow(
+        """
+        SELECT rolsuper, rolreplication, rolbypassrls
+        FROM pg_roles
+        WHERE rolname = $1
+        """,
+        role,
+    )
+    if attributes is None:
+        raise ProvisioningError("Database role is unavailable")
+    if any(
+        bool(attributes[name])
+        for name in ("rolsuper", "rolreplication", "rolbypassrls")
+    ):
+        raise ProvisioningError("Database role has provider-restricted privileges")
+    login_clause = "LOGIN" if login else "NOLOGIN"
+    async with connection.transaction():
+        await connection.execute(
+            "SET LOCAL ROLE " + quote_identifier(CLOUD_SQL_ADMIN_ROLE)
+        )
+        await connection.execute(
+            "ALTER ROLE "
+            + quote_identifier(role)
+            + f" WITH {login_clause} NOINHERIT NOCREATEDB NOCREATEROLE"
+        )
+        await remove_role_memberships(connection, role)
+        await connection.execute("RESET ROLE")
 
 
 async def assert_role_owns_no_objects(
@@ -501,11 +680,10 @@ async def provision_migration_role(
             f"GRANT USAGE, CREATE ON SCHEMA public TO {quoted_migration}"
         )
         if legacy_role is not None and legacy_role != migration_role:
-            await connection.execute(
-                "ALTER ROLE "
-                + quote_identifier(legacy_role)
-                + " WITH NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
-                + "NOREPLICATION NOBYPASSRLS"
+            await narrow_cloud_sql_role(
+                connection,
+                legacy_role,
+                login=False,
             )
     await require_migration_ownership(connection, migration_role)
 
@@ -577,19 +755,42 @@ def runtime_profile_allows_relation(profile: str, relation: str) -> bool:
         return True
     if profile == "private-api":
         return not relation.startswith(
-            ("managed_", "feedback_", "ownership_", "unified_managed_")
+            ("managed_", "feedback_", "ownership_", "unified_")
         )
     if profile == "managed-api":
-        return (
-            relation.startswith(("managed_", "feedback_", "unified_managed_"))
-            or relation == "installation_credentials"
-        )
+        return relation.startswith(
+            ("managed_", "feedback_", "unified_managed_")
+        ) or relation in {
+            "installation_credentials",
+            "unified_account_principals",
+        }
     if profile in {"managed-processor", "managed-lifecycle"}:
         return (
             relation.startswith(("managed_", "unified_managed_"))
             or relation == "installation_credentials"
         )
     return relation.startswith("feedback_")
+
+
+def runtime_relation_privileges(profile: str, relation: str) -> tuple[str, ...]:
+    if profile == "managed-api" and relation in {
+        "unified_account_principals",
+        "unified_managed_account_links",
+    }:
+        return ("SELECT", "INSERT")
+    return ("SELECT", "INSERT", "UPDATE", "DELETE")
+
+
+def runtime_relation_column_privileges(
+    profile: str,
+    relation: str,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    if profile == "managed-api" and relation in {
+        "unified_account_principals",
+        "unified_managed_account_links",
+    }:
+        return (("principal_id", ("UPDATE",)),)
+    return ()
 
 
 async def runtime_relation_catalog(
@@ -628,10 +829,7 @@ async def runtime_sequence_catalog(
         ORDER BY sequence.relname
         """
     )
-    return tuple(
-        (str(row["sequence_name"]), str(row["relation_name"]))
-        for row in rows
-    )
+    return tuple((str(row["sequence_name"]), str(row["relation_name"])) for row in rows)
 
 
 def runtime_grant_statements(
@@ -654,16 +852,31 @@ def runtime_grant_statements(
         raise ProvisioningError("Runtime profile has no application relations")
 
     statements = [
-        "GRANT SELECT ON TABLE public.noop_schema_migrations "
-        f"TO {quoted_role}",
+        f"GRANT SELECT ON TABLE public.noop_schema_migrations TO {quoted_role}",
     ]
     statements.extend(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
+        "GRANT "
+        + ", ".join(runtime_relation_privileges(profile, relation))
+        + " ON TABLE "
         + "public."
         + quote_identifier(relation)
         + f" TO {quoted_role}"
         for relation in selected_relations
         if relation != "noop_schema_migrations"
+    )
+    statements.extend(
+        "GRANT "
+        + ", ".join(privileges)
+        + " ("
+        + quote_identifier(column)
+        + ") ON TABLE public."
+        + quote_identifier(relation)
+        + f" TO {quoted_role}"
+        for relation in selected_relations
+        for column, privileges in runtime_relation_column_privileges(
+            profile,
+            relation,
+        )
     )
     statements.extend(
         "GRANT SELECT, UPDATE, USAGE ON SEQUENCE "
@@ -680,26 +893,45 @@ def runtime_grant_statements(
     return tuple(statements)
 
 
+def runtime_revoke_statements(
+    role: str,
+    *,
+    migration_role: str,
+    database: str,
+) -> tuple[str, ...]:
+    quoted_role = quote_identifier(role)
+    quoted_database = quote_identifier(database)
+    quoted_migration_role = quote_identifier(migration_role)
+    return (
+        f"REVOKE ALL PRIVILEGES ON DATABASE {quoted_database} FROM {quoted_role}",
+        f"REVOKE ALL PRIVILEGES ON SCHEMA public FROM {quoted_role}",
+        "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM " + quoted_role,
+        "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM " + quoted_role,
+        "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM " + quoted_role,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE "
+        + quoted_migration_role
+        + " IN SCHEMA public REVOKE ALL PRIVILEGES ON TABLES FROM "
+        + quoted_role,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE "
+        + quoted_migration_role
+        + " IN SCHEMA public REVOKE ALL PRIVILEGES ON SEQUENCES FROM "
+        + quoted_role,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE "
+        + quoted_migration_role
+        + " IN SCHEMA public REVOKE ALL PRIVILEGES ON FUNCTIONS FROM "
+        + quoted_role,
+    )
+
+
 async def quarantine_runtime_role(
     connection: asyncpg.Connection,
     role: str,
 ) -> None:
     try:
-        await connection.execute(
-            "ALTER ROLE "
-            + quote_identifier(role)
-            + " WITH NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
-            + "NOREPLICATION NOBYPASSRLS"
-        )
+        await narrow_cloud_sql_role(connection, role, login=False)
     except Exception as error:
         raise ProvisioningError(
             "Runtime database role could not be disabled"
-        ) from error
-    try:
-        await remove_role_memberships(connection, role)
-    except Exception as error:
-        raise ProvisioningError(
-            "Runtime database role quarantine could not be completed"
         ) from error
 
 
@@ -719,59 +951,24 @@ async def provision_runtime_role(
     quoted_role = quote_identifier(runtime_role)
     quoted_database = quote_identifier(database)
     async with connection.transaction():
-        await connection.execute(
-            "ALTER ROLE "
-            + quoted_role
-            + " WITH LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
-            + "NOREPLICATION NOBYPASSRLS"
-        )
-        await remove_role_memberships(connection, runtime_role)
+        await narrow_cloud_sql_role(connection, runtime_role, login=True)
         await assert_role_owns_no_objects(connection, runtime_role)
         await connection.execute(
             f"REVOKE CREATE, TEMPORARY ON DATABASE {quoted_database} FROM PUBLIC"
         )
         await connection.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
-        await connection.execute(
-            f"REVOKE ALL PRIVILEGES ON DATABASE {quoted_database} FROM {quoted_role}"
-        )
+        for statement in runtime_revoke_statements(
+            runtime_role,
+            migration_role=migration_role,
+            database=database,
+        ):
+            await connection.execute(statement)
         await connection.execute(
             f"GRANT CONNECT ON DATABASE {quoted_database} TO {quoted_role}"
         )
-        await connection.execute(
-            f"REVOKE ALL PRIVILEGES ON SCHEMA public FROM {quoted_role}"
-        )
         await connection.execute(f"GRANT USAGE ON SCHEMA public TO {quoted_role}")
         await connection.execute(
-            "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM " + quoted_role
-        )
-        await connection.execute(
-            "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM "
-            + quoted_role
-        )
-        await connection.execute(
-            "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM "
-            + quoted_role
-        )
-        await connection.execute(
             "REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC"
-        )
-        await connection.execute(
-            "ALTER DEFAULT PRIVILEGES FOR ROLE "
-            + quote_identifier(migration_role)
-            + " IN SCHEMA public REVOKE ALL PRIVILEGES ON TABLES FROM "
-            + quoted_role
-        )
-        await connection.execute(
-            "ALTER DEFAULT PRIVILEGES FOR ROLE "
-            + quote_identifier(migration_role)
-            + " IN SCHEMA public REVOKE ALL PRIVILEGES ON SEQUENCES FROM "
-            + quoted_role
-        )
-        await connection.execute(
-            "ALTER DEFAULT PRIVILEGES FOR ROLE "
-            + quote_identifier(migration_role)
-            + " IN SCHEMA public REVOKE ALL PRIVILEGES ON FUNCTIONS FROM "
-            + quoted_role
         )
         await connection.execute(
             "ALTER DEFAULT PRIVILEGES FOR ROLE "
@@ -799,10 +996,7 @@ async def require_exact_migration_manifest(
     rows = await connection.fetch(
         "SELECT version, checksum FROM noop_schema_migrations"
     )
-    applied = {
-        str(row["version"]): str(row["checksum"]).strip()
-        for row in rows
-    }
+    applied = {str(row["version"]): str(row["checksum"]).strip() for row in rows}
     if applied != expected_migration_manifest():
         raise ProvisioningError(
             "Database migration manifest does not match this release"
@@ -846,10 +1040,25 @@ async def verify_runtime_role(
         raise ProvisioningError("Runtime database principal is invalid")
     await assert_role_owns_no_objects(connection, current_user)
 
+    def expected_table_privileges(relation_name: str) -> tuple[str, ...]:
+        if relation_name == "noop_schema_migrations":
+            return ("SELECT",)
+        if runtime_profile_allows_relation(runtime_profile, relation_name):
+            return runtime_relation_privileges(runtime_profile, relation_name)
+        return ()
+
     relations = await connection.fetch(
         """
         SELECT candidate.relname,
-               format('%I.%I', namespace.nspname, candidate.relname) AS name
+               format('%I.%I', namespace.nspname, candidate.relname) AS name,
+               has_table_privilege(candidate.oid, 'SELECT') AS table_select,
+               has_table_privilege(candidate.oid, 'INSERT') AS table_insert,
+               has_table_privilege(candidate.oid, 'UPDATE') AS table_update,
+               has_table_privilege(candidate.oid, 'DELETE') AS table_delete,
+               has_table_privilege(candidate.oid, 'TRUNCATE') AS table_truncate,
+               has_table_privilege(candidate.oid, 'REFERENCES')
+                   AS table_references,
+               has_table_privilege(candidate.oid, 'TRIGGER') AS table_trigger
         FROM pg_class candidate
         JOIN pg_namespace namespace ON namespace.oid = candidate.relnamespace
         WHERE namespace.nspname = 'public'
@@ -858,38 +1067,78 @@ async def verify_runtime_role(
         """
     )
     for relation in relations:
-        expected = (
-            ("SELECT",)
-            if relation["relname"] == "noop_schema_migrations"
-            else (
-                TABLE_PRIVILEGES
-                if runtime_profile_allows_relation(
-                    runtime_profile,
-                    str(relation["relname"]),
-                )
-                else ()
-            )
-        )
+        relation_name = str(relation["relname"])
+        expected_table = expected_table_privileges(relation_name)
         for privilege in TABLE_PRIVILEGES:
-            granted = await connection.fetchval(
-                "SELECT has_table_privilege($1, $2)",
-                relation["name"],
-                privilege,
-            )
-            if bool(granted) != (privilege in expected):
+            granted = bool(relation[f"table_{privilege.lower()}"])
+            if granted != (privilege in expected_table):
                 raise ProvisioningError("Runtime database table grants are not bounded")
         for privilege in FORBIDDEN_TABLE_PRIVILEGES:
-            if await connection.fetchval(
-                "SELECT has_table_privilege($1, $2)",
-                relation["name"],
-                privilege,
-            ):
+            if bool(relation[f"table_{privilege.lower()}"]):
                 raise ProvisioningError("Runtime database role has a DDL-like grant")
+
+    columns = await connection.fetch(
+        """
+        SELECT candidate.relname,
+               attribute.attname,
+               has_column_privilege(
+                   format('%I.%I', namespace.nspname, candidate.relname),
+                   attribute.attname,
+                   'SELECT'
+               ) AS column_select,
+               has_column_privilege(
+                   format('%I.%I', namespace.nspname, candidate.relname),
+                   attribute.attname,
+                   'INSERT'
+               ) AS column_insert,
+               has_column_privilege(
+                   format('%I.%I', namespace.nspname, candidate.relname),
+                   attribute.attname,
+                   'UPDATE'
+               ) AS column_update,
+               has_column_privilege(
+                   format('%I.%I', namespace.nspname, candidate.relname),
+                   attribute.attname,
+                   'REFERENCES'
+               ) AS column_references
+        FROM pg_class candidate
+        JOIN pg_namespace namespace ON namespace.oid = candidate.relnamespace
+        JOIN pg_attribute attribute ON attribute.attrelid = candidate.oid
+        WHERE namespace.nspname = 'public'
+          AND candidate.relkind IN ('r', 'p', 'v', 'm', 'f')
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+        ORDER BY candidate.relname, attribute.attnum
+        """
+    )
+    for column in columns:
+        relation_name = str(column["relname"])
+        column_name = str(column["attname"])
+        expected_table = expected_table_privileges(relation_name)
+        expected_column_grants = dict(
+            runtime_relation_column_privileges(runtime_profile, relation_name)
+        )
+        for privilege in COLUMN_PRIVILEGES:
+            granted = bool(column[f"column_{privilege.lower()}"])
+            expected = (
+                privilege in expected_table
+                or privilege in expected_column_grants.get(column_name, ())
+            )
+            if granted != expected:
+                raise ProvisioningError(
+                    "Runtime database column grants are not bounded"
+                )
 
     sequences = await connection.fetch(
         """
         SELECT format('%I.%I', namespace.nspname, sequence.relname) AS name,
-               target.relname AS relation_name
+               target.relname AS relation_name,
+               has_sequence_privilege(sequence.oid, 'SELECT')
+                   AS sequence_select,
+               has_sequence_privilege(sequence.oid, 'UPDATE')
+                   AS sequence_update,
+               has_sequence_privilege(sequence.oid, 'USAGE')
+                   AS sequence_usage
         FROM pg_class sequence
         JOIN pg_namespace namespace ON namespace.oid = sequence.relnamespace
         JOIN pg_depend dependency
@@ -903,16 +1152,12 @@ async def verify_runtime_role(
     )
     for sequence in sequences:
         for privilege in SEQUENCE_PRIVILEGES:
-            granted = await connection.fetchval(
-                "SELECT has_sequence_privilege($1, $2)",
-                sequence["name"],
-                privilege,
-            )
+            granted = bool(sequence[f"sequence_{privilege.lower()}"])
             expected = runtime_profile_allows_relation(
                 runtime_profile,
                 str(sequence["relation_name"]),
             )
-            if bool(granted) != expected:
+            if granted != expected:
                 raise ProvisioningError("Runtime sequence grants are not bounded")
 
     executable_functions = await connection.fetch(
@@ -1047,12 +1292,16 @@ async def configure_runtime(args: argparse.Namespace, token: str) -> str:
             process=proxy,
         )
         try:
-            configure_cloud_sql_user(
+            await configure_runtime_cloud_sql_user(
+                migration_connection,
                 token,
                 project=args.project,
                 instance=args.instance,
                 role=args.user,
                 password=password,
+                secret_exists=existing is not None,
+                migration_role=args.migration_user,
+                database=args.database,
             )
             credential_rotated = True
             try:
