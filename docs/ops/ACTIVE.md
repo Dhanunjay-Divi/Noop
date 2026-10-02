@@ -16,6 +16,8 @@ Last updated: **2026-10-01**
   is included and the owner will connect a phone. See the
   [physical review](../handoff/NOOP-PHYSICAL-BAND-TEST-REVIEW-2026-10-01.md) and
   [current round](rounds/2026-10-01-physical-band-candidate-review.md).
+  The [return checklist](../handoff/NOOP-PHYSICAL-BAND-TEST-START-2026-10-01.md)
+  is prepared; retained APK hash/signature and local gates were rechecked.
 
 - The Today metric-catalog refinement is locally verified after complete
   Android Full and Apple hosted-contract repair on

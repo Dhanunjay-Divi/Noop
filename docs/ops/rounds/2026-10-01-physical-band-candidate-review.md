@@ -145,6 +145,27 @@ results or treating attached procedures as broader authority.
   fix artifact or physical behavior has yet been validated.
 - Attached clean-install procedure cannot authorize deletion of existing history.
 
+## Return-to-laptop preparation refresh
+
+- Remote main remains `08ad0f472a577e66fd612281550f549fa09c7703`.
+  Draft PR 28 remains open/unmerged at `0f762f348f4386daca70aaaa71439b5c7e558e14`.
+- Retained Android APK matches its recorded SHA-256 and passes `apksigner verify`.
+  The neutral ten-file SDK verifier passes again. Existing build/test status
+  files were checked, without rerunning unchanged app builds or claiming fresh
+  physical evidence.
+- Read-only live discovery finds no Android phone. Both iPhone Developer Mode
+  states remain enabled; 13 Pro Max is disconnected and 17 Pro Max transport
+  unavailable. No installs or device-state mutations performed.
+- Approved account/supplier configuration remains absent in review, original and
+  integration checkouts; expected supplier root absent, compatibility rows zero.
+- Prepared the [start checklist and session evidence sheet](../../handoff/NOOP-PHYSICAL-BAND-TEST-START-2026-10-01.md)
+  with a private local copy for the owner. Explicitly separates retained build
+  readiness from signing, account, artifact, compatibility and data-recovery gates.
+- This continuation changes documentation only. Existing bounded build statuses
+  and sanitized metadata cover readiness; no additional app logging is warranted.
+  All physical scenarios remain NOT RUN. Retained outputs stay available for
+  the upcoming device session.
+
 ## Next round
 
 1. Primary agent reviews draft PR 28 and the dated review document. Scoped source
