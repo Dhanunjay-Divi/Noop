@@ -114,7 +114,7 @@ class PrimaryNavigationContractTest {
     }
 
     @Test
-    fun accessibilityTextKeepsVisibleLabelsWithCappedNavigationScale() {
+    fun accessibilityKeepsTabSemanticsWithOneStableActiveLabel() {
         val labels = listOf("Heute", "Trends", "Workouts", "Schlaf", "Mehr")
         val accessibilityText = bottomBarLabelLayout(
             labels = labels,
@@ -172,6 +172,9 @@ class PrimaryNavigationContractTest {
         assertTrue(barSlot.contains(".selectable("))
         assertTrue(barSlot.contains("selected = active"))
         assertTrue(barSlot.contains("role = Role.Tab"))
+        assertTrue(barSlot.contains(".heightIn(min = Metrics.controlHeight)"))
+        assertTrue(barSlot.contains("if (active) {"))
+        assertTrue(barSlot.contains("Spacer(modifier = Modifier.fillMaxSize())"))
         assertTrue(barSlot.contains("minLines = labelMaxLines"))
         assertTrue(barSlot.contains("maxLines = labelMaxLines"))
         assertTrue(barSlot.contains("softWrap = false"))
@@ -184,7 +187,7 @@ class PrimaryNavigationContractTest {
             .substringAfter("private fun GlassBottomBar(")
             .substringBefore("\ninternal enum class NoopCommandLensEdge")
         assertTrue(bottomBar.contains(".selectableGroup()"))
-        assertTrue(bottomBar.contains(".height(labelLayout.barHeightDp.dp)"))
+        assertTrue(bottomBar.contains("val barHeight = labelLayout.barHeightDp.dp + Metrics.space12"))
         assertTrue(bottomBar.contains(
             "labelScaleMultiplier = labelLayout.labelScaleMultiplier",
         ))
@@ -198,11 +201,74 @@ class PrimaryNavigationContractTest {
         assertTrue(bottomBar.contains(
             "val barContentPadding = if (compactNavigation) 4.dp else 7.dp",
         ))
+        assertTrue(bottomBar.contains("MeniscusNavigationRail("))
+        assertTrue(bottomBar.contains("MeniscusNavigationBead("))
         assertTrue(bottomBar.contains(
-            "RoundedCornerShape(Metrics.navigationBarRadius)"
+            "val compactBeadDiameter = Metrics.navigationLensSize - Metrics.space8"
         ))
+        assertTrue(bottomBar.contains("selectedCenter = physicalLensCenter"))
+        assertTrue(bottomBar.contains("beadDiameter = compactBeadDiameter"))
+        assertTrue(bottomBar.contains("animationSpec = if (reduceMotion) snap() else NoopMotion.value()"))
+        assertFalse(bottomBar.contains("BottomNavigationMeniscusShape"))
+        assertFalse(bottomBar.contains("raisedNavigationLens"))
+        assertFalse(bottomBar.contains("detectDragGestures"))
+        assertTrue(text.contains("private fun MeniscusNavigationRail("))
+        assertTrue(text.contains("private fun MeniscusNavigationBead("))
+        assertTrue(text.contains("Canvas(modifier = modifier)"))
         assertFalse(bottomBar.contains("MovableNoopCommandLens("))
         assertTrue(text.contains("MovableNoopCommandLens("))
+    }
+
+    @Test
+    fun meniscusRailUsesFiveFixedCentersAndSmoothBoundedShoulders() {
+        val centers = (0 until 5).map { selectedIndex ->
+            bottomBarTabCenter(
+                availableWidth = 344f,
+                horizontalContentPadding = 4f,
+                interItemSpacing = 1f,
+                tabCount = 5,
+                selectedIndex = selectedIndex,
+            )
+        }
+        listOf(37.2f, 104.6f, 172f, 239.4f, 306.8f)
+            .zip(centers)
+            .forEach { (expected, actual) ->
+                assertEquals(expected, actual, 0.0001f)
+            }
+        assertEquals(67.4f, centers.zipWithNext().first().let { it.second - it.first }, 0.0001f)
+
+        centers.forEach { center ->
+            val geometry = bottomBarMeniscusGeometry(
+                widthPx = 344f,
+                heightPx = 68f,
+                selectedCenterXPx = center,
+                beadDiameterPx = 36f,
+                cornerRadiusPx = 16f,
+            )
+            assertEquals(center, geometry.centerXPx, 0.0001f)
+            assertTrue(geometry.startXPx >= geometry.cornerRadiusPx)
+            assertTrue(geometry.startXPx <= geometry.leftShoulderXPx)
+            assertTrue(geometry.leftShoulderXPx <= geometry.centerXPx)
+            assertTrue(geometry.centerXPx <= geometry.rightShoulderXPx)
+            assertTrue(geometry.rightShoulderXPx <= geometry.endXPx)
+            assertTrue(geometry.endXPx <= 344f - geometry.cornerRadiusPx)
+            assertTrue(geometry.shoulderYPx < geometry.baselineYPx)
+            assertTrue(geometry.baselineYPx < geometry.recessBottomYPx)
+            assertEquals(15.12f, geometry.baselineYPx, 0.0001f)
+            assertEquals(12.96f, geometry.shoulderYPx, 0.0001f)
+            assertEquals(30.24f, geometry.recessBottomYPx, 0.0001f)
+        }
+
+        assertEquals(
+            centers.first(),
+            bottomBarTabCenter(344f, 4f, 1f, 5, -4),
+            0.0001f,
+        )
+        assertEquals(
+            centers.last(),
+            bottomBarTabCenter(344f, 4f, 1f, 5, 12),
+            0.0001f,
+        )
     }
 
     @Test
@@ -430,10 +496,14 @@ class PrimaryNavigationContractTest {
             .substringBefore("\ninternal enum class NoopCommandLensEdge")
 
         assertTrue(bottomBar.contains("animateDpAsState("))
-        assertTrue(bottomBar.contains("raisedNavigationLens(lensAccent)"))
+        assertTrue(bottomBar.contains("MeniscusNavigationRail("))
+        assertTrue(bottomBar.contains("MeniscusNavigationBead("))
+        assertTrue(bottomBar.contains("NoopMotion.value()"))
         assertTrue(bottomBar.contains("rememberReduceMotion()"))
         assertTrue(bottomBar.contains("if (reduceMotion) snap()"))
         assertTrue(bottomBar.contains(".selectableGroup()"))
+        assertFalse(bottomBar.contains("raisedNavigationLens"))
+        assertFalse(bottomBar.contains("BottomNavigationMeniscusShape"))
         assertTrue(appRoot.contains("role = Role.Tab"))
 
         val managed = uiSource("ManagedCloudCard.kt")
@@ -486,7 +556,8 @@ class PrimaryNavigationContractTest {
 
         assertTrue(appRoot.contains("Metrics.navigationLensStrokeWidth"))
         assertTrue(appRoot.contains("Metrics.navigationLensHighlightWidth"))
-        assertTrue(appRoot.contains("Metrics.navigationLensShadowRadius"))
+        assertFalse(bottomBar.contains("Metrics.navigationLensShadowRadius"))
+        assertFalse(bottomBar.contains(".shadow("))
         assertTrue(appRoot.contains("Metrics.navigationLensIconSize"))
         assertTrue(appRoot.contains("Metrics.navigationLensActiveOffset"))
         assertTrue(appRoot.contains("Metrics.navigationLensLabelOffset"))

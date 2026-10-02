@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -143,6 +144,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -1496,6 +1498,160 @@ internal const val BottomBarLabelEffectiveScaleFloor = 0.68f
 private const val BottomBarSingleLineHeightDp = 56
 private const val CompactBottomBarWidthDp = 360
 
+internal fun bottomBarTabCenter(
+    availableWidth: Float,
+    horizontalContentPadding: Float,
+    interItemSpacing: Float,
+    tabCount: Int,
+    selectedIndex: Int,
+): Float {
+    if (tabCount <= 0) return availableWidth / 2f
+    val boundedIndex = selectedIndex.coerceIn(0, tabCount - 1)
+    val boundedPadding = horizontalContentPadding.coerceAtLeast(0f)
+    val boundedSpacing = interItemSpacing.coerceAtLeast(0f)
+    val totalSpacing = boundedSpacing * (tabCount - 1)
+    val contentWidth = (
+        availableWidth - (boundedPadding * 2f) - totalSpacing
+    ).coerceAtLeast(0f)
+    val slotWidth = contentWidth / tabCount
+    return boundedPadding +
+        (slotWidth + boundedSpacing) * boundedIndex +
+        (slotWidth / 2f)
+}
+
+internal data class BottomBarMeniscusGeometry(
+    val cornerRadiusPx: Float,
+    val centerXPx: Float,
+    val startXPx: Float,
+    val leftShoulderXPx: Float,
+    val baselineYPx: Float,
+    val shoulderYPx: Float,
+    val recessBottomYPx: Float,
+    val rightShoulderXPx: Float,
+    val endXPx: Float,
+)
+
+internal fun bottomBarMeniscusGeometry(
+    widthPx: Float,
+    heightPx: Float,
+    selectedCenterXPx: Float,
+    beadDiameterPx: Float,
+    cornerRadiusPx: Float,
+): BottomBarMeniscusGeometry {
+    val width = widthPx.coerceAtLeast(0f)
+    val height = heightPx.coerceAtLeast(0f)
+    val corner = cornerRadiusPx.coerceIn(0f, minOf(width, height) / 2f)
+    val center = selectedCenterXPx.coerceIn(
+        corner,
+        (width - corner).coerceAtLeast(corner),
+    )
+    val beadDiameter = beadDiameterPx.coerceAtLeast(0f)
+    val beadRadius = beadDiameter / 2f
+    val idealHalfWidth = beadRadius * 1.55f
+    val leftReach = minOf(idealHalfWidth, (center - corner).coerceAtLeast(0f))
+    val rightReach = minOf(
+        idealHalfWidth,
+        (width - corner - center).coerceAtLeast(0f),
+    )
+    val leftShoulderRun = minOf(beadRadius * 0.80f, leftReach * 0.68f)
+    val rightShoulderRun = minOf(beadRadius * 0.80f, rightReach * 0.68f)
+    val baseline = minOf(height * 0.28f, beadDiameter * 0.42f)
+    val shoulder = (baseline - beadDiameter * 0.06f).coerceAtLeast(0f)
+    val recessBottom = minOf(
+        height * 0.52f,
+        baseline + beadDiameter * 0.42f,
+    ).coerceAtLeast(baseline)
+    return BottomBarMeniscusGeometry(
+        cornerRadiusPx = corner,
+        centerXPx = center,
+        startXPx = center - leftReach,
+        leftShoulderXPx = center - leftShoulderRun,
+        baselineYPx = baseline,
+        shoulderYPx = shoulder,
+        recessBottomYPx = recessBottom,
+        rightShoulderXPx = center + rightShoulderRun,
+        endXPx = center + rightReach,
+    )
+}
+
+private fun Path.addBottomBarMeniscusContour(
+    geometry: BottomBarMeniscusGeometry,
+    moveToStart: Boolean,
+) {
+    val center = geometry.centerXPx
+    val baseline = geometry.baselineYPx
+    val shoulder = geometry.shoulderYPx
+    val recessBottom = geometry.recessBottomYPx
+    val leftOuterSpan = geometry.leftShoulderXPx - geometry.startXPx
+    val leftInnerSpan = center - geometry.leftShoulderXPx
+    val rightInnerSpan = geometry.rightShoulderXPx - center
+    val rightOuterSpan = geometry.endXPx - geometry.rightShoulderXPx
+    if (moveToStart) {
+        moveTo(geometry.startXPx, baseline)
+    } else {
+        lineTo(geometry.startXPx, baseline)
+    }
+    cubicTo(
+        geometry.startXPx + (leftOuterSpan * 0.42f),
+        baseline,
+        geometry.leftShoulderXPx - (leftOuterSpan * 0.24f),
+        shoulder,
+        geometry.leftShoulderXPx,
+        shoulder,
+    )
+    cubicTo(
+        geometry.leftShoulderXPx + (leftInnerSpan * 0.34f),
+        shoulder,
+        center - (leftInnerSpan * 0.34f),
+        recessBottom,
+        center,
+        recessBottom,
+    )
+    cubicTo(
+        center + (rightInnerSpan * 0.34f),
+        recessBottom,
+        geometry.rightShoulderXPx - (rightInnerSpan * 0.34f),
+        shoulder,
+        geometry.rightShoulderXPx,
+        shoulder,
+    )
+    cubicTo(
+        geometry.rightShoulderXPx + (rightOuterSpan * 0.24f),
+        shoulder,
+        geometry.endXPx - (rightOuterSpan * 0.42f),
+        baseline,
+        geometry.endXPx,
+        baseline,
+    )
+}
+
+private fun bottomBarMeniscusPath(
+    size: Size,
+    geometry: BottomBarMeniscusGeometry,
+): Path {
+    val corner = geometry.cornerRadiusPx
+    val baseline = geometry.baselineYPx
+    return Path().apply {
+        moveTo(corner, baseline)
+        addBottomBarMeniscusContour(geometry, moveToStart = false)
+        lineTo(size.width - corner, baseline)
+        quadraticTo(size.width, baseline, size.width, baseline + corner)
+        lineTo(size.width, size.height - corner)
+        quadraticTo(size.width, size.height, size.width - corner, size.height)
+        lineTo(corner, size.height)
+        quadraticTo(0f, size.height, 0f, size.height - corner)
+        lineTo(0f, baseline + corner)
+        quadraticTo(0f, baseline, corner, baseline)
+        close()
+    }
+}
+
+private fun bottomBarMeniscusContourPath(
+    geometry: BottomBarMeniscusGeometry,
+): Path = Path().apply {
+    addBottomBarMeniscusContour(geometry, moveToStart = true)
+}
+
 internal fun bottomBarLabelLayout(
     labels: List<String>,
     fontScale: Float,
@@ -1593,9 +1749,9 @@ private fun GlassBottomBar(
     selected: Destination,
     onTabSelected: (Destination) -> Unit,
 ) {
-    val barShape = RoundedCornerShape(Metrics.navigationBarRadius)
     val barLabels = bottomBarTabs.map { stringResource(it.labelRes) }
     val reduceMotion = rememberReduceMotion()
+    val layoutDirection = LocalLayoutDirection.current
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
@@ -1621,18 +1777,29 @@ private fun GlassBottomBar(
                     Metrics.navigationLensLabelHorizontalPadding,
             )
             val barHeight = labelLayout.barHeightDp.dp + Metrics.space12
-            val slotWidth = (
-                maxWidth - (barContentPadding * 2)
-            ) / bottomBarTabs.size
+            val compactBeadDiameter = Metrics.navigationLensSize - Metrics.space8
+            val beadCanvasSize = Metrics.navigationLensSize
+            val railCornerRadius = Metrics.navigationBarRadius - Metrics.space6
             val selectedIndex = bottomBarTabs
                 .indexOfFirst { it.dest == selected }
                 .coerceAtLeast(0)
-            val lensOffset by animateDpAsState(
-                targetValue = barContentPadding +
-                    (slotWidth * selectedIndex) +
-                    ((slotWidth - Metrics.navigationLensSize) / 2),
+            val lensCenter = bottomBarTabCenter(
+                availableWidth = maxWidth.value,
+                horizontalContentPadding = barContentPadding.value,
+                interItemSpacing = Metrics.navigationLensItemSpacing.value,
+                tabCount = bottomBarTabs.size,
+                selectedIndex = selectedIndex,
+            ).dp
+            val animatedLensCenter by animateDpAsState(
+                targetValue = lensCenter,
                 animationSpec = if (reduceMotion) snap() else NoopMotion.value(),
             )
+            val physicalLensCenter = if (layoutDirection == LayoutDirection.Rtl) {
+                maxWidth - animatedLensCenter
+            } else {
+                animatedLensCenter
+            }
+            val beadOffset = physicalLensCenter - (beadCanvasSize / 2)
             val lensAccent by animateColorAsState(
                 targetValue = bottomBarAccent(selected),
                 animationSpec = if (reduceMotion) {
@@ -1646,21 +1813,22 @@ private fun GlassBottomBar(
                     .height(barHeight)
                     .fillMaxWidth()
             ) {
-                Box(
+                MeniscusNavigationRail(
+                    selectedCenter = physicalLensCenter,
+                    beadDiameter = compactBeadDiameter,
+                    cornerRadius = railCornerRadius,
+                    accent = lensAccent,
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .height(labelLayout.barHeightDp.dp)
-                        .fillMaxWidth()
-                        .navigationGlassSurface(
-                            shape = barShape,
-                            accentRim = lensAccent.copy(alpha = 0.26f),
-                        ),
+                        .fillMaxSize(),
                 )
-                Box(
+                MeniscusNavigationBead(
+                    accent = lensAccent,
                     modifier = Modifier
-                        .offset(x = lensOffset)
-                        .size(Metrics.navigationLensSize)
-                        .raisedNavigationLens(lensAccent),
+                        .offset(
+                            x = beadOffset,
+                            y = -Metrics.space4,
+                        )
+                        .size(beadCanvasSize),
                 )
                 Row(
                     modifier = Modifier
@@ -1692,71 +1860,159 @@ private fun GlassBottomBar(
     }
 }
 
-private fun Modifier.raisedNavigationLens(accent: Color): Modifier = composed {
+@Composable
+private fun MeniscusNavigationRail(
+    selectedCenter: Dp,
+    beadDiameter: Dp,
+    cornerRadius: Dp,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
     val light = Palette.isLight
-    val body = Brush.linearGradient(
-        colors = listOf(
-            accent.copy(
-                alpha = if (light) {
-                    Metrics.navigationLensBodyLightStartAlpha
-                } else {
-                    Metrics.navigationLensBodyDarkStartAlpha
-                },
-            ),
-            accent.copy(
-                alpha = if (light) {
-                    Metrics.navigationLensBodyLightEndAlpha
-                } else {
-                    Metrics.navigationLensBodyDarkEndAlpha
-                },
-            ),
-        ),
-        start = Offset.Zero,
-        end = Offset.Infinite,
-    )
-    this
-        .shadow(
-            elevation = Metrics.navigationLensShadowRadius,
-            shape = CircleShape,
-            clip = false,
+    Canvas(modifier = modifier) {
+        val geometry = bottomBarMeniscusGeometry(
+            widthPx = size.width,
+            heightPx = size.height,
+            selectedCenterXPx = selectedCenter.toPx(),
+            beadDiameterPx = beadDiameter.toPx(),
+            cornerRadiusPx = cornerRadius.toPx(),
         )
-        .clip(CircleShape)
-        .drawWithCache {
-            val rimWidth = Metrics.navigationLensStrokeWidth.toPx()
-            val highlightWidth = Metrics.navigationLensHighlightWidth.toPx()
-            val highlightInset = Metrics.navigationLensHighlightInset.toPx()
-            onDrawBehind {
-                drawCircle(brush = body)
-                drawCircle(
-                    color = accent.copy(
-                        alpha = if (light) {
-                            Metrics.navigationLensRimLightAlpha
-                        } else {
-                            Metrics.navigationLensRimDarkAlpha
-                        },
-                    ),
-                    style = Stroke(width = rimWidth),
-                )
-                drawArc(
-                    color = Palette.navigationLensHighlight.copy(
-                        alpha = if (light) {
-                            Metrics.navigationLensHighlightLightAlpha
-                        } else {
-                            Metrics.navigationLensHighlightDarkAlpha
-                        },
-                    ),
-                    startAngle = Metrics.navigationLensHighlightStartAngle,
-                    sweepAngle = Metrics.navigationLensHighlightSweepAngle,
-                    useCenter = false,
-                    style = Stroke(width = highlightWidth, cap = StrokeCap.Round),
-                    topLeft = Offset(highlightInset, highlightInset),
-                    size = Size(
-                        this.size.width - (highlightInset * 2),
-                        this.size.height - (highlightInset * 2),
-                    ),
-                )
-            }
-        }
+        val surfacePath = bottomBarMeniscusPath(size, geometry)
+        val contourPath = bottomBarMeniscusContourPath(geometry)
+        val body = Brush.verticalGradient(
+            colorStops = arrayOf(
+                0f to Palette.navigationLensHighlight.copy(
+                    alpha = if (light) 0.46f else 0.12f,
+                ),
+                0.24f to Palette.surfaceRaised.copy(
+                    alpha = if (light) 0.90f else 0.84f,
+                ),
+                1f to Palette.surfaceInset.copy(
+                    alpha = if (light) 0.96f else 0.92f,
+                ),
+            ),
+        )
+        val glint = Brush.linearGradient(
+            colors = listOf(
+                Palette.navigationLensHighlight.copy(
+                    alpha = if (light) 0.20f else 0.045f,
+                ),
+                Color.Transparent,
+                Palette.surfaceBase.copy(alpha = if (light) 0.03f else 0.18f),
+            ),
+            start = Offset.Zero,
+            end = Offset(size.width, size.height),
+        )
+        drawPath(
+            path = surfacePath,
+            color = Palette.surfaceBase.copy(alpha = if (light) 0.10f else 0.46f),
+        )
+        drawPath(path = surfacePath, brush = body)
+        drawPath(path = surfacePath, brush = glint)
+        drawPath(
+            path = surfacePath,
+            color = Palette.hairlineStrong.copy(alpha = if (light) 0.64f else 0.74f),
+            style = Stroke(width = Metrics.navigationLensStrokeWidth.toPx()),
+        )
+        drawPath(
+            path = contourPath,
+            color = accent.copy(alpha = if (light) 0.08f else 0.11f),
+            style = Stroke(
+                width = Metrics.space6.toPx(),
+                cap = StrokeCap.Round,
+            ),
+        )
+        drawPath(
+            path = contourPath,
+            color = accent.copy(alpha = if (light) 0.34f else 0.44f),
+            style = Stroke(
+                width = Metrics.navigationLensHighlightWidth.toPx(),
+                cap = StrokeCap.Round,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun MeniscusNavigationBead(
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    val light = Palette.isLight
+    Canvas(modifier = modifier) {
+        val beadRadius = (size.minDimension - Metrics.space8.toPx()) / 2f
+        val beadCenter = center
+        val haloRadius = size.minDimension / 2f
+        val halo = Brush.radialGradient(
+            colors = listOf(
+                accent.copy(alpha = if (light) 0.13f else 0.18f),
+                Color.Transparent,
+            ),
+            center = beadCenter,
+            radius = haloRadius,
+        )
+        val body = Brush.linearGradient(
+            colors = listOf(
+                Palette.navigationLensHighlight.copy(
+                    alpha = if (light) 0.48f else 0.14f,
+                ),
+                accent.copy(
+                    alpha = if (light) {
+                        Metrics.navigationLensBodyLightStartAlpha
+                    } else {
+                        Metrics.navigationLensBodyDarkStartAlpha
+                    },
+                ),
+                Palette.surfaceRaised.copy(alpha = if (light) 0.88f else 0.82f),
+            ),
+            start = Offset(beadCenter.x - beadRadius, beadCenter.y - beadRadius),
+            end = Offset(beadCenter.x + beadRadius, beadCenter.y + beadRadius),
+        )
+        drawCircle(brush = halo, radius = haloRadius, center = beadCenter)
+        drawCircle(
+            color = Palette.surfaceBase.copy(alpha = if (light) 0.10f else 0.42f),
+            radius = beadRadius + Metrics.navigationLensStrokeWidth.toPx(),
+            center = beadCenter + Offset(0f, Metrics.space2.toPx()),
+        )
+        drawCircle(brush = body, radius = beadRadius, center = beadCenter)
+        drawCircle(
+            color = accent.copy(
+                alpha = if (light) {
+                    Metrics.navigationLensRimLightAlpha
+                } else {
+                    Metrics.navigationLensRimDarkAlpha
+                },
+            ),
+            radius = beadRadius,
+            center = beadCenter,
+            style = Stroke(width = Metrics.navigationLensStrokeWidth.toPx()),
+        )
+        val highlightInset = Metrics.navigationLensHighlightInset.toPx()
+        drawArc(
+            color = Palette.navigationLensHighlight.copy(
+                alpha = if (light) {
+                    Metrics.navigationLensHighlightLightAlpha
+                } else {
+                    Metrics.navigationLensHighlightDarkAlpha
+                },
+            ),
+            startAngle = Metrics.navigationLensHighlightStartAngle,
+            sweepAngle = Metrics.navigationLensHighlightSweepAngle,
+            useCenter = false,
+            style = Stroke(
+                width = Metrics.navigationLensHighlightWidth.toPx(),
+                cap = StrokeCap.Round,
+            ),
+            topLeft = Offset(
+                beadCenter.x - beadRadius + highlightInset,
+                beadCenter.y - beadRadius + highlightInset,
+            ),
+            size = Size(
+                (beadRadius - highlightInset) * 2f,
+                (beadRadius - highlightInset) * 2f,
+            ),
+        )
+    }
 }
 
 internal enum class NoopCommandLensEdge {
@@ -2195,8 +2451,8 @@ internal fun Modifier.navigationGlassSurface(
         }
 }
 
-/** One nav slot: an icon over a small label. Active = green accent (semibold), inactive =
- * textSecondary. The icon-sized halo mirrors iOS without filling the whole touch target. */
+/** One 48dp+ nav target. Only the selected destination exposes a visual label; every slot keeps
+ * its full tab semantics and content description. */
 @Composable
 private fun BarSlot(
     icon: ImageVector,
@@ -2211,7 +2467,7 @@ private fun BarSlot(
 ) {
     val reduceMotion = rememberReduceMotion()
     val tint by animateColorAsState(
-        targetValue = if (active) accent else Palette.textSecondary,
+        targetValue = if (active) accent else Palette.textTertiary,
         animationSpec = if (reduceMotion) {
             snap()
         } else {
@@ -2231,6 +2487,7 @@ private fun BarSlot(
     Column(
         modifier = modifier
             .fillMaxHeight()
+            .heightIn(min = Metrics.controlHeight)
             .testTag(testTag)
             .selectable(
                 selected = active,
@@ -2266,31 +2523,42 @@ private fun BarSlot(
                         translationY = if (active) {
                             -Metrics.navigationLensActiveOffset.toPx()
                         } else {
-                            0f
+                            Metrics.space4.toPx()
                         }
                     },
             )
         }
-        Text(
-            label,
-            style = NoopType.footnote.copy(
-                fontSize = (10f * labelScaleMultiplier).sp,
-                lineHeight = (12f * labelScaleMultiplier).sp,
-                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-            ),
-            color = tint,
-            minLines = labelMaxLines,
-            maxLines = labelMaxLines,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset(y = -Metrics.navigationLensLabelOffset)
-                .padding(
-                    horizontal = Metrics.navigationLensLabelHorizontalPadding
-                ),
-        )
+                .height(Metrics.space16),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            if (active) {
+                Text(
+                    label,
+                    style = NoopType.footnote.copy(
+                        fontSize = (10f * labelScaleMultiplier).sp,
+                        lineHeight = (12f * labelScaleMultiplier).sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = tint,
+                    minLines = labelMaxLines,
+                    maxLines = labelMaxLines,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .offset(y = -Metrics.navigationLensLabelOffset)
+                        .padding(
+                            horizontal = Metrics.navigationLensLabelHorizontalPadding
+                        ),
+                )
+            } else {
+                Spacer(modifier = Modifier.fillMaxSize())
+            }
+        }
     }
 }
 
