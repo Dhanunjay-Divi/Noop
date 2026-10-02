@@ -298,6 +298,27 @@ def wait_for_sql_operation(
     raise ProvisioningError("Cloud SQL user operation timed out")
 
 
+def cloud_sql_user_names(
+    token: str,
+    *,
+    project: str,
+    instance: str,
+) -> set[str]:
+    project_path = urllib.parse.quote(project, safe="")
+    instance_path = urllib.parse.quote(instance, safe="")
+    users_url = (
+        "https://sqladmin.googleapis.com/sql/v1beta4/projects/"
+        f"{project_path}/instances/{instance_path}/users"
+    )
+    users = api_request(token, "GET", users_url)
+    return {
+        name
+        for item in users.get("items", [])
+        if isinstance(item, dict)
+        and isinstance((name := item.get("name")), str)
+    }
+
+
 def configure_cloud_sql_user(
     token: str,
     *,
@@ -305,6 +326,7 @@ def configure_cloud_sql_user(
     instance: str,
     role: str,
     password: str,
+    known_users: set[str] | None = None,
 ) -> None:
     project_path = urllib.parse.quote(project, safe="")
     instance_path = urllib.parse.quote(instance, safe="")
@@ -313,10 +335,15 @@ def configure_cloud_sql_user(
         "https://sqladmin.googleapis.com/sql/v1beta4/projects/"
         f"{project_path}/instances/{instance_path}/users"
     )
-    users = api_request(token, "GET", users_url)
-    names = {
-        item.get("name") for item in users.get("items", []) if isinstance(item, dict)
-    }
+    names = (
+        cloud_sql_user_names(
+            token,
+            project=project,
+            instance=instance,
+        )
+        if known_users is None
+        else known_users
+    )
     payload: dict[str, object] = {"name": role, "password": password}
     if role in names:
         operation = api_request(
@@ -334,6 +361,105 @@ def configure_cloud_sql_user(
         token,
         project=project,
         operation_name=operation_name,
+    )
+
+
+async def recover_unlisted_quarantined_runtime_role(
+    connection: asyncpg.Connection,
+    role: str,
+    *,
+    cloud_sql_user_listed: bool,
+    secret_exists: bool,
+) -> None:
+    attributes = await connection.fetchrow(
+        """
+        SELECT rolcanlogin,
+               rolsuper,
+               rolcreaterole,
+               rolcreatedb,
+               rolreplication,
+               rolbypassrls,
+               rolinherit
+        FROM pg_roles
+        WHERE rolname = $1
+        """,
+        role,
+    )
+    if attributes is None or cloud_sql_user_listed:
+        return
+    if secret_exists:
+        raise ProvisioningError(
+            "Published runtime role is missing from the Cloud SQL user catalog"
+        )
+    if any(
+        bool(attributes[name])
+        for name in (
+            "rolcanlogin",
+            "rolsuper",
+            "rolcreaterole",
+            "rolcreatedb",
+            "rolreplication",
+            "rolbypassrls",
+            "rolinherit",
+        )
+    ):
+        raise ProvisioningError(
+            "Unlisted runtime database role is not safely quarantined"
+        )
+    memberships = await connection.fetch(
+        """
+        SELECT 1
+        FROM pg_auth_members membership
+        JOIN pg_roles member
+          ON member.oid = membership.member
+        WHERE member.rolname = $1
+        LIMIT 1
+        """,
+        role,
+    )
+    if memberships:
+        raise ProvisioningError(
+            "Unlisted runtime database role retains memberships"
+        )
+    await assert_role_owns_no_objects(connection, role)
+    quoted_role = quote_identifier(role)
+    async with connection.transaction():
+        await connection.execute(
+            "SET LOCAL ROLE " + quote_identifier(CLOUD_SQL_ADMIN_ROLE)
+        )
+        await connection.execute(f"DROP OWNED BY {quoted_role}")
+        await connection.execute(f"DROP ROLE {quoted_role}")
+        await connection.execute("RESET ROLE")
+
+
+async def configure_runtime_cloud_sql_user(
+    connection: asyncpg.Connection,
+    token: str,
+    *,
+    project: str,
+    instance: str,
+    role: str,
+    password: str,
+    secret_exists: bool,
+) -> None:
+    known_users = cloud_sql_user_names(
+        token,
+        project=project,
+        instance=instance,
+    )
+    await recover_unlisted_quarantined_runtime_role(
+        connection,
+        role,
+        cloud_sql_user_listed=role in known_users,
+        secret_exists=secret_exists,
+    )
+    configure_cloud_sql_user(
+        token,
+        project=project,
+        instance=instance,
+        role=role,
+        password=password,
+        known_users=known_users,
     )
 
 
@@ -1073,12 +1199,14 @@ async def configure_runtime(args: argparse.Namespace, token: str) -> str:
             process=proxy,
         )
         try:
-            configure_cloud_sql_user(
+            await configure_runtime_cloud_sql_user(
+                migration_connection,
                 token,
                 project=args.project,
                 instance=args.instance,
                 role=args.user,
                 password=password,
+                secret_exists=existing is not None,
             )
             credential_rotated = True
             try:

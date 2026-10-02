@@ -413,6 +413,134 @@ def test_cloud_sql_role_narrowing_uses_provider_role_without_reserved_flags() ->
     assert all("NOBYPASSRLS" not in statement for statement in statements)
 
 
+def test_unlisted_quarantined_runtime_role_is_removed_before_recreation() -> None:
+    script = load_script()
+    statements: list[str] = []
+
+    class FakeTransaction:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+    class FakeConnection:
+        async def fetchrow(
+            self,
+            statement: str,
+            role: str,
+        ) -> dict[str, bool]:
+            assert "rolcanlogin" in statement
+            assert role == "noop_managed_api"
+            return {
+                "rolcanlogin": False,
+                "rolsuper": False,
+                "rolcreaterole": False,
+                "rolcreatedb": False,
+                "rolreplication": False,
+                "rolbypassrls": False,
+                "rolinherit": False,
+            }
+
+        async def fetch(
+            self,
+            statement: str,
+            role: str,
+        ) -> list[dict[str, int]]:
+            assert "pg_auth_members" in statement
+            assert role == "noop_managed_api"
+            return []
+
+        async def fetchval(self, statement: str, role: str) -> bool:
+            assert "pg_class" in statement
+            assert role == "noop_managed_api"
+            return False
+
+        def transaction(self) -> FakeTransaction:
+            return FakeTransaction()
+
+        async def execute(self, statement: str) -> None:
+            statements.append(statement)
+
+    asyncio.run(
+        script.recover_unlisted_quarantined_runtime_role(
+            FakeConnection(),
+            "noop_managed_api",
+            cloud_sql_user_listed=False,
+            secret_exists=False,
+        )
+    )
+
+    assert statements == [
+        'SET LOCAL ROLE "cloudsqlsuperuser"',
+        'DROP OWNED BY "noop_managed_api"',
+        'DROP ROLE "noop_managed_api"',
+        "RESET ROLE",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("cloud_sql_user_listed", "secret_exists", "rolcanlogin", "membership"),
+    (
+        (False, True, False, False),
+        (False, False, True, False),
+        (False, False, False, True),
+    ),
+)
+def test_unlisted_runtime_role_recovery_fails_closed(
+    cloud_sql_user_listed: bool,
+    secret_exists: bool,
+    rolcanlogin: bool,
+    membership: bool,
+) -> None:
+    script = load_script()
+    statements: list[str] = []
+
+    class FakeConnection:
+        async def fetchrow(
+            self,
+            statement: str,
+            role: str,
+        ) -> dict[str, bool]:
+            del statement, role
+            return {
+                "rolcanlogin": rolcanlogin,
+                "rolsuper": False,
+                "rolcreaterole": False,
+                "rolcreatedb": False,
+                "rolreplication": False,
+                "rolbypassrls": False,
+                "rolinherit": False,
+            }
+
+        async def fetch(
+            self,
+            statement: str,
+            role: str,
+        ) -> list[dict[str, int]]:
+            del statement, role
+            return [{"present": 1}] if membership else []
+
+        async def fetchval(self, statement: str, role: str) -> bool:
+            del statement, role
+            return False
+
+        async def execute(self, statement: str) -> None:
+            statements.append(statement)
+
+    with pytest.raises(script.ProvisioningError):
+        asyncio.run(
+            script.recover_unlisted_quarantined_runtime_role(
+                FakeConnection(),
+                "noop_managed_api",
+                cloud_sql_user_listed=cloud_sql_user_listed,
+                secret_exists=secret_exists,
+            )
+        )
+
+    assert statements == []
+
+
 @pytest.mark.parametrize("failure_stage", ("connect", "verify"))
 def test_runtime_verification_failure_quarantines_role_before_secret_publish(
     monkeypatch: pytest.MonkeyPatch,
@@ -499,7 +627,9 @@ def test_runtime_verification_failure_quarantines_role_before_secret_publish(
     monkeypatch.setattr(script, "cloud_sql_proxy", fake_proxy)
     monkeypatch.setattr(script, "connect_with_retry", fake_connect_with_retry)
     monkeypatch.setattr(
-        script, "configure_cloud_sql_user", lambda *args, **kwargs: None
+        script,
+        "configure_runtime_cloud_sql_user",
+        lambda *args, **kwargs: asyncio.sleep(0),
     )
     monkeypatch.setattr(script, "provision_runtime_role", fake_provision_runtime_role)
     monkeypatch.setattr(script, "verify_runtime_role", fake_verify_runtime_role)
@@ -578,6 +708,14 @@ def test_runtime_secret_publish_failure_restores_previous_credential(
     )
     monkeypatch.setattr(script, "cloud_sql_proxy", fake_proxy)
     monkeypatch.setattr(script, "connect_with_retry", fake_connect_with_retry)
+    monkeypatch.setattr(
+        script,
+        "configure_runtime_cloud_sql_user",
+        lambda _connection, _token, **kwargs: asyncio.sleep(
+            0,
+            result=configured_passwords.append(kwargs["password"]),
+        ),
+    )
     monkeypatch.setattr(
         script,
         "configure_cloud_sql_user",
