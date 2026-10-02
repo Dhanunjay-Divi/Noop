@@ -803,7 +803,9 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
         XCTAssertFalse(android.contains(#"title = "Nutrition""#))
         XCTAssertFalse(android.contains("NutritionMixedSourceCard"))
 
-        XCTAssertTrue(shell.contains("expandedReservedHeight: CGFloat = 76"))
+        XCTAssertTrue(shell.contains(
+            "NoopMetrics.navigationBarReservedHeight"
+        ))
         XCTAssertTrue(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         XCTAssertTrue(shell.contains(
             ".frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))"
