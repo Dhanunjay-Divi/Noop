@@ -5,7 +5,7 @@
     "customer": 889,
     "fixture": 5997,
     "generated": 21,
-    "historical": 3429,
+    "historical": 3444,
     "import": 870,
     "persisted": 688
   },
@@ -147,7 +147,7 @@
     {
       "category": "historical",
       "lineNumbers": [
-        37
+        38
       ],
       "occurrenceCount": 1,
       "path": "AGENTS.md",
@@ -37059,6 +37059,24 @@
     {
       "category": "historical",
       "lineNumbers": [
+        46,
+        118,
+        207,
+        210,
+        215,
+        244,
+        245
+      ],
+      "occurrenceCount": 7,
+      "path": "docs/handoff/NOOP-PRODUCTION-PHYSICAL-VALIDATION-HANDOFF-2026-10-02.md",
+      "sha256": "0e935009120ef46f7369543b87fb9fda395a01b897402a4180926c7d259f5d43",
+      "tokenCounts": {
+        "whoop": 7
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
         35,
         37,
         38,
@@ -37255,34 +37273,38 @@
     {
       "category": "historical",
       "lineNumbers": [
+        21,
+        75,
         80,
-        103,
-        278,
-        281,
-        342,
-        502,
-        557,
-        578,
-        580,
-        635,
-        643,
-        655,
-        661,
-        716,
-        761,
-        829,
-        877,
-        898,
-        1042,
-        1177,
-        1283,
-        1287
+        123,
+        146,
+        321,
+        324,
+        385,
+        545,
+        600,
+        621,
+        623,
+        678,
+        686,
+        698,
+        704,
+        759,
+        804,
+        872,
+        920,
+        941,
+        1085,
+        1220,
+        1326,
+        1330
       ],
-      "occurrenceCount": 22,
+      "occurrenceCount": 25,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "400b99f6425ac73db9e54999136af97d70a3d0efe5deac2b9adc713e76bec35f",
+      "sha256": "fd1fa51f1fd5111eed6f6d36537b4c125b87be0e2280213cfb0bba7cebfc0950",
       "tokenCounts": {
-        "whoop": 14,
+        "whoop": 16,
+        "whoop-first": 1,
         "whoopstore": 8
       }
     },
@@ -37969,29 +37991,46 @@
     {
       "category": "historical",
       "lineNumbers": [
-        23,
-        30,
-        31,
+        73,
+        136,
+        181,
+        194
+      ],
+      "occurrenceCount": 4,
+      "path": "docs/ops/rounds/2026-10-02-release-candidate-and-physical-handoff.md",
+      "sha256": "93bec5074d3389b1ed23371b1223e460c7de023d2896d16de0e659cc9c95372a",
+      "tokenCounts": {
+        "whoop": 4
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        8,
+        25,
         32,
+        33,
         34,
-        34,
-        35,
+        36,
         36,
         37,
         38,
-        42,
-        43,
-        47,
-        52,
-        73,
-        109,
-        109
+        39,
+        40,
+        44,
+        45,
+        49,
+        54,
+        75,
+        111,
+        111
       ],
-      "occurrenceCount": 17,
+      "occurrenceCount": 18,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "516a443c502aafc2ef05d655007a57ab7f166ee5c7bf0550c5a9593ee652cf92",
+      "sha256": "7185f95f6df15ce4f8ffcbebc3d44ceafc68f26f95df2883441d34738526a1f3",
       "tokenCounts": {
         "whoop": 11,
+        "whoop-first": 1,
         "whoopstore": 6
       }
     },
@@ -40209,7 +40248,7 @@
       }
     }
   ],
-  "occurrenceCount": 18605,
+  "occurrenceCount": 18620,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

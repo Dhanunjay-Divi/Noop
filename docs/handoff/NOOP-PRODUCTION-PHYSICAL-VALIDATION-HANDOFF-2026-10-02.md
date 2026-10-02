@@ -34,8 +34,41 @@ The tracked `.agents/skills/noop-ops` skill is the required agent contract. It
 is already present on protected `main`; do not create a second physical-testing
 skill or rely on chat history instead of this record.
 
+### Device-agent start prompt
+
+Use this instruction when handing the integrated candidate to the
+device-connected agent:
+
+> Start from a new clean checkout of protected main. Load
+> `.agents/skills/noop-ops/SKILL.md`, run its context snapshot, and read both
+> physical handoffs. Verify the exact protected SHA and required checks, then
+> build one signed iPhone and Android qualification candidate without clearing
+> retained phone data. Validate WHOOP first. Keep the supplier adapter disabled
+> unless the exact approved model/firmware/artifact tuple matches every trust
+> manifest. Run the full account, connection, live data, history, background,
+> battery, notification, diagnostics, accessibility, source-switching, and
+> metric protocols. Record privacy-safe PASS, FAIL, SKIPPED, or BLOCKED evidence
+> in a new operations round. Never infer physical behavior from a simulator,
+> repin an unapproved archive, or flash guessed firmware.
+
 ## Confirmed software and deployment evidence
 
+- Local consolidation branch
+  `codex/noop-release-candidate-handoff-20261002` has implementation/evidence
+  base `e5f11cfe1602ec02e8b08bc4a766f7b07689e752`. It combines mobile commits
+  `3d8256978` and `628554748`, consolidated supplier commits `cc8df6123` and
+  `eae1c5d71`, and handoff commits `13e787d0b` and `e5f11cfe1`.
+- Exact combined verification passed 88 Apple supplier/neutral-SDK tests, the
+  complete iPhone Simulator graph, two first-run UI cases, the Recovery
+  exact-date UI case on the dedicated review simulator, 58 StrandDesign tests,
+  12 Android navigation/OTP tests with production and Android-test compilation,
+  62 supplier/quarantine Python tests, and the repository release controls.
+  The green UI assertions completed before a known local Xcode teardown hang;
+  protected exact-head checks remain the integration authority.
+- This local branch has not been pushed or merged, and no Actions workflow or
+  deployment mutation was dispatched from it. Do not install it as a release
+  candidate until normal protected integration produces an exact protected
+  SHA.
 - Private synthetic staging was integrated through protected PR `#31`, merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`.
 - All three deployed services use immutable image digest
