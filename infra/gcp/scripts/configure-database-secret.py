@@ -70,6 +70,7 @@ RUNTIME_PROFILE_FUNCTIONS = {
 }
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE")
 FORBIDDEN_TABLE_PRIVILEGES = ("TRUNCATE", "REFERENCES", "TRIGGER")
+COLUMN_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "REFERENCES")
 SEQUENCE_PRIVILEGES = ("SELECT", "UPDATE", "USAGE")
 ROLE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 RESOURCE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]{1,255}$")
@@ -314,8 +315,7 @@ def cloud_sql_user_names(
     return {
         name
         for item in users.get("items", [])
-        if isinstance(item, dict)
-        and isinstance((name := item.get("name")), str)
+        if isinstance(item, dict) and isinstance((name := item.get("name")), str)
     }
 
 
@@ -420,9 +420,7 @@ async def recover_unlisted_quarantined_runtime_role(
         role,
     )
     if memberships:
-        raise ProvisioningError(
-            "Unlisted runtime database role retains memberships"
-        )
+        raise ProvisioningError("Unlisted runtime database role retains memberships")
     await assert_role_owns_no_objects(connection, role)
     quoted_role = quote_identifier(role)
     async with connection.transaction():
@@ -757,19 +755,42 @@ def runtime_profile_allows_relation(profile: str, relation: str) -> bool:
         return True
     if profile == "private-api":
         return not relation.startswith(
-            ("managed_", "feedback_", "ownership_", "unified_managed_")
+            ("managed_", "feedback_", "ownership_", "unified_")
         )
     if profile == "managed-api":
-        return (
-            relation.startswith(("managed_", "feedback_", "unified_managed_"))
-            or relation == "installation_credentials"
-        )
+        return relation.startswith(
+            ("managed_", "feedback_", "unified_managed_")
+        ) or relation in {
+            "installation_credentials",
+            "unified_account_principals",
+        }
     if profile in {"managed-processor", "managed-lifecycle"}:
         return (
             relation.startswith(("managed_", "unified_managed_"))
             or relation == "installation_credentials"
         )
     return relation.startswith("feedback_")
+
+
+def runtime_relation_privileges(profile: str, relation: str) -> tuple[str, ...]:
+    if profile == "managed-api" and relation in {
+        "unified_account_principals",
+        "unified_managed_account_links",
+    }:
+        return ("SELECT", "INSERT")
+    return ("SELECT", "INSERT", "UPDATE", "DELETE")
+
+
+def runtime_relation_column_privileges(
+    profile: str,
+    relation: str,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    if profile == "managed-api" and relation in {
+        "unified_account_principals",
+        "unified_managed_account_links",
+    }:
+        return (("principal_id", ("UPDATE",)),)
+    return ()
 
 
 async def runtime_relation_catalog(
@@ -808,10 +829,7 @@ async def runtime_sequence_catalog(
         ORDER BY sequence.relname
         """
     )
-    return tuple(
-        (str(row["sequence_name"]), str(row["relation_name"]))
-        for row in rows
-    )
+    return tuple((str(row["sequence_name"]), str(row["relation_name"])) for row in rows)
 
 
 def runtime_grant_statements(
@@ -834,16 +852,31 @@ def runtime_grant_statements(
         raise ProvisioningError("Runtime profile has no application relations")
 
     statements = [
-        "GRANT SELECT ON TABLE public.noop_schema_migrations "
-        f"TO {quoted_role}",
+        f"GRANT SELECT ON TABLE public.noop_schema_migrations TO {quoted_role}",
     ]
     statements.extend(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
+        "GRANT "
+        + ", ".join(runtime_relation_privileges(profile, relation))
+        + " ON TABLE "
         + "public."
         + quote_identifier(relation)
         + f" TO {quoted_role}"
         for relation in selected_relations
         if relation != "noop_schema_migrations"
+    )
+    statements.extend(
+        "GRANT "
+        + ", ".join(privileges)
+        + " ("
+        + quote_identifier(column)
+        + ") ON TABLE public."
+        + quote_identifier(relation)
+        + f" TO {quoted_role}"
+        for relation in selected_relations
+        for column, privileges in runtime_relation_column_privileges(
+            profile,
+            relation,
+        )
     )
     statements.extend(
         "GRANT SELECT, UPDATE, USAGE ON SEQUENCE "
@@ -873,10 +906,8 @@ def runtime_revoke_statements(
         f"REVOKE ALL PRIVILEGES ON DATABASE {quoted_database} FROM {quoted_role}",
         f"REVOKE ALL PRIVILEGES ON SCHEMA public FROM {quoted_role}",
         "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM " + quoted_role,
-        "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM "
-        + quoted_role,
-        "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM "
-        + quoted_role,
+        "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM " + quoted_role,
+        "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM " + quoted_role,
         "ALTER DEFAULT PRIVILEGES FOR ROLE "
         + quoted_migration_role
         + " IN SCHEMA public REVOKE ALL PRIVILEGES ON TABLES FROM "
@@ -965,10 +996,7 @@ async def require_exact_migration_manifest(
     rows = await connection.fetch(
         "SELECT version, checksum FROM noop_schema_migrations"
     )
-    applied = {
-        str(row["version"]): str(row["checksum"]).strip()
-        for row in rows
-    }
+    applied = {str(row["version"]): str(row["checksum"]).strip() for row in rows}
     if applied != expected_migration_manifest():
         raise ProvisioningError(
             "Database migration manifest does not match this release"
@@ -1015,7 +1043,15 @@ async def verify_runtime_role(
     relations = await connection.fetch(
         """
         SELECT candidate.relname,
-               format('%I.%I', namespace.nspname, candidate.relname) AS name
+               format('%I.%I', namespace.nspname, candidate.relname) AS name,
+               ARRAY(
+                   SELECT attribute.attname::text
+                   FROM pg_attribute AS attribute
+                   WHERE attribute.attrelid = candidate.oid
+                     AND attribute.attnum > 0
+                     AND NOT attribute.attisdropped
+                   ORDER BY attribute.attnum
+               ) AS columns
         FROM pg_class candidate
         JOIN pg_namespace namespace ON namespace.oid = candidate.relnamespace
         WHERE namespace.nspname = 'public'
@@ -1024,14 +1060,15 @@ async def verify_runtime_role(
         """
     )
     for relation in relations:
-        expected = (
+        relation_name = str(relation["relname"])
+        expected_table = (
             ("SELECT",)
-            if relation["relname"] == "noop_schema_migrations"
+            if relation_name == "noop_schema_migrations"
             else (
-                TABLE_PRIVILEGES
+                runtime_relation_privileges(runtime_profile, relation_name)
                 if runtime_profile_allows_relation(
                     runtime_profile,
-                    str(relation["relname"]),
+                    relation_name,
                 )
                 else ()
             )
@@ -1042,7 +1079,7 @@ async def verify_runtime_role(
                 relation["name"],
                 privilege,
             )
-            if bool(granted) != (privilege in expected):
+            if bool(granted) != (privilege in expected_table):
                 raise ProvisioningError("Runtime database table grants are not bounded")
         for privilege in FORBIDDEN_TABLE_PRIVILEGES:
             if await connection.fetchval(
@@ -1051,6 +1088,25 @@ async def verify_runtime_role(
                 privilege,
             ):
                 raise ProvisioningError("Runtime database role has a DDL-like grant")
+        expected_column_grants = dict(
+            runtime_relation_column_privileges(runtime_profile, relation_name)
+        )
+        for column in relation["columns"]:
+            for privilege in COLUMN_PRIVILEGES:
+                granted = await connection.fetchval(
+                    "SELECT has_column_privilege($1, $2, $3)",
+                    relation["name"],
+                    column,
+                    privilege,
+                )
+                expected = (
+                    privilege in expected_table
+                    or privilege in expected_column_grants.get(column, ())
+                )
+                if bool(granted) != expected:
+                    raise ProvisioningError(
+                        "Runtime database column grants are not bounded"
+                    )
 
     sequences = await connection.fetch(
         """

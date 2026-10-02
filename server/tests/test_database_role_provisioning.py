@@ -223,6 +223,9 @@ def test_runtime_grants_are_dml_only_and_function_specific() -> None:
             "managed_social_profiles",
             "feedback_reports",
             "ownership_accounts",
+            "unified_account_principals",
+            "unified_managed_account_links",
+            "unified_ownership_account_links",
         ),
         sequences=(
             ("managed_social_profiles_id_seq", "managed_social_profiles"),
@@ -254,8 +257,27 @@ def test_runtime_grants_are_dml_only_and_function_specific() -> None:
         "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
         'public."feedback_reports" TO "noop_managed_api"'
     ) in statements
+    assert (
+        "GRANT SELECT, INSERT ON TABLE "
+        'public."unified_account_principals" TO "noop_managed_api"'
+    ) in statements
+    assert (
+        "GRANT SELECT, INSERT ON TABLE "
+        'public."unified_managed_account_links" TO "noop_managed_api"'
+    ) in statements
+    assert (
+        'GRANT UPDATE ("principal_id") ON TABLE '
+        'public."unified_account_principals" TO "noop_managed_api"'
+    ) in statements
+    assert (
+        'GRANT UPDATE ("principal_id") ON TABLE '
+        'public."unified_managed_account_links" TO "noop_managed_api"'
+    ) in statements
     assert not any("daily_metrics" in statement for statement in statements)
     assert not any("ownership_accounts" in statement for statement in statements)
+    assert not any(
+        "unified_ownership_account_links" in statement for statement in statements
+    )
     assert (
         "GRANT SELECT, UPDATE, USAGE ON SEQUENCE "
         'public."managed_social_profiles_id_seq" TO "noop_managed_api"'
@@ -290,7 +312,9 @@ def test_runtime_profiles_separate_legacy_managed_feedback_and_ownership_data() 
         "managed_social_profiles",
         "feedback_reports",
         "ownership_accounts",
+        "unified_account_principals",
         "unified_managed_account_links",
+        "unified_ownership_account_links",
     }
 
     allowed = {
@@ -313,6 +337,7 @@ def test_runtime_profiles_separate_legacy_managed_feedback_and_ownership_data() 
         "managed_accounts",
         "managed_social_profiles",
         "feedback_reports",
+        "unified_account_principals",
         "unified_managed_account_links",
     }
     assert allowed["managed-processor"] == {
@@ -331,6 +356,10 @@ def test_runtime_profiles_separate_legacy_managed_feedback_and_ownership_data() 
         "ownership_accounts" not in profile_relations
         for profile_relations in allowed.values()
     )
+    assert all(
+        "unified_ownership_account_links" not in profile_relations
+        for profile_relations in allowed.values()
+    )
 
 
 def test_runtime_verifier_covers_membership_ownership_and_ddl_boundaries() -> None:
@@ -347,6 +376,7 @@ def test_runtime_verifier_covers_membership_ownership_and_ddl_boundaries() -> No
     assert "FROM pg_namespace" in source
     assert "FROM pg_proc" in source
     assert "FROM pg_database" in source
+    assert "has_column_privilege" in source
     assert "NOT has_database_privilege(current_database(), 'CREATE')" in source
     assert "NOT has_database_privilege(current_database(), 'TEMPORARY')" in source
     assert "NOT has_schema_privilege('public', 'CREATE')" in source
