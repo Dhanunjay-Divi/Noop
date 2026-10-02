@@ -586,5 +586,7 @@ def test_operator_wrapper_requires_two_explicit_disabled_runtime_phases() -> Non
     assert "--confirm-runtime-disabled" in shell
     assert "--confirm-migrations-complete" in shell
     assert "NOOP_REQUIRED_NULL_OUTPUTS" in shell
+    assert "missing = [" not in shell
+    assert "if active:" in shell
     assert "--password" not in shell
     assert "--data-file=-" in shell
