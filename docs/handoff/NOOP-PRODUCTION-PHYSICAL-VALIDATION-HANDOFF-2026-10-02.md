@@ -30,6 +30,10 @@ retention, notification delivery, sensor accuracy, or physical ownership.
    approved artifacts for the tested model, hardware, firmware, and protocol.
 6. Do not flash firmware from an inferred package, key, command, or procedure.
 
+The tracked `.agents/skills/noop-ops` skill is the required agent contract. It
+is already present on protected `main`; do not create a second physical-testing
+skill or rely on chat history instead of this record.
+
 ## Confirmed software and deployment evidence
 
 - Private synthetic staging was integrated through protected PR `#31`, merge
@@ -49,6 +53,37 @@ retention, notification delivery, sensor accuracy, or physical ownership.
 - Supplier optional step/sleep reads are serialized, request-fenced, and
   bounded by timeouts in local commit `6d0805485`. Integration evidence must
   name its protected replacement SHA after normal merge.
+
+The accessible historical branch
+`codex/physical-band-review-20261001` is review evidence only. Its remote head
+`7db906359` is based on superseded main `08ad0f472`, lacks the newer request-ID
+and timeout correction, and would revert current PyJWT and product work if
+merged wholesale. The transferred commits `d390e4a9a` and `6bf66cdb1`, plus
+`docs/handoff/NOOP-DISCOVERY-ACCOUNT-REVIEW-2026-10-02.md`, are unavailable and
+must not be guessed.
+
+## Current supplier-artifact stop condition
+
+The supplier adapter must remain disabled until the exact approved archives are
+available and match the reviewed trust manifests.
+
+The current local archive copies do not match the October 1 transfer evidence:
+
+- iOS archive SHA-256 is
+  `bbaa48df28c421608df7683be23fd13d455889d537722750529a9b550176e185`;
+  its `2.2.XX.15` primary binary SHA-256 is
+  `39fef6cc140bac8f45d9a60113300be923d04a96df008d9acda0e25a17b8c89a`.
+- Android archive SHA-256 is
+  `a335d5ecf53e6928fd13940cb166c78fab63fe1772e854fe35099e70c489ec83`;
+  it contains protocol `2.3.80.15` with SHA-256
+  `1d657bb6251a214eb1e941f1a25793b38378483352ef4e50de00e4270969ab04`.
+
+Those values match neither protected-main trust pins nor the transferred
+October 1 claims for iOS and Android. Do not repin to these archives, copy them
+into Git, or use them for a supplier-band result. Obtain the authoritative
+approved artifact bundle with a SHA-256 manifest, then rerun every artifact,
+license, wrapper, build, and physical gate. WHOOP comparison testing may
+continue independently.
 
 The staging evidence uses synthetic identities and fictional data. It does not
 prove real OTP delivery, public traffic, production health-data transfer,
@@ -73,6 +108,12 @@ data.
 
 ## Candidate preparation
 
+Use section 1.2 of
+`docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md` as the executable command
+source. Run every build through `Tools/run-bounded-command.py` with private
+round-owned log and status files. The summaries below do not replace those
+commands.
+
 ### iPhone
 
 1. Run the exact Apple SDK verification/configuration commands in
@@ -84,6 +125,10 @@ data.
    SHA-256 without recording a personal signing identity.
 5. Install with `xcrun devicectl` while preserving existing phone data unless
    a specific clean-install case requires removal.
+6. Before install, run `codesign --verify --deep --strict --verbose=2` on the
+   app. Inspect the embedded provisioning profile and entitlements privately;
+   record only bundle family, version/build, required capability presence, app
+   SHA-256, and a redacted certificate fingerprint.
 
 ### Android
 
@@ -92,11 +137,19 @@ data.
 3. Build the exact Full Debug APK from the same protected SHA.
 4. Record the APK SHA-256 and install with `adb` while preserving existing data
    outside an explicitly recorded clean-install case.
+5. Before install, run `apksigner verify --print-certs` and inspect package,
+   version, ABI, and debuggable state with Android build tools. Keep certificate
+   owner text private; record only the approved fingerprint and artifact facts.
 
 Do not use GitHub Actions dispatches for physical testing. Required protected
 checks still remain mandatory for integration.
 
 ## First-run and account sequence
+
+Use a dedicated clean test phone for first-run evidence. Use a separate
+data-preserving phone for upgrade/reconnect evidence. Do not clear app data,
+Keychain, Keystore, account state, or health history on a retained personal or
+upgrade-test phone.
 
 Exercise a genuinely clean first run before a preconfigured development state:
 
@@ -121,6 +174,11 @@ validation gates until recorded with the exact candidate.
 Validate the existing WHOOP comparison transport first. Do not remove, relabel,
 or route around it.
 
+Before supplier testing begins, record the WHOOP candidate, active source,
+source-qualified row counts, durable history cursor, reconnect/background
+outcomes, and fixed diagnostic category counts as `PASS`, `FAIL`, or `BLOCKED`.
+Confirm the supplier factory remains disabled during this baseline.
+
 For WHOOP on iPhone and Android, record:
 
 - discovery, identification, connect, disconnect, and reconnect;
@@ -140,6 +198,13 @@ the same matrix. Include:
 - source stop/disconnect cancelling pending reads;
 - live heart rate continuing without optional command overlap;
 - history retention/overflow behavior while the phone is unavailable.
+
+Supplier prerequisites are a hard checklist: exact model, project code, board,
+MCU, BLE controller, bootloader, firmware, protocol, wrapper and transitive
+artifact hashes; compatibility row; distribution/support/vulnerability rights;
+SBOM and privacy review; pairing/reset/recovery procedures; retained control
+units; and pre-approved accuracy, latency, battery, thermal and reliability
+budgets. Any missing item is `BLOCKED`.
 
 Finally run source switching in both directions:
 
@@ -162,6 +227,43 @@ Finally run source switching in both directions:
 - Keep public invocation, real health transfer, real Safety paging, payment,
   and real provider delivery disabled unless separately authorized and gated.
 
+Use approved synthetic-account tooling to prove account creation, concurrent
+single-owner claims, privacy-preserving loser behavior, restart, logout,
+restore, cross-account isolation, export, erasure, and replacement-phone
+recovery. Shared evidence may contain only a redacted correlation reference,
+never an account or band identifier.
+
+Immediately before installing a candidate, reverify private staging against the
+integrated protected SHA:
+
+```bash
+cd infra/gcp
+./scripts/verify-private-runtime.sh
+tofu plan -detailed-exitcode
+```
+
+Exit `0` is no drift; exit `2` is drift and blocks the round. Never paste
+provider output or secret values into shared evidence.
+
+## Metric, battery, and egress protocols
+
+Execute `PHY-MET-001` through `PHY-MET-006` exactly as defined in
+`docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`. This includes
+synchronized manual/video step references, stationary false-step scenarios,
+both wrists, pre-registered cohorts and error budgets, approved reference
+instruments, missingness distributions, and client/server formula parity over
+the same accepted physical window. Unsupported or absent channels stay
+missing.
+
+Execute `PHY-PWR-001` and the 24-hour/multi-day/30-day soak plan with
+pre-approved budgets. Record app, wrapper, firmware, phone class, radio state,
+collection state, elapsed time, and aggregate resource result.
+
+Capture signed-app egress only with approved synthetic data and an authorized
+test network. Compare destinations and purposes with the allowlist. Unexpected
+supplier-SDK egress fails the scenario. Remove test certificates, proxies,
+captures, and temporary trust settings after review.
+
 ## Evidence and privacy
 
 Create a new round under `docs/ops/rounds/` and attach only privacy-safe
@@ -182,6 +284,15 @@ For each case, record:
 - fixed failure category;
 - whether user data was preserved;
 - next reproducible action.
+
+Generate the report through the in-app user-reviewed app-report flow. Store the
+export in a private mode-`0600` round directory, hash it, and scan it before
+sharing. Reject any report containing health values, precise timestamps,
+names, addresses, serials, printed IDs, BLE addresses, account/contact/device
+identifiers, tokens, URLs, payloads, raw frames, arbitrary SDK errors, or user
+text. Do not use broad `logcat`, sysdiagnose, packet capture, or console dumps
+as routine evidence. Remove temporary copies after the sanitized result is
+recorded.
 
 ## Physical and external gates
 
@@ -207,6 +318,21 @@ Failures or missing supplier inputs must be recorded. Do not weaken a gate,
 substitute simulator evidence, or call the release production-ready while any
 required physical, security, privacy, signing, legal, or provider gate remains
 open.
+
+## Completion and hand-back
+
+The physical round is complete only when every applicable authoritative
+`PHY-*` row has a recorded result, UTC boundary, reset scope, expected and
+observed behavior, app/wrapper/hardware/firmware/formula revisions, artifact
+reference, defect/retest link, data-preservation result, and reviewer. Update
+`docs/FIRST_PRODUCTION_RELEASE_CHECKLIST.md`, a new operations round,
+`docs/ops/ACTIVE.md`, and `docs/ops/rounds/INDEX.md`.
+
+Return the exact protected SHA, signed artifact digests, deployment
+revision/digest, configuration path inventory, pass/fail/blocked matrix,
+privacy-safe report hashes, defects, and external gates. Do not return
+credentials, identifiers, personal signing details, raw health data, or
+supplier binaries.
 
 ## Inaccessible transferred review
 

@@ -21,12 +21,13 @@ by recorded evidence.
 
 ## Physical-device continuation priority
 
-After the current app-integration pull request is merged and protected `main`
-is green, the next device-connected agent must prioritize the signed iPhone and
-Android install/validation round:
+After the current mobile UI and supplier-read integration candidates are merged
+and protected `main` is green, the next device-connected agent must prioritize
+the signed iPhone and Android install/validation round:
 
 1. Start from clean protected `main`, run the context snapshot, and read
-   `docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`.
+   `docs/handoff/NOOP-PRODUCTION-PHYSICAL-VALIDATION-HANDOFF-2026-10-02.md`
+   and `docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`.
    Confirm the vendored neutral SDK still reports source revision
    `b02808372b7c537f22058c7ebc75d92c750373be` and manifest SHA-256
    `6beca829f3b2a367cf7046544e8d06dc74ae9f905e1eefe4bb58ccf41615fd34`

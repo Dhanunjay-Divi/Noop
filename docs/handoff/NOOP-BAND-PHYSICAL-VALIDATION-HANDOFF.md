@@ -272,16 +272,16 @@ owner or supplier artifact, and do not substitute a guess.
 The physical agent must exercise this sequence without skipping directly to a
 prepaired development state:
 
-1. Install the exact signed release candidate on a clean phone.
-2. Put one charged, worn band into a time-bounded pairing mode.
-3. Enter or select only the minimum printed-label characters approved for
-   discovery.
-4. Scan eligible candidates, select one, and trigger identify vibration.
-5. Confirm the worn band vibrated. This creates only a provisional session; it
-   must not create ownership or start ordinary collection.
-6. Fetch and verify the exact immutable remote Terms document. Show the
+1. Install the exact signed Debug qualification candidate on a clean phone.
+2. Fetch and verify the exact immutable remote Terms document. Show the
    one-account rule, recovery path, no general v1 transfer, and separate NOOP+
    consent. Record explicit versioned acceptance.
+3. Put one charged, worn band into a time-bounded pairing mode.
+4. Enter or select only the minimum printed-label characters approved for
+   discovery.
+5. Scan eligible candidates, select one, and trigger identify vibration.
+6. Confirm the worn band vibrated. This creates only a provisional session; it
+   must not create ownership or start ordinary collection.
 7. Create or sign in to the verified email/password ownership account.
    Optional phone verification remains optional and is not health-data consent.
 8. Request a fresh server possession challenge. Send it through the wrapper,
@@ -348,7 +348,7 @@ reviewed capability or platform reason.
 | ID | Procedure | Pass condition |
 |---|---|---|
 | PHY-SUP-001 | Match model, board, bootloader, firmware, protocol, function report, wrapper, and binary hashes to the test unit. | Every identifier maps to one approved compatibility row; no wildcard or guessed revision. |
-| PHY-SUP-002 | Build signed Apple and Android apps from the pinned wrapper artifacts. | Release artifact manifest contains exact digests; supplier binaries are absent from this Git repository. |
+| PHY-SUP-002 | Build signed Apple and Android Debug qualification apps from the pinned wrapper artifacts. | Qualification artifact manifest contains exact digests; supplier binaries are absent from this Git repository. Release/Archive remains blocked until separate distribution approval. |
 | PHY-SUP-003 | Produce dependency inventory, notices, SBOM, vulnerability report, privacy declarations, and support contacts. | Every shipped binary and native library has an owner, license disposition, and response path. |
 | PHY-SUP-004 | Capture signed-app network egress during setup, idle, live, history, weather, haptic, and OTA paths. | Only reviewed destinations and purposes occur; unexpected supplier egress is denied or the test fails. |
 

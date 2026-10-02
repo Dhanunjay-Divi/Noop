@@ -6,7 +6,7 @@
 - Owner: project team
 - Branch: `codex/supplier-read-serialization-20261002`
 - Start commit: `a8a617593b4b81485fca672353ebcebe2d073f55`
-- End implementation commit: commit containing this round
+- End implementation commit: `6d0805485b29a05f63573ea0c453e1135f22b376`
 - Record commit or PR: local commit only; no push or merge
 
 ## Objective
@@ -117,11 +117,15 @@ out package state and completed successfully.
 ## Git and release state
 
 - Changed paths:
+  `Strand/BLE/VeepooBandAdapter.swift`,
+  `Strand/BLE/VeepooBandAdapterCore.swift`,
   `Strand/BLE/VeepooBandSource.swift`,
+  `StrandTests/ApplePairingRegistryRegressionTests.swift`,
   `StrandTests/VeepooBandAdapterCoreTests.swift`,
   this round, `docs/ops/ACTIVE.md`, `docs/ops/rounds/INDEX.md`, and the
   mechanically refreshed terminology inventory.
-- Commits: local commit containing this round.
+- Commits: implementation `769b8b8c8` and `6d0805485`; physical handoff
+  `6a615ff50`; documentation follow-up containing this record.
 - Branch and remote state: local branch only; not pushed or merged.
 - Repository visibility verified: not changed by this round.
 - Version/build impact: no version change.

@@ -53,7 +53,13 @@ Last updated: **2026-10-02**
   boundaries are unchanged. Focused Apple supplier tests pass 75/75 and the
   complete iPhone Simulator graph builds. No raw logging, push, merge,
   deployment, or physical BLE/accuracy/background/battery/retention claim is
-  part of this round.
+  part of this round. The consolidated production handoff now links the exact
+  install/evidence commands, candidate signature checks, WHOOP-first gate,
+  account/cloud and metric protocols, and privacy-safe hand-back contract. The
+  currently available local supplier archives do not match protected-main or
+  transferred October 1 trust evidence, so supplier physical testing remains
+  blocked until an authoritative approved artifact bundle is restored and
+  reverified; WHOOP comparison testing can proceed independently.
 
 - The mobile command-lens regression repair is integrated on protected `main`
   through PR `#30` at squash merge
