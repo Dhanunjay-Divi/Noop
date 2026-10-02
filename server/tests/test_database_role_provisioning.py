@@ -466,14 +466,41 @@ def test_unlisted_quarantined_runtime_role_is_removed_before_recreation() -> Non
         script.recover_unlisted_quarantined_runtime_role(
             FakeConnection(),
             "noop_managed_api",
+            migration_role=script.MIGRATION_USER,
+            database="noop",
             cloud_sql_user_listed=False,
             secret_exists=False,
         )
     )
 
     assert statements == [
+        'REVOKE ALL PRIVILEGES ON DATABASE "noop" FROM "noop_managed_api"',
+        'REVOKE ALL PRIVILEGES ON SCHEMA public FROM "noop_managed_api"',
+        (
+            "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM "
+            '"noop_managed_api"'
+        ),
+        (
+            "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM "
+            '"noop_managed_api"'
+        ),
+        (
+            "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM "
+            '"noop_managed_api"'
+        ),
+        (
+            'ALTER DEFAULT PRIVILEGES FOR ROLE "noop_migration" IN SCHEMA '
+            'public REVOKE ALL PRIVILEGES ON TABLES FROM "noop_managed_api"'
+        ),
+        (
+            'ALTER DEFAULT PRIVILEGES FOR ROLE "noop_migration" IN SCHEMA '
+            'public REVOKE ALL PRIVILEGES ON SEQUENCES FROM "noop_managed_api"'
+        ),
+        (
+            'ALTER DEFAULT PRIVILEGES FOR ROLE "noop_migration" IN SCHEMA '
+            'public REVOKE ALL PRIVILEGES ON FUNCTIONS FROM "noop_managed_api"'
+        ),
         'SET LOCAL ROLE "cloudsqlsuperuser"',
-        'DROP OWNED BY "noop_managed_api"',
         'DROP ROLE "noop_managed_api"',
         "RESET ROLE",
     ]
@@ -533,6 +560,8 @@ def test_unlisted_runtime_role_recovery_fails_closed(
             script.recover_unlisted_quarantined_runtime_role(
                 FakeConnection(),
                 "noop_managed_api",
+                migration_role=script.MIGRATION_USER,
+                database="noop",
                 cloud_sql_user_listed=cloud_sql_user_listed,
                 secret_exists=secret_exists,
             )

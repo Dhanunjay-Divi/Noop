@@ -368,6 +368,8 @@ async def recover_unlisted_quarantined_runtime_role(
     connection: asyncpg.Connection,
     role: str,
     *,
+    migration_role: str,
+    database: str,
     cloud_sql_user_listed: bool,
     secret_exists: bool,
 ) -> None:
@@ -424,10 +426,15 @@ async def recover_unlisted_quarantined_runtime_role(
     await assert_role_owns_no_objects(connection, role)
     quoted_role = quote_identifier(role)
     async with connection.transaction():
+        for statement in runtime_revoke_statements(
+            role,
+            migration_role=migration_role,
+            database=database,
+        ):
+            await connection.execute(statement)
         await connection.execute(
             "SET LOCAL ROLE " + quote_identifier(CLOUD_SQL_ADMIN_ROLE)
         )
-        await connection.execute(f"DROP OWNED BY {quoted_role}")
         await connection.execute(f"DROP ROLE {quoted_role}")
         await connection.execute("RESET ROLE")
 
@@ -441,6 +448,8 @@ async def configure_runtime_cloud_sql_user(
     role: str,
     password: str,
     secret_exists: bool,
+    migration_role: str,
+    database: str,
 ) -> None:
     known_users = cloud_sql_user_names(
         token,
@@ -450,6 +459,8 @@ async def configure_runtime_cloud_sql_user(
     await recover_unlisted_quarantined_runtime_role(
         connection,
         role,
+        migration_role=migration_role,
+        database=database,
         cloud_sql_user_listed=role in known_users,
         secret_exists=secret_exists,
     )
@@ -849,6 +860,38 @@ def runtime_grant_statements(
     return tuple(statements)
 
 
+def runtime_revoke_statements(
+    role: str,
+    *,
+    migration_role: str,
+    database: str,
+) -> tuple[str, ...]:
+    quoted_role = quote_identifier(role)
+    quoted_database = quote_identifier(database)
+    quoted_migration_role = quote_identifier(migration_role)
+    return (
+        f"REVOKE ALL PRIVILEGES ON DATABASE {quoted_database} FROM {quoted_role}",
+        f"REVOKE ALL PRIVILEGES ON SCHEMA public FROM {quoted_role}",
+        "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM " + quoted_role,
+        "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM "
+        + quoted_role,
+        "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM "
+        + quoted_role,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE "
+        + quoted_migration_role
+        + " IN SCHEMA public REVOKE ALL PRIVILEGES ON TABLES FROM "
+        + quoted_role,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE "
+        + quoted_migration_role
+        + " IN SCHEMA public REVOKE ALL PRIVILEGES ON SEQUENCES FROM "
+        + quoted_role,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE "
+        + quoted_migration_role
+        + " IN SCHEMA public REVOKE ALL PRIVILEGES ON FUNCTIONS FROM "
+        + quoted_role,
+    )
+
+
 async def quarantine_runtime_role(
     connection: asyncpg.Connection,
     role: str,
@@ -883,47 +926,18 @@ async def provision_runtime_role(
             f"REVOKE CREATE, TEMPORARY ON DATABASE {quoted_database} FROM PUBLIC"
         )
         await connection.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
-        await connection.execute(
-            f"REVOKE ALL PRIVILEGES ON DATABASE {quoted_database} FROM {quoted_role}"
-        )
+        for statement in runtime_revoke_statements(
+            runtime_role,
+            migration_role=migration_role,
+            database=database,
+        ):
+            await connection.execute(statement)
         await connection.execute(
             f"GRANT CONNECT ON DATABASE {quoted_database} TO {quoted_role}"
         )
-        await connection.execute(
-            f"REVOKE ALL PRIVILEGES ON SCHEMA public FROM {quoted_role}"
-        )
         await connection.execute(f"GRANT USAGE ON SCHEMA public TO {quoted_role}")
         await connection.execute(
-            "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM " + quoted_role
-        )
-        await connection.execute(
-            "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM "
-            + quoted_role
-        )
-        await connection.execute(
-            "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM "
-            + quoted_role
-        )
-        await connection.execute(
             "REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC"
-        )
-        await connection.execute(
-            "ALTER DEFAULT PRIVILEGES FOR ROLE "
-            + quote_identifier(migration_role)
-            + " IN SCHEMA public REVOKE ALL PRIVILEGES ON TABLES FROM "
-            + quoted_role
-        )
-        await connection.execute(
-            "ALTER DEFAULT PRIVILEGES FOR ROLE "
-            + quote_identifier(migration_role)
-            + " IN SCHEMA public REVOKE ALL PRIVILEGES ON SEQUENCES FROM "
-            + quoted_role
-        )
-        await connection.execute(
-            "ALTER DEFAULT PRIVILEGES FOR ROLE "
-            + quote_identifier(migration_role)
-            + " IN SCHEMA public REVOKE ALL PRIVILEGES ON FUNCTIONS FROM "
-            + quoted_role
         )
         await connection.execute(
             "ALTER DEFAULT PRIVILEGES FOR ROLE "
@@ -1207,6 +1221,8 @@ async def configure_runtime(args: argparse.Namespace, token: str) -> str:
                 role=args.user,
                 password=password,
                 secret_exists=existing is not None,
+                migration_role=args.migration_user,
+                database=args.database,
             )
             credential_rotated = True
             try:
