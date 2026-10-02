@@ -1861,10 +1861,136 @@ private struct FloatingTabBarHeightPreferenceKey: PreferenceKey {
     }
 }
 
-/// The signature bottom bar: one compact smoked-glass dock plus a separate movable edge action lens.
-/// Selection is an icon-sized halo rather than a full tab capsule, then becomes the current-tab
-/// disclosure when scrolling compacts navigation. Real iOS 26 Liquid Glass is used where available,
-/// with a material fallback.
+/// One continuous rail silhouette with a socket beneath the selected lens. The two cubic shoulders
+/// share horizontal tangents with both the rail top and the socket floor, so selection can interpolate
+/// between fixed tabs without welding separate circles or masks onto a rounded rectangle.
+private struct MeniscusTabRailShape: Shape {
+    var selectedIndex: CGFloat
+    let itemCount: Int
+    let horizontalInset: CGFloat
+    let cornerRadius: CGFloat
+    let notchDepth: CGFloat
+    let notchReach: CGFloat
+
+    var animatableData: CGFloat {
+        get { selectedIndex }
+        set { selectedIndex = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        guard rect.width > 0, rect.height > 0, itemCount > 0 else {
+            return Path()
+        }
+
+        let radius = min(
+            max(0, cornerRadius),
+            min(rect.width, rect.height) / 2
+        )
+        let count = CGFloat(itemCount)
+        let usableWidth = max(0, rect.width - horizontalInset * 2)
+        let slotWidth = usableWidth / count
+        let boundedIndex = selectedIndex.clamped(to: 0...(count - 1))
+        let selectedCenterX = rect.minX
+            + horizontalInset
+            + slotWidth * (boundedIndex + 0.5)
+        let topY = rect.minY
+        let socketFloorY = topY + min(
+            max(0, notchDepth),
+            max(0, rect.height - radius)
+        )
+        let topLeadingTangentX = rect.minX + radius
+        let topTrailingTangentX = rect.maxX - radius
+        // End tabs naturally tighten only their outer shoulder as it approaches a rounded rail corner.
+        // The inner shoulder keeps the full reach, preserving the socket instead of shifting the lens.
+        let leadingReach = min(
+            notchReach,
+            max(0, selectedCenterX - topLeadingTangentX)
+        )
+        let trailingReach = min(
+            notchReach,
+            max(0, topTrailingTangentX - selectedCenterX)
+        )
+        let socketStartX = selectedCenterX - leadingReach
+        let socketEndX = selectedCenterX + trailingReach
+
+        var path = Path()
+        path.move(to: CGPoint(x: topLeadingTangentX, y: topY))
+        path.addLine(to: CGPoint(x: socketStartX, y: topY))
+        path.addCurve(
+            to: CGPoint(x: selectedCenterX, y: socketFloorY),
+            control1: CGPoint(
+                x: socketStartX + leadingReach * 0.44,
+                y: topY
+            ),
+            control2: CGPoint(
+                x: selectedCenterX - leadingReach * 0.34,
+                y: socketFloorY
+            )
+        )
+        path.addCurve(
+            to: CGPoint(x: socketEndX, y: topY),
+            control1: CGPoint(
+                x: selectedCenterX + trailingReach * 0.34,
+                y: socketFloorY
+            ),
+            control2: CGPoint(
+                x: socketEndX - trailingReach * 0.44,
+                y: topY
+            )
+        )
+        path.addLine(to: CGPoint(x: topTrailingTangentX, y: topY))
+        path.addArc(
+            center: CGPoint(
+                x: topTrailingTangentX,
+                y: rect.minY + radius
+            ),
+            radius: radius,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(0),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+        path.addArc(
+            center: CGPoint(
+                x: rect.maxX - radius,
+                y: rect.maxY - radius
+            ),
+            radius: radius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+        path.addArc(
+            center: CGPoint(
+                x: rect.minX + radius,
+                y: rect.maxY - radius
+            ),
+            radius: radius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addArc(
+            center: CGPoint(
+                x: rect.minX + radius,
+                y: rect.minY + radius
+            ),
+            radius: radius,
+            startAngle: .degrees(180),
+            endAngle: .degrees(270),
+            clockwise: false
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// The signature bottom bar: one compact smoked-glass meniscus rail plus a separate movable edge
+/// action lens. Selection remains an icon-sized halo, but the rail itself now forms a smooth socket
+/// around it before becoming the current-tab disclosure when scrolling compacts navigation. Real
+/// iOS 26 Liquid Glass is used where available, with a material fallback.
 private struct FloatingTabBar: View {
     /// Reserve the expanded bar from the first layout pass. Its 48pt body plus bottom breathing room
     /// measures about 56pt; 76pt leaves an optical/touch margin and keeps the next card's rounded edge
@@ -1904,15 +2030,19 @@ private struct FloatingTabBar: View {
     private static let labelLineCount = 1
     private static let labelMinimumScaleFactor: CGFloat = 0.56
     private static let raisedLensDimension =
-        NoopMetrics.navigationLensSize
+        max(NoopMetrics.navigationLensSize, NoopMetrics.controlHeight)
     private static let expandedRailTopInset =
         NoopMetrics.navigationBarTopInset
     private static let expandedRailCornerRadius =
         NoopMetrics.navigationBarRadius
+    private static let meniscusNotchDepth =
+        raisedLensDimension - expandedRailTopInset - NoopMetrics.space1
+    private static let meniscusNotchReach =
+        raisedLensDimension / 2 + NoopMetrics.space3
 
-    /// Compaction is suppressed at accessibility text sizes. Sighted low-vision users retain the same
-    /// five persistent localized wayfinding labels; only this fixed navigation chrome receives a bounded
-    /// scale so the rail stays stable without clamping the user's text size anywhere else in the app.
+    /// Compaction is suppressed at accessibility text sizes. Sighted low-vision users retain all five
+    /// persistent destinations and the selected localized label; every button keeps its full VoiceOver
+    /// name even though inactive visual labels yield to the meniscus.
     private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
     private var expandedHeight: CGFloat {
         Self.expandedBodyHeight(
@@ -1951,6 +2081,24 @@ private struct FloatingTabBar: View {
     }
     private var currentAccent: Color {
         navigationAccent(for: currentItem.tag)
+    }
+    private var expandedRailHorizontalInset: CGFloat {
+        // Keep the end-tab socket clear of the rounded rail corners. Even on the narrowest supported
+        // phone, the remaining five equal slots stay above the 44pt minimum interaction width.
+        (dynamicTypeSize.isAccessibilitySize ? 3 : 6) + NoopMetrics.space6
+    }
+    private var expandedRailShape: MeniscusTabRailShape {
+        MeniscusTabRailShape(
+            selectedIndex: CGFloat(selection),
+            itemCount: nav.count,
+            horizontalInset: expandedRailHorizontalInset,
+            cornerRadius: Self.expandedRailCornerRadius,
+            notchDepth: Self.meniscusNotchDepth,
+            notchReach: Self.meniscusNotchReach
+        )
+    }
+    private var selectionAnimation: Animation? {
+        NoopMotion.gated(NoopMotion.card, reduced: reduceMotion)
     }
     private func navigationAccent(for tag: Int) -> Color {
         switch tag {
@@ -2009,8 +2157,8 @@ private struct FloatingTabBar: View {
     private func navigationInk(active: Bool, accent: Color) -> Color {
         guard active else {
             return colorScheme == .dark
-                ? .white.opacity(colorSchemeContrast == .increased ? 0.82 : 0.70)
-                : .black.opacity(colorSchemeContrast == .increased ? 0.76 : 0.62)
+                ? .white.opacity(colorSchemeContrast == .increased ? 0.82 : 0.52)
+                : .black.opacity(colorSchemeContrast == .increased ? 0.76 : 0.46)
         }
         return accent
     }
@@ -2059,16 +2207,10 @@ private struct FloatingTabBar: View {
                alignment: .leading)
         .background {
             if !visuallyCompact {
-                RoundedRectangle(
-                    cornerRadius: Self.expandedRailCornerRadius,
-                    style: .continuous
-                )
+                expandedRailShape
                     .fill(.clear)
                     .navigationGlass(
-                        in: RoundedRectangle(
-                            cornerRadius: Self.expandedRailCornerRadius,
-                            style: .continuous
-                        ),
+                        in: expandedRailShape,
                         tint: navigationGlassTint
                     )
                     .opacity(navigationGlassOpacity)
@@ -2077,21 +2219,15 @@ private struct FloatingTabBar: View {
         }
         .background {
             if !visuallyCompact {
-                RoundedRectangle(
-                    cornerRadius: Self.expandedRailCornerRadius,
-                    style: .continuous
-                )
+                expandedRailShape
                     .fill(navigationScrim)
                     .padding(.top, Self.expandedRailTopInset)
             }
         }
         .overlay {
             if !visuallyCompact {
-                RoundedRectangle(
-                    cornerRadius: Self.expandedRailCornerRadius,
-                    style: .continuous
-                )
-                    .strokeBorder(
+                expandedRailShape
+                    .stroke(
                     LinearGradient(colors: [
                         currentAccent.opacity(colorScheme == .dark ? 0.30 : 0.20),
                         .white.opacity(colorScheme == .dark ? 0.13 : 0.42),
@@ -2114,22 +2250,21 @@ private struct FloatingTabBar: View {
             x: 0,
             y: visuallyCompact ? 0 : 5
         )
+        .animation(selectionAnimation, value: selection)
         .animation(reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.28),
                    value: visuallyCompact)
     }
 
-    /// The full wayfinding state. The movable action lens is composed independently by RootTabView,
-    /// so the dock always reads as exactly five destinations in expanded and compact presentations.
+    /// The full wayfinding state. Five fixed hit targets remain visible, but only the selected destination
+    /// carries a text label so the moving bead and rail contour provide the primary wayfinding signal.
+    /// The movable action lens is composed independently by RootTabView.
     private var expandedBar: some View {
         HStack(spacing: dynamicTypeSize.isAccessibilitySize ? 0 : IPhonePrimaryTab.itemSpacing) {
             ForEach(nav) { item in tabButton(item) }
         }
-        .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 3 : 6)
+        .padding(.horizontal, expandedRailHorizontalInset)
         .frame(height: expandedHeight)
-        .animation(
-            reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.26),
-            value: selection
-        )
+        .animation(selectionAnimation, value: selection)
     }
 
     /// Farther down a screen, navigation yields to a borderless current-tab disclosure. Its fixed frame
@@ -2265,26 +2400,32 @@ private struct FloatingTabBar: View {
                 .offset(
                     y: active ? -NoopMetrics.navigationLensActiveOffset : 0
                 )
-                Text(visualTitle(for: item))
-                    // Fixed navigation remains one line like a native tab bar. The local Dynamic Type cap,
-                    // tightening and bounded scaling keep every shipped localized title whole; tail
-                    // truncation is only a defensive fallback for a future translation outside that bound.
-                    .font(StrandFont.footnote.weight(active ? .semibold : .medium))
-                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                    .lineLimit(Self.labelLineCount)
-                    .minimumScaleFactor(Self.labelMinimumScaleFactor)
-                    .allowsTightening(true)
-                    .truncationMode(.tail)
-                    .multilineTextAlignment(.center)
-                    .frame(
-                        minHeight: Self.boundedLabelLineHeight(scaledLabelLineHeight)
-                            * CGFloat(Self.labelLineCount)
-                    )
-                    .offset(y: -NoopMetrics.navigationLensLabelOffset)
-                    .padding(
-                        .horizontal,
-                        NoopMetrics.navigationLensLabelHorizontalPadding
-                    )
+                ZStack {
+                    if active {
+                        Text(visualTitle(for: item))
+                            // The selected name remains one line like a native tab bar. The local Dynamic
+                            // Type cap and bounded scaling keep the current destination whole; inactive
+                            // buttons remain fully named through their button accessibility labels.
+                            .font(StrandFont.footnote.weight(.semibold))
+                            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                            .lineLimit(Self.labelLineCount)
+                            .minimumScaleFactor(Self.labelMinimumScaleFactor)
+                            .allowsTightening(true)
+                            .truncationMode(.tail)
+                            .multilineTextAlignment(.center)
+                            .transition(.opacity.combined(with: .scale(scale: 0.94)))
+                    }
+                }
+                .frame(
+                    minHeight: Self.boundedLabelLineHeight(scaledLabelLineHeight)
+                        * CGFloat(Self.labelLineCount)
+                )
+                .offset(y: -NoopMetrics.navigationLensLabelOffset)
+                .padding(
+                    .horizontal,
+                    NoopMetrics.navigationLensLabelHorizontalPadding
+                )
+                .accessibilityHidden(true)
             }
             .foregroundStyle(navigationInk(active: active, accent: accent))
             .frame(maxWidth: .infinity)
@@ -2413,6 +2554,57 @@ private struct NoopCommandNMark: View {
     }
 }
 
+/// A mirrored liquid bulb whose narrow neck terminates exactly at the snapped safe-area edge.
+/// The visible body is deliberately smaller than the unchanged 48x52 interaction frame.
+private struct NoopCommandBubbleShape: Shape {
+    let edge: NoopCommandLensEdge
+
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            let mirroredX = edge == .trailing ? x : 1 - x
+            return CGPoint(
+                x: rect.minX + rect.width * mirroredX,
+                y: rect.minY + rect.height * y
+            )
+        }
+
+        var path = Path()
+        path.move(to: point(1, 0.34))
+        path.addCurve(
+            to: point(0.73, 0.18),
+            control1: point(0.94, 0.34),
+            control2: point(0.84, 0.22)
+        )
+        path.addCurve(
+            to: point(0.20, 0.12),
+            control1: point(0.58, 0.03),
+            control2: point(0.34, 0.03)
+        )
+        path.addCurve(
+            to: point(0.02, 0.50),
+            control1: point(0.07, 0.20),
+            control2: point(0.02, 0.34)
+        )
+        path.addCurve(
+            to: point(0.20, 0.88),
+            control1: point(0.02, 0.66),
+            control2: point(0.07, 0.80)
+        )
+        path.addCurve(
+            to: point(0.73, 0.82),
+            control1: point(0.34, 0.97),
+            control2: point(0.58, 0.97)
+        )
+        path.addCurve(
+            to: point(1, 0.66),
+            control1: point(0.84, 0.78),
+            control2: point(0.94, 0.66)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
 private struct MovableNoopCommandLens: View {
     let bottomClearance: CGFloat
     let action: () -> Void
@@ -2438,16 +2630,8 @@ private struct MovableNoopCommandLens: View {
             : .white.opacity(0.94)
     }
 
-    private var lensShape: UnevenRoundedRectangle {
-        let outerRadius: CGFloat = 7
-        let innerRadius: CGFloat = 16
-        return UnevenRoundedRectangle(
-            topLeadingRadius: edge == .leading ? outerRadius : innerRadius,
-            bottomLeadingRadius: edge == .leading ? outerRadius : innerRadius,
-            bottomTrailingRadius: edge == .trailing ? outerRadius : innerRadius,
-            topTrailingRadius: edge == .trailing ? outerRadius : innerRadius,
-            style: .continuous
-        )
+    private var lensShape: NoopCommandBubbleShape {
+        NoopCommandBubbleShape(edge: edge)
     }
 
     private var lensFace: some View {
@@ -2462,17 +2646,14 @@ private struct MovableNoopCommandLens: View {
         let rimTop = Color.white.opacity(colorScheme == .dark ? 0.24 : 0.52)
         let shadowOpacity = colorScheme == .dark ? 0.12 : 0.06
 
-        return NoopCommandNMark()
-            .offset(x: edge == .leading ? 1 : -1)
-            .frame(width: 18, height: 38)
-            .background {
-                lensShape
-                    .fill(opticalScrim)
-                    .navigationGlass(in: lensShape, tint: glassTint)
-                    .opacity(surfaceOpacity)
-            }
-            .overlay {
-                lensShape.strokeBorder(
+        return ZStack {
+            lensShape
+                .fill(opticalScrim)
+                .navigationGlass(in: lensShape, tint: glassTint)
+                .opacity(surfaceOpacity)
+
+            lensShape
+                .stroke(
                     LinearGradient(
                         colors: [
                             rimTop,
@@ -2484,6 +2665,28 @@ private struct MovableNoopCommandLens: View {
                     ),
                     lineWidth: 0.75
                 )
+
+            Capsule()
+                .fill(
+                    StrandPalette.navigationLensHighlight.opacity(
+                        colorScheme == .dark
+                            ? NoopMetrics.navigationLensHighlightDarkOpacity
+                            : NoopMetrics.navigationLensHighlightLightOpacity
+                    )
+                )
+                .frame(width: 9, height: 1.5)
+                .rotationEffect(.degrees(edge == .leading ? -18 : 18))
+                .offset(x: edge == .leading ? 3 : -3, y: -10)
+
+            NoopCommandNMark()
+                .offset(x: edge == .leading ? 3 : -3)
+        }
+            .frame(width: 32, height: 36)
+            .background {
+                lensShape
+                    .fill(StrandPalette.chargeColor.opacity(shadowOpacity))
+                    .blur(radius: 5)
+                    .offset(y: 2)
             }
             .shadow(
                 color: StrandPalette.chargeColor.opacity(shadowOpacity),
@@ -2491,7 +2694,9 @@ private struct MovableNoopCommandLens: View {
                 x: 0,
                 y: 2
             )
-            .offset(x: edge == .leading ? -18 : 18)
+            // The button centre already rests 26pt inside the safe-area edge. A 32pt body shifted
+            // 10pt outward therefore ends exactly at that edge while its 48x52 target stays on-screen.
+            .offset(x: edge == .leading ? -10 : 10)
             .frame(
                 width: NoopCommandLensLayout.touchSize.width,
                 height: NoopCommandLensLayout.touchSize.height

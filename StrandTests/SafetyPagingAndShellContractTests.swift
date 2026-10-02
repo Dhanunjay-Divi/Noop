@@ -1905,8 +1905,13 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(commandLens.contains(#"Text("Move to left edge")"#))
         XCTAssertTrue(commandLens.contains(#"Text("Move to right edge")"#))
         XCTAssertTrue(shell.contains("static let touchSize = CGSize(width: 48, height: 52)"))
-        XCTAssertTrue(commandLens.contains(".frame(width: 18, height: 38)"))
-        XCTAssertTrue(commandLens.contains(".offset(x: edge == .leading ? -18 : 18)"))
+        XCTAssertTrue(shell.contains("private struct NoopCommandBubbleShape: Shape"))
+        XCTAssertTrue(commandLens.contains("NoopCommandBubbleShape(edge: edge)"))
+        XCTAssertTrue(commandLens.contains(".frame(width: 32, height: 36)"))
+        XCTAssertTrue(commandLens.contains(".offset(x: edge == .leading ? -10 : 10)"))
+        XCTAssertTrue(commandLens.contains(".navigationGlass(in: lensShape"))
+        XCTAssertTrue(commandLens.contains("StrandPalette.navigationLensHighlight.opacity("))
+        XCTAssertTrue(commandLens.contains("@Environment(\\.accessibilityReduceTransparency)"))
         XCTAssertTrue(commandLens.contains("private var verticalFraction = 0.76"))
         XCTAssertFalse(commandLens.contains(#"Image(systemName: "plus")"#))
         XCTAssertTrue(shell.contains("--demo-quick-actions"))
@@ -1928,11 +1933,20 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
 
     func testPrimaryTabBarUsesOneRaisedMovingLensWithoutLosingSemantics() throws {
         let shell = try source("StrandiOS/App/RootTabView.swift")
+        let meniscus = try XCTUnwrap(
+            shell.components(separatedBy: "private struct MeniscusTabRailShape: Shape").last?
+                .components(separatedBy: "private struct FloatingTabBar: View").first
+        )
         let tabBar = try XCTUnwrap(
             shell.components(separatedBy: "private struct FloatingTabBar: View").last?
                 .components(separatedBy: "private extension Comparable").first
         )
 
+        XCTAssertTrue(meniscus.contains("var animatableData: CGFloat"))
+        XCTAssertTrue(meniscus.contains("let boundedIndex = selectedIndex.clamped("))
+        XCTAssertTrue(meniscus.contains("let leadingReach = min("))
+        XCTAssertTrue(meniscus.contains("let trailingReach = min("))
+        XCTAssertEqual(meniscus.components(separatedBy: "path.addCurve(").count - 1, 2)
         XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensSize"))
         XCTAssertTrue(tabBar.contains("NoopMetrics.navigationBarTopInset"))
         XCTAssertTrue(tabBar.contains("NoopMetrics.navigationBarRadius"))
@@ -1952,6 +1966,22 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(tabBar.contains("matchedGeometryEffect("))
         XCTAssertTrue(tabBar.contains(#"id: "selected-tab-indicator""#))
         XCTAssertTrue(tabBar.contains("Circle()"))
+        XCTAssertTrue(tabBar.contains("private var expandedRailShape: MeniscusTabRailShape"))
+        XCTAssertGreaterThanOrEqual(
+            tabBar.components(separatedBy: "expandedRailShape").count - 1,
+            4
+        )
+        XCTAssertTrue(tabBar.contains(
+            "max(NoopMetrics.navigationLensSize, NoopMetrics.controlHeight)"
+        ))
+        XCTAssertTrue(tabBar.contains(
+            "(dynamicTypeSize.isAccessibilitySize ? 3 : 6) + NoopMetrics.space6"
+        ))
+        XCTAssertTrue(tabBar.contains("NoopMotion.gated(NoopMotion.card"))
+        XCTAssertTrue(tabBar.contains(".animation(selectionAnimation, value: selection)"))
+        XCTAssertTrue(tabBar.contains("if active {\n                        Text(visualTitle(for: item))"))
+        XCTAssertTrue(tabBar.contains(".accessibilityHidden(true)"))
+        XCTAssertFalse(tabBar.contains("DragGesture"))
         XCTAssertTrue(tabBar.contains("@Environment(\\.accessibilityReduceMotion)"))
         XCTAssertTrue(tabBar.contains("NoopMotion.gated("))
         XCTAssertTrue(tabBar.contains(".accessibilityAddTraits(.isButton)"))
