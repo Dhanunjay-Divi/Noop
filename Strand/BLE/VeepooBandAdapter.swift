@@ -88,12 +88,12 @@ private final class VeepooBandAdapter: VeepooBandAdapterControlling {
         core.stopLiveHeartRate()
     }
 
-    func readSteps() {
-        core.readSteps()
+    func readSteps(requestID: UInt64) {
+        core.readSteps(requestID: requestID)
     }
 
-    func readSleep() {
-        core.readSleep()
+    func readSleep(requestID: UInt64) {
+        core.readSleep(requestID: requestID)
     }
 }
 
@@ -291,7 +291,7 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
     /// completion block is never retained and never fires. The class method does
     /// issue the supplier's own step command to the band for a same-day query and
     /// calls back exactly once, on the main queue, about half a second later.
-    func readSteps(generation: UInt64) {
+    func readSteps(generation: UInt64, requestID: UInt64) {
         // The band's address may change across verification, so it is read from the
         // live peripheral model rather than the scan-time candidate.
         guard let model = manager.peripheralModel,
@@ -301,7 +301,8 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
             emit(
                 .stepsFailed(
                     generation: generation,
-                    .noResult
+                    requestID: requestID,
+                    failure: .noResult
                 )
             )
             return
@@ -319,7 +320,8 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
                     self?.emit(
                         .stepsFailed(
                             generation: generation,
-                            .noResult
+                            requestID: requestID,
+                            failure: .noResult
                         )
                     )
                 }
@@ -332,7 +334,8 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
                     self?.emit(
                         .stepsFailed(
                             generation: generation,
-                            .invalidSample
+                            requestID: requestID,
+                            failure: .invalidSample
                         )
                     )
                 }
@@ -342,7 +345,8 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
                 self?.emit(
                     .steps(
                         generation: generation,
-                        VeepooBandSDKStepsEvent(
+                        requestID: requestID,
+                        reading: VeepooBandSDKStepsEvent(
                             steps: steps,
                             distanceKm: Self.doubleValue(
                                 raw["Dis"] ?? raw["dis"]
@@ -377,7 +381,7 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
     /// the device's stored days (that selector IS implemented on `VPPeripheralManage`),
     /// then read back only the sleep rows. NOOP reads sleep fields and nothing else -
     /// the sync also populates vendor tables this app deliberately never touches.
-    func readSleep(generation: UInt64) {
+    func readSleep(generation: UInt64, requestID: UInt64) {
         guard let peripheral = manager.peripheralManage,
               let model = manager.peripheralModel,
               let address = model.deviceAddress,
@@ -386,7 +390,8 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
             emit(
                 .sleepFailed(
                     generation: generation,
-                    .noResult
+                    requestID: requestID,
+                    failure: .noResult
                 )
             )
             return
@@ -396,7 +401,11 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
             // Only read once the device has finished handing over its days.
             guard state == .complete else { return }
             Task { @MainActor [weak self] in
-                self?.emitSleep(generation: generation, address: address)
+                self?.emitSleep(
+                    generation: generation,
+                    requestID: requestID,
+                    address: address
+                )
             }
         }
     }
@@ -406,7 +415,11 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
     /// Both today and yesterday are queried: the band files a night under a single
     /// date key, and which one depends on when the session started, so a night that
     /// began before midnight is not under today's key.
-    private func emitSleep(generation: UInt64, address: String) {
+    private func emitSleep(
+        generation: UInt64,
+        requestID: UInt64,
+        address: String
+    ) {
         let today = Date()
         let yesterday = today.addingTimeInterval(-86_400)
         var rows: [[AnyHashable: Any]] = []
@@ -421,7 +434,8 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
             emit(
                 .sleepFailed(
                     generation: generation,
-                    .noResult
+                    requestID: requestID,
+                    failure: .noResult
                 )
             )
             return
@@ -441,7 +455,8 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
             emit(
                 .sleepFailed(
                     generation: generation,
-                    .invalidSample
+                    requestID: requestID,
+                    failure: .invalidSample
                 )
             )
             return
@@ -453,7 +468,8 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
             emit(
                 .sleepFailed(
                     generation: generation,
-                    .invalidSample
+                    requestID: requestID,
+                    failure: .invalidSample
                 )
             )
             return
@@ -462,7 +478,8 @@ private final class VeepooBleSDKClient: VeepooBandSDKClient {
         emit(
             .sleep(
                 generation: generation,
-                VeepooBandSDKSleepEvent(
+                requestID: requestID,
+                reading: VeepooBandSDKSleepEvent(
                     startTs: start,
                     endTs: end,
                     totalMin: best.total,

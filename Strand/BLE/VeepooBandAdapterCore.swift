@@ -103,8 +103,13 @@ enum VeepooBandAdapterEvent: Equatable, Sendable {
     case battery(VeepooBandBatteryReading)
     case liveStarted
     case heartRate(VeepooBandHeartRateReading)
-    case steps(VeepooBandStepsReading)
-    case sleep(VeepooBandSleepReading)
+    case steps(requestID: UInt64, reading: VeepooBandStepsReading)
+    case sleep(requestID: UInt64, reading: VeepooBandSleepReading)
+    case metricReadFailed(
+        requestID: UInt64,
+        stage: VeepooBandAdapterStage,
+        failure: VeepooBandAdapterFailure
+    )
     case liveStopped
     case disconnected
     case failed(stage: VeepooBandAdapterStage, failure: VeepooBandAdapterFailure)
@@ -123,8 +128,8 @@ protocol VeepooBandAdapterControlling: AnyObject {
     func verifyPassword(_ password: String)
     func startLiveHeartRate()
     func stopLiveHeartRate()
-    func readSteps()
-    func readSleep()
+    func readSteps(requestID: UInt64)
+    func readSleep(requestID: UInt64)
 }
 
 enum VeepooBandSDKConnectionEvent: Equatable, Sendable {
@@ -198,15 +203,25 @@ enum VeepooBandSDKEvent: Equatable, Sendable {
         VeepooBandAdapterFailure
     )
     case live(generation: UInt64, VeepooBandSDKLiveEvent)
-    case steps(generation: UInt64, VeepooBandSDKStepsEvent)
+    case steps(
+        generation: UInt64,
+        requestID: UInt64,
+        reading: VeepooBandSDKStepsEvent
+    )
     case stepsFailed(
         generation: UInt64,
-        VeepooBandAdapterFailure
+        requestID: UInt64,
+        failure: VeepooBandAdapterFailure
     )
-    case sleep(generation: UInt64, VeepooBandSDKSleepEvent)
+    case sleep(
+        generation: UInt64,
+        requestID: UInt64,
+        reading: VeepooBandSDKSleepEvent
+    )
     case sleepFailed(
         generation: UInt64,
-        VeepooBandAdapterFailure
+        requestID: UInt64,
+        failure: VeepooBandAdapterFailure
     )
 
     var generation: UInt64 {
@@ -217,10 +232,10 @@ enum VeepooBandSDKEvent: Equatable, Sendable {
              .battery(let generation, _),
              .batteryFailed(let generation, _),
              .live(let generation, _),
-             .steps(let generation, _),
-             .stepsFailed(let generation, _),
-             .sleep(let generation, _),
-             .sleepFailed(let generation, _):
+             .steps(let generation, _, _),
+             .stepsFailed(let generation, _, _),
+             .sleep(let generation, _, _),
+             .sleepFailed(let generation, _, _):
             return generation
         }
     }
@@ -242,8 +257,8 @@ protocol VeepooBandSDKClient: AnyObject {
     func readBattery(generation: UInt64)
     func startLiveHeartRate(generation: UInt64)
     func stopLiveHeartRate()
-    func readSteps(generation: UInt64)
-    func readSleep(generation: UInt64)
+    func readSteps(generation: UInt64, requestID: UInt64)
+    func readSleep(generation: UInt64, requestID: UInt64)
 }
 
 enum VeepooBandDiagnosticOutcome: String, Equatable, Sendable {
@@ -311,26 +326,39 @@ final class VeepooBandAppDiagnostics: VeepooBandDiagnosticsRecording {
 /// App-owned state machine around the quarantined supplier client.
 @MainActor
 final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
+    private struct ActiveMetricRead: Equatable {
+        let requestID: UInt64
+        let stage: VeepooBandAdapterStage
+    }
+
     var eventHandler: ((VeepooBandAdapterEvent) -> Void)?
     private(set) var state: VeepooBandAdapterState = .idle
 
     private let client: any VeepooBandSDKClient
     private let compatibilityPolicy: VeepooBandCompatibilityPolicy
     private let diagnostics: any VeepooBandDiagnosticsRecording
+    private let stepReadTimeoutNanoseconds: UInt64
+    private let sleepReadTimeoutNanoseconds: UInt64
     private var generation: UInt64 = 0
     private var candidates: [UInt64: VeepooBandCandidate] = [:]
     private var acceptedHeartRateCount = 0
     private var staleStages = Set<VeepooBandAdapterStage>()
     private var reportedInvalidHeartRate = false
+    private var activeMetricRead: ActiveMetricRead?
+    private var metricReadTimeoutTask: Task<Void, Never>?
 
     init(
         client: any VeepooBandSDKClient,
         compatibilityPolicy: VeepooBandCompatibilityPolicy,
-        diagnostics: (any VeepooBandDiagnosticsRecording)? = nil
+        diagnostics: (any VeepooBandDiagnosticsRecording)? = nil,
+        stepReadTimeoutNanoseconds: UInt64 = 15_000_000_000,
+        sleepReadTimeoutNanoseconds: UInt64 = 60_000_000_000
     ) {
         self.client = client
         self.compatibilityPolicy = compatibilityPolicy
         self.diagnostics = diagnostics ?? VeepooBandAppDiagnostics.shared
+        self.stepReadTimeoutNanoseconds = stepReadTimeoutNanoseconds
+        self.sleepReadTimeoutNanoseconds = sleepReadTimeoutNanoseconds
         client.eventHandler = { [weak self] event in self?.handle(event) }
     }
 
@@ -394,6 +422,7 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
         guard state != .idle else { return }
         let priorStage = currentStage
         let count = acceptedHeartRateCount
+        cancelMetricRead(recordCancellation: true)
         client.stopLiveHeartRate()
         client.stopDiscovery()
         client.disconnect()
@@ -440,23 +469,31 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
 
     /// Asks the band for its own scored sleep after authentication. The supplier
     /// stack may drop commands issued while authentication is still settling.
-    func readSleep() {
-        guard state == .ready || state == .startingLive || state == .streaming else {
-            reject(.invalidState, stage: .sleep)
-            return
+    func readSleep(requestID: UInt64) {
+        beginMetricRead(
+            requestID: requestID,
+            stage: .sleep,
+            timeoutNanoseconds: sleepReadTimeoutNanoseconds
+        ) {
+            client.readSleep(
+                generation: generation,
+                requestID: requestID
+            )
         }
-        diagnostics.record(.init(stage: .sleep, outcome: .began))
-        client.readSleep(generation: generation)
     }
 
     /// Reads the band's own day-cumulative step total after authentication.
-    func readSteps() {
-        guard state == .ready || state == .startingLive || state == .streaming else {
-            reject(.invalidState, stage: .steps)
-            return
+    func readSteps(requestID: UInt64) {
+        beginMetricRead(
+            requestID: requestID,
+            stage: .steps,
+            timeoutNanoseconds: stepReadTimeoutNanoseconds
+        ) {
+            client.readSteps(
+                generation: generation,
+                requestID: requestID
+            )
         }
-        diagnostics.record(.init(stage: .steps, outcome: .began))
-        client.readSteps(generation: generation)
     }
 
     func stopLiveHeartRate() {
@@ -591,17 +628,25 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
             fail(failure, stage: .battery)
         case .live(_, let value):
             handle(value)
-        case .steps(_, let value):
-            handleSteps(value)
-        case .stepsFailed(_, let failure):
+        case .steps(_, let requestID, let value):
+            guard finishMetricRead(requestID: requestID, stage: .steps) else {
+                return
+            }
+            handleSteps(value, requestID: requestID)
+        case .stepsFailed(_, let requestID, let failure):
             recordOptionalReadFailure(
+                requestID: requestID,
                 stage: .steps,
                 failure: failure
             )
-        case .sleep(_, let value):
-            handleSleep(value)
-        case .sleepFailed(_, let failure):
+        case .sleep(_, let requestID, let value):
+            guard finishMetricRead(requestID: requestID, stage: .sleep) else {
+                return
+            }
+            handleSleep(value, requestID: requestID)
+        case .sleepFailed(_, let requestID, let failure):
             recordOptionalReadFailure(
+                requestID: requestID,
                 stage: .sleep,
                 failure: failure
             )
@@ -702,7 +747,10 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
 
     /// Accepts a night the band scored itself. Only sanity bounds are applied; a
     /// value NOOP cannot verify is surfaced as the band's, never re-derived.
-    private func handleSleep(_ event: VeepooBandSDKSleepEvent) {
+    private func handleSleep(
+        _ event: VeepooBandSDKSleepEvent,
+        requestID: UInt64
+    ) {
         guard state == .ready || state == .startingLive || state == .streaming else {
             recordStale(.sleep)
             return
@@ -715,12 +763,18 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
               event.awakenings.map({ (0...100).contains($0) }) ?? true,
               event.efficiency.map({ (0...1).contains($0) }) ?? true
         else {
-            reject(.invalidSample, stage: .sleep)
+            emitMetricReadFailure(
+                requestID: requestID,
+                stage: .sleep,
+                failure: .invalidSample,
+                outcome: .rejected
+            )
             return
         }
         eventHandler?(
             .sleep(
-                .init(
+                requestID: requestID,
+                reading: .init(
                     startTs: event.startTs,
                     endTs: event.endTs,
                     totalMin: event.totalMin,
@@ -737,18 +791,27 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
     /// Accepts a day-cumulative activity total. A step counter only ever grows
     /// within a day, and the band reports an absolute total, so the only validation
     /// is a sane range. NOOP never fabricates or back-fills this value.
-    private func handleSteps(_ event: VeepooBandSDKStepsEvent) {
+    private func handleSteps(
+        _ event: VeepooBandSDKStepsEvent,
+        requestID: UInt64
+    ) {
         guard state == .ready || state == .startingLive || state == .streaming else {
             recordStale(.steps)
             return
         }
         guard (0...200_000).contains(event.steps) else {
-            reject(.invalidSample, stage: .steps)
+            emitMetricReadFailure(
+                requestID: requestID,
+                stage: .steps,
+                failure: .invalidSample,
+                outcome: .rejected
+            )
             return
         }
         eventHandler?(
             .steps(
-                .init(
+                requestID: requestID,
+                reading: .init(
                     steps: event.steps,
                     distanceKm: event.distanceKm,
                     kcal: event.kcal
@@ -759,6 +822,7 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
     }
 
     private func recordOptionalReadFailure(
+        requestID: UInt64,
         stage: VeepooBandAdapterStage,
         failure: VeepooBandAdapterFailure
     ) {
@@ -766,14 +830,15 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
             recordStale(stage)
             return
         }
-        diagnostics.record(
-            .init(
-                stage: stage,
-                outcome: .failed,
-                failure: failure
-            )
+        guard finishMetricRead(requestID: requestID, stage: stage) else {
+            return
+        }
+        emitMetricReadFailure(
+            requestID: requestID,
+            stage: stage,
+            failure: failure,
+            outcome: .failed
         )
-        eventHandler?(.failed(stage: stage, failure: failure))
     }
 
     private func finishLive(failure: VeepooBandAdapterFailure) {
@@ -797,6 +862,7 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
 
     private func unexpectedDisconnect() {
         guard state != .idle else { return }
+        cancelMetricRead(recordCancellation: true)
         client.stopLiveHeartRate()
         client.stopDiscovery()
         generation &+= 1
@@ -817,6 +883,7 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
         _ failure: VeepooBandAdapterFailure,
         stage: VeepooBandAdapterStage
     ) {
+        cancelMetricRead(recordCancellation: true)
         client.stopLiveHeartRate()
         client.stopDiscovery()
         client.disconnect()
@@ -838,6 +905,7 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
     }
 
     private func cancelCurrentSession(recordCancellation: Bool) {
+        cancelMetricRead(recordCancellation: recordCancellation)
         guard state != .idle else { return }
         let priorStage = currentStage
         client.stopLiveHeartRate()
@@ -864,6 +932,105 @@ final class VeepooBandAdapterCore: VeepooBandAdapterControlling {
                 failure: .staleCallback
             )
         )
+    }
+
+    private func beginMetricRead(
+        requestID: UInt64,
+        stage: VeepooBandAdapterStage,
+        timeoutNanoseconds: UInt64,
+        start: () -> Void
+    ) {
+        guard state == .ready || state == .startingLive || state == .streaming else {
+            emitMetricReadFailure(
+                requestID: requestID,
+                stage: stage,
+                failure: .invalidState,
+                outcome: .rejected
+            )
+            return
+        }
+        guard activeMetricRead == nil else {
+            emitMetricReadFailure(
+                requestID: requestID,
+                stage: stage,
+                failure: .busy,
+                outcome: .rejected
+            )
+            return
+        }
+
+        let request = ActiveMetricRead(requestID: requestID, stage: stage)
+        activeMetricRead = request
+        diagnostics.record(.init(stage: stage, outcome: .began))
+        metricReadTimeoutTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+            } catch {
+                return
+            }
+            guard let self, self.activeMetricRead == request else { return }
+            self.activeMetricRead = nil
+            self.metricReadTimeoutTask = nil
+            self.emitMetricReadFailure(
+                requestID: request.requestID,
+                stage: request.stage,
+                failure: .timeout,
+                outcome: .failed
+            )
+        }
+        start()
+    }
+
+    @discardableResult
+    private func finishMetricRead(
+        requestID: UInt64,
+        stage: VeepooBandAdapterStage
+    ) -> Bool {
+        guard activeMetricRead == .init(
+            requestID: requestID,
+            stage: stage
+        ) else {
+            recordStale(stage)
+            return false
+        }
+        metricReadTimeoutTask?.cancel()
+        metricReadTimeoutTask = nil
+        activeMetricRead = nil
+        return true
+    }
+
+    private func emitMetricReadFailure(
+        requestID: UInt64,
+        stage: VeepooBandAdapterStage,
+        failure: VeepooBandAdapterFailure,
+        outcome: VeepooBandDiagnosticOutcome
+    ) {
+        diagnostics.record(
+            .init(
+                stage: stage,
+                outcome: outcome,
+                failure: failure
+            )
+        )
+        eventHandler?(
+            .metricReadFailed(
+                requestID: requestID,
+                stage: stage,
+                failure: failure
+            )
+        )
+    }
+
+    private func cancelMetricRead(recordCancellation: Bool) {
+        metricReadTimeoutTask?.cancel()
+        metricReadTimeoutTask = nil
+        guard let request = activeMetricRead else { return }
+        activeMetricRead = nil
+        if recordCancellation {
+            diagnostics.record(
+                .init(stage: request.stage, outcome: .cancelled)
+            )
+        }
     }
 
     private func stage(for event: VeepooBandSDKEvent) -> VeepooBandAdapterStage {

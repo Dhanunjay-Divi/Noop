@@ -45,8 +45,8 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         private(set) var batteryReads: [UInt64] = []
         private(set) var liveStarts: [UInt64] = []
         private(set) var liveStopCount = 0
-        private(set) var readStepsGenerations: [UInt64] = []
-        private(set) var readSleepGenerations: [UInt64] = []
+        private(set) var readStepsRequests: [(UInt64, UInt64)] = []
+        private(set) var readSleepRequests: [(UInt64, UInt64)] = []
 
         func startDiscovery(generation: UInt64, targetPeripheralID: UUID?) {
             discoveries.append((generation, targetPeripheralID))
@@ -74,12 +74,12 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             batteryReads.append(generation)
         }
 
-        func readSteps(generation: UInt64) {
-            readStepsGenerations.append(generation)
+        func readSteps(generation: UInt64, requestID: UInt64) {
+            readStepsRequests.append((generation, requestID))
         }
 
-        func readSleep(generation: UInt64) {
-            readSleepGenerations.append(generation)
+        func readSleep(generation: UInt64, requestID: UInt64) {
+            readSleepRequests.append((generation, requestID))
         }
 
         func startLiveHeartRate(generation: UInt64) {
@@ -111,8 +111,8 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         private(set) var stopDiscoveryCount = 0
         private(set) var connections: [(UInt64, String)] = []
         private(set) var reconnects: [UInt64] = []
-        private(set) var readStepsCount = 0
-        private(set) var readSleepCount = 0
+        private(set) var readStepRequestIDs: [UInt64] = []
+        private(set) var readSleepRequestIDs: [UInt64] = []
         var onDiscovery: (() -> Void)?
         var onStopDiscovery: (() -> Void)?
         var onDisconnect: (() -> Void)?
@@ -141,12 +141,15 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             onDisconnect?()
         }
         func verifyPassword(_ password: String) {}
-        func readSteps() {
-            readStepsCount += 1
+        var readStepsCount: Int { readStepRequestIDs.count }
+        var readSleepCount: Int { readSleepRequestIDs.count }
+
+        func readSteps(requestID: UInt64) {
+            readStepRequestIDs.append(requestID)
         }
 
-        func readSleep() {
-            readSleepCount += 1
+        func readSleep(requestID: UInt64) {
+            readSleepRequestIDs.append(requestID)
         }
 
         func startLiveHeartRate() { liveStartCount += 1 }
@@ -917,16 +920,19 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         var events: [VeepooBandAdapterEvent] = []
         core.eventHandler = { events.append($0) }
 
-        core.readSteps()
-        core.readSleep()
-        XCTAssertTrue(client.readStepsGenerations.isEmpty)
-        XCTAssertTrue(client.readSleepGenerations.isEmpty)
+        core.readSteps(requestID: 1)
+        core.readSleep(requestID: 2)
+        XCTAssertTrue(client.readStepsRequests.isEmpty)
+        XCTAssertTrue(client.readSleepRequests.isEmpty)
 
         let generation = ready(core, client: client)
-        core.readSteps()
-        core.readSleep()
-        XCTAssertEqual(client.readStepsGenerations, [generation])
-        XCTAssertEqual(client.readSleepGenerations, [generation])
+        let stepRequestID: UInt64 = 10
+        let sleepRequestID: UInt64 = 11
+        core.readSteps(requestID: stepRequestID)
+        XCTAssertEqual(
+            client.readStepsRequests.map { [$0.0, $0.1] },
+            [[generation, stepRequestID]]
+        )
 
         let steps = VeepooBandStepsReading(
             steps: 0,
@@ -945,13 +951,20 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         client.emit(
             .steps(
                 generation: generation,
-                .init(steps: 0, distanceKm: 0, kcal: 0)
+                requestID: stepRequestID,
+                reading: .init(steps: 0, distanceKm: 0, kcal: 0)
             )
+        )
+        core.readSleep(requestID: sleepRequestID)
+        XCTAssertEqual(
+            client.readSleepRequests.map { [$0.0, $0.1] },
+            [[generation, sleepRequestID]]
         )
         client.emit(
             .sleep(
                 generation: generation,
-                .init(
+                requestID: sleepRequestID,
+                reading: .init(
                     startTs: sleep.startTs,
                     endTs: sleep.endTs,
                     totalMin: sleep.totalMin,
@@ -964,8 +977,16 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         )
 
         XCTAssertEqual(core.state, .ready)
-        XCTAssertTrue(events.contains(.steps(steps)))
-        XCTAssertTrue(events.contains(.sleep(sleep)))
+        XCTAssertTrue(
+            events.contains(
+                .steps(requestID: stepRequestID, reading: steps)
+            )
+        )
+        XCTAssertTrue(
+            events.contains(
+                .sleep(requestID: sleepRequestID, reading: sleep)
+            )
+        )
         XCTAssertTrue(
             diagnostics.events.contains(
                 .init(stage: .steps, outcome: .completed)
@@ -991,16 +1012,42 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         core.eventHandler = { events.append($0) }
         let generation = ready(core, client: client)
 
-        client.emit(.stepsFailed(generation: generation, .noResult))
-        client.emit(.sleepFailed(generation: generation, .timeout))
+        core.readSteps(requestID: 21)
+        client.emit(
+            .stepsFailed(
+                generation: generation,
+                requestID: 21,
+                failure: .noResult
+            )
+        )
+        core.readSleep(requestID: 22)
+        client.emit(
+            .sleepFailed(
+                generation: generation,
+                requestID: 22,
+                failure: .timeout
+            )
+        )
 
         XCTAssertEqual(core.state, .ready)
         XCTAssertEqual(client.disconnectCount, 0)
         XCTAssertTrue(
-            events.contains(.failed(stage: .steps, failure: .noResult))
+            events.contains(
+                .metricReadFailed(
+                    requestID: 21,
+                    stage: .steps,
+                    failure: .noResult
+                )
+            )
         )
         XCTAssertTrue(
-            events.contains(.failed(stage: .sleep, failure: .timeout))
+            events.contains(
+                .metricReadFailed(
+                    requestID: 22,
+                    stage: .sleep,
+                    failure: .timeout
+                )
+            )
         )
         XCTAssertTrue(
             diagnostics.events.contains(
@@ -1025,11 +1072,13 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         var events: [VeepooBandAdapterEvent] = []
         core.eventHandler = { events.append($0) }
         let generation = ready(core, client: client)
+        core.readSleep(requestID: 31)
 
         client.emit(
             .sleep(
                 generation: generation,
-                .init(
+                requestID: 31,
+                reading: .init(
                     startTs: 1_000,
                     endTs: 26_200,
                     totalMin: 420,
@@ -1051,9 +1100,116 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         )
         XCTAssertTrue(
             events.contains(
-                .failed(stage: .sleep, failure: .invalidSample)
+                .metricReadFailed(
+                    requestID: 31,
+                    stage: .sleep,
+                    failure: .invalidSample
+                )
             )
         )
+    }
+
+    @MainActor
+    func testMetricReadRejectsLateCallbackWhileNextRequestIsActive() {
+        let client = FakeClient()
+        let diagnostics = RecordingDiagnostics()
+        let core = VeepooBandAdapterCore(
+            client: client,
+            compatibilityPolicy: Self.approvedPolicy,
+            diagnostics: diagnostics
+        )
+        var events: [VeepooBandAdapterEvent] = []
+        core.eventHandler = { events.append($0) }
+        let generation = ready(core, client: client)
+
+        core.readSteps(requestID: 41)
+        client.emit(
+            .stepsFailed(
+                generation: generation,
+                requestID: 41,
+                failure: .noResult
+            )
+        )
+        core.readSteps(requestID: 42)
+        client.emit(
+            .steps(
+                generation: generation,
+                requestID: 41,
+                reading: .init(steps: 111, distanceKm: nil, kcal: nil)
+            )
+        )
+        client.emit(
+            .steps(
+                generation: generation,
+                requestID: 42,
+                reading: .init(steps: 222, distanceKm: nil, kcal: nil)
+            )
+        )
+
+        let acceptedRequestIDs = events.compactMap { event -> UInt64? in
+            guard case .steps(let requestID, _) = event else { return nil }
+            return requestID
+        }
+        XCTAssertEqual(acceptedRequestIDs, [42])
+        XCTAssertTrue(
+            diagnostics.events.contains(
+                .init(
+                    stage: .steps,
+                    outcome: .stale,
+                    failure: .staleCallback
+                )
+            )
+        )
+    }
+
+    @MainActor
+    func testMetricReadTimeoutReleasesLaneAndRejectsLateCallback() async {
+        let client = FakeClient()
+        let diagnostics = RecordingDiagnostics()
+        let core = VeepooBandAdapterCore(
+            client: client,
+            compatibilityPolicy: Self.approvedPolicy,
+            diagnostics: diagnostics,
+            stepReadTimeoutNanoseconds: 1_000_000
+        )
+        var events: [VeepooBandAdapterEvent] = []
+        core.eventHandler = { events.append($0) }
+        let generation = ready(core, client: client)
+
+        core.readSteps(requestID: 51)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertTrue(
+            events.contains(
+                .metricReadFailed(
+                    requestID: 51,
+                    stage: .steps,
+                    failure: .timeout
+                )
+            )
+        )
+
+        client.emit(
+            .steps(
+                generation: generation,
+                requestID: 51,
+                reading: .init(steps: 111, distanceKm: nil, kcal: nil)
+            )
+        )
+        core.readSteps(requestID: 52)
+        client.emit(
+            .steps(
+                generation: generation,
+                requestID: 52,
+                reading: .init(steps: 222, distanceKm: nil, kcal: nil)
+            )
+        )
+
+        let acceptedRequestIDs = events.compactMap { event -> UInt64? in
+            guard case .steps(let requestID, _) = event else { return nil }
+            return requestID
+        }
+        XCTAssertEqual(acceptedRequestIDs, [52])
+        XCTAssertEqual(core.state, .ready)
     }
 
     @MainActor
@@ -1218,6 +1374,9 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             await Task.yield()
         }
         XCTAssertEqual(adapter.readStepsCount, 1)
+        let firstStepRequestID = try! XCTUnwrap(
+            adapter.readStepRequestIDs.first
+        )
 
         try? await Task.sleep(nanoseconds: 10_000_000)
         XCTAssertEqual(adapter.readStepsCount, 1)
@@ -1227,11 +1386,20 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             "Sleep must wait for the outstanding step command"
         )
 
-        adapter.emit(.failed(stage: .steps, failure: .noResult))
+        adapter.emit(
+            .metricReadFailed(
+                requestID: firstStepRequestID,
+                stage: .steps,
+                failure: .noResult
+            )
+        )
         XCTAssertEqual(
             adapter.readSleepCount,
             1,
             "An optional step failure must release the command lane"
+        )
+        let sleepRequestID = try! XCTUnwrap(
+            adapter.readSleepRequestIDs.first
         )
         try? await Task.sleep(nanoseconds: 10_000_000)
         XCTAssertEqual(
@@ -1249,18 +1417,23 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             awakenings: 2,
             efficiency: 0.91
         )
-        adapter.emit(.sleep(sleep))
+        adapter.emit(
+            .sleep(requestID: sleepRequestID, reading: sleep)
+        )
         for _ in 0..<100 where adapter.readStepsCount < 2 {
             try? await Task.sleep(nanoseconds: 1_000_000)
         }
         XCTAssertEqual(adapter.readStepsCount, 2)
+        let secondStepRequestID = adapter.readStepRequestIDs[1]
 
         let step = VeepooBandStepsReading(
             steps: 4_321,
             distanceKm: 3.2,
             kcal: 240
         )
-        adapter.emit(.steps(step))
+        adapter.emit(
+            .steps(requestID: secondStepRequestID, reading: step)
+        )
         XCTAssertEqual(persistedSteps, [step])
         XCTAssertEqual(persistedSleep, [sleep])
 
@@ -1300,9 +1473,15 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         }
         try? await Task.sleep(nanoseconds: 10_000_000)
         XCTAssertEqual(adapter.readSleepCount, 0)
+        let stepRequestID = try! XCTUnwrap(
+            adapter.readStepRequestIDs.first
+        )
 
         adapter.emit(
-            .steps(.init(steps: 20, distanceKm: nil, kcal: nil))
+            .steps(
+                requestID: stepRequestID,
+                reading: .init(steps: 20, distanceKm: nil, kcal: nil)
+            )
         )
 
         XCTAssertEqual(adapter.readSleepCount, 1)
@@ -1341,8 +1520,8 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
             efficiency: nil
         )
 
-        adapter.emit(.steps(step))
-        adapter.emit(.sleep(sleep))
+        adapter.emit(.steps(requestID: 900, reading: step))
+        adapter.emit(.sleep(requestID: 901, reading: sleep))
         XCTAssertEqual(stepResults, 0)
         XCTAssertEqual(sleepResults, 0)
 
@@ -1361,15 +1540,97 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         }
         try? await Task.sleep(nanoseconds: 10_000_000)
         XCTAssertEqual(adapter.readSleepCount, 0)
+        let outstandingStepRequestID = try! XCTUnwrap(
+            adapter.readStepRequestIDs.first
+        )
 
         adapter.emit(.disconnected)
-        adapter.emit(.steps(step))
-        adapter.emit(.sleep(sleep))
+        adapter.emit(
+            .steps(requestID: outstandingStepRequestID, reading: step)
+        )
+        adapter.emit(.sleep(requestID: 902, reading: sleep))
         try? await Task.sleep(nanoseconds: 10_000_000)
 
         XCTAssertEqual(adapter.readSleepCount, 0)
         XCTAssertEqual(stepResults, 0)
         XCTAssertEqual(sleepResults, 0)
+        source.stop()
+    }
+
+    @MainActor
+    func testSourceTimeoutDisconnectsAndRejectsLateMetricCallback() async {
+        let adapter = FakeAdapter()
+        var persistedSteps: [VeepooBandStepsReading] = []
+        let source = VeepooBandSource(
+            live: LiveState(),
+            adapter: adapter,
+            password: "2468",
+            onCredentialRejected: {},
+            persistSteps: { persistedSteps.append($0) },
+            stepPollIntervalNanoseconds: 1_000_000,
+            sleepReadDelayNanoseconds: 0
+        )
+        adapter.onDisconnect = {
+            adapter.emit(.disconnected)
+        }
+
+        adapter.emit(
+            .battery(
+                .init(
+                    percent: 80,
+                    level: nil,
+                    charging: false,
+                    low: false
+                )
+            )
+        )
+        for _ in 0..<100 where adapter.readStepsCount < 1 {
+            await Task.yield()
+        }
+        let firstRequestID = try! XCTUnwrap(
+            adapter.readStepRequestIDs.first
+        )
+
+        adapter.emit(
+            .metricReadFailed(
+                requestID: firstRequestID,
+                stage: .steps,
+                failure: .timeout
+            )
+        )
+        XCTAssertEqual(adapter.disconnectCount, 1)
+        adapter.emit(
+            .steps(
+                requestID: firstRequestID,
+                reading: .init(steps: 111, distanceKm: nil, kcal: nil)
+            )
+        )
+        XCTAssertTrue(persistedSteps.isEmpty)
+
+        adapter.emit(
+            .battery(
+                .init(
+                    percent: 80,
+                    level: nil,
+                    charging: false,
+                    low: false
+                )
+            )
+        )
+        for _ in 0..<100 where adapter.readStepsCount < 2 {
+            await Task.yield()
+        }
+        let secondRequestID = adapter.readStepRequestIDs[1]
+        XCTAssertNotEqual(secondRequestID, firstRequestID)
+        let accepted = VeepooBandStepsReading(
+            steps: 222,
+            distanceKm: nil,
+            kcal: nil
+        )
+        adapter.emit(
+            .steps(requestID: secondRequestID, reading: accepted)
+        )
+        XCTAssertEqual(persistedSteps, [accepted])
         source.stop()
     }
 
@@ -1402,10 +1663,16 @@ final class VeepooBandAdapterCoreTests: XCTestCase {
         }
         try? await Task.sleep(nanoseconds: 10_000_000)
         XCTAssertEqual(adapter.readSleepCount, 0)
+        let stepRequestID = try! XCTUnwrap(
+            adapter.readStepRequestIDs.first
+        )
 
         source.stop()
         adapter.emit(
-            .steps(.init(steps: 20, distanceKm: nil, kcal: nil))
+            .steps(
+                requestID: stepRequestID,
+                reading: .init(steps: 20, distanceKm: nil, kcal: nil)
+            )
         )
         try? await Task.sleep(nanoseconds: 10_000_000)
 

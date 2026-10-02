@@ -49,10 +49,15 @@ in-flight optional-read state.
 
 - Added a pending-sleep state and one guarded transition that starts sleep only
   after the current step read succeeds or fails.
+- Carried a monotonic app-owned request ID through the source, adapter core,
+  quarantined SDK wrapper, and every success/failure callback.
+- Added 15-second step and 60-second sleep timeouts. A timeout emits only a
+  fixed categorical failure, resets the transport, and cannot let a delayed
+  callback satisfy a later request after reconnect.
 - Blocked subsequent step polls while sleep is pending or in flight.
-- Accepted step and sleep readings only while the matching request is in
-  flight, preventing unsolicited or post-disconnect values from reaching
-  persistence sinks.
+- Accepted step and sleep readings only while the exact request ID and stage
+  are in flight, preventing unsolicited, duplicate, delayed, or
+  post-disconnect values from reaching persistence sinks.
 - Cleared pending, step-in-flight, and sleep-in-flight state through the
   existing disconnect, credential-failure, compatibility-failure,
   battery-failure, connection-failure, permanent-credential, reconnect, and
@@ -89,7 +94,7 @@ in-flight optional-read state.
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | `xcodegen generate` | Pass | Current project graph generated from tracked configuration | App runtime behavior |
-| Bounded macOS `Strand` test with `-only-testing:StrandTests/VeepooBandAdapterCoreTests` | 72 tests passed, 0 failures | Supplier adapter/source unit contracts, including serialized optional reads and terminal cleanup | Physical BLE or supplier SDK timing |
+| Bounded macOS `Strand` test with `-only-testing:StrandTests/VeepooBandAdapterCoreTests` | 75 tests passed, 0 failures | Supplier adapter/source unit contracts, including serialized optional reads, request fencing, bounded timeout reset, delayed-callback rejection, and terminal cleanup | Physical BLE or supplier SDK timing |
 | Bounded `NOOPiOS` generic iOS Simulator build | Pass | The complete iPhone app graph compiles with the source change | Signed installation, background execution, or physical transport |
 | Repository policy gates | 117 operations records valid; private-data guard passed; health-claims clear across 1,324 files; terminology ratchet passed with 18,605 unchanged occurrences; legal inventory verified 230 runtime components and 3 container inputs; supplier wrapper/quarantine tests 33/33 | Operations, private-data, claims, terminology, legal, and supplier-artifact boundaries remain coherent | Hosted checks, external approval, or physical behavior |
 | `git diff --check` | Pass | No whitespace error in the current diff | Runtime correctness |
@@ -142,8 +147,8 @@ out package state and completed successfully.
 
 ## Open risks and honest limitations
 
-- The supplier SDK may deliver callbacks with timing or duplication behavior
-  not represented by the fake adapter.
+- Physical hardware still must confirm the supplier SDK's callback timing and
+  timeout envelopes for the approved model/firmware pair.
 - Physical command ordering, live-HR coexistence, reconnect behavior, battery,
   retention, background execution, and sensor accuracy remain unverified.
 
