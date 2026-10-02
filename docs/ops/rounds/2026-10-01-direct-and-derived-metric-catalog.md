@@ -111,6 +111,7 @@ insights.
 | macOS app graph | `Strand` build exited 0 | The shared Apple catalog and classic Today exhaustive switches compile | Physical Apple Watch or wearable import behavior |
 | iPhone Simulator graph | `NOOPiOS` build exited 0 for iPhone 17 Pro Simulator, including Watch and app extensions | Current Apple mobile graph compiles with the new choices and localization | Apple Watch sensor delivery, background sync, battery, or accuracy |
 | iPhone visual review | Current 1206x2622 editor capture reviewed; Vision OCR confirmed `Vitals · Measured`, `Activity · Measured`, `Available Metrics`, and `18 supported` | The selected rows no longer wrap their provenance metadata and the source grouping is visible | Every locale, Dynamic Type size, or physical display |
+| Android follow-up visual review | Current API 35 captures reviewed at 1080x2424: Today SHA-256 `f165091139b669623be80dd7dc29eef6a736c447458409bbd0d7c30a0c95ee8a`, editor upper `bd10cd4af6338562ecff7e78c556c44dfe43bf6ab47ba9e0fe41453d40419c86`, editor lower `586ca6c0db7f47e4ea66478d5c59216754deb73a1b17962ab7b188137791b973` | The fresh six include Steps, the editor exposes all 18 choices and the three provenance groups, and no clipping or overlap was observed in the reviewed states | Physical Health Connect, wearable delivery, TalkBack traversal, or every locale/font size |
 | App-wide localization generation | `Generated 997 app-wide strings and 45 Android-only resources for 9 locales` | Apple and Android generated resources are synchronized, including the localized compact metadata and source-dependent provenance copy | Human linguistic review of every translation |
 | Android source-qualified metric wall | Full Kotlin compilation passed; 137 focused tests passed across `TodayMetricTilesTest`, `KeyMetricPrefsTest`, `TodayExplainabilityTest`, `TodayChargeTapCollapseTest`, `WearableCapabilityCatalogTest`, `MetricHistoryCatalogTest`, and `ComparePrefsTest` | Source-qualified history identities, provider separation, calendar windows, measured Weight day bounds, supplier-native Steps arbitration, and WHOOP Steps fail-closed behavior compile and pass | Physical Health Connect, WHOOP, or supplier-band delivery |
 | Apple source-qualified metric wall | 61 focused `StrandTests` passed plus 12 `WearableCapabilityCatalogTests` | Every persisted Apple Health key is catalogued, generic provenance remains Apple Health, origin copy compiles, and WHOOP Steps is not advertised | Signed-device HealthKit/Apple Watch delivery or physical accuracy |
@@ -140,8 +141,10 @@ insights.
 
 ## Physical device and deployment
 
-- Install/update action: unsigned iPhone Simulator candidate only.
-- Generalized device and OS class: iPhone 17 Pro Simulator on iOS 26.5.
+- Install/update action: unsigned iPhone Simulator candidate plus a follow-up
+  Android Full debug APK on an API 35 emulator.
+- Generalized device and OS class: iPhone 17 Pro Simulator on iOS 26.5 and
+  Android API 35 emulator at `1080x2424`.
 - BLE/background/haptic/battery scenarios exercised: none.
 - Apple Watch, WHOOP, supplier-band, HealthKit, and Health Connect physical
   validation remains required under
@@ -189,7 +192,8 @@ insights.
 
 ## Open risks and honest limitations
 
-- Android visual review remains pending an attached emulator or phone.
+- Android emulator visual review is complete for Today and the upper/lower
+  metric-editor states; signed physical Android review remains pending.
 - Physical-source availability differs by watch model, band firmware, granted
   permissions, wear time, and export contents; missing source data must remain
   missing rather than fabricated.

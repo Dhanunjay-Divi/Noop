@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `integrated and exact-main verified; device review pending`
+- State: `integrated and exact-main verified; signed-device review pending`
 - Owner: project team
 - Branch: `codex/today-metric-catalog-fitness-age-20261001`
 - Start commit: `232f746e045d2755947579c3408efc5c3b84ff69`
@@ -61,6 +61,7 @@ paragraph copy to the number-first summary.
 | Android Full debug unit/compile wall | `BUILD SUCCESSFUL`; 29 tasks, including Full Kotlin/resource compilation and `testFullDebugUnitTest` | Android implementation, resources, accessibility composition, and status boundary tests compile and pass | Android visual appearance because no emulator was attached |
 | iPhone Simulator build | `NOOPiOS` build succeeded with app, Watch, complications, and widgets | Current Apple app graph compiles with the status implementation | Signed installation or physical-device behavior |
 | iPhone Simulator visual review | Reviewed a 1206x2622 current-state capture showing Recovery 43 `Steady`, Sleep 85 `Well rested`, and Effort 45 `Moderate`; no observed clipping, overlap, or sentence wrapping | The requested compact presentation fits the current phone layout | Other Dynamic Type sizes or every locale on physical hardware |
+| Android API 35 follow-up visual review | Reviewed current 1080x2424 Today capture SHA-256 `f165091139b669623be80dd7dc29eef6a736c447458409bbd0d7c30a0c95ee8a`; no observed clipping or overlap in the Daily Signal, Fitness Age, self-check, or navigation | The matched compact hierarchy renders coherently on the reviewed Android emulator | Physical TalkBack, every locale/font size, or sensor accuracy |
 
 ## Data, privacy, and medical truth
 
@@ -75,7 +76,8 @@ paragraph copy to the number-first summary.
 
 ## Open risks and honest limitations
 
-- Android visual review remains pending an attached emulator or phone.
+- Android emulator visual review is complete; signed physical-phone review
+  remains pending.
 - Large-text, all-locale, and signed physical-phone review remain release
   evidence gates.
 - Physical-band, BLE, background, battery, haptic, notification, and sensor
@@ -84,7 +86,8 @@ paragraph copy to the number-first summary.
 ## Physical device and deployment
 
 - Install/update action: unsigned iPhone Simulator candidate only.
-- Android emulator or phone launch: not run in this round.
+- Android follow-up launch: exact Full debug APK installed on an API 35
+  emulator with synthetic fixture state.
 - BLE/background/haptic/battery scenarios exercised: none.
 - No deployment, store upload, signed candidate, firmware action, or production
   traffic was dispatched.
@@ -110,7 +113,7 @@ paragraph copy to the number-first summary.
 
 ## Next round
 
-1. Run Android visual and signed physical-phone accessibility review.
+1. Run signed physical-phone accessibility review.
 2. Keep physical sensor, background, battery, and notification behavior behind
    their existing device evidence gates.
 

@@ -279,6 +279,11 @@ class PrimaryNavigationContractTest {
         val source = appRootSource()
         assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
         val text = source!!
+        assertTrue(text.contains("private fun NoopCommandNMark()"))
+        assertTrue(text.contains("NoopCommandNMark()"))
+        assertTrue(text.contains("lineTo(right, bottom)"))
+        assertTrue(text.contains("join = StrokeJoin.Round"))
+        assertFalse(text.contains("sweepAngle = 288f"))
         val lens = text
             .substringAfter("private fun MovableNoopCommandLens(")
             .substringBefore("\n/**")
