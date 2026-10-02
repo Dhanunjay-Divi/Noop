@@ -119,7 +119,7 @@ insights.
 | Android hosted-gate repair | Bounded `compileFullDebugKotlin` plus focused `RuntimePerformanceContractTest` and `AndroidLocalizationPolicyTest` passed: `BUILD SUCCESSFUL` in 1 minute 43 seconds, 29 tasks | The performance contract now verifies the selected-day-bounded weight query, and Compare uses the generated localized metric metadata formatter | The complete replacement hosted Android wall or physical data delivery |
 | Apple localization and chart repair | `FeedbackLocalization/generate.py --check` passed for 86 app-report strings across nine locales; `i18n_audit.py --ci github/main` passed with no new Android hardcoded literals, Apple unextracted literals, focus-locale gaps, or brand-boundary violations | Source accessibility labels and Android Compare metadata remain localizable, and the chart exposes one coherent accessibility element instead of a duplicate invisible selected-point node | Human review of every translation or signed-device VoiceOver behavior |
 | Apple focused UI rerun | `testConfiguredProviderAndSyntheticBandCompleteFullOnboarding` passed in 55.620 seconds and `testRecoveryTrendSupportsExactDateScrubbing` passed in 16.244 seconds on the dedicated iPhone Simulator; Xcode reported `TEST SUCCEEDED` for 2 tests with zero failures before a post-test simulator-diagnostics timeout | The configured flow reaches visible Bluetooth, advances to the device chooser, and exact-date chart scrubbing changes the same chart semantic value without navigating away | Physical BLE, signed installation, or every production-shell UI case |
-| Terminology and release-control ratchets | 18,596 classified occurrences across 1,643 path/category groups; zero forbidden mappings; reviewed allowlist digest `00db1a24683e00fb776e680a24d7cf58cb56cb47031057fd6c015f286582736d`; reviewed inventory digest `0dad0a30b11570e0e88747f9a9ca738bac9f7203396d75d68b0ececbe471f092`; exact 258-test release-control wall passed | New compatible-band resolver identifiers, persisted source IDs, tests, historical records, and generated line movement are explicitly classified and pinned without adding a customer-facing vendor-to-NOOP mapping | Removal of pre-existing compatibility terminology or physical transport behavior |
+| Terminology and release-control ratchets | 18,600 classified occurrences across 1,646 path/category groups; zero forbidden mappings; reviewed allowlist digest `8e132ecc603f925d221df62d4acb22bee4de6fd3c513f8bfd06340f9557d8b79`; reviewed inventory digest `3fa96c6f46913243424733c5812f90f4eb531123be5040d67d575c6ca37427ba`; exact 258-test release-control wall passed after updating both reviewed-source pins | New compatible-band resolver identifiers, persisted source IDs, tests, historical records, and generated line movement are explicitly classified and pinned without adding a customer-facing vendor-to-NOOP mapping | Removal of pre-existing compatibility terminology or physical transport behavior |
 | Diff hygiene | `git diff --check` passed | No whitespace-error regression in the working patch | Runtime correctness outside the tested scope |
 
 ## Data, privacy, and medical truth
@@ -152,9 +152,14 @@ insights.
 - Exact hosted head `fd8f10ac6964844655799b3d5a07f690b268d5d9`
   exposed bounded stale contract and localization failures after the metric
   implementation itself had passed the focused local walls.
-- The replacement repair is locally verified on the same active branch.
-- A replacement push, exact-head required checks, protected integration, and
-  clean-main verification remain pending.
+- Replacement head `5b011341e96c4fbfcc32ee2cbc496d2632808bd5`
+  was pushed and began exact-head checks. Its release-control job correctly
+  rejected the stale terminology snapshot while the remaining heavy jobs
+  continued.
+- The reviewed inventory and required-CI digest repair passes the complete
+  258-test release-control wall locally. One final replacement push,
+  exact-head required checks, protected integration, and clean-main
+  verification remain pending.
 - No deployment, store upload, signed build, firmware action, or production
   traffic was dispatched.
 
@@ -216,8 +221,15 @@ insights.
   waiting for the actual device chooser, re-querying the SwiftUI chart semantic
   node after selection, and removing its duplicate one-pixel accessibility
   overlay. The two focused UI cases pass together.
-- Replacement exact-head hosted checks remain required before protected
-  integration.
+- Replacement head `5b011341e96c4fbfcc32ee2cbc496d2632808bd5`
+  then passed the early policy, i18n, operations, server, and package checks
+  that completed before follow-up. Its release-control job failed only because
+  the regenerated terminology inventory had not yet been committed and pinned.
+- The final reviewed inventory reports 18,600 classified occurrences across
+  1,646 path/category groups with zero forbidden mappings. Its own audit passes,
+  and the complete 258-test release-control wall passes after updating the two
+  reviewed-source digests.
+- One final exact-head hosted run remains required before protected integration.
 
 ## Privacy check
 

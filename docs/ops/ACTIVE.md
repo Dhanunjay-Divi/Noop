@@ -26,10 +26,13 @@ Last updated: **2026-10-02**
   and chart UI observations. The replacement repair passes bounded Full Kotlin
   compilation plus the focused Android performance/localization tests,
   complete local i18n audit, and the paired configured-onboarding and
-  exact-date chart-scrub iPhone UI cases. A replacement push and exact-head
-  checks remain pending. Physical Apple Watch, WHOOP, supplier-band, HealthKit,
-  Health Connect, background, battery, and accuracy behavior remains
-  unvalidated and unclaimed.
+  exact-date chart-scrub iPhone UI cases. Pushed head `5b011341e` then isolated
+  one stale terminology inventory as its first completed failure; the
+  regenerated zero-forbidden-mapping inventory and both reviewed-source pins
+  pass the complete 258-test release-control wall locally. A final replacement
+  push and exact-head checks remain pending. Physical Apple Watch, WHOOP,
+  supplier-band, HealthKit, Health Connect, background, battery, and accuracy
+  behavior remains unvalidated and unclaimed.
 
 - The hydration target/correction implementation is focused-test and
   build-verified on the same branch. Apple and Android now explain the existing
