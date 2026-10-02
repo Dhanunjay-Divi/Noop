@@ -63,7 +63,29 @@ final class ManagedCloudRetryContractTests: XCTestCase {
         XCTAssertTrue(source.contains("verificationSuccessVisible"))
         XCTAssertFalse(source.contains("verificationSuccessCode"))
         XCTAssertTrue(source.contains("@Environment(\\.accessibilityReduceMotion)"))
+        XCTAssertTrue(source.contains("@AccessibilityFocusState"))
+        XCTAssertTrue(
+            source.contains(".accessibilityHidden(verificationSuccessVisible)")
+        )
+        XCTAssertTrue(source.contains(".accessibilityFocused($accessibilityFocused)"))
+        XCTAssertFalse(
+            source.contains("No verification code digits entered")
+        )
+        XCTAssertFalse(
+            source.contains(
+                "Enter or paste the verification code from Messages"
+            )
+        )
         XCTAssertFalse(source.contains("AppDiagnosticsRecorder"))
+
+        let clearsCode = try XCTUnwrap(source.range(of: "code = \"\""))
+        let refreshesOverview = try XCTUnwrap(
+            source.range(
+                of: "await service.refreshOverview()",
+                range: clearsCode.upperBound..<source.endIndex
+            )
+        )
+        XCTAssertLessThan(clearsCode.lowerBound, refreshesOverview.lowerBound)
     }
 
     func testScopedRetryStateClearsWithoutTouchingOtherScopesOrDefaults()

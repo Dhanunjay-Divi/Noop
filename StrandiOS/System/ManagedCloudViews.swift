@@ -221,9 +221,10 @@ private struct ManagedCloudSetupSheet: View {
                     .screenPadding()
                     .padding(.vertical, NoopMetrics.space5)
                 }
+                .accessibilityHidden(verificationSuccessVisible)
                 if verificationSuccessVisible {
                     ManagedVerificationSuccessOverlay()
-                    .zIndex(1)
+                        .zIndex(1)
                 }
             }
             .navigationTitle("NOOP+")
@@ -234,6 +235,7 @@ private struct ManagedCloudSetupSheet: View {
                         Image(systemName: "xmark")
                     }
                     .disabled(service.isBusy)
+                    .accessibilityHidden(verificationSuccessVisible)
                     .accessibilityLabel("Close NOOP+ setup")
                 }
             }
@@ -894,16 +896,6 @@ private struct ManagedVerificationCodeEntry: View {
         )
         .opacity(isBusy ? 0.72 : 1)
         .accessibilityLabel("NOOP+ verification code")
-        .accessibilityValue(
-            code.isEmpty
-                ? String(localized: "No verification code digits entered")
-                : String(
-                    localized: "\(code.count) verification code digits entered"
-                )
-        )
-        .accessibilityHint(
-            String(localized: "Enter or paste the verification code from Messages")
-        )
         .accessibilityIdentifier("noop.noop-plus.code")
         .task(id: requestsFocus) {
             guard requestsFocus else { return }
@@ -978,6 +970,7 @@ private struct ManagedVerificationNudge: GeometryEffect {
 
 private struct ManagedVerificationSuccessOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AccessibilityFocusState private var accessibilityFocused: Bool
     @State private var showCheck = false
 
     private var verifiedLabel: String {
@@ -1026,7 +1019,9 @@ private struct ManagedVerificationSuccessOverlay: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(verifiedLabel)
+        .accessibilityFocused($accessibilityFocused)
         .task {
+            accessibilityFocused = true
             if reduceMotion {
                 showCheck = true
                 return

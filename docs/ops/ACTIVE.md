@@ -4,18 +4,20 @@ Last updated: **2026-10-02**
 
 ## Authoritative context
 
-- The matched mobile tab/OTP motion refinement is locally verified on branch
-  `codex/mobile-liquid-tab-otp-motion-20261002` at implementation commit
-  `1268a2cb82188fdaed53a2cc148587dc9d186b9e`. iPhone and Android now use one
+- The matched mobile tab/OTP motion refinement is in independent-review
+  remediation on branch `codex/mobile-liquid-tab-otp-motion-20261002`.
+  iPhone and Android now use one
   raised selected lens across the same five labeled tabs while retaining
   reselect behavior, touch targets, accessibility roles, reduced-motion snap,
   and the separate movable NOOP N. Managed verification preserves the existing
   four-through-eight digit service contract, normalizes localized decimal
   input, supports platform OTP autofill, clears the code immediately after a
   confirmed transition, and never copies or redraws it in success state.
-  Android production compile, 10/10 focused tests, Full APK, Apple 67/67
-  focused tests, the complete iPhone graph, all-platform i18n, and paired
-  `1080x2424` / `1206x2622` visual review pass. Protected integration, real OTP,
+  Previous Android production compile, 10/10 focused tests, Full APK, Apple
+  67/67 focused tests, the complete iPhone graph, all-platform i18n, and paired
+  `1080x2424` / `1206x2622` visual review passed. The review-fix tree still
+  requires repeated focused gates, app builds, visual review, final independent
+  re-review, protected integration, and exact-main verification. Real OTP,
   signed-device accessibility, and every physical band/source gate remain
   pending.
 

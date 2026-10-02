@@ -1695,38 +1695,63 @@ private fun Modifier.raisedNavigationLens(accent: Color): Modifier = composed {
     val light = Palette.isLight
     val body = Brush.linearGradient(
         colors = listOf(
-            accent.copy(alpha = if (light) 0.24f else 0.30f),
-            accent.copy(alpha = if (light) 0.10f else 0.14f),
+            accent.copy(
+                alpha = if (light) {
+                    Metrics.navigationLensBodyLightStartAlpha
+                } else {
+                    Metrics.navigationLensBodyDarkStartAlpha
+                },
+            ),
+            accent.copy(
+                alpha = if (light) {
+                    Metrics.navigationLensBodyLightEndAlpha
+                } else {
+                    Metrics.navigationLensBodyDarkEndAlpha
+                },
+            ),
         ),
         start = Offset.Zero,
         end = Offset.Infinite,
     )
     this
         .shadow(
-            elevation = 9.dp,
+            elevation = Metrics.navigationLensShadowRadius,
             shape = CircleShape,
             clip = false,
         )
         .clip(CircleShape)
         .drawWithCache {
-            val rimWidth = 0.8.dp.toPx()
-            val highlightWidth = 1.1.dp.toPx()
+            val rimWidth = Metrics.navigationLensStrokeWidth.toPx()
+            val highlightWidth = Metrics.navigationLensHighlightWidth.toPx()
+            val highlightInset = Metrics.navigationLensHighlightInset.toPx()
             onDrawBehind {
                 drawCircle(brush = body)
                 drawCircle(
-                    color = accent.copy(alpha = if (light) 0.58f else 0.68f),
+                    color = accent.copy(
+                        alpha = if (light) {
+                            Metrics.navigationLensRimLightAlpha
+                        } else {
+                            Metrics.navigationLensRimDarkAlpha
+                        },
+                    ),
                     style = Stroke(width = rimWidth),
                 )
                 drawArc(
-                    color = Color.White.copy(alpha = if (light) 0.56f else 0.28f),
-                    startAngle = 205f,
-                    sweepAngle = 74f,
+                    color = Color.White.copy(
+                        alpha = if (light) {
+                            Metrics.navigationLensHighlightLightAlpha
+                        } else {
+                            Metrics.navigationLensHighlightDarkAlpha
+                        },
+                    ),
+                    startAngle = Metrics.navigationLensHighlightStartAngle,
+                    sweepAngle = Metrics.navigationLensHighlightSweepAngle,
                     useCenter = false,
                     style = Stroke(width = highlightWidth, cap = StrokeCap.Round),
-                    topLeft = Offset(3.dp.toPx(), 3.dp.toPx()),
+                    topLeft = Offset(highlightInset, highlightInset),
                     size = Size(
-                        this.size.width - 6.dp.toPx(),
-                        this.size.height - 6.dp.toPx(),
+                        this.size.width - (highlightInset * 2),
+                        this.size.height - (highlightInset * 2),
                     ),
                 )
             }
@@ -2195,7 +2220,7 @@ private fun BarSlot(
     )
     val selectedTabLiftLabel = stringResource(R.string.nav_selected_tab_animation_label)
     val selectedScale by animateFloatAsState(
-        targetValue = if (active) 1.04f else 1f,
+        targetValue = if (active) Metrics.navigationLensSelectedScale else 1f,
         animationSpec = if (reduceMotion) {
             snap()
         } else {
@@ -2214,7 +2239,7 @@ private fun BarSlot(
                 role = Role.Tab,
                 onClick = onClick,
             )
-            .padding(vertical = 3.dp)
+            .padding(vertical = Metrics.navigationLensHighlightInset)
             .semantics {
                 contentDescription = label
             },
@@ -2232,11 +2257,15 @@ private fun BarSlot(
                 contentDescription = null,
                 tint = tint,
                 modifier = Modifier
-                    .size(18.dp)
+                    .size(Metrics.navigationLensIconSize)
                     .graphicsLayer {
                         scaleX = selectedScale
                         scaleY = selectedScale
-                        translationY = if (active) -4.dp.toPx() else 0f
+                        translationY = if (active) {
+                            -Metrics.navigationLensActiveOffset.toPx()
+                        } else {
+                            0f
+                        }
                     },
             )
         }
@@ -2255,6 +2284,7 @@ private fun BarSlot(
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
+                .offset(y = -Metrics.navigationLensLabelOffset)
                 .padding(horizontal = 1.dp),
         )
     }

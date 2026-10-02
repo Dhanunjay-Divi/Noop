@@ -15,6 +15,7 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -86,6 +87,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -337,7 +342,6 @@ private fun ManagedCloudSetupSheet(
     }
 
     LaunchedEffect(state.phase) {
-        if (state.phase == ManagedCloudPhase.ENROLLED) service.refreshOverview()
         val verificationConfirmed = (
             state.phase == ManagedCloudPhase.CONSENT_REQUIRED ||
                 state.phase == ManagedCloudPhase.ENROLLED
@@ -359,12 +363,21 @@ private fun ManagedCloudSetupSheet(
             verificationSuccessJob = null
             verificationSuccessVisible = false
         }
+        if (state.phase == ManagedCloudPhase.ENROLLED) service.refreshOverview()
     }
 
     NoopBottomSheet(onDismiss = onDismiss) {
         Box(modifier = Modifier.fillMaxWidth()) {
             Column(
-                modifier = Modifier.testTag("noop.noop-plus.sheet"),
+                modifier = Modifier
+                    .testTag("noop.noop-plus.sheet")
+                    .then(
+                        if (verificationSuccessVisible) {
+                            Modifier.clearAndSetSemantics { }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 verticalArrangement = Arrangement.spacedBy(Metrics.sectionGap),
             ) {
             Text(
@@ -1051,8 +1064,11 @@ private fun ManagedVerificationSuccessOverlay(
                     }
                 }
             }
+            .focusable()
             .semantics(mergeDescendants = true) {
                 contentDescription = verifiedLabel
+                liveRegion = LiveRegionMode.Assertive
+                paneTitle = verifiedLabel
             },
         contentAlignment = Alignment.Center,
     ) {

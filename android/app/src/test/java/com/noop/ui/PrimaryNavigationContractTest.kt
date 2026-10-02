@@ -440,6 +440,24 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains("ManagedCloudPhase.CONSENT_REQUIRED"))
         assertTrue(text.contains("rememberReduceMotion()"))
         assertTrue(text.contains("verificationSuccessVisible"))
+        assertTrue(text.contains("Modifier.clearAndSetSemantics"))
+        assertTrue(text.contains("LiveRegionMode.Assertive"))
+        assertTrue(text.contains("paneTitle = verifiedLabel"))
         assertFalse(text.contains("verificationSuccessCode"))
+
+        val clearsCode = text.indexOf("code = \"\"")
+        val refreshesOverview = text.indexOf(
+            "service.refreshOverview()",
+            startIndex = clearsCode + 1,
+        )
+        assertTrue(clearsCode >= 0)
+        assertTrue(refreshesOverview > clearsCode)
+
+        assertTrue(appRoot.contains("Metrics.navigationLensStrokeWidth"))
+        assertTrue(appRoot.contains("Metrics.navigationLensHighlightWidth"))
+        assertTrue(appRoot.contains("Metrics.navigationLensShadowRadius"))
+        assertTrue(appRoot.contains("Metrics.navigationLensIconSize"))
+        assertTrue(appRoot.contains("Metrics.navigationLensActiveOffset"))
+        assertTrue(appRoot.contains("Metrics.navigationLensLabelOffset"))
     }
 }

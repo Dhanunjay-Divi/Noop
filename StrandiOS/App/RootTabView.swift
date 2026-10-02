@@ -2185,7 +2185,7 @@ private struct FloatingTabBar: View {
                 selection = item.tag
             }
         } label: {
-            VStack(spacing: 1) {
+            VStack(spacing: NoopMetrics.navigationLensItemSpacing) {
                 ZStack {
                     if active {
                         Circle()
@@ -2194,26 +2194,34 @@ private struct FloatingTabBar: View {
                                 Circle()
                                     .strokeBorder(
                                         selectedHaloStroke(accent: accent),
-                                        lineWidth: 0.8
+                                        lineWidth: NoopMetrics.navigationLensStrokeWidth
                                     )
                             )
                             .overlay(alignment: .topLeading) {
                                 Circle()
                                     .trim(from: 0.06, to: 0.30)
                                     .stroke(
-                                        .white.opacity(colorScheme == .dark ? 0.30 : 0.54),
+                                        .white.opacity(
+                                            colorScheme == .dark
+                                                ? NoopMetrics.navigationLensHighlightDarkOpacity
+                                                : NoopMetrics.navigationLensHighlightLightOpacity
+                                        ),
                                         style: StrokeStyle(
-                                            lineWidth: 1.1,
+                                            lineWidth: NoopMetrics.navigationLensHighlightWidth,
                                             lineCap: .round
                                         )
                                     )
-                                    .padding(3)
+                                    .padding(NoopMetrics.navigationLensHighlightInset)
                             }
                             .shadow(
-                                color: accent.opacity(colorScheme == .dark ? 0.24 : 0.16),
-                                radius: 8,
+                                color: accent.opacity(
+                                    colorScheme == .dark
+                                        ? NoopMetrics.navigationLensShadowDarkOpacity
+                                        : NoopMetrics.navigationLensShadowLightOpacity
+                                ),
+                                radius: NoopMetrics.navigationLensShadowRadius,
                                 x: 0,
-                                y: 4
+                                y: NoopMetrics.navigationLensShadowY
                             )
                             .matchedGeometryEffect(
                                 id: "selected-tab-indicator",
@@ -2221,15 +2229,24 @@ private struct FloatingTabBar: View {
                             )
                     }
                     Image(systemName: item.icon)
-                        .font(.system(size: 17, weight: active ? .semibold : .regular))
+                        .font(
+                            .system(
+                                size: NoopMetrics.navigationLensIconSize,
+                                weight: active ? .semibold : .regular
+                            )
+                        )
                         .symbolRenderingMode(.hierarchical)
-                        .scaleEffect(active ? 1.04 : 1)
+                        .scaleEffect(
+                            active ? NoopMetrics.navigationLensSelectedScale : 1
+                        )
                 }
                 .frame(
                     width: Self.raisedLensDimension,
                     height: Self.raisedLensDimension
                 )
-                .offset(y: active ? -7 : 0)
+                .offset(
+                    y: active ? -NoopMetrics.navigationLensActiveOffset : 0
+                )
                 Text(visualTitle(for: item))
                     // Fixed navigation remains one line like a native tab bar. The local Dynamic Type cap,
                     // tightening and bounded scaling keep every shipped localized title whole; tail
@@ -2245,7 +2262,7 @@ private struct FloatingTabBar: View {
                         minHeight: Self.boundedLabelLineHeight(scaledLabelLineHeight)
                             * CGFloat(Self.labelLineCount)
                     )
-                    .offset(y: -2)
+                    .offset(y: -NoopMetrics.navigationLensLabelOffset)
             }
             .foregroundStyle(navigationInk(active: active, accent: accent))
             .frame(maxWidth: .infinity)

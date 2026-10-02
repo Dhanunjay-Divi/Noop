@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `verified locally; protected integration pending`
+- State: `independent-review remediation in progress`
 - Owner: project team
 - Branch: `codex/mobile-liquid-tab-otp-motion-20261002`
 - Start commit: `dbd23c25e4f681c4a087642b41441270fa15c3a0`
-- End implementation commit: `1268a2cb82188fdaed53a2cc148587dc9d186b9e`
+- End implementation commit: pending review-fix checkpoint
 - Record commit or PR: pending protected pull request
 
 ## Objective
@@ -64,9 +64,10 @@ formulas, band transport, account authority, or server behavior.
   code is never copied into or redrawn by the success overlay.
 - Android success dismissal runs in a sheet-owned job that is canceled on
   phase reset or disposal, preventing a stale pointer-blocking overlay.
-- Removed untranslated numeric accessibility status text; Apple count and hint
-  text use localized resources, and Android retains the localized field label
-  and native editable-field semantics.
+- Removed untranslated numeric accessibility status and hint text. Apple and
+  Android retain their existing localized field labels and native editable-field
+  semantics; the server-confirmed overlay takes accessibility focus or emits an
+  assertive live-region announcement while underlying controls are hidden.
 
 ## Data, privacy, and medical truth
 
@@ -100,7 +101,7 @@ formulas, band transport, account authority, or server behavior.
 
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
-| Independent review | Initial review reported unresolved merge state, six-only validation, retained OTP digits, cancellable-overlay risk, partial Reduced Motion, untranslated status text, and ad-hoc dimensions; the implementation was corrected before commit and submitted for re-review | The known privacy, contract, lifecycle, accessibility, and maintainability risks were explicitly handled | A formal external security audit |
+| Independent review | Initial review reported unresolved merge state, six-only validation, retained OTP digits, cancellable-overlay risk, partial Reduced Motion, untranslated status text, and ad-hoc dimensions. A second review found delayed Android clearing, incomplete modal accessibility, three untranslated Apple strings, remaining lens literals, and overstated records; those findings are under remediation and require final re-review | The review process identified concrete privacy, contract, lifecycle, accessibility, and maintainability risks before protected integration | Closure until final re-review and repeated gates pass |
 | Android production compile | Bounded `compileFullDebugKotlin` passed | Current Full production Kotlin compiles with the corrected UI | Signed phone behavior |
 | Android focused contract | `PrimaryNavigationContractTest` passed 10/10 after one stale token assertion was updated | Five-tab semantics, moving lens, four-to-eight digit normalization, reduced motion, autofill, and non-retained success state are enforced | Instrumented TalkBack behavior |
 | Android APK | Bounded `assembleFullDebug` passed; SHA-256 `a4fe157427c615c67909a97516992353b8446ae1e19f542dcae8113fc3f17e02` | The exact Full debug candidate packages | Store signing or physical install |
@@ -126,7 +127,7 @@ formulas, band transport, account authority, or server behavior.
 - Changed paths: shared design tokens, iPhone/Android shell navigation,
   iPhone/Android managed-cloud verification views, focused contracts, and this
   operations record.
-- Implementation commit: `1268a2cb82188fdaed53a2cc148587dc9d186b9e`.
+- Implementation commit: pending review-fix checkpoint.
 - Branch and remote state: local only; protected pull request and exact-main
   verification pending.
 - Repository visibility: unchanged; public-source exclusions remain in force.
