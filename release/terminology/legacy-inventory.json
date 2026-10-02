@@ -5,7 +5,7 @@
     "customer": 887,
     "fixture": 5976,
     "generated": 21,
-    "historical": 3410,
+    "historical": 3423,
     "import": 870,
     "persisted": 700
   },
@@ -37002,6 +37002,36 @@
     {
       "category": "historical",
       "lineNumbers": [
+        49,
+        51,
+        138,
+        169
+      ],
+      "occurrenceCount": 4,
+      "path": "docs/handoff/NOOP-PHYSICAL-BAND-TEST-REVIEW-2026-10-01.md",
+      "sha256": "72c8995bf4cee29d032368d235f7002a95944cb769a583f44e6bd1a1e69bf016",
+      "tokenCounts": {
+        "whoop": 4
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        54,
+        68,
+        85,
+        85
+      ],
+      "occurrenceCount": 4,
+      "path": "docs/handoff/NOOP-PHYSICAL-BAND-TEST-START-2026-10-01.md",
+      "sha256": "8f0cdd88f605051b6730f21364180662af4014dcfa42ed1e54204626b4d63874",
+      "tokenCounts": {
+        "whoop": 4
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
         35,
         37,
         38,
@@ -37198,26 +37228,26 @@
     {
       "category": "historical",
       "lineNumbers": [
-        156,
-        159,
-        220,
-        380,
-        435,
-        456,
-        458,
-        513,
-        521,
-        533,
-        539,
-        594,
-        639,
-        707,
-        755,
-        776,
-        920,
-        1055,
-        1161,
-        1165
+        171,
+        174,
+        235,
+        395,
+        450,
+        471,
+        473,
+        528,
+        536,
+        548,
+        554,
+        609,
+        654,
+        722,
+        770,
+        791,
+        935,
+        1070,
+        1176,
+        1180
       ],
       "occurrenceCount": 20,
       "path": "docs/ops/ACTIVE.md",
@@ -37871,23 +37901,50 @@
     {
       "category": "historical",
       "lineNumbers": [
-        17,
-        24,
-        25,
+        16,
+        165
+      ],
+      "occurrenceCount": 2,
+      "path": "docs/ops/rounds/2026-10-01-connected-band-test-attempt.md",
+      "sha256": "db3e0dfe41de75040204e89acb863806f1c81d7c2193c6ab114f70dd66da815c",
+      "tokenCounts": {
+        "whoop": 2
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        14,
         26,
+        177
+      ],
+      "occurrenceCount": 3,
+      "path": "docs/ops/rounds/2026-10-01-physical-band-candidate-review.md",
+      "sha256": "0d0cc207928d8175215475efb3c88cfceb3511cca85b6467e256c27ba08d60dc",
+      "tokenCounts": {
+        "whoop": 3
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        19,
+        26,
+        27,
         28,
-        28,
-        29,
+        30,
         30,
         31,
         32,
-        36,
-        37,
-        41,
-        46,
-        67,
-        103,
-        103
+        33,
+        34,
+        38,
+        39,
+        43,
+        48,
+        69,
+        105,
+        105
       ],
       "occurrenceCount": 17,
       "path": "docs/ops/rounds/INDEX.md",
@@ -40111,7 +40168,7 @@
       }
     }
   ],
-  "occurrenceCount": 18579,
+  "occurrenceCount": 18592,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

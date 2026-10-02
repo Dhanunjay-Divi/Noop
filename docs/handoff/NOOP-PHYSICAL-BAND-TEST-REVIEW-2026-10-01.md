@@ -1,5 +1,14 @@
 # NOOP Physical Band Test Review
 
+**Later connected-session evidence:** both supplied native SDKs now compile,
+Android’s enabled build passes 52 supplier tests and is updated in place, and a
+signed enabled build is freshly installed on the 13 Pro Max. This supersedes
+missing-supplier/archive and 13 Pro Max signing findings below. Physical BLE,
+account/provider and exact model/firmware gates remain. See the
+[SDK intake](NOOP-SUPPLIER-SDK-INTAKE-2026-10-01.md) and
+[connected session](../ops/rounds/2026-10-01-connected-band-test-attempt.md).
+
+
 Date: 2026-10-01
 Reviewer: Codex recovery agent
 Status: scoped source fix locally verified; physical collection not yet run

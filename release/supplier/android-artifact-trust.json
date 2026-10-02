@@ -96,7 +96,7 @@
     {
       "nativeAbis": [],
       "nativeLibraries": [],
-      "path": "jar_core/vpprotocol-2.3.81.15.aar",
+      "path": "jar_core/vpprotocol-2.3.86.15.aar",
       "requiredClasses": [
         "com.veepoo.protocol.VPOperateManager",
         "com.veepoo.protocol.listener.base.IBleWriteResponse",
@@ -115,7 +115,7 @@
         "com.veepoo.protocol.model.enums.EHeartStatus",
         "com.veepoo.protocol.model.enums.EPwdStatus"
       ],
-      "sha256": "756514429b1b68328f2152d85126d1dccc9ae5f0ea2d398429bba01d53588c27"
+      "sha256": "f383e81e5314d4d4d97b1a0ebe59e5bc9d76b0968ba73deec517641be52211d3"
     }
   ],
   "schemaVersion": 1

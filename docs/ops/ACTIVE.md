@@ -4,20 +4,20 @@ Last updated: **2026-10-01**
 
 ## Authoritative context
 
-- The physical comparison review branch `codex/physical-band-review-20261001`
-  is published as draft PR [#28](https://github.com/Dhanunjay-Divi/Noop/pull/28). It
-  starts at candidate `232f746e0` and contains source fix `2e676e75d` for Apple
-  optional step/sleep command serialization. Focused supplier tests pass 70/70,
-  SDK boundary checks pass 7/7, the default-off iOS graph compiles, and the
-  Android Full Debug APK (9.2.1-debug / 304) assembles. Both
-  iPhones now have Developer Mode enabled. Physical collection is not run:
-  required signing capabilities, approved external supplier artifacts, account
-  configuration, and the zero-row compatibility manifest remain gates. Android
-  is included and the owner will connect a phone. See the
-  [physical review](../handoff/NOOP-PHYSICAL-BAND-TEST-REVIEW-2026-10-01.md) and
-  [current round](rounds/2026-10-01-physical-band-candidate-review.md).
-  The [return checklist](../handoff/NOOP-PHYSICAL-BAND-TEST-START-2026-10-01.md)
-  is prepared; retained APK hash/signature and local gates were rechecked.
+- Draft [PR #28](https://github.com/Dhanunjay-Divi/Noop/pull/28), branch
+  `codex/physical-band-review-20261001`, contains Apple optional step/sleep
+  serialization fix `2e676e75d` and the owner-supplied native SDK intake follow-up.
+  Both SDK-enabled graphs compile. Android supplier tests pass 52/52; the
+  SDK-enabled 9.2.1-debug / 304 update is installed with the same certificate.
+  The full signed iOS 9.2.1 / 231 graph passes and is freshly installed on the
+  13 Pro Max. Both current phone screens are locked; owner Terms completion,
+  approved account/provider configuration and exact model/firmware approval
+  remain required. No physical BLE collection or sensor parity is claimed.
+  Supplier archives are preserved in ignored local storage; no public binaries.
+  This supersedes earlier missing-archive and 13 Pro Max signing findings.
+  See [SDK intake](../handoff/NOOP-SUPPLIER-SDK-INTAKE-2026-10-01.md),
+  [connected round](rounds/2026-10-01-connected-band-test-attempt.md) and the
+  [return checklist](../handoff/NOOP-PHYSICAL-BAND-TEST-START-2026-10-01.md).
 
 - The Today metric-catalog refinement is locally verified after complete
   Android Full and Apple hosted-contract repair on

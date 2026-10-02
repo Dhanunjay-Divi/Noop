@@ -1,5 +1,15 @@
 # NOOP physical-band test start checklist — 2026-10-01
 
+**Connected-session update:** the owner-supplied SDKs are integrated and enabled
+builds pass on both platforms. Android’s same-signature SDK update and a fresh
+signed install on the 13 Pro Max are complete. Both screens are currently locked;
+owner first-run setup, approved account/provider configuration and exact band
+qualification remain. The earlier preparation findings below are historical;
+use the [SDK intake](NOOP-SUPPLIER-SDK-INTAKE-2026-10-01.md) and
+[connected round](../ops/rounds/2026-10-01-connected-band-test-attempt.md)
+for the current artifact and device state. No physical band pass yet.
+
+
 Preparation is verified; installation and live band scenarios are **not run**.
 Use this alongside the [detailed review](NOOP-PHYSICAL-BAND-TEST-REVIEW-2026-10-01.md)
 and [physical validation runbook](NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md).

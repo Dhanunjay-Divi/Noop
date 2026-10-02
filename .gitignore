@@ -199,3 +199,6 @@ Config/BundleIdSecrets.xcconfig
 
 # kiro working area (sandbox analysis + screenshots)
 noop_WIP/
+
+# Owner-supplied SDK archive receipts; private copies, not public source.
+/LocalSupplierSDK/

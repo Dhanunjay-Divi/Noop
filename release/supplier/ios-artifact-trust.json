@@ -61,10 +61,10 @@
       "path": "Demo/VeepooBleSDKDemo/VeepooBleSDKDemo/JL_BLEKit.framework"
     },
     {
-      "binarySha256": "22e9d0154c5fecddbd3a21ef309fb3d33d734ec5f8e671787fa9ee8564d13d35",
-      "bytes": 14600052,
+      "binarySha256": "ef553626d64ee625d9eb3121445d0c8a60f7958cdf721f7da5ecebca77d4d7b0",
+      "bytes": 14624249,
       "fileCount": 133,
-      "inventorySha256": "b7ef91819dfd077434366a60c360023cd215a875406e83a233969633bb41f65e",
+      "inventorySha256": "dbb907a5d83eaae3b70bb02ce093868920b059e79a2640b22b6a335f295c3dfc",
       "name": "VeepooBleSDK",
       "path": "Framework/2.2.XX.15/VeepooBleSDK.framework"
     },
@@ -79,18 +79,18 @@
   ],
   "generatedFrameworks": [
     {
-      "binarySha256": "c22b46589e8bf9b7198146226366a421963d682945d0dc80c69f6d4d1fa95aae",
-      "bytes": 263465,
+      "binarySha256": "051d47ca86e365f314291ed18c05844677283a1ae7d50e4053ad4df9b5661d46",
+      "bytes": 264025,
       "fileCount": 10,
-      "inventorySha256": "71ff4640f71c21ebb03d3ef644dabbb00fba676f50af805b8973a98fedf9b92b",
+      "inventorySha256": "0143b66056c7c8364deda7641240d2351d05540a8d51ba84b94208db7d443f45",
       "name": "FMDB",
       "path": "Demo/VeepooBleSDKDemo/build/Debug-iphoneos/FMDB/FMDB.framework"
     },
     {
-      "binarySha256": "fadb76572cb8d507751cacbd4b37f742d291c2b6cff8ff5fb7149b8560ce9d3d",
-      "bytes": 197388,
+      "binarySha256": "d024f1b62e3a939e402a04489e8bbf30641ec988688106b9f4cdca95be96c1f6",
+      "bytes": 198348,
       "fileCount": 15,
-      "inventorySha256": "39c50fdfce9d83c5276c875a526b9e96019b7d0e25efda9c7b108548851afae8",
+      "inventorySha256": "6ad2bf7bbc6e097a0050d51053753a68a874c9c1a2df61d5eb3736ff50c9a26f",
       "name": "MJExtension",
       "path": "Demo/VeepooBleSDKDemo/build/Debug-iphoneos/MJExtension/MJExtension.framework"
     }

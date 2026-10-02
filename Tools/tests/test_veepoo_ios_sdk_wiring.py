@@ -98,7 +98,7 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
         )
         self.assertEqual(
             MODULE.EXPECTED_BINARY_SHA256,
-            "22e9d0154c5fecddbd3a21ef309fb3d33d734ec5f8e671787fa9ee8564d13d35",
+            "ef553626d64ee625d9eb3121445d0c8a60f7958cdf721f7da5ecebca77d4d7b0",
         )
         self.assertEqual(
             MODULE.TRUST_RELATIVE_PATH,
@@ -195,10 +195,10 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
                     "b0b615ed347ccb96958964a14234c5b2",
                 ),
                 "VeepooBleSDK": (
-                    "22e9d0154c5fecddbd3a21ef309fb3d33"
-                    "d734ec5f8e671787fa9ee8564d13d35",
-                    "b7ef91819dfd077434366a60c360023cd"
-                    "215a875406e83a233969633bb41f65e",
+                    "ef553626d64ee625d9eb3121445d0c8a6"
+                    "0f7958cdf721f7da5ecebca77d4d7b0",
+                    "dbb907a5d83eaae3b70bb02ce09386892"
+                    "0b059e79a2640b22b6a335f295c3dfc",
                 ),
                 "ZipZap": (
                     "a9fe0ba509e08b4bc13b7f41f7770596"
@@ -215,12 +215,12 @@ class VeepooIOSSDKWiringTests(unittest.TestCase):
             },
             {
                 "FMDB": (
-                    "c22b46589e8bf9b7198146226366a421"
-                    "963d682945d0dc80c69f6d4d1fa95aae"
+                    "051d47ca86e365f314291ed18c058446"
+                    "77283a1ae7d50e4053ad4df9b5661d46"
                 ),
                 "MJExtension": (
-                    "fadb76572cb8d507751cacbd4b37f742"
-                    "d291c2b6cff8ff5fb7149b8560ce9d3d"
+                    "d024f1b62e3a939e402a04489e8bbf30"
+                    "641ec988688106b9f4cdca95be96c1f6"
                 ),
             },
         )
