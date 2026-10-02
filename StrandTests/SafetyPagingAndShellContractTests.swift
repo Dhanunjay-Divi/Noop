@@ -1942,6 +1942,13 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensIconSize"))
         XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensActiveOffset"))
         XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensLabelOffset"))
+        XCTAssertTrue(tabBar.contains("StrandPalette.navigationLensHighlight"))
+        XCTAssertTrue(
+            tabBar.contains("NoopMetrics.navigationLensHighlightStartAngle")
+        )
+        XCTAssertTrue(
+            tabBar.contains("NoopMetrics.navigationLensHighlightSweepAngle")
+        )
         XCTAssertTrue(tabBar.contains("matchedGeometryEffect("))
         XCTAssertTrue(tabBar.contains(#"id: "selected-tab-indicator""#))
         XCTAssertTrue(tabBar.contains("Circle()"))

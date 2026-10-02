@@ -91,6 +91,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.password
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -111,6 +112,7 @@ import java.time.format.FormatStyle
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -118,7 +120,16 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 internal val ManagedVerificationCodeLengthRange = 4..8
+internal const val ManagedVerificationSuccessDurationMillis = 3_000L
 internal const val ManagedVerificationCodeMaximumLength = 8
+
+internal fun CoroutineScope.launchManagedVerificationSuccessDismissal(
+    durationMillis: Long = ManagedVerificationSuccessDurationMillis,
+    onDismiss: () -> Unit,
+): Job = launch {
+    delay(durationMillis)
+    onDismiss()
+}
 
 internal fun sanitizeManagedVerificationCode(
     rawValue: String,
@@ -350,8 +361,8 @@ private fun ManagedCloudSetupSheet(
             code = ""
             verificationSuccessJob?.cancel()
             verificationSuccessVisible = true
-            verificationSuccessJob = scope.launch {
-                delay(680)
+            verificationSuccessJob =
+                scope.launchManagedVerificationSuccessDismissal {
                 verificationSuccessVisible = false
                 verificationSuccessJob = null
             }
@@ -958,6 +969,7 @@ private fun ManagedVerificationCodeField(
             }
             .semantics {
                 contentDescription = label
+                password()
             },
         decorationBox = { innerTextField ->
             Box {
@@ -1056,6 +1068,7 @@ private fun ManagedVerificationSuccessOverlay(
 
     Box(
         modifier = modifier
+            .testTag("noop.noop-plus.verified")
             .background(Palette.surfaceBase.copy(alpha = 0.88f))
             .pointerInput(Unit) {
                 awaitPointerEventScope {

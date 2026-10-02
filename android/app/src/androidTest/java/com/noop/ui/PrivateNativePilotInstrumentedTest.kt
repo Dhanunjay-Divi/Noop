@@ -9,12 +9,15 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -96,12 +99,20 @@ class PrivateNativePilotInstrumentedTest {
         compose.onNodeWithTag(TAG_SEND_CODE).assertIsEnabled().performClick()
 
         waitForTag(TAG_CODE, 30_000)
-        compose.onNodeWithTag(TAG_CODE).performTextInput(requireNotNull(code))
+        compose.onNodeWithTag(TAG_CODE)
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            .performTextInput(requireNotNull(code))
         compose.onNodeWithTag(TAG_VERIFY_CODE)
             .performScrollTo()
             .assertIsEnabled()
             .performClick()
 
+        waitForTag(TAG_VERIFIED, 30_000)
+        compose.onNodeWithTag(TAG_VERIFIED).assertIsDisplayed()
+        assertTrue(
+            "The verified secret field must leave the semantics tree.",
+            compose.onAllNodesWithTag(TAG_CODE).fetchSemanticsNodes().isEmpty(),
+        )
         waitForTag(TAG_CONSENT, 30_000)
         compose.onNodeWithTag(TAG_ENROLL)
             .performScrollTo()
@@ -207,6 +218,7 @@ class PrivateNativePilotInstrumentedTest {
         const val TAG_SEND_CODE = "noop.noop-plus.send-code"
         const val TAG_CODE = "noop.noop-plus.code"
         const val TAG_VERIFY_CODE = "noop.noop-plus.verify-code"
+        const val TAG_VERIFIED = "noop.noop-plus.verified"
         const val TAG_CONSENT = "noop.noop-plus.consent"
         const val TAG_ENROLL = "noop.noop-plus.enroll"
         const val TAG_ENROLLED = "noop.noop-plus.enrolled"

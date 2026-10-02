@@ -225,9 +225,9 @@ struct RootTabView: View {
                     .frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))
                     .accessibilityHidden(true)
             }
-            // At accessibility sizes, letting the floating rail overlap this viewport can split a
-            // sentence across persistent controls. Reserve the measured control footprint in layout
-            // instead of merely painting over the text. Ordinary sizes retain the floating treatment.
+            // Persistent navigation must not cover a metric card or split large text while it is being
+            // read. Reserve the measured control footprint in the viewport at every text size; the rail
+            // still renders as a floating glass surface over the page background rather than a system bar.
             .padding(.bottom, tabContentBottomReservation)
             if !keyboardVisible,
                dynamicTypeSize.isAccessibilitySize ||
@@ -528,7 +528,7 @@ struct RootTabView: View {
     }
 
     private var tabContentBottomReservation: CGFloat {
-        guard !keyboardVisible, dynamicTypeSize.isAccessibilitySize else { return 0 }
+        guard !keyboardVisible else { return 0 }
         return visibleTabBarHeight
     }
 
@@ -2017,8 +2017,16 @@ private struct FloatingTabBar: View {
     private func selectedHaloFill(accent: Color) -> LinearGradient {
         LinearGradient(
             colors: [
-                accent.opacity(colorScheme == .dark ? 0.28 : 0.18),
-                accent.opacity(colorScheme == .dark ? 0.10 : 0.07),
+                accent.opacity(
+                    colorScheme == .dark
+                        ? NoopMetrics.navigationLensBodyDarkStartOpacity
+                        : NoopMetrics.navigationLensBodyLightStartOpacity
+                ),
+                accent.opacity(
+                    colorScheme == .dark
+                        ? NoopMetrics.navigationLensBodyDarkEndOpacity
+                        : NoopMetrics.navigationLensBodyLightEndOpacity
+                ),
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -2027,8 +2035,12 @@ private struct FloatingTabBar: View {
     private func selectedHaloStroke(accent: Color) -> Color {
         accent.opacity(
             reduceTransparency || colorSchemeContrast == .increased
-                ? 0.72
-                : (colorScheme == .dark ? 0.52 : 0.42)
+                ? NoopMetrics.navigationLensRimHighContrastOpacity
+                : (
+                    colorScheme == .dark
+                        ? NoopMetrics.navigationLensRimDarkOpacity
+                        : NoopMetrics.navigationLensRimLightOpacity
+                )
         )
     }
 
@@ -2199,9 +2211,15 @@ private struct FloatingTabBar: View {
                             )
                             .overlay(alignment: .topLeading) {
                                 Circle()
-                                    .trim(from: 0.06, to: 0.30)
+                                    .trim(
+                                        from: NoopMetrics.navigationLensHighlightStartAngle / 360,
+                                        to: (
+                                            NoopMetrics.navigationLensHighlightStartAngle
+                                                + NoopMetrics.navigationLensHighlightSweepAngle
+                                        ) / 360
+                                    )
                                     .stroke(
-                                        .white.opacity(
+                                        StrandPalette.navigationLensHighlight.opacity(
                                             colorScheme == .dark
                                                 ? NoopMetrics.navigationLensHighlightDarkOpacity
                                                 : NoopMetrics.navigationLensHighlightLightOpacity
@@ -2263,6 +2281,10 @@ private struct FloatingTabBar: View {
                             * CGFloat(Self.labelLineCount)
                     )
                     .offset(y: -NoopMetrics.navigationLensLabelOffset)
+                    .padding(
+                        .horizontal,
+                        NoopMetrics.navigationLensLabelHorizontalPadding
+                    )
             }
             .foregroundStyle(navigationInk(active: active, accent: accent))
             .frame(maxWidth: .infinity)

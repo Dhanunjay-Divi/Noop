@@ -205,13 +205,22 @@ final class MoreListParityTests: XCTestCase {
             ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
         ), "A scroll-content margin still permits large text to render under the floating controls.")
         XCTAssertTrue(shell.contains(".padding(.bottom, tabContentBottomReservation)"),
-                      "Accessibility text needs a viewport that physically ends above persistent controls.")
+                      "The viewport must physically end above persistent controls at every text size.")
         XCTAssertTrue(shell.contains(
             ".frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))"
-        ), "Ordinary sizes must retain the floating inset without double-reserving accessibility space.")
-        XCTAssertTrue(shell.contains(
-            "guard !keyboardVisible, dynamicTypeSize.isAccessibilitySize else { return 0 }"
-        ), "Only accessibility navigation should trade overlap for a separate reading region.")
+        ), "The measured safe-area inset and viewport reservation must not double-count the dock.")
+        let reservation = try XCTUnwrap(
+            shell.components(
+                separatedBy: "private var tabContentBottomReservation: CGFloat"
+            ).last?.components(
+                separatedBy: "private static func diagnosticTabName"
+            ).first
+        )
+        XCTAssertTrue(reservation.contains(
+            "guard !keyboardVisible else { return 0 }"
+        ), "Every non-keyboard viewport must reserve the persistent dock footprint.")
+        XCTAssertTrue(reservation.contains("return visibleTabBarHeight"))
+        XCTAssertFalse(reservation.contains("dynamicTypeSize.isAccessibilitySize"))
         XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ||"))
         XCTAssertTrue(shell.contains("reduceTransparency ||"))
         XCTAssertTrue(shell.contains("colorSchemeContrast == .increased"))
@@ -380,8 +389,11 @@ final class MoreListParityTests: XCTestCase {
                       "The real compact state needs a deterministic visual-regression route.")
         XCTAssertTrue(shell.contains(".glassEffect(.regular.tint(tint)"),
                       "Floating controls must diffuse content beneath their shapes without adding an opaque band.")
-        XCTAssertTrue(shell.contains(".matchedGeometryEffect(\n                            id: \"selected-tab-indicator\""),
-                      "The selected capsule must morph between expanded tabs and the compact control.")
+        XCTAssertTrue(
+            tabBar.contains(#"id: "selected-tab-indicator""#)
+                && tabBar.contains("in: navigationMorph"),
+            "The selected capsule must morph between expanded tabs and the compact control."
+        )
         XCTAssertTrue(shell.contains("value: selection"),
                       "Tab selection needs a local animation so the capsule moves instead of jumping.")
         XCTAssertTrue(shell.contains("return .black.opacity(0.11)"),

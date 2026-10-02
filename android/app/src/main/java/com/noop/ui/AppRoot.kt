@@ -1616,8 +1616,9 @@ private fun GlassBottomBar(
                 labels = barLabels,
                 availableWidth = maxWidth,
                 horizontalContentPadding = barContentPadding,
-                interItemSpacing = 1.dp,
-                labelHorizontalSafetyPadding = 1.dp,
+                interItemSpacing = Metrics.navigationLensItemSpacing,
+                labelHorizontalSafetyPadding =
+                    Metrics.navigationLensLabelHorizontalPadding,
             )
             val barHeight = labelLayout.barHeightDp.dp + Metrics.space12
             val slotWidth = (
@@ -1670,7 +1671,9 @@ private fun GlassBottomBar(
                         .padding(horizontal = barContentPadding)
                         .selectableGroup(),
                     verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(1.dp),
+                    horizontalArrangement = Arrangement.spacedBy(
+                        Metrics.navigationLensItemSpacing
+                    ),
                 ) {
                     bottomBarTabs.forEach { tab ->
                     BarSlot(
@@ -1737,7 +1740,7 @@ private fun Modifier.raisedNavigationLens(accent: Color): Modifier = composed {
                     style = Stroke(width = rimWidth),
                 )
                 drawArc(
-                    color = Color.White.copy(
+                    color = Palette.navigationLensHighlight.copy(
                         alpha = if (light) {
                             Metrics.navigationLensHighlightLightAlpha
                         } else {
@@ -2244,7 +2247,9 @@ private fun BarSlot(
                 contentDescription = label
             },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top,
+        verticalArrangement = Arrangement.spacedBy(
+            Metrics.navigationLensItemSpacing
+        ),
     ) {
         Box(
             modifier = Modifier
@@ -2285,7 +2290,9 @@ private fun BarSlot(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset(y = -Metrics.navigationLensLabelOffset)
-                .padding(horizontal = 1.dp),
+                .padding(
+                    horizontal = Metrics.navigationLensLabelHorizontalPadding
+                ),
         )
     }
 }

@@ -338,9 +338,8 @@ private struct ManagedCloudSetupSheet: View {
                         verificationSuccessVisible = true
                     }
                 }
-                verificationSuccessTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 680_000_000)
-                    guard !Task.isCancelled else { return }
+                verificationSuccessTask =
+                    ManagedVerificationSuccessPolicy.dismissalTask {
                     if reduceMotion {
                         verificationSuccessVisible = false
                     } else {
@@ -896,6 +895,7 @@ private struct ManagedVerificationCodeEntry: View {
         )
         .opacity(isBusy ? 0.72 : 1)
         .accessibilityLabel("NOOP+ verification code")
+        .accessibilityValue(String(repeating: "•", count: code.count))
         .accessibilityIdentifier("noop.noop-plus.code")
         .task(id: requestsFocus) {
             guard requestsFocus else { return }
@@ -1019,6 +1019,7 @@ private struct ManagedVerificationSuccessOverlay: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(verifiedLabel)
+        .accessibilityIdentifier("noop.noop-plus.verified")
         .accessibilityFocused($accessibilityFocused)
         .task {
             accessibilityFocused = true

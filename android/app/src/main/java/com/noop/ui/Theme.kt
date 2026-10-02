@@ -118,6 +118,7 @@ object Palette {
     val accentMuted get() = active.accentMuted
     val focusRing get() = active.focusRing
     val accentInk get() = active.accentInk
+    val navigationLensHighlight = Color.White
     const val disabledOpacity = 0.45f
 
     // Recovery / Charge gradient.
@@ -478,7 +479,7 @@ object Metrics {
     val navigationLensHighlightWidth = 1.1.dp
     val navigationLensHighlightInset = 3.dp
     val navigationLensShadowRadius = 8.dp
-    val navigationLensShadowY = 4.dp
+    val navigationLensLabelHorizontalPadding = 1.dp
     val navigationLensIconSize = 18.dp
     val navigationLensActiveOffset = 6.dp
     val navigationLensLabelOffset = 2.dp

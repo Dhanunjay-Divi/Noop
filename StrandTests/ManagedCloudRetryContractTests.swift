@@ -53,6 +53,9 @@ final class ManagedCloudRetryContractTests: XCTestCase {
 
     func testManagedVerificationUIKeepsAutofillAndServerConfirmedSuccess() throws {
         let source = try source("StrandiOS/System/ManagedCloudViews.swift")
+        let policy = try self.source(
+            "Strand/System/ManagedVerificationSuccessPolicy.swift"
+        )
 
         XCTAssertTrue(source.contains(".textContentType(.oneTimeCode)"))
         XCTAssertTrue(source.contains("managedVerificationCodeLengthRange = 4...8"))
@@ -68,6 +71,43 @@ final class ManagedCloudRetryContractTests: XCTestCase {
             source.contains(".accessibilityHidden(verificationSuccessVisible)")
         )
         XCTAssertTrue(source.contains(".accessibilityFocused($accessibilityFocused)"))
+        XCTAssertTrue(
+            source.contains(
+                #".accessibilityIdentifier("noop.noop-plus.verified")"#
+            )
+        )
+        XCTAssertTrue(
+            source.contains(
+                #".accessibilityValue(String(repeating: "•", count: code.count))"#
+            )
+        )
+        XCTAssertTrue(
+            policy.contains("durationNanoseconds: UInt64 = 3_000_000_000")
+        )
+        XCTAssertTrue(
+            source.contains(
+                "ManagedVerificationSuccessPolicy.dismissalTask"
+            )
+        )
+        let phaseLifecycle = try XCTUnwrap(
+            source.components(separatedBy: ".task(id: service.phase)").last?
+                .components(separatedBy: ".onDisappear").first
+        )
+        XCTAssertGreaterThanOrEqual(
+            phaseLifecycle.components(
+                separatedBy: "verificationSuccessTask?.cancel()"
+            ).count - 1,
+            2
+        )
+        let disposalLifecycle = try XCTUnwrap(
+            source.components(separatedBy: ".onDisappear").last
+        )
+        XCTAssertTrue(
+            disposalLifecycle.contains(
+                "verificationSuccessTask?.cancel()"
+            )
+        )
+        XCTAssertTrue(disposalLifecycle.contains("verificationSuccessVisible = false"))
         XCTAssertFalse(
             source.contains("No verification code digits entered")
         )
@@ -86,6 +126,41 @@ final class ManagedCloudRetryContractTests: XCTestCase {
             )
         )
         XCTAssertLessThan(clearsCode.lowerBound, refreshesOverview.lowerBound)
+    }
+
+    @MainActor
+    func testManagedVerificationSuccessWaitsForTheFullWindow() async {
+        let clock = ContinuousClock()
+        let started = clock.now
+        var dismissed = false
+
+        let task = ManagedVerificationSuccessPolicy.dismissalTask {
+            dismissed = true
+        }
+        XCTAssertFalse(dismissed)
+        await task.value
+
+        XCTAssertTrue(dismissed)
+        XCTAssertGreaterThanOrEqual(
+            started.duration(to: clock.now),
+            .seconds(3)
+        )
+    }
+
+    @MainActor
+    func testManagedVerificationSuccessCancellationSuppressesDismissal() async {
+        var dismissed = false
+        let task = ManagedVerificationSuccessPolicy.dismissalTask(
+            durationNanoseconds: 60_000_000_000
+        ) {
+            dismissed = true
+        }
+
+        await Task.yield()
+        task.cancel()
+        await task.value
+
+        XCTAssertFalse(dismissed)
     }
 
     func testScopedRetryStateClearsWithoutTouchingOtherScopesOrDefaults()

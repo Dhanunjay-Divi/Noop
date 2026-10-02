@@ -6,8 +6,13 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 
 /** Pins the daily navigation hierarchy shared with the Apple shell. */
+@OptIn(ExperimentalCoroutinesApi::class)
 class PrimaryNavigationContractTest {
     private fun appRootSource(): String? {
         val root = File(System.getProperty("user.dir") ?: ".")
@@ -443,6 +448,32 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains("Modifier.clearAndSetSemantics"))
         assertTrue(text.contains("LiveRegionMode.Assertive"))
         assertTrue(text.contains("paneTitle = verifiedLabel"))
+        assertTrue(text.contains("password()"))
+        assertTrue(text.contains(".testTag(\"noop.noop-plus.verified\")"))
+        assertTrue(
+            text.contains(
+                "ManagedVerificationSuccessDurationMillis = 3_000L"
+            )
+        )
+        assertTrue(
+            text.contains(
+                "scope.launchManagedVerificationSuccessDismissal"
+            )
+        )
+        val phaseLifecycle = text
+            .substringAfter("LaunchedEffect(state.phase)")
+            .substringBefore("NoopBottomSheet(")
+        assertTrue(
+            phaseLifecycle
+                .split("verificationSuccessJob?.cancel()")
+                .size - 1 >= 2
+        )
+        val disposalLifecycle = text
+            .substringAfter("DisposableEffect(Unit)")
+            .substringBefore("LaunchedEffect(state.phase)")
+        assertTrue(
+            disposalLifecycle.contains("verificationSuccessJob?.cancel()")
+        )
         assertFalse(text.contains("verificationSuccessCode"))
 
         val clearsCode = text.indexOf("code = \"\"")
@@ -459,5 +490,44 @@ class PrimaryNavigationContractTest {
         assertTrue(appRoot.contains("Metrics.navigationLensIconSize"))
         assertTrue(appRoot.contains("Metrics.navigationLensActiveOffset"))
         assertTrue(appRoot.contains("Metrics.navigationLensLabelOffset"))
+        assertTrue(appRoot.contains("Palette.navigationLensHighlight"))
+        assertTrue(appRoot.contains("Metrics.navigationLensItemSpacing"))
+        assertFalse(appRoot.contains("interItemSpacing = 1.dp"))
+        assertFalse(appRoot.contains("Arrangement.spacedBy(1.dp)"))
+    }
+
+    @Test
+    fun managedVerificationSuccessWaitsForTheFullWindow() = runTest {
+        var dismissed = false
+        val job = launchManagedVerificationSuccessDismissal {
+            dismissed = true
+        }
+
+        runCurrent()
+        assertFalse(dismissed)
+        advanceTimeBy(ManagedVerificationSuccessDurationMillis - 1)
+        runCurrent()
+        assertFalse(dismissed)
+        advanceTimeBy(1)
+        runCurrent()
+
+        assertTrue(dismissed)
+        job.join()
+    }
+
+    @Test
+    fun managedVerificationSuccessCancellationSuppressesDismissal() = runTest {
+        var dismissed = false
+        val job = launchManagedVerificationSuccessDismissal {
+            dismissed = true
+        }
+
+        runCurrent()
+        job.cancel()
+        advanceTimeBy(ManagedVerificationSuccessDurationMillis)
+        runCurrent()
+
+        assertFalse(dismissed)
+        job.join()
     }
 }

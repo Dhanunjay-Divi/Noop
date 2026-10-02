@@ -442,11 +442,20 @@ final class NOOPiOSUITests: XCTestCase {
         let codeField = app.textFields["noop.noop-plus.code"]
         XCTAssertTrue(codeField.waitForExistence(timeout: 30))
         focusAndType(code, into: codeField, in: app)
+        let maskedValue = codeField.value as? String ?? ""
+        XCTAssertEqual(maskedValue.count, code.count)
+        XCTAssertFalse(
+            maskedValue.contains(where: \.isNumber),
+            "The editable OTP field must not expose verification digits to accessibility."
+        )
 
         let verifyCode = app.buttons["noop.noop-plus.verify-code"]
         XCTAssertTrue(verifyCode.isEnabled)
         verifyCode.tap()
 
+        let verified = app.descendants(matching: .any)["noop.noop-plus.verified"]
+        XCTAssertTrue(verified.waitForExistence(timeout: 30))
+        XCTAssertFalse(codeField.exists, "The verified secret must clear with the phase transition.")
         XCTAssertTrue(consent.waitForExistence(timeout: 30))
         let enroll = app.buttons["noop.noop-plus.enroll"]
         XCTAssertTrue(enroll.exists)
@@ -865,6 +874,23 @@ final class NOOPiOSUITests: XCTestCase {
             tab.tap()
             XCTAssertTrue(tab.isSelected, "Tab \(index) must remain operable at AX-XXXL.")
         }
+    }
+
+    func testTodayOrdinaryTextViewportReservesExpandedNavigation() {
+        let app = launchApp()
+        let scroll = app.scrollViews["noop.today.scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 20))
+        let tabs = (0...4).map { app.buttons["noop.tab.\($0)"] }
+        for tab in tabs {
+            XCTAssertTrue(tab.waitForExistence(timeout: 5))
+        }
+        let navigationBoundary = tabs.map(\.frame.minY).min() ?? 0
+        XCTAssertGreaterThan(navigationBoundary, 0)
+        XCTAssertLessThanOrEqual(
+            scroll.frame.maxY,
+            navigationBoundary + 2,
+            "Ordinary text must end above the expanded navigation controls."
+        )
     }
 
     func testTrendsTimeoutShowsRetryAndRetryLeavesTheTerminalFailure() {

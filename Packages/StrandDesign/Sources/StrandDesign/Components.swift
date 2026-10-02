@@ -60,6 +60,7 @@ public enum NoopMetrics {
     public static let navigationLensHighlightInset: CGFloat = 3
     public static let navigationLensShadowRadius: CGFloat = 8
     public static let navigationLensShadowY: CGFloat = 4
+    public static let navigationLensLabelHorizontalPadding: CGFloat = 1
     public static let navigationLensIconSize: CGFloat = 18
     public static let navigationLensActiveOffset: CGFloat = 6
     public static let navigationLensLabelOffset: CGFloat = 2
@@ -70,6 +71,7 @@ public enum NoopMetrics {
     public static let navigationLensBodyDarkEndOpacity: CGFloat = 0.14
     public static let navigationLensRimLightOpacity: CGFloat = 0.58
     public static let navigationLensRimDarkOpacity: CGFloat = 0.68
+    public static let navigationLensRimHighContrastOpacity: CGFloat = 0.72
     public static let navigationLensHighlightLightOpacity: CGFloat = 0.54
     public static let navigationLensHighlightDarkOpacity: CGFloat = 0.30
     public static let navigationLensShadowLightOpacity: CGFloat = 0.16

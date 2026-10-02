@@ -4,38 +4,59 @@ Last updated: **2026-10-02**
 
 ## Authoritative context
 
-- The matched mobile tab/OTP motion refinement is in independent-review
-  remediation on branch `codex/mobile-liquid-tab-otp-motion-20261002`.
-  iPhone and Android now use one
-  raised selected lens across the same five labeled tabs while retaining
-  reselect behavior, touch targets, accessibility roles, reduced-motion snap,
-  and the separate movable NOOP N. Managed verification preserves the existing
-  four-through-eight digit service contract, normalizes localized decimal
-  input, supports platform OTP autofill, clears the code immediately after a
-  confirmed transition, and never copies or redraws it in success state.
-  Previous Android production compile, 10/10 focused tests, Full APK, Apple
-  67/67 focused tests, the complete iPhone graph, all-platform i18n, and paired
-  `1080x2424` / `1206x2622` visual review passed. The review-fix tree still
-  requires repeated focused gates, app builds, visual review, final independent
-  re-review, protected integration, and exact-main verification. Real OTP,
-  signed-device accessibility, and every physical band/source gate remain
-  pending.
+- The matched mobile tab/OTP motion refinement is locally final with
+  exact-current independent re-review complete on branch
+  `codex/mobile-liquid-tab-otp-motion-20261002`. iPhone and Android use one
+  raised selected lens across the same five labeled tabs while preserving
+  reselect behavior, touch targets, accessibility roles, Reduced Motion, and
+  the separate movable NOOP N. Managed verification preserves the four-through-
+  eight digit service contract, localized decimal normalization, platform OTP
+  autofill, immediate secret clearing, masked editable-field accessibility,
+  and a three-second server-confirmed success state that never stores or
+  redraws the code. The final token pass covers lens body, rim, highlight,
+  spacing, label padding, and palette ownership on both platforms. iPhone now
+  reserves the measured dock footprint at every text size, matching Android's
+  non-overlapping content boundary. Exact-current evidence passes Android
+  focused 12/12, production and instrumentation-source compile,
+  onboarding/Trends/package wall, Full APK
+  SHA-256 `3a134fc284b029c82afb2e9859191f0cdbd01d055d145a5761b12808ec6ada05`,
+  Apple focused 86/86, direct dock-boundary UI 1/1, the complete iPhone graph,
+  clean first-run 2/2, all-platform i18n, and reviewed `1080x2424` /
+  `1206x2622` captures. The final re-review found no remaining code defect.
+  Private native-pilot assertions compile but were not executed without their
+  private inputs. Protected integration and exact-main verification remain.
+  Real OTP, signed-device accessibility, and every physical band/source gate
+  remain pending.
 
-- The mobile command-lens regression repair is locally verified on branch
-  `codex/mobile-command-n-visual-close-20261002` from exact protected
-  `main` `e840874872f5e7eb7f38afcecd7aaa826b12288e`. Current main had
-  replaced the previously approved geometric NOOP `N` with an 80-percent arc
-  and center dot that read as an activity ring. The local repair restores one
-  matched rounded-stroke N on iPhone and Android while preserving the
-  `48x52` target, bounded drag, edge snap, persistence, nine-action launcher,
-  and accessibility movement actions. Android focused compile/unit and APK
-  assembly pass; Apple focused shell 1/1 and the complete iPhone Simulator
-  graph pass. Current `1080x2424` Android and `1206x2622` iPhone captures were
-  reviewed without observed clipping or overlap. The Android follow-up also
-  closes the stale Today/editor visual gap: Steps is in the default six and
-  all 18 choices remain grouped as measured/imported, source-dependent, and
-  NOOP insights. Protected checks, normal merge, exact-main verification, and
-  every signed physical-device/source gate remain pending.
+- The mobile command-lens regression repair is integrated on protected `main`
+  through PR `#30` at squash merge
+  `a8a617593b4b81485fca672353ebcebe2d073f55`. It restores one matched
+  rounded-stroke N on iPhone and Android while preserving the `48x52` target,
+  bounded drag, edge snap, persistence, nine-action launcher, and accessibility
+  movement actions. Android focused compile/unit and APK assembly, Apple shell
+  1/1, the complete iPhone Simulator graph, paired visual review, terminology,
+  localization, operations, claims, legal, private-data, and required-CI
+  controls passed before protected integration. The Android follow-up also
+  confirmed Steps in the default six and all 18 choices grouped as
+  measured/imported, source-dependent, and NOOP insights. Signed physical
+  device/source behavior remains unvalidated and unclaimed.
+
+- A replacement private synthetic GCP staging deployment is live and its source
+  is integrated through PR `#31` at protected merge
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`. The dedicated
+  billing-enabled project has protected remote state, budget alerts, Firebase
+  iOS/Android registration, App Check registration, synthetic phone OTP, one
+  retained fictional pilot claim, and email/password account identity. One
+  immutable image digest scanned with zero findings; Cloud SQL, migrations,
+  workload-specific credentials, IAM-only APIs, processors, lifecycle jobs,
+  App Check enforcement, and the scheduler are deployed. A three-account
+  fictional OTP/runtime smoke covered upload, processing, tenant isolation,
+  restore, erasure, social, and Safety fail-closed behavior; disposable
+  fictional push destinations and App Check debug tokens were removed, the
+  scheduled lifecycle completed, the private-runtime verifier passes, and
+  OpenTofu reports no drift. Public invocation, real health data, payment
+  entitlement, real OTP/push, and physical-band claims remain disabled or
+  unvalidated.
 
 - The direct-and-derived Today metric expansion is integrated on protected
   `main` through PR `#27` at squash merge

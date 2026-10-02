@@ -2,12 +2,12 @@
 
 ## Status
 
-- State: `verified locally; protected integration pending`
+- State: `integrated on protected main; physical validation pending`
 - Owner: project team
 - Branch: `codex/mobile-command-n-visual-close-20261002`
 - Start commit: `e840874872f5e7eb7f38afcecd7aaa826b12288e`
-- End implementation commit: commit containing this record
-- Record commit or PR: pending protected pull request
+- End implementation commit: `a8a617593b4b81485fca672353ebcebe2d073f55`
+- Record commit or PR: protected PR `#30`
 
 ## Objective
 
@@ -138,10 +138,11 @@ behavior:
 
 - Changed paths: iPhone and Android shell glyphs, focused shell contracts, and
   operations records.
-- Commits: pending local implementation commit.
-- Branch and remote state: local branch from exact protected
-  `main` `e840874872f5e7eb7f38afcecd7aaa826b12288e`; protected pull request
-  and exact-main verification pending.
+- Commits: protected squash
+  `a8a617593b4b81485fca672353ebcebe2d073f55`.
+- Branch and remote state: PR `#30` passed protected checks and is integrated
+  on `main`; the later mobile motion branch includes that exact protected
+  commit.
 - Repository visibility verified: unchanged; public-source exclusions remain in
   force.
 - Version/build impact: none planned.
@@ -168,8 +169,7 @@ behavior:
 
 ## Next round
 
-1. Complete protected checks, normal merge, and exact-main verification.
-2. Run the signed physical-source matrix from
+1. Run the signed physical-source matrix from
    `docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`.
 
 ## Privacy check

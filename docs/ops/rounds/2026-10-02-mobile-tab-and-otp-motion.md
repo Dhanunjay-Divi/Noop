@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `independent-review remediation in progress`
+- State: `local final verification and independent re-review complete; protected integration pending`
 - Owner: project team
 - Branch: `codex/mobile-liquid-tab-otp-motion-20261002`
 - Start commit: `dbd23c25e4f681c4a087642b41441270fa15c3a0`
-- End implementation commit: pending review-fix checkpoint
+- End implementation commit: pending final checkpoint
 - Record commit or PR: pending protected pull request
 
 ## Objective
@@ -62,12 +62,24 @@ formulas, band transport, account authority, or server behavior.
 - A confirmed service transition clears the code immediately, stores only a
   Boolean presentation state, and shows an abstract checkmark. The verified
   code is never copied into or redrawn by the success overlay.
+- The editable verification field exposes only a masked accessibility value on
+  both platforms, and the server-confirmed success state remains visible for
+  three seconds without retaining the code.
+- Apple and Android route dismissal through testable cancellation-aware
+  policies. Phase reset and sheet disposal cancel pending dismissal work, so a
+  stale overlay cannot mutate a later presentation state.
 - Android success dismissal runs in a sheet-owned job that is canceled on
   phase reset or disposal, preventing a stale pointer-blocking overlay.
 - Removed untranslated numeric accessibility status and hint text. Apple and
   Android retain their existing localized field labels and native editable-field
   semantics; the server-confirmed overlay takes accessibility focus or emits an
   assertive live-region announcement while underlying controls are hidden.
+- Completed the selected-lens token pass on both platforms, including body,
+  rim, highlight, spacing, label padding, and palette ownership.
+- iPhone now reserves the measured dock footprint at every text size while the
+  keyboard is hidden. The dock still reads as floating glass, but metric cards
+  no longer render beneath persistent navigation; Android already obtained the
+  equivalent non-overlap from `Scaffold`.
 
 ## Data, privacy, and medical truth
 
@@ -101,16 +113,20 @@ formulas, band transport, account authority, or server behavior.
 
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
-| Independent review | Initial review reported unresolved merge state, six-only validation, retained OTP digits, cancellable-overlay risk, partial Reduced Motion, untranslated status text, and ad-hoc dimensions. A second review found delayed Android clearing, incomplete modal accessibility, three untranslated Apple strings, remaining lens literals, and overstated records; those findings are under remediation and require final re-review | The review process identified concrete privacy, contract, lifecycle, accessibility, and maintainability risks before protected integration | Closure until final re-review and repeated gates pass |
+| Independent review | Two reviews found the original contract narrowing, OTP retention/exposure, lifecycle, Reduced Motion, accessibility, tokenization, geometry, and evidence defects. The exact-current re-review found no remaining code defect after direct dock-boundary geometry and executable success-window/cancellation coverage were added; its procedural file-tracking and stale-record findings are closed by the final checkpoint | The review process changed the implementation and its tests before protected integration rather than accepting build status as closure | Physical-device behavior or provider correctness |
 | Android production compile | Bounded `compileFullDebugKotlin` passed | Current Full production Kotlin compiles with the corrected UI | Signed phone behavior |
-| Android focused contract | `PrimaryNavigationContractTest` passed 10/10 after one stale token assertion was updated | Five-tab semantics, moving lens, four-to-eight digit normalization, reduced motion, autofill, and non-retained success state are enforced | Instrumented TalkBack behavior |
-| Android APK | Bounded `assembleFullDebug` passed; SHA-256 `a4fe157427c615c67909a97516992353b8446ae1e19f542dcae8113fc3f17e02` | The exact Full debug candidate packages | Store signing or physical install |
-| Android visual review | API 35 `1080x2424` Today capture SHA-256 `312c7e02ae629dc4b3b62e2beb406b5892f413fca4a2b6af4e03b1570c993585` | Labels fit, the selected lens is centered, content is not covered incoherently, and the N remains bounded | OEM rendering, touch comfort, or physical TalkBack |
-| Apple focused contracts | 67/67 passed in `ManagedCloudRetryContractTests` and `SafetyPagingAndShellContractTests` | Verification normalization/privacy and tab semantics remain green with existing Safety shell contracts | iOS-only compilation by itself |
-| Complete iPhone graph | Bounded `NOOPiOS` Simulator build passed, including Watch and widgets | The iOS-conditional verification view and shared design package compile in the mobile graph | Signing, physical Watch, BLE, or background behavior |
-| iPhone visual review | iPhone 17 Pro Simulator `1206x2622` Today capture SHA-256 `c163c70f0982568d0c852a62070424226440507b1f7e873c1d532ffddc392823` | The matched selected lens, labels, cards, and movable N render without observed clipping or incoherent overlap | Every locale, Dynamic Type size, or physical display |
+| Android focused contract | Exact-current `PrimaryNavigationContractTest` passed 12/12 with Full production and instrumentation-source compilation | Five-tab semantics, moving lens, four-to-eight digit normalization, Reduced Motion, autofill, non-retained success state, a full three-second virtual-time window, and cancellation are enforced | Instrumented TalkBack behavior or real OTP |
+| Android APK | Bounded `assembleFullDebug` passed; SHA-256 `3a134fc284b029c82afb2e9859191f0cdbd01d055d145a5761b12808ec6ada05` | The exact Full debug candidate packages | Store signing or physical install |
+| Android onboarding, Trends, and package wall | `OnboardingOwnershipStepSelectionTest`, `OnboardingInstrumentationHarnessTest`, `TrendsHistoryLoadTest`, `TrendsAxisLabelsTest`, and `assembleFullDebug` passed together | Required onboarding policy, useful Trends history/axis behavior, and packaging remain intact around the navigation change | Physical BLE, signed install, or OEM background behavior |
+| Android visual review | API 35 `1080x2424` Today capture SHA-256 `39ca83ea18cb2cd9b64abd188dc6d2da0298fa8d70f7f0045e280708953ff23b` | Labels fit, the selected lens is centered, content is not covered incoherently, and the N remains bounded | OEM rendering, touch comfort, or physical TalkBack |
+| Apple focused contracts | Original managed-cloud/shell set passed 67/67; exact-current `ManagedCloudRetryContractTests`, `MoreListParityTests`, and `SafetyPagingAndShellContractTests` passed 86/86 after the dock-reservation and success-lifecycle corrections | Verification normalization/privacy, a real three-second minimum window, cancellation, tab semantics, and non-overlapping persistent navigation are enforced with existing Safety shell contracts | iOS-only compilation by itself |
+| Complete iPhone graph | Exact-current bounded `NOOPiOS` Simulator build passed, including Watch and widgets | The iOS-conditional verification view and shared design package compile in the mobile graph | Signing, physical Watch, BLE, or background behavior |
+| Clean iPhone first-run journey | `testFreshInstallOrdersTermsBluetoothAndBandSetupBeforeAccount` and `testConfiguredProviderAndSyntheticBandCompleteFullOnboarding` passed 2/2 | Terms, Bluetooth, supported-band setup, account, and configured synthetic completion remain in the required order | Real provider, carrier, physical band, or signed-phone behavior |
+| iPhone dock-boundary regression | `testTodayOrdinaryTextViewportReservesExpandedNavigation` passed 1/1 using the minimum tab `frame.minY` as the actual navigation boundary | The ordinary-text Today viewport ends above every expanded persistent tab control | Other screens, physical display scaling, or touch comfort |
+| Private native pilot sources | Apple and Android private-pilot assertions compile and verify masked/password semantics, success-overlay appearance, and secret-field removal after the confirmed phase transition | The opt-in physical/provider pilot will fail if those semantics regress | Runtime provider behavior because private pilot inputs were unavailable and the cases were not executed |
+| iPhone visual review | iPhone 17 Pro Simulator `1206x2622` Today capture SHA-256 `61bf5f650a6781ec3e4a1d1f511b77791683312efe380213a8fb2080b455af34` | The matched selected lens, labels, cards, movable N, and reserved dock region render without observed clipping or incoherent overlap | Every locale, Dynamic Type size, or physical display |
 | All-platform i18n | Full audit passed with zero translated-key gaps in supported Apple catalogs | New localized Apple accessibility text and existing Android resources remain within coverage policy | Human linguistic review |
-| Diff hygiene | `git diff --check` passed before record creation | No whitespace-error regression | Runtime correctness outside listed gates |
+| Diff hygiene | `git diff --check` passed on the exact current source before documentation closeout | No whitespace-error regression | Runtime correctness outside listed gates |
 
 ## Physical device and deployment
 
@@ -124,12 +140,13 @@ formulas, band transport, account authority, or server behavior.
 
 ## Git and release state
 
-- Changed paths: shared design tokens, iPhone/Android shell navigation,
-  iPhone/Android managed-cloud verification views, focused contracts, and this
-  operations record.
-- Implementation commit: pending review-fix checkpoint.
-- Branch and remote state: local only; protected pull request and exact-main
-  verification pending.
+- Changed paths: shared design tokens and verification-success policy,
+  iPhone/Android shell navigation, iPhone/Android managed-cloud verification
+  views, focused contracts, and this operations record.
+- Implementation commit: pending final checkpoint.
+- Branch and remote state: local branch includes protected `main`
+  `a8a617593b4b81485fca672353ebcebe2d073f55`; one consolidated protected pull
+  request and exact-main verification remain.
 - Repository visibility: unchanged; public-source exclusions remain in force.
 - Version/build impact: none.
 - Release impact: source integration only; no store upload or production
@@ -153,8 +170,8 @@ formulas, band transport, account authority, or server behavior.
 
 ## Next round
 
-1. Merge current protected `main`, run repository gates, push a normal pull
-   request, and complete exact-main verification.
+1. Complete repository controls, one protected pull request, normal merge, and
+   exact-main verification.
 2. Run real OTP/autofill and physical-device accessibility in the signed-phone
    validation round.
 
