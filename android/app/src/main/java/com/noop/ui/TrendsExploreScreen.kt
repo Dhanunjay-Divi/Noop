@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.R
+import com.noop.analytics.HydrationStore
 import com.noop.data.DailyMetric
 import com.noop.data.MoodStore
 import com.noop.data.NutritionLogContract
@@ -96,172 +97,413 @@ private enum class ExploreRange(val days: Int?, val label: String, val windowNam
     val reachesDeep: Boolean get() = days == null || days > WhoopRepository.RECENT_DAYS_CAP
 }
 
-// MARK: - Metric descriptor (Android analogue of MetricCatalog's MetricDescriptor)
+// MARK: - Source-qualified metric catalog
 
-/**
- * One chartable metric: how to label/format it, its accent, and where its series comes
- * from. [dailyPick] is non-null for built-in DailyMetric columns; otherwise the series
- * is loaded from the metricSeries table under [seriesKey].
- */
-private data class MetricSpec(
+internal data class MetricHistoryDescriptor(
     val key: String,
     val title: String,
-    val unit: String,
     val category: String,
-    val accent: Color,
+    val unit: String,
+    val source: String,
+    val sourceLabel: String,
+    val decimals: Int,
     val higherIsBetter: Boolean?,
-    val decimals: Int = 0,
-    val dailyPick: ((DailyMetric) -> Double?)? = null,
-    val seriesKey: String? = null,
-    /** Source (deviceId) the [seriesKey] lives under when it is NOT the strap's own , e.g. the
-     *  nutrition-log or noop-mood write under dedicated source ids (v2.2.0
-     *  parity with the macOS MetricCatalog, whose descriptors carry key+source). */
-    val seriesSource: String? = null,
-    /** A short localized one-liner (the Explore header subtitle / catalog blurb). Only the
-     *  three headline scores , Charge / Effort / Rest , carry one today; everything else is null.
-     *  Mirrors macOS `MetricDescriptor.description`. */
     val description: String? = null,
-    /** Effort display scale (#268) , only meaningful for the "strain" column, where it converts the
-     *  stored 0–100 value + unit onto WHOOP's 0–21 axis. Default 0–100 leaves every other column alone. */
+    val note: String? = null,
+) {
+    val id: String get() = "$source:$key"
+}
+
+/**
+ * Explicit customer-facing history catalog. Internal revision, confidence, evidence, and
+ * motion-estimate keys stay out of this list. A repeated key under two providers is deliberately
+ * represented twice; selection and loading always use [MetricHistoryDescriptor.id].
+ */
+internal object AndroidMetricHistoryCatalog {
+    const val DIRECT_SOURCE = "my-whoop"
+    const val NOOP_SOURCE = "my-whoop-noop"
+
+    val categories = listOf("Heart", "Charge", "Rest", "Effort", "Health", "Nutrition", "Mind")
+
+    val all: List<MetricHistoryDescriptor> = buildList {
+        fun addMetric(
+            source: String,
+            sourceLabel: String,
+            key: String,
+            title: String,
+            category: String,
+            unit: String,
+            decimals: Int = 0,
+            higherIsBetter: Boolean? = null,
+            description: String? = null,
+            note: String? = null,
+        ) {
+            add(
+                MetricHistoryDescriptor(
+                    key = key,
+                    title = title,
+                    category = category,
+                    unit = unit,
+                    source = source,
+                    sourceLabel = sourceLabel,
+                    decimals = decimals,
+                    higherIsBetter = higherIsBetter,
+                    description = description,
+                    note = note,
+                ),
+            )
+        }
+
+        fun direct(
+            key: String,
+            title: String,
+            category: String,
+            unit: String,
+            decimals: Int = 0,
+            higherIsBetter: Boolean? = null,
+            description: String? = null,
+        ) = addMetric(
+            DIRECT_SOURCE, "Compatible band", key, title, category, unit,
+            decimals, higherIsBetter, description,
+        )
+
+        fun noop(
+            key: String,
+            title: String,
+            category: String,
+            unit: String,
+            decimals: Int = 0,
+            higherIsBetter: Boolean? = null,
+            description: String? = null,
+        ) = addMetric(
+            NOOP_SOURCE, "NOOP", key, title, category, unit,
+            decimals, higherIsBetter, description,
+        )
+
+        fun apple(
+            key: String,
+            title: String,
+            category: String,
+            unit: String,
+            decimals: Int = 0,
+            higherIsBetter: Boolean? = null,
+            note: String? = null,
+        ) = addMetric(
+            WhoopRepository.APPLE_HEALTH_SOURCE, "Apple Health", key, title, category, unit,
+            decimals, higherIsBetter, note = note,
+        )
+
+        fun healthConnect(
+            key: String,
+            title: String,
+            category: String,
+            unit: String,
+            decimals: Int = 0,
+            higherIsBetter: Boolean? = null,
+            note: String? = null,
+        ) = addMetric(
+            HealthConnectImporter.DEVICE_ID, "Health Connect", key, title, category, unit,
+            decimals, higherIsBetter, note = note,
+        )
+
+        // Compatible-band measurements and imported vendor summaries.
+        direct("avg_hr", "Average Heart Rate", "Heart", "bpm")
+        direct("max_hr", "Max Heart Rate", "Heart", "bpm")
+        direct("energy_kcal", "Calories", "Heart", "kcal")
+        direct("recovery", "Recovery", "Charge", "%", higherIsBetter = true)
+        direct("hrv", "Heart Rate Variability", "Charge", "ms", higherIsBetter = true)
+        direct("rhr", "Resting Heart Rate", "Charge", "bpm", higherIsBetter = false)
+        direct("resp_rate", "Respiratory Rate", "Charge", "rpm", decimals = 1)
+        direct("spo2", "Blood Oxygen", "Charge", "%", higherIsBetter = true)
+        direct("skin_temp", "Skin Temperature", "Charge", "°C", decimals = 1)
+        direct("sleep_performance", "Sleep Score", "Rest", "%", higherIsBetter = true)
+        direct("in_bed_min", "Time in Bed", "Rest", "min")
+        direct("sleep_total_min", "Asleep Time", "Rest", "min", higherIsBetter = true)
+        direct("hours_vs_needed_pct", "Hours vs Needed", "Rest", "%", higherIsBetter = true)
+        direct("sleep_consistency", "Sleep Consistency", "Rest", "%", higherIsBetter = true)
+        direct("restorative_pct", "Restorative Sleep", "Rest", "%", higherIsBetter = true)
+        direct("restorative_min", "Restorative Sleep", "Rest", "min", higherIsBetter = true)
+        direct("sleep_efficiency", "Sleep Efficiency", "Rest", "%", higherIsBetter = true)
+        direct("sleep_deep_min", "Deep (SWS) Sleep", "Rest", "min", higherIsBetter = true)
+        direct("sleep_rem_min", "REM Sleep", "Rest", "min", higherIsBetter = true)
+        direct("sleep_light_min", "Light Sleep", "Rest", "min")
+        direct("sleep_need_min", "Sleep Need", "Rest", "min")
+        direct("sleep_debt_min", "Sleep Debt", "Rest", "min", higherIsBetter = false)
+        direct("strain", "Effort", "Effort", "/100", decimals = 1)
+        direct("hr_zones13_min", "HR Zones 1-3", "Effort", "min")
+        direct("hr_zones45_min", "HR Zones 4-5", "Effort", "min")
+        direct("hr_zones_all_min", "HR Zones (All)", "Effort", "min")
+        direct("strength_min", "Strength Activity Time", "Effort", "min")
+        direct("stress", "Day Stress", "Health", "/3", decimals = 1, higherIsBetter = false)
+
+        // NOOP-computed outputs remain separate from direct/imported values.
+        noop("fitness_age", "Fitness Age", "Heart", "", higherIsBetter = false)
+        noop("vo2max_est", "VO₂ Max (estimated)", "Heart", "", decimals = 1, higherIsBetter = true)
+        noop("vitality", "Vitality", "Heart", "", higherIsBetter = true)
+        noop("body_age", "Wellness Age", "Heart", "yrs", higherIsBetter = false)
+        noop("energy_kcal", "Calories (estimated)", "Heart", "kcal")
+        noop("recovery", "Recovery", "Charge", "%", higherIsBetter = true)
+        noop("hrv", "Heart Rate Variability", "Charge", "ms", higherIsBetter = true)
+        noop("rhr", "Resting Heart Rate", "Charge", "bpm", higherIsBetter = false)
+        noop("resp_rate", "Respiratory Rate", "Charge", "rpm", decimals = 1)
+        noop("spo2", "Blood Oxygen", "Charge", "%", higherIsBetter = true)
+        noop("skin_temp", "Skin Temperature", "Charge", "°C", decimals = 1)
+        noop("sleep_performance", "Sleep Score", "Rest", "%", higherIsBetter = true)
+        noop("sleep_total_min", "Asleep Time", "Rest", "min", higherIsBetter = true)
+        noop("sleep_efficiency", "Sleep Efficiency", "Rest", "%", higherIsBetter = true)
+        noop("sleep_deep_min", "Deep (SWS) Sleep", "Rest", "min", higherIsBetter = true)
+        noop("sleep_rem_min", "REM Sleep", "Rest", "min", higherIsBetter = true)
+        noop("sleep_light_min", "Light Sleep", "Rest", "min")
+        noop("strain", "Effort", "Effort", "/100", decimals = 1)
+        noop("active_zone_moderate_min", "Moderate Active Minutes", "Effort", "min")
+        noop("active_zone_vigorous_min", "Vigorous Active Minutes", "Effort", "min")
+        noop("active_zone_credited_min", "Credited Active Minutes", "Effort", "min")
+        noop("active_zone_observed_min", "Observed Active Minutes", "Effort", "min")
+
+        // Apple Health flattened series and AppleDaily/DailyMetric projections.
+        apple("avg_hr", "Average Heart Rate", "Heart", "bpm")
+        apple("max_hr", "Max Heart Rate", "Heart", "bpm")
+        apple("walking_hr", "Walking Heart Rate", "Heart", "bpm")
+        apple("vo2max", "VO₂ Max", "Heart", "", decimals = 1, higherIsBetter = true)
+        apple("resting_hr", "Resting Heart Rate", "Charge", "bpm", higherIsBetter = false)
+        apple("hrv", "Heart Rate Variability", "Charge", "ms", higherIsBetter = true)
+        apple("resp_rate", "Respiratory Rate", "Charge", "rpm", decimals = 1)
+        apple("spo2", "Blood Oxygen", "Charge", "%", higherIsBetter = true)
+        apple("in_bed_min", "Time in Bed", "Rest", "min")
+        apple("asleep_min", "Asleep Time", "Rest", "min", higherIsBetter = true)
+        apple("deep_min", "Deep (SWS) Sleep", "Rest", "min", higherIsBetter = true)
+        apple("rem_min", "REM Sleep", "Rest", "min", higherIsBetter = true)
+        apple("core_min", "Core Sleep", "Rest", "min")
+        apple("awake_min", "Awake Time", "Rest", "min", higherIsBetter = false)
+        apple("steps", "Steps", "Effort", "", higherIsBetter = true)
+        apple("active_kcal", "Active Energy", "Effort", "kcal")
+        apple("basal_kcal", "Resting Energy", "Effort", "kcal")
+        apple("weight", "Weight", "Health", "kg", decimals = 1)
+        apple("body_fat", "Body Fat", "Health", "%", decimals = 1, higherIsBetter = false)
+        apple("lean_mass", "Lean Body Mass", "Health", "kg", decimals = 1, higherIsBetter = true)
+        apple("bmi", "BMI", "Health", "", decimals = 1)
+        apple(
+            HealthConnectImporter.BODY_TEMPERATURE_KEY,
+            "Body Temperature",
+            "Health",
+            "°C",
+            decimals = 1,
+            note = "Absolute body temperature; separate from skin-temperature deviation.",
+        )
+        apple(
+            "wrist_temp",
+            "Sleeping Wrist Temperature",
+            "Health",
+            "°C",
+            decimals = 1,
+            note = "Apple sleeping-wrist temperature; separate from body and skin temperature.",
+        )
+        apple(HydrationStore.KEY, "Hydration", "Health", "ml")
+
+        // Health Connect owns its own source-qualified copies; no Apple fallback is implied.
+        healthConnect("avg_hr", "Average Heart Rate", "Heart", "bpm")
+        healthConnect("vo2max", "VO₂ Max", "Heart", "", decimals = 1, higherIsBetter = true)
+        healthConnect("resting_hr", "Resting Heart Rate", "Charge", "bpm", higherIsBetter = false)
+        healthConnect("hrv", "Heart Rate Variability", "Charge", "ms", higherIsBetter = true)
+        healthConnect("resp_rate", "Respiratory Rate", "Charge", "rpm", decimals = 1)
+        healthConnect("spo2", "Blood Oxygen", "Charge", "%", higherIsBetter = true)
+        healthConnect("asleep_min", "Asleep Time", "Rest", "min", higherIsBetter = true)
+        healthConnect("steps", "Steps", "Effort", "", higherIsBetter = true)
+        healthConnect("active_kcal", "Active Energy", "Effort", "kcal")
+        healthConnect("basal_kcal", "Resting Energy", "Effort", "kcal")
+        healthConnect("weight", "Weight", "Health", "kg", decimals = 1)
+        healthConnect("body_fat", "Body Fat", "Health", "%", decimals = 1, higherIsBetter = false)
+        healthConnect("lean_mass", "Lean Body Mass", "Health", "kg", decimals = 1, higherIsBetter = true)
+        healthConnect(
+            "bmi",
+            "BMI",
+            "Health",
+            "",
+            decimals = 1,
+            note = "Derived by the importer from measured weight and confirmed profile height.",
+        )
+        healthConnect(
+            HealthConnectImporter.BODY_TEMPERATURE_KEY,
+            "Body Temperature",
+            "Health",
+            "°C",
+            decimals = 1,
+            note = "Absolute body temperature; separate from skin-temperature deviation.",
+        )
+        healthConnect(
+            HealthConnectImporter.BASAL_BODY_TEMPERATURE_KEY,
+            "Basal Body Temperature",
+            "Health",
+            "°C",
+            decimals = 2,
+        )
+        healthConnect(HydrationStore.KEY, "Hydration", "Health", "ml")
+
+        addMetric(
+            HydrationStore.SOURCE_ID, "NOOP", HydrationStore.KEY, "Hydration",
+            "Health", "ml", 0, null,
+        )
+        addMetric(
+            NutritionLogContract.DEVICE_ID, "Nutrition", "calories_in", "Calories In",
+            "Nutrition", "kcal", 0, null,
+        )
+        addMetric(
+            NutritionLogContract.DEVICE_ID, "Nutrition", "protein_g", "Protein",
+            "Nutrition", "g", 0, null,
+        )
+        addMetric(
+            NutritionLogContract.DEVICE_ID, "Nutrition", "carbs_g", "Carbs",
+            "Nutrition", "g", 0, null,
+        )
+        addMetric(
+            NutritionLogContract.DEVICE_ID, "Nutrition", "fat_g", "Fat",
+            "Nutrition", "g", 0, null,
+        )
+        addMetric(
+            MoodStore.MOOD_DEVICE_ID, "Mood", "mood", "Mood",
+            "Mind", "/5", 0, true,
+        )
+    }
+
+    fun visible(canPresentBmi: Boolean): List<MetricHistoryDescriptor> =
+        all.filter { canPresentBmi || it.key != "bmi" }
+
+    fun byId(id: String, canPresentBmi: Boolean = true): MetricHistoryDescriptor? =
+        visible(canPresentBmi).firstOrNull { it.id == id }
+}
+
+private data class MetricSpec(
+    val descriptor: MetricHistoryDescriptor,
+    val accent: Color,
     val effortScale: EffortScale = EffortScale.HUNDRED,
 ) {
-    /** True for the Effort column when the user picked WHOOP's 0–21 scale (the only value-converting case). */
-    private val whoopEffort: Boolean get() = key == "strain" && effortScale == EffortScale.WHOOP
+    val id: String get() = descriptor.id
+    val key: String get() = descriptor.key
+    val title: String get() = descriptor.title
+    val unit: String get() = descriptor.unit
+    val category: String get() = descriptor.category
+    val sourceLabel: String get() = descriptor.sourceLabel
+    val higherIsBetter: Boolean? get() = descriptor.higherIsBetter
+    val decimals: Int get() = descriptor.decimals
+    val description: String? get() = descriptor.description
 
-    /** The unit label, swapped to "/21" for the Effort column on the WHOOP scale. */
+    private val whoopEffort: Boolean get() = key == "strain" && effortScale == EffortScale.WHOOP
     val displayUnit: String get() = if (whoopEffort) "/21" else unit
 
     fun format(v: Double): String {
         if (!v.isFinite()) return ","
         if (key == "fitness_age") return FitnessAgePresentation.value(v)
-        // Effort (#268): the stored value is 0–100; convert to 0–21 for display when that scale is picked.
         val shown = if (whoopEffort) UnitFormatter.effortValue(v, EffortScale.WHOOP) else v
         val n = if (decimals == 0) "${shown.roundToInt()}" else String.format(Locale.US, "%.${decimals}f", shown)
         return if (displayUnit.isEmpty()) n else "$n $displayUnit"
     }
 }
 
-/** The built-in DailyMetric-backed metrics, in the macOS ordering (Charge first). */
-private val builtInMetrics: List<MetricSpec> = listOf(
-    MetricSpec(
-        key = "recovery", title = uiString(R.string.l10n_trends_explore_screen_charge_d4e1aee4), unit = "%", category = uiString(R.string.explore_category_charge),
-        accent = Palette.accent, higherIsBetter = true, decimals = 0,
-        dailyPick = { it.recovery },
-        description = uiString(R.string.explore_description_charge),
-    ),
-    MetricSpec(
-        key = "strain", title = uiString(R.string.l10n_trends_explore_screen_effort_8c974bc6), unit = "/100", category = uiString(R.string.explore_category_effort),
-        accent = Palette.strain066, higherIsBetter = null, decimals = 1,
-        dailyPick = { it.strain },
-        description = uiString(R.string.explore_description_effort),
-    ),
-    MetricSpec(
-        key = "hrv", title = "HRV", unit = "ms", category = uiString(R.string.explore_category_charge),
-        accent = Palette.metricPurple, higherIsBetter = true, decimals = 0,
-        dailyPick = { it.avgHrv },
-    ),
-    MetricSpec(
-        key = "rhr", title = uiString(R.string.l10n_trends_explore_screen_resting_hr_26677094), unit = "bpm", category = uiString(R.string.explore_category_charge),
-        accent = Palette.metricRose, higherIsBetter = false, decimals = 0,
-        dailyPick = { it.restingHr?.toDouble() },
-    ),
-    MetricSpec(
-        key = "sleep", title = uiString(R.string.l10n_trends_explore_screen_sleep_3cac34e6), unit = "h", category = uiString(R.string.explore_category_rest),
-        // Rest-score accent rides the reset accent token (iOS metricAccent maps every Rest metric ,
-        // sleep_performance / sleep_total_min , to StrandPalette.accent), not a stray metric hue.
-        accent = Palette.accent, higherIsBetter = true, decimals = 1,
-        dailyPick = { it.totalSleepMin?.let { m -> m / 60.0 } },
-        description = uiString(R.string.explore_description_rest),
-    ),
-    MetricSpec(
-        key = "efficiency", title = uiString(R.string.l10n_trends_explore_screen_sleep_efficiency_b4b5c293), unit = "%", category = uiString(R.string.explore_category_rest),
-        accent = Palette.accent, higherIsBetter = true, decimals = 0,
-        dailyPick = { it.efficiency },
-    ),
-    MetricSpec(
-        key = "spo2", title = uiString(R.string.l10n_trends_explore_screen_blood_oxygen_a8ad9ff5), unit = "%", category = uiString(R.string.explore_category_health),
-        accent = Palette.metricCyan, higherIsBetter = true, decimals = 0,
-        dailyPick = { it.spo2Pct },
-    ),
-    MetricSpec(
-        key = "resp", title = uiString(R.string.l10n_trends_explore_screen_respiratory_rate_3fbb532f), unit = "rpm", category = uiString(R.string.explore_category_health),
-        accent = Palette.accent, higherIsBetter = null, decimals = 1,
-        dailyPick = { it.respRateBpm },
-    ),
-)
+private fun MetricHistoryDescriptor.toMetricSpec(): MetricSpec {
+    val accent = when {
+        key in setOf("avg_hr", "max_hr", "walking_hr", "rhr", "resting_hr") -> Palette.metricRose
+        key == "hrv" -> Palette.metricPurple
+        key == "spo2" -> Palette.metricCyan
+        key.contains("kcal") || key == "skin_temp" || key.contains("temp") -> Palette.metricAmber
+        category == "Effort" -> Palette.strain066
+        category == "Heart" -> Palette.chargeColor
+        else -> Palette.accent
+    }
+    return MetricSpec(this, accent)
+}
 
-/** Proper titles/units/categories for series-backed keys written by the importers and the Mind
- *  check-in , matching the macOS MetricCatalog entries exactly (v2.2.0 parity). seriesKey/
- *  seriesSource are filled in at discovery time. */
-private val knownSeriesMetrics: Map<String, MetricSpec> = mapOf(
-    "fitness_age" to MetricSpec(
-        "fitness_age",
-        uiString(R.string.l10n_health_screen_fitness_age_12383b4a),
-        "",
-        uiString(R.string.explore_category_heart),
-        Palette.chargeColor,
-        false,
-        0,
-    ),
-    // #605/#608: imported avg/max HR is written to metricSeries (Apple Health / WHOOP CSV / Xiaomi) and
-    // the Compare screen exposes it, but Explore's picker didn't , iOS MetricCatalog has had both. Series-
-    // backed (no DailyMetric column), "Heart" category, parity. (Strap-only per-second HR lives in the
-    // Deep Timeline; this surfaces the per-day avg/max for imported sources.)
-    "avg_hr" to MetricSpec("avg_hr", uiString(R.string.explore_metric_average_heart_rate), "bpm", uiString(R.string.explore_category_heart),
-        Palette.metricRose, null, 0),
-    "max_hr" to MetricSpec("max_hr", uiString(R.string.explore_metric_max_heart_rate), "bpm", uiString(R.string.explore_category_heart),
-        Palette.metricRose, null, 0),
-    "calories_in" to MetricSpec("calories_in", uiString(R.string.explore_metric_calories_in), "kcal", uiString(R.string.explore_category_nutrition),
-        Palette.metricAmber, null, 0),
-    "protein_g" to MetricSpec("protein_g", uiString(R.string.explore_metric_protein), "g", uiString(R.string.explore_category_nutrition),
-        Palette.metricCyan, null, 0),
-    "carbs_g" to MetricSpec("carbs_g", uiString(R.string.explore_metric_carbs), "g", uiString(R.string.explore_category_nutrition),
-        Palette.metricCyan, null, 0),
-    "fat_g" to MetricSpec("fat_g", uiString(R.string.explore_metric_fat), "g", uiString(R.string.explore_category_nutrition),
-        Palette.metricCyan, null, 0),
-    "mood" to MetricSpec("mood", uiString(R.string.explore_metric_mood), "/5", uiString(R.string.explore_category_mind),
-        Palette.metricPurple, true, 0),
-    "bmi" to MetricSpec(
-        "bmi",
-        uiString(R.string.profile_bmi_label),
-        "",
-        uiString(R.string.explore_category_health),
-        Palette.metricPurple,
-        null,
-        1,
-    ),
-    HealthConnectImporter.BODY_TEMPERATURE_KEY to MetricSpec(
-        HealthConnectImporter.BODY_TEMPERATURE_KEY,
-        "Body Temperature",
-        "°C",
-        uiString(R.string.explore_category_health),
-        Palette.metricAmber,
-        null,
-        1,
-    ),
-    HealthConnectImporter.BASAL_BODY_TEMPERATURE_KEY to MetricSpec(
-        HealthConnectImporter.BASAL_BODY_TEMPERATURE_KEY,
-        "Basal Body Temperature",
-        "°C",
-        uiString(R.string.explore_category_health),
-        Palette.metricAmber,
-        null,
-        2,
-    ),
-)
+// MARK: - Loaded series and calendar windows
 
-// MARK: - A loaded series point (day string + value), oldest first.
+internal data class SeriesPoint(val day: String, val value: Double)
 
-private data class SeriesPoint(val day: String, val value: Double)
+internal fun calendarDayWindow(
+    points: List<SeriesPoint>,
+    days: Int?,
+): List<SeriesPoint> {
+    val dated = points.mapNotNull { point ->
+        val day = runCatching { LocalDate.parse(point.day) }.getOrNull() ?: return@mapNotNull null
+        point.takeIf { it.value.isFinite() }?.let { day to it }
+    }.sortedBy { it.first }
+    if (days == null) return dated.map { it.second }
+    if (days <= 0 || dated.isEmpty()) return emptyList()
+    val latest = dated.last().first
+    val cutoff = latest.minusDays((days - 1).toLong())
+    return dated.filter { (day, _) -> !day.isBefore(cutoff) && !day.isAfter(latest) }
+        .map { it.second }
+}
 
-/** Lightweight ordinal day index for slicing windows without date parsing. The series is
- *  already sorted ascending by day (YYYY-MM-DD), so the trailing N entries are the window;
- *  we slice by RELATIVE-TO-LATEST count, matching the macOS day-distance window closely
- *  enough for the per-day daily cache (one row per day). */
-private fun List<SeriesPoint>.windowFor(range: ExploreRange): List<SeriesPoint> {
-    val days = range.days ?: return this
-    if (isEmpty()) return emptyList()
-    return takeLast(days)
+private fun List<SeriesPoint>.windowFor(range: ExploreRange): List<SeriesPoint> =
+    calendarDayWindow(this, range.days)
+
+internal fun metricHistoryPhysicalSources(logicalSource: String, activeStrapId: String): List<String> =
+    when (logicalSource) {
+        AndroidMetricHistoryCatalog.DIRECT_SOURCE ->
+            WhoopRepository.importedSourceIdsFor(activeStrapId)
+        AndroidMetricHistoryCatalog.NOOP_SOURCE ->
+            WhoopRepository.computedSourceIdsFor(activeStrapId)
+        else -> listOf(logicalSource)
+    }
+
+private fun dailyMetricHistoryValue(key: String, row: DailyMetric): Double? = when (key) {
+    "recovery" -> row.recovery
+    "hrv" -> row.avgHrv
+    "rhr", "resting_hr" -> row.restingHr?.toDouble()
+    "strain" -> row.strain
+    "resp_rate" -> row.respRateBpm
+    "spo2" -> row.spo2Pct
+    "skin_temp" -> row.skinTempDevC
+    "sleep_total_min", "asleep_min" -> row.totalSleepMin
+    "sleep_efficiency" -> row.efficiency
+    "sleep_deep_min", "deep_min" -> row.deepMin
+    "sleep_rem_min", "rem_min" -> row.remMin
+    "sleep_light_min", "core_min" -> row.lightMin
+    "energy_kcal" -> row.activeKcalEst
+    "steps" -> row.steps?.toDouble()
+    else -> null
+}
+
+private fun appleDailyMetricHistoryValue(key: String, row: com.noop.data.AppleDaily): Double? = when (key) {
+    "steps" -> row.steps?.toDouble()
+    "active_kcal" -> row.activeKcal
+    "basal_kcal" -> row.basalKcal
+    "vo2max" -> row.vo2max
+    "avg_hr" -> row.avgHr?.toDouble()
+    "max_hr" -> row.maxHr?.toDouble()
+    "walking_hr" -> row.walkingHr?.toDouble()
+    "weight" -> row.weightKg
+    else -> null
+}
+
+internal suspend fun loadMetricHistorySeries(
+    repo: WhoopRepository,
+    metric: MetricHistoryDescriptor,
+    activeStrapId: String,
+    from: String = "0000-00-00",
+    to: String = "9999-99-99",
+): List<Pair<String, Double>> {
+    val merged = LinkedHashMap<String, Double>()
+    for (source in metricHistoryPhysicalSources(metric.source, activeStrapId)) {
+        val sourceRows = LinkedHashMap<String, Double>()
+        for (row in repo.metricSeries(source, metric.key, from, to)) {
+            if (row.value.isFinite()) sourceRows[row.day] = row.value
+        }
+        for (row in repo.daysInRange(source, from, to)) {
+            dailyMetricHistoryValue(metric.key, row)
+                ?.takeIf(Double::isFinite)
+                ?.let { sourceRows.putIfAbsent(row.day, it) }
+        }
+        if (source == WhoopRepository.APPLE_HEALTH_SOURCE ||
+            source == WhoopRepository.HEALTH_CONNECT_SOURCE
+        ) {
+            for (row in repo.appleDaily(source, from, to)) {
+                appleDailyMetricHistoryValue(metric.key, row)
+                    ?.takeIf(Double::isFinite)
+                    ?.let { sourceRows.putIfAbsent(row.day, it) }
+            }
+        }
+        for ((day, value) in sourceRows) merged.putIfAbsent(day, value)
+    }
+    return merged.entries.sortedBy { it.key }.map { it.key to it.value }
 }
 
 // MARK: - Summary stats over a window
@@ -306,129 +548,39 @@ fun TrendsExploreScreen(vm: AppViewModel) {
         )
     }
 
-    // #797 follow-up (Explore 'All' truncation): `recentDays` is the BOUNDED dashboard flow (capped at
-    // WhoopRepository.RECENT_DAYS_CAP), so a 3000+ day import would silently show only the most-recent ~800
-    // days under the 'All' / 1Y ranges, which have no other full-history escape hatch. Mirror the uncapped
-    // full-history path TrendsScreen already uses: load the merged daily history ONCE, and back the built-in
-    // series off it whenever the effective range reaches into the deep past. Until it lands we fall back to
-    // `recentDays` so the screen is populated on the first frame; the default (shallow-range) refresh keeps
-    // using the cheap bounded flow, so the cap is NOT raised (#797 stays fixed). Same merge as the dashboard.
-    var fullHistory by remember { mutableStateOf<List<DailyMetric>?>(null) }
-    LaunchedEffect(deviceId) {
-        fullHistory = runCatching { vm.repo.daysMerged(deviceId) }.getOrNull()
-    }
-
-    // Extra long-format keys from the metricSeries table (anything beyond the built-ins) , from the
-    // strap source AND the dedicated import/check-in sources, which write under their OWN deviceIds
-    // (nutrition-log, noop-mood) and were invisible to a strap-only key scan (v2.2.0 parity).
-    var extraKeys by remember { mutableStateOf<List<Pair<String, String?>>>(emptyList()) }
-    LaunchedEffect(deviceId, ageMetricDataVersion) {
-        // Scan the strap's series keys across the active-id ∪ canonical "my-whoop" union (SPINE / #814), so a
-        // re-added strap still discovers the keys the canonical import/engine wrote. `seriesSource = null`
-        // keeps these resolving against the strap path below; a single-WHOOP install scans just "my-whoop".
-        val strap = WhoopRepository.importedSourceIdsFor(deviceId)
-            .flatMap { id -> runCatching { vm.repo.metricKeys(id) }.getOrDefault(emptyList()) }
-            .distinct()
-            .map { it to null as String? }
-        val sourced = listOf(
-            NutritionLogContract.DEVICE_ID,
-            MoodStore.MOOD_DEVICE_ID,
-            HealthConnectImporter.DEVICE_ID,
-        ).flatMap { src ->
-            runCatching { vm.repo.metricKeys(src) }.getOrDefault(emptyList()).map { it to (src as String?) }
-        }
-        extraKeys = strap + sourced
-    }
-
-    // The full picker: built-ins first, then any extra metricSeries keys not already covered.
-    // Known import/check-in keys get their proper titles/units/categories (matching the macOS
-    // MetricCatalog); anything else falls back to a prettified key under "Other".
-    val metrics = remember(extraKeys, canPresentBmi) {
-        val builtInKeys = builtInMetrics.map { it.key }.toSet()
-        val extras = extraKeys
-            .filter { (k, _) -> k !in builtInKeys }
-            .filter { (k, _) -> canPresentBmi || k != "bmi" }
-            .distinctBy { (k, src) -> "$src:$k" }
-            .map { (k, src) ->
-                val known = knownSeriesMetrics[k]
-                known?.copy(seriesKey = k, seriesSource = src) ?: MetricSpec(
-                    key = k,
-                    title = k.replace('_', ' ').replaceFirstChar { c -> c.uppercase() },
-                    unit = "",
-                    category = "Other",
-                    accent = Palette.metricCyan,
-                    higherIsBetter = null,
-                    decimals = 1,
-                    seriesKey = k,
-                    seriesSource = src,
-                )
-            }
-        builtInMetrics + extras
+    val metrics = remember(canPresentBmi) {
+        AndroidMetricHistoryCatalog.visible(canPresentBmi).map { it.toMetricSpec() }
     }
 
     // Effort display scale (#268) , carried on the selected spec so the Effort column's value + unit
     // follow the toggle through every read-out (hero, footer stats, Y-axis). Display-only.
     val effortScale = UnitPrefs.effortScale(LocalContext.current)
 
-    var selectedKey by remember { mutableStateOf(builtInMetrics.first().key) }
+    val defaultMetricId = "${AndroidMetricHistoryCatalog.DIRECT_SOURCE}:recovery"
+    var selectedId by remember { mutableStateOf(defaultMetricId) }
     LaunchedEffect(canPresentBmi) {
-        if (!canPresentBmi && selectedKey == "bmi") {
-            selectedKey = builtInMetrics.first().key
+        if (!canPresentBmi && metrics.firstOrNull { it.id == selectedId }?.key == "bmi") {
+            selectedId = defaultMetricId
         }
     }
     var range by remember { mutableStateOf(ExploreRange.Month) }
-    val selected = (metrics.firstOrNull { it.key == selectedKey } ?: metrics.first())
+    val selected = (metrics.firstOrNull { it.id == selectedId } ?: metrics.first())
         .copy(effortScale = effortScale)
 
-    // Build the full ascending series for the selected metric. Built-ins come off the daily history;
-    // metricSeries-backed metrics are loaded on demand.
-    //
-    // #797 Explore-'All' fix: for a deep range ([ExploreRange.reachesDeep]) back the built-in series off the
-    // UNCAPPED `fullHistory` once it has loaded, so 'All' shows the WHOLE import instead of the most-recent
-    // ~RECENT_DAYS_CAP days; until it lands (and for every shallow range) use the cheap bounded `recentDays`
-    // flow, so the default dashboard refresh path is unchanged and the cap is not raised.
-    val builtInDays = if (range.reachesDeep) (fullHistory ?: recentDays) else recentDays
-    var seriesKeyLoaded by remember { mutableStateOf<String?>(null) }
+    // Load only the selected source partition. `recentDays` is a recomposition generation signal;
+    // the actual read below is uncapped full history and never merges another provider.
+    var seriesIdLoaded by remember { mutableStateOf<String?>(null) }
     var loadedSeries by remember { mutableStateOf<List<SeriesPoint>>(emptyList()) }
-    LaunchedEffect(selected.key, builtInDays, ageMetricDataVersion) {
-        val pick = selected.dailyPick
-        if (pick != null) {
-            loadedSeries = builtInDays.mapNotNull { d ->
-                pick(d)?.takeIf { it.isFinite() }?.let { SeriesPoint(d.day, it) }
-            }
-            seriesKeyLoaded = selected.key
-        } else if (selected.seriesKey != null) {
-            // Series-backed metrics live under their own source id when imported/checked-in (nutrition-log,
-            // noop-mood): read from that source. A STRAP series (seriesSource == null) is read across the
-            // active-id ∪ canonical "my-whoop" union (SPINE / #814), deduped per day with the active id
-            // winning, so a re-added strap still shows the canonically-stored series; a single-WHOOP install
-            // reads just "my-whoop" (v2.2.0 parity).
-            val explicitSource = selected.seriesSource
-            val rows = runCatching {
-                if (explicitSource != null) {
-                    vm.repo.metricSeries(explicitSource, selected.seriesKey, "0000-00-00", "9999-99-99")
-                        .map { SeriesPoint(it.day, it.value) }
-                } else {
-                    val byDay = LinkedHashMap<String, Double>()
-                    // Active id first ⇒ wins the day; canonical only fills days the active id lacks.
-                    for (id in WhoopRepository.importedSourceIdsFor(deviceId)) {
-                        for (r in vm.repo.metricSeries(id, selected.seriesKey, "0000-00-00", "9999-99-99")) {
-                            byDay.putIfAbsent(r.day, r.value)
-                        }
-                    }
-                    byDay.entries.sortedBy { it.key }.map { SeriesPoint(it.key, it.value) }
-                }
-            }.getOrDefault(emptyList())
-            loadedSeries = rows
-            seriesKeyLoaded = selected.key
-        } else {
-            loadedSeries = emptyList()
-            seriesKeyLoaded = selected.key
-        }
+    LaunchedEffect(selected.id, recentDays, ageMetricDataVersion, deviceId) {
+        loadedSeries = runCatching {
+            loadMetricHistorySeries(vm.repo, selected.descriptor, deviceId)
+                .map { (day, value) -> SeriesPoint(day, value) }
+        }.getOrDefault(emptyList())
+        seriesIdLoaded = selected.id
     }
 
     // Resolve the active window with the macOS sparse-widen rule.
-    val series = if (seriesKeyLoaded == selected.key) loadedSeries else emptyList()
+    val series = if (seriesIdLoaded == selected.id) loadedSeries else emptyList()
     val effectiveRange = remember(series, range) {
         if (series.isEmpty()) range
         else range.widening.firstOrNull { series.windowFor(it).isNotEmpty() } ?: ExploreRange.All
@@ -463,7 +615,7 @@ fun TrendsExploreScreen(vm: AppViewModel) {
         MetricDropdown(
             metrics = metrics,
             selected = selected,
-            onSelect = { selectedKey = it },
+            onSelect = { selectedId = it },
         )
         }
 
@@ -472,7 +624,7 @@ fun TrendsExploreScreen(vm: AppViewModel) {
         item {
         Row(verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f)) {
-                Overline(selected.category)
+                Overline("${selected.category} · ${selected.sourceLabel}")
                 Text(selected.title, style = NoopType.title2, color = Palette.textPrimary)
                 // The plain-English one-liner for the three headline scores (Charge/Effort/Rest);
                 // null for every other metric, so only the scores show a subtitle here.
@@ -595,7 +747,7 @@ private fun MetricDropdown(
         ) {
             Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(selected.accent))
             Column(modifier = Modifier.weight(1f)) {
-                Overline(selected.category, color = Palette.textTertiary)
+                Overline("${selected.category} · ${selected.sourceLabel}", color = Palette.textTertiary)
                 Text(selected.title, style = NoopType.headline, color = Palette.textPrimary)
             }
             Icon(
@@ -631,7 +783,7 @@ private fun MetricDropdown(
                     Overline(category, color = Palette.accent)
                 }
                 items.forEach { metric ->
-                    val isSelected = metric.key == selected.key
+                    val isSelected = metric.id == selected.id
                     DropdownMenuItem(
                         text = {
                             Row(
@@ -640,12 +792,18 @@ private fun MetricDropdown(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(metric.accent))
-                                Text(
-                                    metric.title,
-                                    style = NoopType.body,
-                                    color = if (isSelected) Palette.accent else Palette.textPrimary,
-                                    modifier = Modifier.weight(1f),
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        metric.title,
+                                        style = NoopType.body,
+                                        color = if (isSelected) Palette.accent else Palette.textPrimary,
+                                    )
+                                    Text(
+                                        metric.sourceLabel,
+                                        style = NoopType.footnote,
+                                        color = Palette.textTertiary,
+                                    )
+                                }
                                 if (isSelected) {
                                     Icon(
                                         Icons.Filled.Check,
@@ -656,7 +814,7 @@ private fun MetricDropdown(
                                 }
                             }
                         },
-                        onClick = { onSelect(metric.key); expanded = false },
+                        onClick = { onSelect(metric.id); expanded = false },
                         modifier = if (isSelected) {
                             Modifier.background(Palette.accent.copy(alpha = StrandAlpha.selectedFill))
                         } else Modifier,

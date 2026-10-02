@@ -527,6 +527,9 @@
     <string name="appwide_metric_origin_noop_insight">Аналитика NOOP</string>
     <string name="appwide_metric_origin_noop_insight_detail">Рассчитано по доступным измерениям и вашей истории.</string>
     <string name="appwide_metric_origin_noop_short">NOOP</string>
+    <string name="appwide_metric_origin_source_dependent">Зависит от источника</string>
+    <string name="appwide_metric_origin_source_dependent_detail">Измеряется, если источник предоставляет значение; иначе явно отмечается как оценка NOOP.</string>
+    <string name="appwide_metric_origin_source_dependent_short">Измерено/оценено</string>
     <string name="appwide_metric_vo2_max">МПК</string>
     <string name="appwide_metric_education_body_temp_action">Проверьте исходный источник и способ измерения. Подтвердите неожиданный результат подходящим термометром и обратитесь за помощью, если этого требуют симптомы.</string>
     <string name="appwide_metric_education_body_temp_limits">Место, устройство, время и условия измерения различаются. Это не мониторинг внутренней температуры тела и не диагноз.</string>

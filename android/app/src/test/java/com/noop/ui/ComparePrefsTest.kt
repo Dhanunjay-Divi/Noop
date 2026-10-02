@@ -91,4 +91,18 @@ class ComparePrefsTest {
             )?.map { it.id },
         )
     }
+
+    @Test
+    fun parseSelection_preservesSameMetricFromDifferentProviders() {
+        val parsed = parseCompareSelection(
+            raw = "apple-health:steps,health-connect:steps",
+            minSelection = 2,
+            maxSelection = 4,
+        )
+
+        assertEquals(
+            listOf("apple-health:steps", "health-connect:steps"),
+            parsed?.map { it.id },
+        )
+    }
 }

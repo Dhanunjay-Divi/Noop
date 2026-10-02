@@ -13,9 +13,8 @@ import org.junit.Test
  * Unit tests for the Today Weight + Steps tile fallback logic (issues #107, #150). The Calories tile
  * reads straight off DailyMetric, so the pure logic worth pinning is the two tiles with an imported
  * fallback source:
- *   - [latestWeightKg] picks the most-recent non-null body weight across the two Apple-side sources.
- *   - [weightTile] prefers that weight, else falls back to the SI profile weight with an honest
- *     "from profile" caption, always formatted through the unit toggle.
+ *   - [latestWeightKg] picks the most-recent non-null body weight at or before the selected day.
+ *   - [weightTile] keeps missing measurements missing instead of borrowing profile setup data.
  *   - [stepsForDay] resolves the selected day's imported Apple Health / Health Connect step total —
  *     the Steps tile's fallback when the strap (e.g. a WHOOP 4.0) didn't bank an on-device count.
  */
@@ -51,7 +50,7 @@ class TodayMetricTilesTest {
     @Test
     fun latestWeight_nullWhenNoSourceHasWeight() {
         val apple = listOf(appleDay("2026-01-01", null), appleDay("2026-01-02", null))
-        assertNull(latestWeightKg(apple, emptyList()))
+        assertNull(latestWeightKg(apple, emptyList(), "2026-01-02"))
     }
 
     @Test
@@ -61,14 +60,14 @@ class TodayMetricTilesTest {
             appleDay("2026-01-05", 78.5),
             appleDay("2026-01-03", 79.0),
         )
-        assertEquals(78.5, latestWeightKg(apple, emptyList())!!, 1e-9)
+        assertEquals(78.5, latestWeightKg(apple, emptyList(), "2026-01-05")!!, 1e-9)
     }
 
     @Test
     fun latestWeight_skipsNullWeightDaysEvenWhenNewer() {
         // A newer day with no weight must not blank out an older real reading.
         val apple = listOf(appleDay("2026-01-02", 81.0), appleDay("2026-01-09", null))
-        assertEquals(81.0, latestWeightKg(apple, emptyList())!!, 1e-9)
+        assertEquals(81.0, latestWeightKg(apple, emptyList(), "2026-01-09")!!, 1e-9)
     }
 
     @Test
@@ -77,39 +76,40 @@ class TodayMetricTilesTest {
         val healthConnect = listOf(
             AppleDaily(deviceId = "health-connect", day = "2026-01-06", weightKg = 77.0),
         )
-        assertEquals(77.0, latestWeightKg(apple, healthConnect)!!, 1e-9)
+        assertEquals(77.0, latestWeightKg(apple, healthConnect, "2026-01-06")!!, 1e-9)
+    }
+
+    @Test
+    fun latestWeight_excludesFutureReadings() {
+        val apple = listOf(
+            appleDay("2026-01-04", 80.0),
+            appleDay("2026-01-10", 70.0),
+        )
+        assertEquals(80.0, latestWeightKg(apple, emptyList(), "2026-01-05")!!, 1e-9)
     }
 
     // MARK: weightTile
 
     @Test
     fun weightTile_usesLatestReading_metric() {
-        val t = weightTile(latestWeightKg = 74.5, profileWeightKg = 90.0, unit = MassUnit.KILOGRAMS)
+        val t = weightTile(latestWeightKg = 74.5, unit = MassUnit.KILOGRAMS)
         assertEquals("74.5 kg", t.value)
-        assertEquals("latest", t.caption)
+        assertEquals("latest measured", t.caption)
     }
 
     @Test
     fun weightTile_usesLatestReading_imperial() {
-        val t = weightTile(latestWeightKg = 100.0, profileWeightKg = 90.0, unit = MassUnit.POUNDS)
+        val t = weightTile(latestWeightKg = 100.0, unit = MassUnit.POUNDS)
         // 100 kg * 2.20462 = 220.462 lb
         assertEquals("220.5 lb", t.value)
-        assertEquals("latest", t.caption)
+        assertEquals("latest measured", t.caption)
     }
 
     @Test
-    fun weightTile_fallsBackToProfile_withHonestCaption() {
-        val t = weightTile(latestWeightKg = null, profileWeightKg = 75.0, unit = MassUnit.KILOGRAMS)
-        assertEquals("75.0 kg", t.value)
-        assertEquals("from profile", t.caption)
-    }
-
-    @Test
-    fun weightTile_profileFallbackRespectsImperial() {
-        val t = weightTile(latestWeightKg = null, profileWeightKg = 75.0, unit = MassUnit.POUNDS)
-        // 75 kg * 2.20462 = 165.3465 lb
-        assertEquals("165.3 lb", t.value)
-        assertEquals("from profile", t.caption)
+    fun weightTile_keepsMissingMeasurementMissing() {
+        val t = weightTile(latestWeightKg = null, unit = MassUnit.KILOGRAMS)
+        assertEquals(NoopDisplayFormat.MISSING, t.value)
+        assertNull(t.caption)
     }
 
     // MARK: stepsForDay — Today Steps-tile fallback to imported Apple Health / Health Connect (#150)
@@ -169,10 +169,23 @@ class TodayMetricTilesTest {
         // A measured import wins when both are present.
         assertEquals(
             "Measured · Apple Health / Health Connect",
-            stepsSourceCaption(motionDerived = 9_000, imported = 8_000, calibratedEstimate = 7_000),
+            stepsSourceCaption(
+                motionDerived = 9_000,
+                imported = 8_000,
+                supplierMeasured = 8_500,
+                calibratedEstimate = 7_000,
+            ),
         )
         assertEquals("Steps", stepsTileLabel(9_000, 8_000, 7_000))
-        assertEquals(8_000, resolvedSteps(imported = 8_000, motionDerived = 9_000, calibratedEstimate = 7_000))
+        assertEquals(
+            8_000,
+            resolvedSteps(
+                imported = 8_000,
+                supplierMeasured = 8_500,
+                motionDerived = 9_000,
+                calibratedEstimate = 7_000,
+            ),
+        )
 
         assertNull(
             stepsSourceCaption(motionDerived = 4_000, imported = null, calibratedEstimate = 7_000),
@@ -199,8 +212,43 @@ class TodayMetricTilesTest {
             emptyList<Pair<String, Double>>(),
             resolvedStepsSeries(
                 imported = emptyMap(),
+                supplierMeasured = emptyMap(),
                 motionDerived = mapOf("2026-01-04" to 4_000),
                 calibratedEstimate = mapOf("2026-01-04" to 7_000),
+            ),
+        )
+    }
+
+    @Test
+    fun registryQualifiedSupplierStepsFillOnlyMissingImportedDays() {
+        assertEquals(
+            "Measured · Compatible band",
+            stepsSourceCaption(
+                motionDerived = 9_000,
+                imported = null,
+                supplierMeasured = 8_500,
+                calibratedEstimate = 7_000,
+            ),
+        )
+        assertEquals(
+            8_500,
+            resolvedSteps(
+                imported = null,
+                supplierMeasured = 8_500,
+                motionDerived = 9_000,
+                calibratedEstimate = 7_000,
+            ),
+        )
+        assertEquals(
+            listOf("2026-01-01" to 7_000.0, "2026-01-02" to 8_500.0),
+            resolvedStepsSeries(
+                imported = mapOf("2026-01-01" to 7_000),
+                supplierMeasured = mapOf(
+                    "2026-01-01" to 6_500,
+                    "2026-01-02" to 8_500,
+                ),
+                motionDerived = emptyMap(),
+                calibratedEstimate = emptyMap(),
             ),
         )
     }

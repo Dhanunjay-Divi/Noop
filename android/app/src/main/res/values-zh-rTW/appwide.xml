@@ -527,6 +527,9 @@
     <string name="appwide_metric_origin_noop_insight">NOOP 洞察</string>
     <string name="appwide_metric_origin_noop_insight_detail">根據可用測量資料和你的歷史記錄計算。</string>
     <string name="appwide_metric_origin_noop_short">NOOP</string>
+    <string name="appwide_metric_origin_source_dependent">取決於來源</string>
+    <string name="appwide_metric_origin_source_dependent_detail">來源提供時顯示為測量值；否則明確標示為 NOOP 估算值。</string>
+    <string name="appwide_metric_origin_source_dependent_short">測量/估算</string>
     <string name="appwide_metric_vo2_max">最大攝氧量</string>
     <string name="appwide_metric_education_body_temp_action">查看原始來源和測量方法。使用合適的體溫計確認異常數值；如症狀需要，請及時就醫。</string>
     <string name="appwide_metric_education_body_temp_limits">測量部位、裝置、時間和環境各不相同。這不是核心體溫監測，也不能用於診斷。</string>

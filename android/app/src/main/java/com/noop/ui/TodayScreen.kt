@@ -602,6 +602,7 @@ fun TodayScreen(
     val days by viewModel.recentDays.collectAsStateWithLifecycle()
     val sleepTargetMinutes by viewModel.windDownSleepNeedMinutes.collectAsStateWithLifecycle()
     val activeStrapId by viewModel.selectedDeviceId.collectAsStateWithLifecycle()
+    val activeDeviceSourceState by viewModel.activeDeviceSourceState.collectAsStateWithLifecycle()
     val liveSnap by viewModel.dashboardLive.collectAsStateWithLifecycle()
     val historyBackfilling by viewModel.historyBackfillActive.collectAsStateWithLifecycle()
     // The in-flight manual workout (single source of truth, survives an app kill via rehydration), so the
@@ -1344,19 +1345,19 @@ fun TodayScreen(
         )
     }
 
-    // The newest Apple Health / Health Connect body weight, loaded off the main thread. Null until the
-    // load runs or when neither source carries a weight, the Weight tile then falls back to the profile.
+    // The newest Apple Health / Health Connect body weight at or before the displayed day.
     var weightKg by remember(activeStrapId) { mutableStateOf<Double?>(null) }
-    LaunchedEffect(days, activeStrapId, deferHistoricalQueries) {
+    LaunchedEffect(days, selectedDayKey, activeStrapId, deferHistoricalQueries) {
         if (deferHistoricalQueries) return@LaunchedEffect
         val loaded = loadTodayBestEffort {
             latestWeightKg(
                 listOfNotNull(
-                    viewModel.repo.latestAppleDailyWeight("apple-health"),
+                    viewModel.repo.latestAppleDailyWeightAtOrBefore("apple-health", selectedDayKey),
                 ),
                 listOfNotNull(
-                    viewModel.repo.latestAppleDailyWeight("health-connect"),
+                    viewModel.repo.latestAppleDailyWeightAtOrBefore("health-connect", selectedDayKey),
                 ),
+                throughDay = selectedDayKey,
             )
         }
         currentCoroutineContext().ensureActive()
@@ -1386,6 +1387,19 @@ fun TodayScreen(
             } catch (_: Exception) { /* best-effort */ }
         }
     }
+
+    // A supplier-native day total is eligible only when the durable active registry row is the supplier
+    // adapter. WHOOP motion counters and calibrated motion estimates remain excluded.
+    val supplierMeasuredStepsByDay = remember(days, activeDeviceSourceState) {
+        if (activeDeviceSourceState == ActiveDeviceSourceState.SUPPLIER) {
+            days.mapNotNull { row ->
+                row.steps?.takeIf { it >= 0 }?.let { row.day to it }
+            }.toMap()
+        } else {
+            emptyMap()
+        }
+    }
+    val supplierMeasuredStepsForDay = supplierMeasuredStepsByDay[selectedDayKey]
 
     LaunchedEffect(
         days,
@@ -1884,7 +1898,8 @@ fun TodayScreen(
     // 14-day trailing calendar window ending on the phone's actual local day.
     // Old imports stay in history, but they do not fill the Today trend tiles.
     val window = rememberTrendWindow(
-        days, selectedDay, keyMetricsWindowDays, importedStepsByDay, stepsEstByDay,
+        days, selectedDay, keyMetricsWindowDays, importedStepsByDay, supplierMeasuredStepsByDay,
+        stepsEstByDay,
         resolvedSpo2ByDay, averageHrByDay, maxHrByDay, measuredVo2MaxByDay,
     )
 
@@ -2459,8 +2474,8 @@ fun TodayScreen(
                                     effortScale = effortScale,
                                     effortForDay = effortForDay,
                                     latestWeightKg = weightKg,
-                                    profileWeightKg = profileWeightKg,
                                     importedStepsForDay = importedStepsForDay,
+                                    supplierMeasuredStepsForDay = supplierMeasuredStepsForDay,
                                     estimatedStepsForDay = stepsEstForDay,
                                     averageHrForDay = averageHrForDay,
                                     maxHrForDay = maxHrForDay,
@@ -2568,6 +2583,7 @@ fun TodayScreen(
                             fitnessAge = fitnessAgeToday,
                             vitality = vitalityToday,
                             importedStepsForDay = importedStepsForDay,
+                            supplierMeasuredStepsForDay = supplierMeasuredStepsForDay,
                             estimatedStepsForDay = stepsEstForDay,
                             caloriesForDay = caloriesByDay[selectedDayKey],
                             hydrationReadState = displayedHydrationRead,
@@ -6215,6 +6231,7 @@ private fun YourCardsSection(
     fitnessAge: Double?,
     vitality: Double?,
     importedStepsForDay: Int?,
+    supplierMeasuredStepsForDay: Int?,
     estimatedStepsForDay: Int?,
     caloriesForDay: Double?,
     hydrationReadState: TodayHydrationReadState,
@@ -6254,6 +6271,7 @@ private fun YourCardsSection(
                         fitnessAge = fitnessAge,
                         vitality = vitality,
                         importedStepsForDay = importedStepsForDay,
+                        supplierMeasuredStepsForDay = supplierMeasuredStepsForDay,
                         estimatedStepsForDay = estimatedStepsForDay,
                         caloriesForDay = caloriesForDay,
                         hydrationReadState = hydrationReadState,
@@ -6272,6 +6290,7 @@ private fun YourCardsSection(
                         DashboardCard.STEPS -> stepsSourceCaption(
                             motionDerived = day?.steps,
                             imported = importedStepsForDay,
+                            supplierMeasured = supplierMeasuredStepsForDay,
                             calibratedEstimate = estimatedStepsForDay,
                         )
                         else -> null
@@ -6400,6 +6419,7 @@ private fun dashboardCardValue(
     fitnessAge: Double?,
     vitality: Double?,
     importedStepsForDay: Int?,
+    supplierMeasuredStepsForDay: Int?,
     estimatedStepsForDay: Int?,
     caloriesForDay: Double?,
     hydrationReadState: TodayHydrationReadState,
@@ -6440,6 +6460,7 @@ private fun dashboardCardValue(
         DashboardCard.STEPS -> {
             resolvedSteps(
                 imported = importedStepsForDay,
+                supplierMeasured = supplierMeasuredStepsForDay,
                 motionDerived = day?.steps,
                 calibratedEstimate = estimatedStepsForDay,
             )?.let { intStringGrouped(it.toDouble()) } ?: NO_DATA
@@ -7658,8 +7679,8 @@ private fun MetricGrid(
     effortScale: EffortScale = EffortScale.HUNDRED,
     effortForDay: Double? = null,
     latestWeightKg: Double? = null,
-    profileWeightKg: Double = 75.0,
     importedStepsForDay: Int? = null,
+    supplierMeasuredStepsForDay: Int? = null,
     estimatedStepsForDay: Int? = null,
     averageHrForDay: Double? = null,
     maxHrForDay: Double? = null,
@@ -7833,7 +7854,12 @@ private fun MetricGrid(
         KeyMetric.STEPS to run {
             // Primary Steps requires a measured phone/watch pedometer count. DailyMetric remains a
             // compatibility read only and cannot fill this value.
-            val steps = resolvedSteps(importedStepsForDay, d?.steps, estimatedStepsForDay)
+            val steps = resolvedSteps(
+                imported = importedStepsForDay,
+                supplierMeasured = supplierMeasuredStepsForDay,
+                motionDerived = d?.steps,
+                calibratedEstimate = estimatedStepsForDay,
+            )
             KeyTileData(
                 label = stepsTileLabel(d?.steps, importedStepsForDay, estimatedStepsForDay),
                 value = steps?.let { intString(it.toDouble()) } ?: NO_DATA,
@@ -7844,7 +7870,7 @@ private fun MetricGrid(
             )
         },
         KeyMetric.WEIGHT to run {
-            val weight = weightTile(latestWeightKg, profileWeightKg, massUnit)
+            val weight = weightTile(latestWeightKg, massUnit)
             KeyTileData(
                 label = uiString(R.string.l10n_today_screen_weight_69c0b815),
                 value = weight.value,
@@ -9592,6 +9618,7 @@ private fun rememberTrendWindow(
     anchorDay: LocalDate,
     windowDays: Int,
     importedStepsByDay: Map<String, Int> = emptyMap(),
+    supplierMeasuredStepsByDay: Map<String, Int> = emptyMap(),
     calibratedStepsByDay: Map<String, Int> = emptyMap(),
     resolvedSpo2ByDay: Map<String, Double> = emptyMap(),
     averageHrByDay: Map<String, Double> = emptyMap(),
@@ -9599,7 +9626,8 @@ private fun rememberTrendWindow(
     measuredVo2MaxByDay: Map<String, Double> = emptyMap(),
 ): Window =
     androidx.compose.runtime.remember(
-        days, anchorDay, windowDays, importedStepsByDay, resolvedSpo2ByDay,
+        days, anchorDay, windowDays, importedStepsByDay, supplierMeasuredStepsByDay,
+        resolvedSpo2ByDay,
         averageHrByDay, maxHrByDay, measuredVo2MaxByDay,
     ) {
         // Trailing CALENDAR days ending today, NOT the last N stored rows, which on an old import
@@ -9609,6 +9637,7 @@ private fun rememberTrendWindow(
         val recent = days.filter { it.day >= cutoff && it.day <= end }
         fun series(pick: (DailyMetric) -> Double?): List<Double> = recent.mapNotNull(pick)
         val measuredWindow = importedStepsByDay.filterKeys { it >= cutoff && it <= end }
+        val supplierWindow = supplierMeasuredStepsByDay.filterKeys { it >= cutoff && it <= end }
         fun mappedSeries(values: Map<String, Double>): List<Double> =
             values.entries
                 .filter { it.key in cutoff..end && it.value.isFinite() }
@@ -9629,7 +9658,12 @@ private fun rememberTrendWindow(
                 .ifEmpty { series { it.spo2Pct } },
             resp = series { it.respRateBpm },
             vo2Max = mappedSeries(measuredVo2MaxByDay),
-            steps = resolvedStepsSeries(measuredWindow, emptyMap(), emptyMap()).map { it.second },
+            steps = resolvedStepsSeries(
+                imported = measuredWindow,
+                supplierMeasured = supplierWindow,
+                motionDerived = emptyMap(),
+                calibratedEstimate = emptyMap(),
+            ).map { it.second },
         )
     }
 
@@ -10160,6 +10194,8 @@ private fun keyMetricGroupTitle(group: KeyMetricGroup): String = when (group) {
 private fun keyMetricOriginTitle(origin: KeyMetricOrigin): String = when (origin) {
     KeyMetricOrigin.MEASURED_IMPORTED ->
         uiString(R.string.appwide_metric_origin_measured_imported)
+    KeyMetricOrigin.SOURCE_DEPENDENT ->
+        uiString(R.string.appwide_metric_origin_source_dependent)
     KeyMetricOrigin.NOOP_INSIGHT ->
         uiString(R.string.appwide_metric_origin_noop_insight)
 }
@@ -10168,6 +10204,8 @@ private fun keyMetricOriginTitle(origin: KeyMetricOrigin): String = when (origin
 private fun keyMetricOriginCompactTitle(origin: KeyMetricOrigin): String = when (origin) {
     KeyMetricOrigin.MEASURED_IMPORTED ->
         uiString(R.string.appwide_metric_origin_measured_short)
+    KeyMetricOrigin.SOURCE_DEPENDENT ->
+        uiString(R.string.appwide_metric_origin_source_dependent_short)
     KeyMetricOrigin.NOOP_INSIGHT ->
         uiString(R.string.appwide_metric_origin_noop_short)
 }
@@ -10176,6 +10214,8 @@ private fun keyMetricOriginCompactTitle(origin: KeyMetricOrigin): String = when 
 private fun keyMetricOriginDetail(origin: KeyMetricOrigin): String = when (origin) {
     KeyMetricOrigin.MEASURED_IMPORTED ->
         uiString(R.string.appwide_metric_origin_measured_imported_detail)
+    KeyMetricOrigin.SOURCE_DEPENDENT ->
+        uiString(R.string.appwide_metric_origin_source_dependent_detail)
     KeyMetricOrigin.NOOP_INSIGHT ->
         uiString(R.string.appwide_metric_origin_noop_insight_detail)
 }

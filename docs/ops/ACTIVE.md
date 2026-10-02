@@ -1,22 +1,29 @@
 # Active NOOP handoff
 
-Last updated: **2026-10-01**
+Last updated: **2026-10-02**
 
 ## Authoritative context
 
 - The direct-and-derived Today metric expansion is locally verified on
   `codex/today-metric-catalog-fitness-age-20261001`. Apple and Android now
   expose the same 18 Today-ready choices, retain Steps in the fresh-install
-  six, and group the editor into measured/imported source data versus NOOP
-  insights. Average HR, maximum HR, asleep time, and measured VO2 max are now
-  directly selectable; measured VO2 max never falls back to `vo2max_est`, and
-  primary Steps continues to exclude motion-only estimates. Android Full
-  focused compile/tests, Apple focused catalog/trend tests, macOS and complete
-  iPhone Simulator builds, nine-locale generation, and diff hygiene pass. A
-  current 1206x2622 iPhone editor capture was reviewed and Vision OCR confirmed
-  compact one-line metadata plus `18 supported`. Physical Apple Watch, WHOOP,
-  supplier-band, HealthKit, Health Connect, background, battery, and accuracy
-  behavior remains unvalidated and unclaimed.
+  six, and group the editor into measured/imported, source-dependent, and NOOP
+  insight values. Average HR, maximum HR, asleep time, and measured VO2 max are
+  directly selectable; measured VO2 max never falls back to `vo2max_est`.
+  `Open all metric history` is source-qualified on both platforms: Apple Health,
+  Health Connect, compatible-band, and NOOP series with the same key remain
+  separate. Every persisted Apple Health history key has a catalog entry.
+  Primary Steps accepts Apple Health/Health Connect or a registry-qualified
+  supplier-native total, but excludes motion estimates; WHOOP Steps is
+  deliberately unavailable because neither the current BLE nor export path
+  supplies a validated value. Generic aggregated records remain labelled
+  `Apple Health`, not `Apple Watch`, because source-device identity is not
+  retained. Android measured Weight is bounded to the selected day and never
+  borrows profile setup weight. Current verification passes Android compilation
+  plus 137 focused tests, Apple 61 focused app tests, Apple 12 capability tests,
+  nine-locale generation for 997 app-wide strings, and diff hygiene. Physical
+  Apple Watch, WHOOP, supplier-band, HealthKit, Health Connect, background,
+  battery, and accuracy behavior remains unvalidated and unclaimed.
 
 - The hydration target/correction implementation is focused-test and
   build-verified on the same branch. Apple and Android now explain the existing

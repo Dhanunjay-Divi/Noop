@@ -417,6 +417,39 @@
     "zh-Hans": "测量",
     "zh-Hant": "測量"
   },
+  "appwide.metric.origin.source_dependent": {
+    "de": "Quellenabhängig",
+    "en": "Source-dependent",
+    "es": "Según la fuente",
+    "fr": "Selon la source",
+    "it": "In base alla fonte",
+    "pt-PT": "Dependente da fonte",
+    "ru": "Зависит от источника",
+    "zh-Hans": "取决于来源",
+    "zh-Hant": "取決於來源"
+  },
+  "appwide.metric.origin.source_dependent_detail": {
+    "de": "Gemessen, wenn die Quelle dies bereitstellt, sonst klar als NOOP-Schätzung gekennzeichnet.",
+    "en": "Measured when the source provides it; otherwise clearly labelled as a NOOP estimate.",
+    "es": "Medido cuando la fuente lo proporciona; de lo contrario, se indica claramente como estimación de NOOP.",
+    "fr": "Mesuré lorsque la source le fournit ; sinon clairement indiqué comme estimation NOOP.",
+    "it": "Misurato quando la fonte lo fornisce; altrimenti indicato chiaramente come stima NOOP.",
+    "pt-PT": "Medido quando a fonte o fornece; caso contrário, claramente identificado como estimativa NOOP.",
+    "ru": "Измеряется, если источник предоставляет значение; иначе явно отмечается как оценка NOOP.",
+    "zh-Hans": "来源提供时显示为测量值；否则明确标为 NOOP 估算值。",
+    "zh-Hant": "來源提供時顯示為測量值；否則明確標示為 NOOP 估算值。"
+  },
+  "appwide.metric.origin.source_dependent_short": {
+    "de": "Gemessen/geschätzt",
+    "en": "Measured/estimated",
+    "es": "Medido/estimado",
+    "fr": "Mesuré/estimé",
+    "it": "Misurato/stimato",
+    "pt-PT": "Medido/estimado",
+    "ru": "Измерено/оценено",
+    "zh-Hans": "测量/估算",
+    "zh-Hant": "測量/估算"
+  },
   "appwide.metric.origin.noop_insight": {
     "de": "NOOP-Einblicke",
     "en": "NOOP insights",

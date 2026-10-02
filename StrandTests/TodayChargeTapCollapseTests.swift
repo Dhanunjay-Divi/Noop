@@ -26,20 +26,19 @@ final class TodayChargeTapCollapseTests: XCTestCase {
     func testSyncedFromSummary_listsOnlySourcesWithData() {
         XCTAssertEqual(
             TodayView.syncedFromSummary(hasWhoop: true, hasApple: true, hasXiaomi: false),
-            "Synced from: Compatible band, Apple Watch")
+            "Synced from: Compatible band, Apple Health")
         XCTAssertEqual(
             TodayView.syncedFromSummary(hasWhoop: true, hasApple: false, hasXiaomi: false),
             "Synced from: Compatible band")
         XCTAssertEqual(
             TodayView.syncedFromSummary(hasWhoop: true, hasApple: true, hasXiaomi: true),
-            "Synced from: Compatible band, Apple Watch, Mi Band")
+            "Synced from: Compatible band, Apple Health, Mi Band")
     }
 
-    func testSyncedFromSummary_appleHealthReadsAsAppleWatch() {
-        // A watch-only user reads the device they know, not the framework: "Apple Watch", not "Apple Health".
+    func testSyncedFromSummary_appleHealthStaysSourceAccurate() {
         XCTAssertEqual(
             TodayView.syncedFromSummary(hasWhoop: false, hasApple: true, hasXiaomi: false),
-            "Synced from: Apple Watch")
+            "Synced from: Apple Health")
     }
 
     func testSyncedFromSummary_noSourcesIsHonest() {

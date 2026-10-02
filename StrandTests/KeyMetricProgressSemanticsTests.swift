@@ -133,6 +133,10 @@ final class KeyMetricPrefsTests: XCTestCase {
             Set(KeyMetric.allCases.filter { $0.origin == .noopInsight }),
             Set([.charge, .rest, .effort, .stress, .vitality])
         )
+        XCTAssertEqual(
+            Set(KeyMetric.allCases.filter { $0.origin == .sourceDependent }),
+            Set([.calories])
+        )
     }
 
     func testShortLegacySelectionKeepsUserOrderAndFillsToThree() {

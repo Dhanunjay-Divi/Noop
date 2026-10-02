@@ -2180,6 +2180,12 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun latestAppleDailyWeight(deviceId: String): AppleDaily?
 
     @Query(
+        "SELECT * FROM appleDaily WHERE deviceId = :deviceId AND day <= :throughDay " +
+            "AND weightKg IS NOT NULL ORDER BY day DESC LIMIT 1"
+    )
+    suspend fun latestAppleDailyWeightAtOrBefore(deviceId: String, throughDay: String): AppleDaily?
+
+    @Query(
         "SELECT * FROM liveSession WHERE deviceId = :deviceId " +
             "AND startTs >= :from AND startTs <= :to ORDER BY startTs ASC LIMIT :limit"
     )

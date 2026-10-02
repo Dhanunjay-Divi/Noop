@@ -527,6 +527,9 @@
     <string name="appwide_metric_origin_noop_insight">NOOP 洞察</string>
     <string name="appwide_metric_origin_noop_insight_detail">根据可用测量数据和你的历史记录计算。</string>
     <string name="appwide_metric_origin_noop_short">NOOP</string>
+    <string name="appwide_metric_origin_source_dependent">取决于来源</string>
+    <string name="appwide_metric_origin_source_dependent_detail">来源提供时显示为测量值；否则明确标为 NOOP 估算值。</string>
+    <string name="appwide_metric_origin_source_dependent_short">测量/估算</string>
     <string name="appwide_metric_vo2_max">最大摄氧量</string>
     <string name="appwide_metric_education_body_temp_action">查看原始来源和测量方法。使用合适的体温计确认异常数值；如症状需要，请及时就医。</string>
     <string name="appwide_metric_education_body_temp_limits">测量部位、设备、时间和环境各不相同。这不是核心体温监测，也不能用于诊断。</string>

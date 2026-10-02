@@ -27,7 +27,7 @@ class TodayChargeTapCollapseTest {
     @Test
     fun syncedFromSummary_listsOnlySourcesWithData() {
         assertEquals(
-            "Synced from: Compatible band, Apple Watch",
+            "Synced from: Compatible band, Apple Health",
             syncedFromSummary(hasWhoop = true, hasApple = true, hasXiaomi = false),
         )
         assertEquals(
@@ -35,22 +35,22 @@ class TodayChargeTapCollapseTest {
             syncedFromSummary(hasWhoop = true, hasApple = false, hasXiaomi = false),
         )
         assertEquals(
-            "Synced from: Compatible band, Apple Watch, Mi Band",
+            "Synced from: Compatible band, Apple Health, Mi Band",
             syncedFromSummary(hasWhoop = true, hasApple = true, hasXiaomi = true),
         )
     }
 
     @Test
-    fun syncedFromSummary_appleHealthReadsAsAppleWatch() {
+    fun syncedFromSummary_appleHealthStaysSourceAccurate() {
         assertEquals(
-            "Synced from: Apple Watch",
+            "Synced from: Apple Health",
             syncedFromSummary(hasWhoop = false, hasApple = true, hasXiaomi = false),
         )
     }
 
     @Test
     fun syncedFromSummary_healthConnectReadsAsHealthConnect() {
-        // #176: a Health-Connect-only user must NOT see "Synced from: Apple Watch".
+        // #176: a Health-Connect-only user must not be folded into Apple Health.
         assertEquals(
             "Synced from: Health Connect",
             syncedFromSummary(hasWhoop = false, hasApple = false, hasHealthConnect = true, hasXiaomi = false),
@@ -60,7 +60,7 @@ class TodayChargeTapCollapseTest {
             syncedFromSummary(hasWhoop = true, hasApple = false, hasHealthConnect = true, hasXiaomi = false),
         )
         assertEquals(
-            "Synced from: Compatible band, Apple Watch, Health Connect",
+            "Synced from: Compatible band, Apple Health, Health Connect",
             syncedFromSummary(hasWhoop = true, hasApple = true, hasHealthConnect = true, hasXiaomi = false),
         )
     }

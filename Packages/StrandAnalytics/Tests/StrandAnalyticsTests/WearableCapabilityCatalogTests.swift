@@ -71,11 +71,20 @@ final class WearableCapabilityCatalogTests: XCTestCase {
         XCTAssertEqual(whoop.state(for: .motion, via: .directBLE), .measuredSignal)
         XCTAssertEqual(whoop.state(for: .opticalWaveform, via: .directBLE), .measuredSignal)
         XCTAssertEqual(whoop.state(for: .bloodOxygen, via: .directBLE), .notExposed)
-        XCTAssertEqual(whoop.state(for: .steps, via: .directBLE), .deviceDerived)
+        XCTAssertEqual(whoop.state(for: .steps, via: .directBLE), .notExposed)
         XCTAssertEqual(whoop.state(for: .sleepStages, via: .directBLE), .deviceDerived)
         XCTAssertFalse(whoop.hasProjectSupportedPath(for: .rrIntervals))
         XCTAssertFalse(whoop.hasProjectSupportedPath(for: .opticalWaveform))
         XCTAssertTrue(whoop.hasProjectSupportedPath(for: .heartRate)) // file import, not BLE
+    }
+
+    func testWhoopStepsAreNotExposedByBLEOrFileImport() throws {
+        for source in [WearableSource.whoop4, .whoop5, .whoopMG] {
+            let contract = try XCTUnwrap(WearableCapabilityCatalog.contract(for: source))
+            XCTAssertEqual(contract.state(for: .steps, via: .directBLE), .notExposed)
+            XCTAssertEqual(contract.state(for: .steps, via: .fileImport), .notExposed)
+            XCTAssertFalse(contract.hasProjectSupportedPath(for: .steps))
+        }
     }
 
     func testOuraCloudDocumentedAndBLEExperimental() throws {

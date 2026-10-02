@@ -527,6 +527,9 @@
     <string name="appwide_metric_origin_noop_insight">Informações NOOP</string>
     <string name="appwide_metric_origin_noop_insight_detail">Calculado a partir das medições disponíveis e do seu histórico.</string>
     <string name="appwide_metric_origin_noop_short">NOOP</string>
+    <string name="appwide_metric_origin_source_dependent">Dependente da fonte</string>
+    <string name="appwide_metric_origin_source_dependent_detail">Medido quando a fonte o fornece; caso contrário, claramente identificado como estimativa NOOP.</string>
+    <string name="appwide_metric_origin_source_dependent_short">Medido/estimado</string>
     <string name="appwide_metric_vo2_max">VO₂ máx.</string>
     <string name="appwide_metric_education_body_temp_action">Verifique a fonte original e o método de medição. Confirme um valor inesperado com um termómetro adequado e procure cuidados se os sintomas o justificarem.</string>
     <string name="appwide_metric_education_body_temp_limits">O local de medição, o dispositivo, o momento e o ambiente variam. Isto não é monitorização da temperatura central nem um diagnóstico.</string>

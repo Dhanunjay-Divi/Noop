@@ -86,13 +86,24 @@ class WearableCapabilityCatalogTest {
             whoop.state(WearableMetric.OPTICAL_WAVEFORM, WearableAcquisitionLane.DIRECT_BLE))
         assertEquals(MetricCapabilityState.NOT_EXPOSED,
             whoop.state(WearableMetric.BLOOD_OXYGEN, WearableAcquisitionLane.DIRECT_BLE))
-        assertEquals(MetricCapabilityState.DEVICE_DERIVED,
+        assertEquals(MetricCapabilityState.NOT_EXPOSED,
             whoop.state(WearableMetric.STEPS, WearableAcquisitionLane.DIRECT_BLE))
         assertEquals(MetricCapabilityState.DEVICE_DERIVED,
             whoop.state(WearableMetric.SLEEP_STAGES, WearableAcquisitionLane.DIRECT_BLE))
         assertFalse(whoop.hasProjectSupportedPath(WearableMetric.RR_INTERVALS))
         assertFalse(whoop.hasProjectSupportedPath(WearableMetric.OPTICAL_WAVEFORM))
         assertTrue(whoop.hasProjectSupportedPath(WearableMetric.HEART_RATE))
+    }
+
+    @Test fun whoopStepsAreNotExposedByBleOrFileImport() {
+        listOf(WearableSource.WHOOP4, WearableSource.WHOOP5, WearableSource.WHOOP_MG).forEach { source ->
+            val contract = requireNotNull(WearableCapabilityCatalog.contract(source))
+            assertEquals(MetricCapabilityState.NOT_EXPOSED,
+                contract.state(WearableMetric.STEPS, WearableAcquisitionLane.DIRECT_BLE))
+            assertEquals(MetricCapabilityState.NOT_EXPOSED,
+                contract.state(WearableMetric.STEPS, WearableAcquisitionLane.FILE_IMPORT))
+            assertFalse(contract.hasProjectSupportedPath(WearableMetric.STEPS))
+        }
     }
 
     @Test fun ouraCloudDocumentedAndBleExperimental() {

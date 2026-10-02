@@ -527,6 +527,9 @@
     <string name="appwide_metric_origin_noop_insight">NOOP-Einblicke</string>
     <string name="appwide_metric_origin_noop_insight_detail">Aus verfügbaren Messungen und deinem Verlauf berechnet.</string>
     <string name="appwide_metric_origin_noop_short">NOOP</string>
+    <string name="appwide_metric_origin_source_dependent">Quellenabhängig</string>
+    <string name="appwide_metric_origin_source_dependent_detail">Gemessen, wenn die Quelle dies bereitstellt, sonst klar als NOOP-Schätzung gekennzeichnet.</string>
+    <string name="appwide_metric_origin_source_dependent_short">Gemessen/geschätzt</string>
     <string name="appwide_metric_vo2_max">VO₂max</string>
     <string name="appwide_metric_education_body_temp_action">Prüfe die ursprüngliche Quelle und Messmethode. Bestätige einen unerwarteten Wert mit einem geeigneten Thermometer und hole bei entsprechenden Beschwerden medizinischen Rat ein.</string>
     <string name="appwide_metric_education_body_temp_limits">Messstelle, Gerät, Zeitpunkt und Umgebung unterscheiden sich. Dies ist weder eine Überwachung der Körperkerntemperatur noch eine Diagnose.</string>

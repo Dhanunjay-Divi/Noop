@@ -113,6 +113,7 @@ data class CompareMetric(
     val category: String,
     val unit: String,
     val source: String,      // explicit metricSeries source partition
+    val sourceLabel: String,
     val decimals: Int,
     // Optional honesty note shown in the metric picker (e.g. BMI is derived from the profile height
     // when it comes from Health Connect, since Health Connect carries no measured BMI record). The
@@ -160,79 +161,20 @@ data class CompareMetric(
  * [DailyMetric] so a my-whoop metric can be derived from the daily cache as a fallback.
  */
 private object CompareCatalog {
-    val categories = listOf("Heart", "Charge", "Rest", "Effort", "Health", "Nutrition", "Mind")
+    val categories = AndroidMetricHistoryCatalog.categories
 
-    val all: List<CompareMetric> = listOf(
-        // Heart
-        CompareMetric("avg_hr", "Average Heart Rate", "Heart", "bpm", "my-whoop", 0),
-        CompareMetric("max_hr", "Max Heart Rate", "Heart", "bpm", "my-whoop", 0),
-        CompareMetric("energy_kcal", "Calories", "Heart", "kcal", "my-whoop", 0),
-        CompareMetric("vo2max", "VO₂ Max", "Heart", "", "apple-health", 1),
-        CompareMetric("fitness_age", "Fitness Age", "Heart", "", "my-whoop", 0),
-        CompareMetric("vo2max_est", "VO₂ Max (estimated)", "Heart", "", "my-whoop", 1),
-        CompareMetric("vitality", "Vitality", "Heart", "", "my-whoop", 0),
-        CompareMetric("body_age", "Wellness Age", "Heart", "yrs", "my-whoop", 0),
-        // Recovery (stable internal category remains "Charge")
-        CompareMetric("recovery", "Recovery", "Charge", "%", "my-whoop", 0),
-        CompareMetric("hrv", "Heart Rate Variability", "Charge", "ms", "my-whoop", 0),
-        CompareMetric("rhr", "Resting Heart Rate", "Charge", "bpm", "my-whoop", 0),
-        CompareMetric("resp_rate", "Respiratory Rate", "Charge", "rpm", "my-whoop", 1),
-        CompareMetric("spo2", "Blood Oxygen", "Charge", "%", "my-whoop", 0),
-        CompareMetric("skin_temp", "Skin Temperature", "Charge", "°C", "my-whoop", 1),
-        // Sleep (stable internal category remains "Rest")
-        CompareMetric("sleep_performance", "Sleep Score", "Rest", "%", "my-whoop", 0),
-        CompareMetric("sleep_total_min", "Asleep Time", "Rest", "min", "my-whoop", 0),
-        CompareMetric("sleep_efficiency", "Sleep Efficiency", "Rest", "%", "my-whoop", 0),
-        CompareMetric("sleep_deep_min", "Deep (SWS) Sleep", "Rest", "min", "my-whoop", 0),
-        CompareMetric("sleep_rem_min", "REM Sleep", "Rest", "min", "my-whoop", 0),
-        CompareMetric("sleep_light_min", "Light Sleep", "Rest", "min", "my-whoop", 0),
-        // Effort (was Strain)
-        CompareMetric("strain", "Effort", "Effort", "/100", "my-whoop", 1),
-        CompareMetric("steps", "Steps", "Effort", "", "apple-health", 0),
-        CompareMetric("active_kcal", "Active Energy", "Effort", "kcal", "apple-health", 0),
-        // Health / Body
-        CompareMetric("weight", "Weight", "Health", "kg", "apple-health", 1),
-        CompareMetric("body_fat", "Body Fat", "Health", "%", "apple-health", 1),
-        CompareMetric("lean_mass", "Lean Body Mass", "Health", "kg", "apple-health", 1),
+    val all: List<CompareMetric> = AndroidMetricHistoryCatalog.all.map {
         CompareMetric(
-            "bmi", "BMI", "Health", "", "apple-health", 1,
-            note = "From Health Connect this is derived from your weight and profile height.",
-        ),
-        CompareMetric(
-            HealthConnectImporter.BODY_TEMPERATURE_KEY,
-            "Body Temperature",
-            "Health",
-            "°C",
-            "apple-health",
-            1,
-            note = "Absolute body temperature; separate from the band's skin-temperature deviation.",
-        ),
-        CompareMetric(
-            "wrist_temp",
-            "Sleeping Wrist Temperature",
-            "Health",
-            "°C",
-            "apple-health",
-            1,
-            note = "Apple sleeping-wrist temperature only; Health Connect body temperature is not relabelled as wrist temperature.",
-        ),
-        CompareMetric(
-            HealthConnectImporter.BASAL_BODY_TEMPERATURE_KEY,
-            "Basal Body Temperature",
-            "Health",
-            "°C",
-            HealthConnectImporter.DEVICE_ID,
-            2,
-            note = "Absolute basal body temperature imported from Health Connect; not skin or sleeping-wrist temperature.",
-        ),
-        // Nutrition: editable manual meals + migrated CSV daily summaries.
-        CompareMetric("calories_in", "Calories In", "Nutrition", "kcal", NutritionLogContract.DEVICE_ID, 0),
-        CompareMetric("protein_g", "Protein", "Nutrition", "g", NutritionLogContract.DEVICE_ID, 0),
-        CompareMetric("carbs_g", "Carbs", "Nutrition", "g", NutritionLogContract.DEVICE_ID, 0),
-        CompareMetric("fat_g", "Fat", "Nutrition", "g", NutritionLogContract.DEVICE_ID, 0),
-        // Mind (daily mood check-in, 1–5; non-clinical self-tracking).
-        CompareMetric("mood", "Mood", "Mind", "/5", MoodStore.MOOD_DEVICE_ID, 0),
-    )
+            key = it.key,
+            title = it.title,
+            category = it.category,
+            unit = it.unit,
+            source = it.source,
+            sourceLabel = it.sourceLabel,
+            decimals = it.decimals,
+            note = it.note,
+        )
+    }
 
     fun visible(canPresentBmi: Boolean): List<CompareMetric> =
         all.filter { canPresentBmi || it.key != "bmi" }
@@ -243,24 +185,16 @@ private object CompareCatalog {
     fun byKey(key: String, canPresentBmi: Boolean = true): CompareMetric? =
         visible(canPresentBmi).firstOrNull { it.key == key }
 
-    fun byId(id: String, canPresentBmi: Boolean = true): CompareMetric? =
-        visible(canPresentBmi).firstOrNull { it.id == id }
-
-    /** Map a my-whoop metric key to the matching DailyMetric column accessor, if any. */
-    fun dailyPick(key: String): ((DailyMetric) -> Double?)? = when (key) {
-        "recovery" -> { d -> d.recovery }
-        "strain" -> { d -> d.strain }
-        "hrv" -> { d -> d.avgHrv }
-        "rhr" -> { d -> d.restingHr?.toDouble() }
-        "resp_rate" -> { d -> d.respRateBpm }
-        "spo2" -> { d -> d.spo2Pct }
-        "skin_temp" -> { d -> d.skinTempDevC }
-        "sleep_total_min" -> { d -> d.totalSleepMin }
-        "sleep_efficiency" -> { d -> d.efficiency }
-        "sleep_deep_min" -> { d -> d.deepMin }
-        "sleep_rem_min" -> { d -> d.remMin }
-        "sleep_light_min" -> { d -> d.lightMin }
-        else -> null
+    fun byId(id: String, canPresentBmi: Boolean = true): CompareMetric? {
+        val normalized = when (id) {
+            "my-whoop:fitness_age",
+            "my-whoop:vo2max_est",
+            "my-whoop:vitality",
+            "my-whoop:body_age",
+            -> "${AndroidMetricHistoryCatalog.NOOP_SOURCE}:${id.substringAfter(':')}"
+            else -> id
+        }
+        return visible(canPresentBmi).firstOrNull { it.id == normalized }
     }
 }
 
@@ -287,7 +221,11 @@ private enum class CompareRange(val label: String, val days: Int?, val phrase: S
         get() = entries.subList(ordinal, entries.size)
 }
 
-private val defaultCompareMetricKeys = listOf("recovery", "sleep_performance", "weight")
+private val defaultCompareMetricIds = listOf(
+    "${AndroidMetricHistoryCatalog.DIRECT_SOURCE}:recovery",
+    "${AndroidMetricHistoryCatalog.DIRECT_SOURCE}:sleep_performance",
+    "${WhoopRepository.APPLE_HEALTH_SOURCE}:weight",
+)
 
 internal fun parseCompareSelection(
     raw: String?,
@@ -334,8 +272,8 @@ private object ComparePrefs {
         val raw = NoopPrefs.of(context).getString(KEY_SELECTED, null)
         parseCompareSelection(raw, minSelection, maxSelection, canPresentBmi)?.let { return it }
 
-        val picks = defaultCompareMetricKeys.mapNotNull {
-            CompareCatalog.byKey(it, canPresentBmi)
+        val picks = defaultCompareMetricIds.mapNotNull {
+            CompareCatalog.byId(it, canPresentBmi)
         }
         val visible = CompareCatalog.visible(canPresentBmi)
         return (if (picks.isEmpty()) visible.take(2) else picks).take(maxSelection)
@@ -626,30 +564,17 @@ fun CompareScreen(vm: AppViewModel) {
     val selectionKey = selected.joinToString("|") { it.id }
     LaunchedEffect(selectionKey, days, ageMetricDataVersion) {
         for (metric in selected) {
-            // Always (re)load derived-from-daily my-whoop series when the cache grew;
-            // metricSeries-only metrics are loaded once, except focused age metrics whose repository
-            // revision can advance without changing the daily cache.
-            val pick = if (metric.source == "my-whoop") CompareCatalog.dailyPick(metric.key) else null
-            val needsLoad = !fullSeries.containsKey(metric.id) ||
-                (pick != null && fullSeries[metric.id].isNullOrEmpty()) ||
-                metric.key in AGE_SERIES_KEYS
-            if (needsLoad) {
-                fullSeries[metric.id] = loadFullSeries(vm, metric, days)
-            }
+            fullSeries[metric.id] = loadFullSeries(vm, metric, days)
         }
         loadedOnce = true
     }
 
     // ── Windowing (RELATIVE to each series' latest point, per macOS slice()).
     fun slice(full: List<Pair<String, Double>>, r: CompareRange): List<Pair<String, Double>> {
-        val n = r.days ?: return full
-        val lastDay = full.lastOrNull()?.first ?: return emptyList()
-        val lastOrd = dayOrdinal(lastDay) ?: return emptyList()
-        val cutoff = lastOrd - (n - 1)
-        return full.filter { (day, _) ->
-            val o = dayOrdinal(day) ?: return@filter false
-            o >= cutoff
-        }
+        return calendarDayWindow(
+            points = full.map { (day, value) -> SeriesPoint(day, value) },
+            days = r.days,
+        ).map { it.day to it.value }
     }
 
     // The range actually used for a series: the SELECTED range when it holds ≥1 point,
@@ -1158,10 +1083,14 @@ private suspend fun loadFullSeries(
     metric: CompareMetric,
     @Suppress("UNUSED_PARAMETER") cachedDays: List<DailyMetric>,
 ): List<Pair<String, Double>> {
-    // Wide window covering all of history (the macOS days = 4000 default).
-    val to = todayDay(1)
-    val from = todayDay(-4000)
-    return vm.repo.resolvedSeries(metric.key, metric.source, from, to, strapDeviceId = vm.activeStrapId).values
+    val descriptor = AndroidMetricHistoryCatalog.byId(metric.id) ?: return emptyList()
+    return loadMetricHistorySeries(
+        repo = vm.repo,
+        metric = descriptor,
+        activeStrapId = vm.activeStrapId,
+        from = todayDay(-4000),
+        to = todayDay(1),
+    )
 }
 
 /** "yyyy-MM-dd" for today offset by [deltaDays], fixed UTC. */
@@ -1253,6 +1182,11 @@ private fun AddMetricMenu(
                                         style = NoopType.body,
                                         color = if (enabled) Palette.textPrimary else Palette.textTertiary,
                                     )
+                                    Text(
+                                        metric.sourceLabel,
+                                        style = NoopType.footnote,
+                                        color = Palette.textTertiary,
+                                    )
                                     metric.note?.let {
                                         Text(
                                             it,
@@ -1286,7 +1220,7 @@ private fun FlowChips(
                 rowChips.forEach { metric ->
                     MetricChip(
                         modifier = Modifier.weight(1f),
-                        title = metric.title,
+                        title = "${metric.title} · ${metric.sourceLabel}",
                         color = colorFor(metric),
                         onRemove = { onRemove(metric) },
                     )

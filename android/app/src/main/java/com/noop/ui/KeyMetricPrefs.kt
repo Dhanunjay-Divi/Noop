@@ -43,6 +43,7 @@ enum class KeyMetricGroup {
 
 enum class KeyMetricOrigin {
     MEASURED_IMPORTED,
+    SOURCE_DEPENDENT,
     NOOP_INSIGHT,
 }
 
@@ -156,7 +157,7 @@ enum class KeyMetric(
         R.string.l10n_today_screen_calories_3e62ecfe,
         Icons.Filled.LocalFireDepartment,
         KeyMetricGroup.ACTIVITY,
-        KeyMetricOrigin.MEASURED_IMPORTED,
+        KeyMetricOrigin.SOURCE_DEPENDENT,
     ),
     STRESS(
         "stress",

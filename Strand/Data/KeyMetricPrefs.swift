@@ -60,6 +60,7 @@ enum KeyMetric: String, CaseIterable, Identifiable {
 
     enum Origin: String, CaseIterable, Identifiable {
         case measuredImported
+        case sourceDependent
         case noopInsight
 
         var id: String { rawValue }
@@ -68,6 +69,8 @@ enum KeyMetric: String, CaseIterable, Identifiable {
             switch self {
             case .measuredImported:
                 return String(localized: "appwide.metric.origin.measured_imported")
+            case .sourceDependent:
+                return String(localized: "appwide.metric.origin.source_dependent")
             case .noopInsight:
                 return String(localized: "appwide.metric.origin.noop_insight")
             }
@@ -77,6 +80,8 @@ enum KeyMetric: String, CaseIterable, Identifiable {
             switch self {
             case .measuredImported:
                 return String(localized: "appwide.metric.origin.measured_imported_detail")
+            case .sourceDependent:
+                return String(localized: "appwide.metric.origin.source_dependent_detail")
             case .noopInsight:
                 return String(localized: "appwide.metric.origin.noop_insight_detail")
             }
@@ -86,6 +91,8 @@ enum KeyMetric: String, CaseIterable, Identifiable {
             switch self {
             case .measuredImported:
                 return String(localized: "appwide.metric.origin.measured_short")
+            case .sourceDependent:
+                return String(localized: "appwide.metric.origin.source_dependent_short")
             case .noopInsight:
                 return String(localized: "appwide.metric.origin.noop_short")
             }
@@ -96,8 +103,10 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         switch self {
         case .charge, .effort, .rest, .stress, .vitality:
             return .noopInsight
+        case .calories:
+            return .sourceDependent
         case .hrv, .restingHr, .averageHr, .maxHr, .bloodOxygen, .respiratory,
-             .asleepTime, .steps, .weight, .calories, .vo2Max, .skinTemp, .hydration:
+             .asleepTime, .steps, .weight, .vo2Max, .skinTemp, .hydration:
             return .measuredImported
         }
     }

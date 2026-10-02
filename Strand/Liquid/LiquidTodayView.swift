@@ -4321,9 +4321,8 @@ struct LiquidTodayView: View {
         )
     }
 
-    /// Pure aggregation seam for the Liquid hero. The existing Today mapper turns computed siblings into
-    /// "On-device", the Apple Health source into "Apple Watch", and imported strap rows into
-    /// "Compatible band".
+    /// Pure aggregation seam for the Liquid hero. The Today mapper turns computed siblings into
+    /// "On-device", retains Apple Health as the source, and maps imported strap rows to "Compatible band".
     static func heroSourceLabel(
         rawSources: [String],
         deviceId: String,

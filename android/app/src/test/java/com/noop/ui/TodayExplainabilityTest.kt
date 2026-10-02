@@ -368,8 +368,8 @@ class TodayExplainabilityTest {
     }
 
     @Test
-    fun liquidHeroSourceLabel_usesAudienceFacingAppleWatchName() {
-        assertEquals("Apple Watch", heroSourceLabel(listOf("apple-health")))
+    fun liquidHeroSourceLabel_keepsAppleHealthSourceAccurate() {
+        assertEquals("Apple Health", heroSourceLabel(listOf("apple-health")))
     }
 
     @Test
@@ -380,8 +380,8 @@ class TodayExplainabilityTest {
     @Test
     fun mixedCompatibleBandSourceStillQualifiesForSyncFeedback() {
         assertTrue(sourceLabelIncludesCompatibleBand("Compatible band"))
-        assertTrue(sourceLabelIncludesCompatibleBand("Compatible band + Apple Watch"))
-        assertFalse(sourceLabelIncludesCompatibleBand("Apple Watch"))
+        assertTrue(sourceLabelIncludesCompatibleBand("Compatible band + Apple Health"))
+        assertFalse(sourceLabelIncludesCompatibleBand("Apple Health"))
     }
 
     @Test

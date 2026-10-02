@@ -74,6 +74,7 @@ class KeyMetricPrefsTest {
         assertEquals(KeyMetricGroup.ACTIVITY, KeyMetric.WEIGHT.group)
         assertEquals(KeyMetricGroup.ACTIVITY, KeyMetric.HYDRATION.group)
         assertEquals(KeyMetricOrigin.MEASURED_IMPORTED, KeyMetric.STEPS.origin)
+        assertEquals(KeyMetricOrigin.SOURCE_DEPENDENT, KeyMetric.CALORIES.origin)
         assertEquals(KeyMetricOrigin.NOOP_INSIGHT, KeyMetric.STRESS.origin)
         assertEquals(false, KeyMetric.VITALITY.isBoundedProgress)
     }
