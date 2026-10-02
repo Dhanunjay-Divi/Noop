@@ -556,6 +556,7 @@ def test_database_url_round_trips_without_credential_arguments() -> None:
     source = SCRIPT_PATH.read_text(encoding="utf-8")
     assert "--password" not in source
     assert "PGPASSWORD" not in source
+    assert 'TemporaryDirectory(prefix="noop-db-", dir="/tmp")' in source
 
 
 def test_operator_wrapper_requires_two_explicit_disabled_runtime_phases() -> None:

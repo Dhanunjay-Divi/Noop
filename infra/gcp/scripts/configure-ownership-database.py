@@ -552,7 +552,7 @@ async def cloud_sql_proxy(
     binary: str,
     connection_name: str,
 ) -> AsyncIterator[tuple[str, subprocess.Popen[bytes]]]:
-    with tempfile.TemporaryDirectory(prefix="noop-ownership-sql-") as socket_root:
+    with tempfile.TemporaryDirectory(prefix="noop-own-", dir="/tmp") as socket_root:
         process = subprocess.Popen(
             [
                 binary,
