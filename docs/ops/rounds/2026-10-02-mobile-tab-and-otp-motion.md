@@ -6,7 +6,7 @@
 - Owner: project team
 - Branch: `codex/mobile-liquid-tab-otp-motion-20261002`
 - Start commit: `dbd23c25e4f681c4a087642b41441270fa15c3a0`
-- End implementation commit: pending final checkpoint
+- End implementation commit: `7aab946dce3eaf2af8e1b894d18e471547cbb278`
 - Record commit or PR: pending protected pull request
 
 ## Objective
@@ -144,8 +144,7 @@ formulas, band transport, account authority, or server behavior.
 - Changed paths: shared design tokens and verification-success policy,
   iPhone/Android shell navigation, iPhone/Android managed-cloud verification
   views, focused contracts, and this operations record.
-- Implementation commit: pending replacement checkpoint after the hosted scrub
-  harness correction.
+- Implementation commit: `7aab946dce3eaf2af8e1b894d18e471547cbb278`.
 - Branch and remote state: local branch includes protected `main`
   `a8a617593b4b81485fca672353ebcebe2d073f55`; PR `#32` is open with auto-merge
   armed. Its first exact-head run passed Android, macOS, packages, policy, and
