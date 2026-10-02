@@ -449,6 +449,10 @@ resource "google_cloud_run_v2_service" "managed_api" {
         value = "21600"
       }
       env {
+        name  = "NOOP_MANAGED_UPLOAD_TTL_SECONDS"
+        value = tostring(var.managed_upload_ttl_seconds)
+      }
+      env {
         name  = "NOOP_MANAGED_RAW_BUCKET"
         value = google_storage_bucket.raw_chunks.name
       }
@@ -1067,10 +1071,6 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
         env {
           name  = "NOOP_MANAGED_PROJECT_ID"
           value = var.project_id
-        }
-        env {
-          name  = "NOOP_MANAGED_STORAGE_ENABLED"
-          value = "true"
         }
         env {
           name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"

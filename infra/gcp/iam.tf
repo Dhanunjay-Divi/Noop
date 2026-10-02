@@ -3,6 +3,8 @@ resource "google_service_account" "api" {
   account_id   = "${local.prefix}-api"
   display_name = "NOOP staging API"
   description  = "Private synthetic staging API identity"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account" "managed_api" {
@@ -10,6 +12,8 @@ resource "google_service_account" "managed_api" {
   account_id   = "${local.prefix}-managed-api"
   display_name = "NOOP+ staging managed API"
   description  = "Firebase-authenticated synthetic storage API"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account" "ownership_api" {
@@ -19,6 +23,8 @@ resource "google_service_account" "ownership_api" {
   account_id   = "${local.prefix}-ownership"
   display_name = "NOOP Band ownership staging API"
   description  = "Identity and ownership authority without health-data access"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account" "processor" {
@@ -26,6 +32,8 @@ resource "google_service_account" "processor" {
   account_id   = "${local.prefix}-processor"
   display_name = "NOOP staging processor"
   description  = "Synthetic raw-chunk processing identity"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account" "managed_lifecycle" {
@@ -33,6 +41,8 @@ resource "google_service_account" "managed_lifecycle" {
   account_id   = "${local.prefix}-lifecycle"
   display_name = "NOOP+ staging lifecycle"
   description  = "Expires managed reservations and deletes retained objects"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account" "feedback_lifecycle" {
@@ -42,6 +52,8 @@ resource "google_service_account" "feedback_lifecycle" {
   account_id   = "${local.prefix}-feedback-life"
   display_name = "NOOP feedback staging lifecycle"
   description  = "Deletes only bounded feedback objects and retention metadata"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account" "feedback_scheduler" {
@@ -51,6 +63,8 @@ resource "google_service_account" "feedback_scheduler" {
   account_id   = "${local.prefix}-feedback-sched"
   display_name = "NOOP feedback staging scheduler"
   description  = "Invokes only the feedback lifecycle job"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account" "managed_scheduler" {
@@ -58,6 +72,8 @@ resource "google_service_account" "managed_scheduler" {
   account_id   = "${local.prefix}-scheduler"
   display_name = "NOOP+ staging scheduler"
   description  = "Invokes the managed-storage lifecycle job"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account" "managed_event_invoker" {
@@ -65,6 +81,8 @@ resource "google_service_account" "managed_event_invoker" {
   account_id   = "${local.prefix}-event-invoker"
   display_name = "NOOP+ staging event invoker"
   description  = "Carries Pub/Sub OIDC identity to the managed processor"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account" "migration" {
@@ -72,6 +90,8 @@ resource "google_service_account" "migration" {
   account_id   = "${local.prefix}-migration"
   display_name = "NOOP staging migration"
   description  = "One-shot database migration identity"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account" "builder" {
@@ -79,6 +99,8 @@ resource "google_service_account" "builder" {
   account_id   = "${local.prefix}-builder"
   display_name = "NOOP staging image builder"
   description  = "Builds digest-pinned synthetic staging images"
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_service_account_iam_member" "api_self_signer" {
@@ -143,12 +165,16 @@ resource "google_project_iam_custom_role" "managed_object_reader" {
   title       = "NOOP managed exact object reader"
   description = "Read exact database-known managed objects without bucket listing"
   permissions = ["storage.objects.get"]
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_storage_bucket_iam_member" "managed_api_raw_reader" {
   bucket = google_storage_bucket.raw_chunks.name
   role   = google_project_iam_custom_role.managed_object_reader.id
   member = "serviceAccount:${google_service_account.managed_api.email}"
+
+  depends_on = [time_sleep.managed_object_role_propagation]
 }
 
 resource "google_storage_bucket_iam_member" "managed_api_feedback_creator" {
@@ -161,12 +187,16 @@ resource "google_storage_bucket_iam_member" "managed_api_feedback_reader" {
   bucket = google_storage_bucket.feedback.name
   role   = google_project_iam_custom_role.managed_object_reader.id
   member = "serviceAccount:${google_service_account.managed_api.email}"
+
+  depends_on = [time_sleep.managed_object_role_propagation]
 }
 
 resource "google_storage_bucket_iam_member" "managed_api_feedback_deleter" {
   bucket = google_storage_bucket.feedback.name
   role   = google_project_iam_custom_role.managed_object_deleter.id
   member = "serviceAccount:${google_service_account.managed_api.email}"
+
+  depends_on = [time_sleep.managed_object_role_propagation]
 }
 
 resource "google_project_iam_member" "api_cloud_sql_client" {
@@ -192,6 +222,8 @@ resource "google_project_iam_custom_role" "managed_api_push_sender" {
     "cloudmessaging.messages.create",
     "resourcemanager.projects.get",
   ]
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_project_iam_member" "managed_api_push_sender" {
@@ -228,6 +260,8 @@ resource "google_storage_bucket_iam_member" "processor_raw_reader" {
   bucket = google_storage_bucket.raw_chunks.name
   role   = google_project_iam_custom_role.managed_object_reader.id
   member = "serviceAccount:${google_service_account.processor.email}"
+
+  depends_on = [time_sleep.managed_object_role_propagation]
 }
 
 resource "google_project_iam_custom_role" "managed_object_deleter" {
@@ -236,12 +270,25 @@ resource "google_project_iam_custom_role" "managed_object_deleter" {
   title       = "NOOP managed object lifecycle"
   description = "Read exact database-known objects for reconciliation and delete lifecycle claims"
   permissions = ["storage.objects.delete", "storage.objects.get"]
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
+}
+
+resource "time_sleep" "managed_object_role_propagation" {
+  create_duration = "60s"
+
+  depends_on = [
+    google_project_iam_custom_role.managed_object_deleter,
+    google_project_iam_custom_role.managed_object_reader,
+  ]
 }
 
 resource "google_storage_bucket_iam_member" "managed_lifecycle_raw_deleter" {
   bucket = google_storage_bucket.raw_chunks.name
   role   = google_project_iam_custom_role.managed_object_deleter.id
   member = "serviceAccount:${google_service_account.managed_lifecycle.email}"
+
+  depends_on = [time_sleep.managed_object_role_propagation]
 }
 
 resource "google_storage_bucket_iam_member" "feedback_lifecycle_deleter" {
@@ -250,6 +297,8 @@ resource "google_storage_bucket_iam_member" "feedback_lifecycle_deleter" {
   bucket = google_storage_bucket.feedback.name
   role   = google_project_iam_custom_role.managed_object_deleter.id
   member = "serviceAccount:${google_service_account.feedback_lifecycle[0].email}"
+
+  depends_on = [time_sleep.managed_object_role_propagation]
 }
 
 resource "google_project_iam_custom_role" "managed_identity_deleter" {
@@ -258,6 +307,8 @@ resource "google_project_iam_custom_role" "managed_identity_deleter" {
   title       = "NOOP managed identity deleter"
   description = "Delete Firebase Auth users only after managed account erasure completes"
   permissions = ["firebaseauth.users.delete"]
+
+  depends_on = [google_project_service.required["iam.googleapis.com"]]
 }
 
 resource "google_project_iam_member" "managed_lifecycle_identity_deleter" {

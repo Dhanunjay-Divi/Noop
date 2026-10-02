@@ -305,6 +305,7 @@ def test_database_url_round_trips_without_exposing_values_in_arguments() -> None
     assert "PGPASSWORD" not in source
     assert "print(database_url" not in source
     assert "print(generated_password" not in source
+    assert 'TemporaryDirectory(prefix="noop-own-", dir="/tmp")' in source
 
 
 @pytest.mark.parametrize(

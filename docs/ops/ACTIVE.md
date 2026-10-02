@@ -4,6 +4,33 @@ Last updated: **2026-10-02**
 
 ## Authoritative context
 
+- A replacement private synthetic GCP staging deployment is live and locally
+  verified on
+  branch `codex/gcp-staging-redeploy-20261002` from exact protected `main`
+  `e840874872f5e7eb7f38afcecd7aaa826b12288e`. The owner-selected replacement
+  account is authenticated, a dedicated billing-enabled project exists, and
+  CLI plus application-default quota context are pinned to it. No prior state,
+  credential, user, database, or health data is being imported. Protected
+  remote state, the zero-runtime foundation, budget alerts, Firebase iOS and
+  Android registrations, App Check registration, synthetic phone OTP, the
+  retained fictional pilot claim, and email/password account identity are
+  applied. Generated native pilot configuration is ignored and mode `0600`.
+  The server dependency gate also moved PyJWT to the first non-vulnerable
+  release after the live audit finding. One immutable image digest scanned with
+  zero findings; Cloud SQL, migrations, workload-specific credentials, the
+  private API, managed API, processor, managed lifecycle, feedback lifecycle,
+  App Check enforcement, and the enabled lifecycle scheduler are deployed.
+  The final three-account fictional OTP/runtime smoke passed in 210 seconds,
+  including upload/processing/isolation/restore/erasure, social, and Safety
+  fail-closed behavior with disposable fictional push destinations. Identity
+  configuration was restored to one retained fictional phone, zero App Check
+  debug tokens remain, a scheduled lifecycle execution completed in 17.33
+  seconds, the private-runtime verifier passes, and OpenTofu reports no drift.
+  Exact branch gates, protected pull-request integration, signed native
+  clients, real OTP/push, and all physical-device claims remain pending.
+  Public invocation, real health data, payment entitlement, and physical-band
+  claims remain disabled.
+
 - The direct-and-derived Today metric expansion is integrated on protected
   `main` through PR `#27` at squash merge
   `5a287b50423b921d408833392b6dfdeadf14a8ae`. Apple and Android now

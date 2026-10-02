@@ -51,6 +51,7 @@ class SyntheticAccount:
     profile_id: str = ""
     pilot_claim_enabled: bool = False
     managed_enrolled: bool = False
+    synthetic_push_registered: bool = False
     account_erasure_requested: bool = False
 
 
@@ -93,7 +94,9 @@ class ManagedStagingSmoke:
             self._exercise_storage()
             self._erase_raw_storage()
             self._exercise_social()
+            self._register_synthetic_push_targets()
             self._exercise_safety()
+            self._revoke_synthetic_push_targets()
             self._delete_social_profiles()
             self._request_account_erasure()
             self._delete_provider_identities()
@@ -949,11 +952,32 @@ class ManagedStagingSmoke:
         incident_id = str(created.get("incident_id") or "")
         if (
             not incident_id
-            or created.get("status") != "open"
             or created.get("delivery", {}).get("contacts_targeted") != 2
             or replayed.get("duplicate") is not True
         ):
             raise SmokeFailure("Safety incident creation or idempotency failed")
+        if created.get("status") == "canceled":
+            terminal = self._managed_request(
+                owner,
+                "GET",
+                f"/v1/managed/safety/incidents/{incident_id}",
+            ).get("incident", {})
+            if (
+                replayed.get("status") != "canceled"
+                or terminal.get("status") != "canceled"
+                or terminal.get("location") is not None
+                or terminal.get("delivery", {}).get("contacts_reached") != 0
+            ):
+                raise SmokeFailure(
+                    "Safety fictional-destination terminalization failed"
+                )
+            print(
+                "PASS Safety invites, accepted contacts, paging idempotency, "
+                "and fictional-destination fail-closed handling"
+            )
+            return
+        if created.get("status") != "open" or replayed.get("status") != "open":
+            raise SmokeFailure("Safety incident entered an unexpected state")
 
         captured_at = datetime.now(UTC).replace(microsecond=0)
         first_location = self._managed_request(
@@ -1024,6 +1048,41 @@ class ManagedStagingSmoke:
             "PASS Safety invites, accepted contacts, manual paging, "
             "latest-only location, responder state, and resolution"
         )
+
+    def _register_synthetic_push_targets(self) -> None:
+        for account in self.accounts[1:]:
+            registration = self._managed_request(
+                account,
+                "PUT",
+                "/v1/managed/push/installations/current",
+                body={
+                    "platform": account.platform,
+                    "environment": "development",
+                    "target_kind": "token",
+                    "token": "noop-synthetic-staging-"
+                    + secrets.token_urlsafe(32),
+                },
+            ).get("registration", {})
+            if (
+                registration.get("installation_id") != account.installation_id
+                or registration.get("status") != "active"
+            ):
+                raise SmokeFailure("synthetic push registration failed")
+            account.synthetic_push_registered = True
+        print("PASS disposable fictional push destinations")
+
+    def _revoke_synthetic_push_targets(self) -> None:
+        for account in self.accounts:
+            if not account.synthetic_push_registered:
+                continue
+            self._managed_request(
+                account,
+                "DELETE",
+                "/v1/managed/push/installations/current",
+                expected={204, 404},
+            )
+            account.synthetic_push_registered = False
+        print("PASS fictional push destination cleanup")
 
     def _delete_social_profiles(self) -> None:
         for account in self.accounts:
@@ -1341,6 +1400,19 @@ class ManagedStagingSmoke:
     def _best_effort_cleanup(self) -> bool:
         cleanup_failed = False
         for account in self.accounts:
+            if account.id_token and account.synthetic_push_registered:
+                try:
+                    self._authenticate(account)
+                    self._managed_request(
+                        account,
+                        "DELETE",
+                        "/v1/managed/push/installations/current",
+                        expected={204, 404},
+                    )
+                except SmokeFailure:
+                    cleanup_failed = True
+                else:
+                    account.synthetic_push_registered = False
             if account.id_token and account.profile_id:
                 try:
                     self._managed_request(

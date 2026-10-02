@@ -393,8 +393,10 @@ def managed_router(
         if unified_identity_authority_repository is None:
             return None
         try:
-            unified = await unified_identity_authority_repository.reconcile_identity(
-                claims
+            unified = (
+                await unified_identity_authority_repository.reconcile_managed_identity(
+                    claims
+                )
             )
         except (
             UnifiedIdentityCollisionError,
