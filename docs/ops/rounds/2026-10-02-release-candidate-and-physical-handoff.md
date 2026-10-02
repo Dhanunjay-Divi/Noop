@@ -127,6 +127,30 @@ evidence as physical proof.
 The terminology inventory is regenerated after this record is added, then
 checked again so line numbers and historical counts match the final tree.
 
+## Objective completion audit
+
+| Requirement | Authoritative current evidence | Status |
+|---|---|---|
+| Metric-first mobile Today | The exact consolidated Apple and Android UI paths match visually reviewed commit `628554748`; current Today source renders the bounded Daily Signal and value-first metric cards before optional deeper content, and each supported card opens its focused detail/history route | Locally complete |
+| Secondary explanation behind detail | Apple routes metric education through `explainedMetric` sheets and focused details; Android routes metric cards to their focused metric screens. The paired reviewed phone captures keep long formula and education copy off the primary Today scan | Locally complete |
+| Distinctive movable NOOP N | Apple `NoopCommandNMark` and Android `NoopCommandNMark` replace the earlier plus/grid action marks while preserving the independent 48-by-52-point target, drag, clamp, nearest-edge snap, persistence, launcher, and accessibility movement actions | Locally complete |
+| Useful Trends behavior | `TrendChart` keeps touch-scrub selection pinned after release; the exact-date iPhone case passed 1/1 on the dedicated review simulator, StrandDesign passed 58/58, and Android preserves date-qualified chart-selection labels and focused metric history | Locally complete |
+| Fresh-install order | Clean iPhone Simulator first run passed 2/2. Android API 35 passed all 3 managed-device cases, including Terms, Bluetooth, supported-band selection, then account without a local bypass | Locally complete |
+| Cross-platform semantics and accessibility | Five labeled tabs, selected state, dock footprint, Reduced Motion, touch targets, large-content behavior, OTP masking and clearing, command-lens semantics, and source-qualified metric routes are covered by focused Apple and Android contract tests and paired visual review | Locally complete; signed-device assistive-technology testing remains physical |
+| Bounded gates and visual review | Exact combined software tests, repository controls, source-equivalence check, and paired `1206x2622` / `1080x2424` visual review passed as recorded above | Locally complete |
+| Durable operations and physical handoff | This round, `docs/ops/ACTIVE.md`, `AGENTS.md`, the tracked `noop-ops` skill, and the production physical-validation handoff contain the exact continuation contract | Complete |
+| Protected-main integration | Protected `main` remains `a8a617593`; the local candidate is 20 commits ahead. PR 32 remains on stale head `1d2543ba1` and is blocked by the iOS failure fixed locally in `3d8256978` | Pending authorization to push, run required exact-head checks, merge normally, and verify exact main |
+
+Historical screenshots are not accepted as current-state proof. Source and
+contract checks confirm that screenshots containing `your health data, local
+by default`, `Continue in local test mode`, `Host your private circle`, and the
+old plus/grid command control are superseded customer states: the local-test
+string remains only in a historical operations record, retired self-hosted
+Friends presentation is absent from the current Apple and Android UI, and the
+current command surface is the NOOP N. Unused localization history may retain
+older wording for the terminology ratchet, but it is not referenced by current
+onboarding runtime source.
+
 ## Physical device and deployment
 
 - Install/update action: not run.
@@ -181,6 +205,10 @@ record reports a passing private-runtime verifier and zero-drift OpenTofu plan.
 - Protected integration of this combined candidate remains pending.
 - The available supplier archives do not match the approved trust evidence, so
   supplier physical validation is blocked.
+- Historical screenshots that show the local-first welcome, local-test account
+  bypass, self-hosted Friends setup, or the earlier plus/grid command control
+  are not the current candidate and must not be used for installation or
+  release evidence.
 - WHOOP physical comparison can proceed only after an exact signed candidate is
   produced from clean protected main.
 - Real OTP, public traffic, payments, provider delivery, permanent account

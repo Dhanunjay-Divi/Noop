@@ -16,7 +16,12 @@ Last updated: **2026-10-02**
   paired `1206x2622` iPhone and `1080x2424` Android visual-review revision,
   which had no observed clipping or overlap. The retained PR27 simulator did
   not preserve the selected trend value while the dedicated review simulator
-  did; protected exact-head execution remains authoritative.
+  did; protected exact-head execution remains authoritative. Source and
+  contract audits also confirm that historical screenshots containing the
+  local-first welcome, local-test account bypass, self-hosted Friends setup, or
+  the old plus/grid command control are not current customer runtime; the
+  consolidated candidate uses required account onboarding, managed Friends,
+  and the movable NOOP N.
   No push, merge, workflow dispatch, deployment mutation, signed install, or
   physical claim occurred. Private staging remains at protected merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest

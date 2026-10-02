@@ -98,6 +98,16 @@ merged wholesale. The transferred commits `d390e4a9a` and `6bf66cdb1`, plus
 `docs/handoff/NOOP-DISCOVERY-ACCOUNT-REVIEW-2026-10-02.md`, are unavailable and
 must not be guessed.
 
+### Retired screenshot states
+
+Do not use older screenshots as candidate truth. Current source and contract
+tests retire the customer-facing `your health data, local by default`,
+`Continue in local test mode`, self-hosted Friends setup, and the earlier
+plus/grid command control. The integrated candidate must show required account
+onboarding, managed Friends, and the movable NOOP N. A signed phone that shows
+one of the retired states is built from the wrong revision or configuration
+and must be rejected.
+
 ## Current supplier-artifact stop condition
 
 The supplier adapter must remain disabled until the exact approved archives are
