@@ -377,6 +377,8 @@ def test_runtime_verifier_covers_membership_ownership_and_ddl_boundaries() -> No
     assert "FROM pg_proc" in source
     assert "FROM pg_database" in source
     assert "has_column_privilege" in source
+    assert "AS column_update" in source
+    assert "SELECT has_column_privilege($1, $2, $3)" not in source
     assert "NOT has_database_privilege(current_database(), 'CREATE')" in source
     assert "NOT has_database_privilege(current_database(), 'TEMPORARY')" in source
     assert "NOT has_schema_privilege('public', 'CREATE')" in source

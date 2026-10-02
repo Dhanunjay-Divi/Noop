@@ -1040,18 +1040,25 @@ async def verify_runtime_role(
         raise ProvisioningError("Runtime database principal is invalid")
     await assert_role_owns_no_objects(connection, current_user)
 
+    def expected_table_privileges(relation_name: str) -> tuple[str, ...]:
+        if relation_name == "noop_schema_migrations":
+            return ("SELECT",)
+        if runtime_profile_allows_relation(runtime_profile, relation_name):
+            return runtime_relation_privileges(runtime_profile, relation_name)
+        return ()
+
     relations = await connection.fetch(
         """
         SELECT candidate.relname,
                format('%I.%I', namespace.nspname, candidate.relname) AS name,
-               ARRAY(
-                   SELECT attribute.attname::text
-                   FROM pg_attribute AS attribute
-                   WHERE attribute.attrelid = candidate.oid
-                     AND attribute.attnum > 0
-                     AND NOT attribute.attisdropped
-                   ORDER BY attribute.attnum
-               ) AS columns
+               has_table_privilege(candidate.oid, 'SELECT') AS table_select,
+               has_table_privilege(candidate.oid, 'INSERT') AS table_insert,
+               has_table_privilege(candidate.oid, 'UPDATE') AS table_update,
+               has_table_privilege(candidate.oid, 'DELETE') AS table_delete,
+               has_table_privilege(candidate.oid, 'TRUNCATE') AS table_truncate,
+               has_table_privilege(candidate.oid, 'REFERENCES')
+                   AS table_references,
+               has_table_privilege(candidate.oid, 'TRIGGER') AS table_trigger
         FROM pg_class candidate
         JOIN pg_namespace namespace ON namespace.oid = candidate.relnamespace
         WHERE namespace.nspname = 'public'
@@ -1061,57 +1068,77 @@ async def verify_runtime_role(
     )
     for relation in relations:
         relation_name = str(relation["relname"])
-        expected_table = (
-            ("SELECT",)
-            if relation_name == "noop_schema_migrations"
-            else (
-                runtime_relation_privileges(runtime_profile, relation_name)
-                if runtime_profile_allows_relation(
-                    runtime_profile,
-                    relation_name,
-                )
-                else ()
-            )
-        )
+        expected_table = expected_table_privileges(relation_name)
         for privilege in TABLE_PRIVILEGES:
-            granted = await connection.fetchval(
-                "SELECT has_table_privilege($1, $2)",
-                relation["name"],
-                privilege,
-            )
-            if bool(granted) != (privilege in expected_table):
+            granted = bool(relation[f"table_{privilege.lower()}"])
+            if granted != (privilege in expected_table):
                 raise ProvisioningError("Runtime database table grants are not bounded")
         for privilege in FORBIDDEN_TABLE_PRIVILEGES:
-            if await connection.fetchval(
-                "SELECT has_table_privilege($1, $2)",
-                relation["name"],
-                privilege,
-            ):
+            if bool(relation[f"table_{privilege.lower()}"]):
                 raise ProvisioningError("Runtime database role has a DDL-like grant")
+
+    columns = await connection.fetch(
+        """
+        SELECT candidate.relname,
+               attribute.attname,
+               has_column_privilege(
+                   format('%I.%I', namespace.nspname, candidate.relname),
+                   attribute.attname,
+                   'SELECT'
+               ) AS column_select,
+               has_column_privilege(
+                   format('%I.%I', namespace.nspname, candidate.relname),
+                   attribute.attname,
+                   'INSERT'
+               ) AS column_insert,
+               has_column_privilege(
+                   format('%I.%I', namespace.nspname, candidate.relname),
+                   attribute.attname,
+                   'UPDATE'
+               ) AS column_update,
+               has_column_privilege(
+                   format('%I.%I', namespace.nspname, candidate.relname),
+                   attribute.attname,
+                   'REFERENCES'
+               ) AS column_references
+        FROM pg_class candidate
+        JOIN pg_namespace namespace ON namespace.oid = candidate.relnamespace
+        JOIN pg_attribute attribute ON attribute.attrelid = candidate.oid
+        WHERE namespace.nspname = 'public'
+          AND candidate.relkind IN ('r', 'p', 'v', 'm', 'f')
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+        ORDER BY candidate.relname, attribute.attnum
+        """
+    )
+    for column in columns:
+        relation_name = str(column["relname"])
+        column_name = str(column["attname"])
+        expected_table = expected_table_privileges(relation_name)
         expected_column_grants = dict(
             runtime_relation_column_privileges(runtime_profile, relation_name)
         )
-        for column in relation["columns"]:
-            for privilege in COLUMN_PRIVILEGES:
-                granted = await connection.fetchval(
-                    "SELECT has_column_privilege($1, $2, $3)",
-                    relation["name"],
-                    column,
-                    privilege,
+        for privilege in COLUMN_PRIVILEGES:
+            granted = bool(column[f"column_{privilege.lower()}"])
+            expected = (
+                privilege in expected_table
+                or privilege in expected_column_grants.get(column_name, ())
+            )
+            if granted != expected:
+                raise ProvisioningError(
+                    "Runtime database column grants are not bounded"
                 )
-                expected = (
-                    privilege in expected_table
-                    or privilege in expected_column_grants.get(column, ())
-                )
-                if bool(granted) != expected:
-                    raise ProvisioningError(
-                        "Runtime database column grants are not bounded"
-                    )
 
     sequences = await connection.fetch(
         """
         SELECT format('%I.%I', namespace.nspname, sequence.relname) AS name,
-               target.relname AS relation_name
+               target.relname AS relation_name,
+               has_sequence_privilege(sequence.oid, 'SELECT')
+                   AS sequence_select,
+               has_sequence_privilege(sequence.oid, 'UPDATE')
+                   AS sequence_update,
+               has_sequence_privilege(sequence.oid, 'USAGE')
+                   AS sequence_usage
         FROM pg_class sequence
         JOIN pg_namespace namespace ON namespace.oid = sequence.relnamespace
         JOIN pg_depend dependency
@@ -1125,16 +1152,12 @@ async def verify_runtime_role(
     )
     for sequence in sequences:
         for privilege in SEQUENCE_PRIVILEGES:
-            granted = await connection.fetchval(
-                "SELECT has_sequence_privilege($1, $2)",
-                sequence["name"],
-                privilege,
-            )
+            granted = bool(sequence[f"sequence_{privilege.lower()}"])
             expected = runtime_profile_allows_relation(
                 runtime_profile,
                 str(sequence["relation_name"]),
             )
-            if bool(granted) != expected:
+            if granted != expected:
                 raise ProvisioningError("Runtime sequence grants are not bounded")
 
     executable_functions = await connection.fetch(
