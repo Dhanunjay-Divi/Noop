@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `locally verified; protected integration pending`
+- State: `integrated and exact-main verified; device review pending`
 - Owner: project team
 - Branch: `codex/today-metric-catalog-fitness-age-20261001`
 - Start commit: `232f746e045d2755947579c3408efc5c3b84ff69`
-- End implementation commit: commit containing this round record
-- Record commit or PR: PR `#27`
+- End implementation commit: `f57d2de9373d0656a36052674e50a55007ea1c5e`
+- Record commit or PR: PR `#27`; squash merge
+  `5a287b50423b921d408833392b6dfdeadf14a8ae`
 
 ## Objective
 
@@ -90,9 +91,13 @@ paragraph copy to the number-first summary.
 
 ## Git and release state
 
-- Branch remains `codex/today-metric-catalog-fitness-age-20261001`.
-- End implementation commit and protected integration remain pending.
-- The round is part of PR `#27`; exact-head hosted checks remain required.
+- Final PR `#27` head
+  `f57d2de9373d0656a36052674e50a55007ea1c5e` passed all ten required
+  contexts and merged normally through protected `main` as
+  `5a287b50423b921d408833392b6dfdeadf14a8ae`.
+- The exact main commit completed 38 checks with 33 successes, five
+  intentional skips, and zero failures; strict required-CI verification passed
+  10/10.
 
 ## Decisions
 
@@ -105,10 +110,8 @@ paragraph copy to the number-first summary.
 
 ## Next round
 
-1. Integrate the consolidated branch through protected review and exact-head
-   checks.
-2. Run Android visual and signed physical-phone accessibility review.
-3. Keep physical sensor, background, battery, and notification behavior behind
+1. Run Android visual and signed physical-phone accessibility review.
+2. Keep physical sensor, background, battery, and notification behavior behind
    their existing device evidence gates.
 
 ## Privacy check
