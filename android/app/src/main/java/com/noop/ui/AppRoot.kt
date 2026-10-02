@@ -1632,7 +1632,6 @@ private fun GlassBottomBar(
                     (slotWidth * selectedIndex) +
                     ((slotWidth - Metrics.navigationLensSize) / 2),
                 animationSpec = if (reduceMotion) snap() else NoopMotion.value(),
-                label = "Selected tab lens position",
             )
             val lensAccent by animateColorAsState(
                 targetValue = bottomBarAccent(selected),
@@ -1641,7 +1640,6 @@ private fun GlassBottomBar(
                 } else {
                     tween(durationMillis = 180, easing = NavEasing)
                 },
-                label = "Selected tab lens color",
             )
             Box(
                 modifier = Modifier
@@ -2219,7 +2217,6 @@ private fun BarSlot(
         } else {
             tween(durationMillis = 180, easing = NavEasing)
         },
-        label = "Bottom navigation item color",
     )
     val selectedTabLiftLabel = stringResource(R.string.nav_selected_tab_animation_label)
     val selectedScale by animateFloatAsState(

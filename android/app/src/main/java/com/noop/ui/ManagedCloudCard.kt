@@ -944,7 +944,6 @@ private fun ManagedVerificationCodeField(
         } else {
             tween(durationMillis = 240)
         },
-        label = "Verification code invalid nudge",
     )
     val nudgeDistancePx = with(LocalDensity.current) {
         Metrics.space4.toPx()
@@ -1058,7 +1057,6 @@ private fun ManagedVerificationSuccessOverlay(
         } else {
             NoopMotion.value()
         },
-        label = "Verification success check",
     )
 
     LaunchedEffect(reduceMotion) {
