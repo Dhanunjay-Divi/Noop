@@ -16498,8 +16498,8 @@
         681,
         684,
         684,
-        1282,
-        1422
+        1284,
+        1424
       ],
       "occurrenceCount": 7,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -16512,8 +16512,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        1016,
-        1705
+        1018,
+        1707
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/ScreenStateContractTests.swift",
