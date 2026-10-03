@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -161,7 +162,9 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -177,6 +180,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 // MARK: - Navigation model
@@ -1498,6 +1502,23 @@ internal const val BottomBarLabelEffectiveScaleFloor = 0.68f
 private const val BottomBarSingleLineHeightDp = 56
 private const val CompactBottomBarWidthDp = 360
 
+internal fun bottomBarContentPadding(
+    availableWidth: Float,
+    tabCount: Int,
+    minimumTabWidth: Float,
+    interItemSpacing: Float,
+    preferredPadding: Float,
+): Float {
+    if (tabCount <= 0) return preferredPadding.coerceAtLeast(0f)
+    val totalSpacing = interItemSpacing.coerceAtLeast(0f) * (tabCount - 1)
+    val maximumPadding = (
+        availableWidth.coerceAtLeast(0f) -
+            minimumTabWidth.coerceAtLeast(0f) * tabCount -
+            totalSpacing
+        ).coerceAtLeast(0f) / 2f
+    return minOf(preferredPadding.coerceAtLeast(0f), maximumPadding)
+}
+
 internal fun bottomBarTabCenter(
     availableWidth: Float,
     horizontalContentPadding: Float,
@@ -1517,6 +1538,47 @@ internal fun bottomBarTabCenter(
     return boundedPadding +
         (slotWidth + boundedSpacing) * boundedIndex +
         (slotWidth / 2f)
+}
+
+internal fun bottomBarPhysicalTabCenter(
+    availableWidth: Float,
+    horizontalContentPadding: Float,
+    interItemSpacing: Float,
+    tabCount: Int,
+    selectedIndex: Int,
+    isRtl: Boolean,
+): Float {
+    val logicalCenter = bottomBarTabCenter(
+        availableWidth = availableWidth,
+        horizontalContentPadding = horizontalContentPadding,
+        interItemSpacing = interItemSpacing,
+        tabCount = tabCount,
+        selectedIndex = selectedIndex,
+    )
+    return if (isRtl) availableWidth - logicalCenter else logicalCenter
+}
+
+internal fun bottomBarNearestTabIndex(
+    physicalX: Float,
+    availableWidth: Float,
+    horizontalContentPadding: Float,
+    interItemSpacing: Float,
+    tabCount: Int,
+    isRtl: Boolean,
+): Int {
+    if (tabCount <= 0) return 0
+    return (0 until tabCount).minBy { index ->
+        abs(
+            physicalX - bottomBarPhysicalTabCenter(
+                availableWidth = availableWidth,
+                horizontalContentPadding = horizontalContentPadding,
+                interItemSpacing = interItemSpacing,
+                tabCount = tabCount,
+                selectedIndex = index,
+                isRtl = isRtl,
+            )
+        )
+    }
 }
 
 internal data class BottomBarMeniscusGeometry(
@@ -1540,12 +1602,16 @@ internal fun bottomBarMeniscusGeometry(
 ): BottomBarMeniscusGeometry {
     val width = widthPx.coerceAtLeast(0f)
     val height = heightPx.coerceAtLeast(0f)
-    val corner = cornerRadiusPx.coerceIn(0f, minOf(width, height) / 2f)
+    val beadDiameter = beadDiameterPx.coerceAtLeast(0f)
+    val baseline = minOf(height * 0.28f, beadDiameter * 0.42f)
+    val corner = cornerRadiusPx.coerceIn(
+        0f,
+        minOf(width / 2f, (height - baseline).coerceAtLeast(0f) / 2f),
+    )
     val center = selectedCenterXPx.coerceIn(
         corner,
         (width - corner).coerceAtLeast(corner),
     )
-    val beadDiameter = beadDiameterPx.coerceAtLeast(0f)
     val beadRadius = beadDiameter / 2f
     val idealHalfWidth = beadRadius * 1.55f
     val leftReach = minOf(idealHalfWidth, (center - corner).coerceAtLeast(0f))
@@ -1555,7 +1621,6 @@ internal fun bottomBarMeniscusGeometry(
     )
     val leftShoulderRun = minOf(beadRadius * 0.80f, leftReach * 0.68f)
     val rightShoulderRun = minOf(beadRadius * 0.80f, rightReach * 0.68f)
-    val baseline = minOf(height * 0.28f, beadDiameter * 0.42f)
     val shoulder = (baseline - beadDiameter * 0.06f).coerceAtLeast(0f)
     val recessBottom = minOf(
         height * 0.52f,
@@ -1752,6 +1817,7 @@ private fun GlassBottomBar(
     val barLabels = bottomBarTabs.map { stringResource(it.labelRes) }
     val reduceMotion = rememberReduceMotion()
     val layoutDirection = LocalLayoutDirection.current
+    var scrubPreviewIndex by remember { mutableStateOf<Int?>(null) }
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
@@ -1760,7 +1826,6 @@ private fun GlassBottomBar(
     ) {
         val compactNavigation = maxWidth < CompactBottomBarWidthDp.dp
         val outerHorizontalPadding = if (compactNavigation) 8.dp else 12.dp
-        val barContentPadding = if (compactNavigation) 4.dp else 7.dp
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1768,6 +1833,13 @@ private fun GlassBottomBar(
                 .padding(horizontal = outerHorizontalPadding)
                 .padding(top = 4.dp, bottom = 8.dp),
         ) {
+            val barContentPadding = bottomBarContentPadding(
+                availableWidth = maxWidth.value,
+                tabCount = bottomBarTabs.size,
+                minimumTabWidth = Metrics.controlHeight.value,
+                interItemSpacing = Metrics.navigationLensItemSpacing.value,
+                preferredPadding = Metrics.space24.value,
+            ).dp
             val labelLayout = rememberBottomBarLabelLayout(
                 labels = barLabels,
                 availableWidth = maxWidth,
@@ -1779,29 +1851,28 @@ private fun GlassBottomBar(
             val barHeight = labelLayout.barHeightDp.dp + Metrics.space12
             val compactBeadDiameter = Metrics.navigationLensSize - Metrics.space8
             val beadCanvasSize = Metrics.navigationLensSize
-            val railCornerRadius = Metrics.navigationBarRadius - Metrics.space6
+            val railCornerRadius = Metrics.cornerPill
             val selectedIndex = bottomBarTabs
                 .indexOfFirst { it.dest == selected }
                 .coerceAtLeast(0)
-            val lensCenter = bottomBarTabCenter(
+            val displayIndex = scrubPreviewIndex ?: selectedIndex
+            val displayDestination = bottomBarTabs[displayIndex].dest
+            val isRtl = layoutDirection == LayoutDirection.Rtl
+            val lensCenter = bottomBarPhysicalTabCenter(
                 availableWidth = maxWidth.value,
                 horizontalContentPadding = barContentPadding.value,
                 interItemSpacing = Metrics.navigationLensItemSpacing.value,
                 tabCount = bottomBarTabs.size,
-                selectedIndex = selectedIndex,
+                selectedIndex = displayIndex,
+                isRtl = isRtl,
             ).dp
             val animatedLensCenter by animateDpAsState(
                 targetValue = lensCenter,
-                animationSpec = if (reduceMotion) snap() else NoopMotion.value(),
+                animationSpec = if (reduceMotion) snap() else NoopMotion.card(),
             )
-            val physicalLensCenter = if (layoutDirection == LayoutDirection.Rtl) {
-                maxWidth - animatedLensCenter
-            } else {
-                animatedLensCenter
-            }
-            val beadOffset = physicalLensCenter - (beadCanvasSize / 2)
+            val beadOffset = animatedLensCenter - (beadCanvasSize / 2)
             val lensAccent by animateColorAsState(
-                targetValue = bottomBarAccent(selected),
+                targetValue = bottomBarAccent(displayDestination),
                 animationSpec = if (reduceMotion) {
                     snap()
                 } else {
@@ -1812,9 +1883,44 @@ private fun GlassBottomBar(
                 modifier = Modifier
                     .height(barHeight)
                     .fillMaxWidth()
+                    .pointerInput(
+                        maxWidth,
+                        barContentPadding,
+                        layoutDirection,
+                        selectedIndex,
+                    ) {
+                        var pendingIndex: Int? = null
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                val committedIndex = pendingIndex
+                                pendingIndex = null
+                                scrubPreviewIndex = null
+                                if (committedIndex != null) {
+                                    onTabSelected(bottomBarTabs[committedIndex].dest)
+                                }
+                            },
+                            onDragCancel = {
+                                pendingIndex = null
+                                scrubPreviewIndex = null
+                            },
+                        ) { change, _ ->
+                            change.consume()
+                            val nextIndex = bottomBarNearestTabIndex(
+                                physicalX = change.position.x.toDp().value,
+                                availableWidth = maxWidth.value,
+                                horizontalContentPadding = barContentPadding.value,
+                                interItemSpacing =
+                                    Metrics.navigationLensItemSpacing.value,
+                                tabCount = bottomBarTabs.size,
+                                isRtl = isRtl,
+                            )
+                            pendingIndex = nextIndex
+                            scrubPreviewIndex = nextIndex
+                        }
+                    }
             ) {
                 MeniscusNavigationRail(
-                    selectedCenter = physicalLensCenter,
+                    selectedCenter = animatedLensCenter,
                     beadDiameter = compactBeadDiameter,
                     cornerRadius = railCornerRadius,
                     accent = lensAccent,
@@ -1841,19 +1947,20 @@ private fun GlassBottomBar(
                         Metrics.navigationLensItemSpacing
                     ),
                 ) {
-                    bottomBarTabs.forEach { tab ->
-                    BarSlot(
-                        icon = tab.icon,
-                        label = stringResource(tab.labelRes),
-                        active = selected == tab.dest,
-                        accent = bottomBarAccent(tab.dest),
-                        testTag = "noop.tab.${tab.dest.route}",
-                        labelMaxLines = labelLayout.maxLines,
-                        labelScaleMultiplier = labelLayout.labelScaleMultiplier,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onTabSelected(tab.dest) },
-                    )
-                }
+                    bottomBarTabs.forEachIndexed { index, tab ->
+                        BarSlot(
+                            icon = tab.icon,
+                            label = stringResource(tab.labelRes),
+                            active = displayIndex == index,
+                            selected = selected == tab.dest,
+                            accent = bottomBarAccent(tab.dest),
+                            testTag = "noop.tab.${tab.dest.route}",
+                            labelMaxLines = labelLayout.maxLines,
+                            labelScaleMultiplier = labelLayout.labelScaleMultiplier,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onTabSelected(tab.dest) },
+                        )
+                    }
                 }
             }
         }
@@ -2059,8 +2166,8 @@ internal fun noopCommandLensRestingOffset(
     edge: NoopCommandLensEdge,
     verticalFraction: Float,
 ): IntOffset {
-    val minimumX = 2
-    val maximumX = (containerWidthPx - touchWidthPx - 2).coerceAtLeast(minimumX)
+    val minimumX = 0
+    val maximumX = (containerWidthPx - touchWidthPx).coerceAtLeast(minimumX)
     val minimumY = topInsetPx.coerceAtLeast(0)
     val maximumY = (
         containerHeightPx - bottomClearancePx - touchHeightPx
@@ -2084,8 +2191,8 @@ internal fun noopCommandLensClampOffset(
     topInsetPx: Int,
     bottomClearancePx: Int,
 ): IntOffset {
-    val minimumX = 2
-    val maximumX = (containerWidthPx - touchWidthPx - 2).coerceAtLeast(minimumX)
+    val minimumX = 0
+    val maximumX = (containerWidthPx - touchWidthPx).coerceAtLeast(minimumX)
     val minimumY = topInsetPx.coerceAtLeast(0)
     val maximumY = (
         containerHeightPx - bottomClearancePx - touchHeightPx
@@ -2109,6 +2216,112 @@ internal fun noopCommandLensVerticalFraction(
     ).coerceAtLeast(minimumY)
     val span = (maximumY - minimumY).coerceAtLeast(1)
     return ((yPx - minimumY).toFloat() / span).coerceIn(0f, 1f)
+}
+
+internal data class NoopCommandLensBubbleGeometry(
+    val edgeX: Float,
+    val outerX: Float,
+    val neckTopY: Float,
+    val neckBottomY: Float,
+    val bodyTopY: Float,
+    val bodyBottomY: Float,
+)
+
+internal fun noopCommandLensBubbleGeometry(
+    widthPx: Float,
+    heightPx: Float,
+    edge: NoopCommandLensEdge,
+): NoopCommandLensBubbleGeometry {
+    val width = widthPx.coerceAtLeast(0f)
+    val height = heightPx.coerceAtLeast(0f)
+    return NoopCommandLensBubbleGeometry(
+        edgeX = if (edge == NoopCommandLensEdge.START) 0f else width,
+        outerX = if (edge == NoopCommandLensEdge.START) width else 0f,
+        neckTopY = height * 0.34f,
+        neckBottomY = height * 0.66f,
+        bodyTopY = height * 0.12f,
+        bodyBottomY = height * 0.88f,
+    )
+}
+
+private fun noopCommandLensBubblePath(
+    size: Size,
+    edge: NoopCommandLensEdge,
+): Path {
+    val geometry = noopCommandLensBubbleGeometry(size.width, size.height, edge)
+    fun x(startFraction: Float): Float = if (edge == NoopCommandLensEdge.START) {
+        size.width * startFraction
+    } else {
+        size.width * (1f - startFraction)
+    }
+    return Path().apply {
+        moveTo(geometry.edgeX, geometry.neckTopY)
+        cubicTo(
+            x(0.06f),
+            size.height * 0.34f,
+            x(0.16f),
+            size.height * 0.22f,
+            x(0.27f),
+            size.height * 0.18f,
+        )
+        cubicTo(
+            x(0.42f),
+            size.height * 0.03f,
+            x(0.66f),
+            size.height * 0.03f,
+            x(0.80f),
+            geometry.bodyTopY,
+        )
+        cubicTo(
+            x(0.93f),
+            size.height * 0.20f,
+            x(0.98f),
+            size.height * 0.34f,
+            x(0.98f),
+            size.height * 0.50f,
+        )
+        cubicTo(
+            x(0.98f),
+            size.height * 0.66f,
+            x(0.93f),
+            size.height * 0.80f,
+            x(0.80f),
+            geometry.bodyBottomY,
+        )
+        cubicTo(
+            x(0.66f),
+            size.height * 0.97f,
+            x(0.42f),
+            size.height * 0.97f,
+            x(0.27f),
+            size.height * 0.82f,
+        )
+        cubicTo(
+            x(0.16f),
+            size.height * 0.78f,
+            x(0.06f),
+            size.height * 0.66f,
+            geometry.edgeX,
+            geometry.neckBottomY,
+        )
+        close()
+    }
+}
+
+private fun Outline.toDrawingPath(): Path = when (this) {
+    is Outline.Rectangle -> Path().apply { addRect(rect) }
+    is Outline.Rounded -> Path().apply { addRoundRect(roundRect) }
+    is Outline.Generic -> path
+}
+
+private data class NoopCommandLensBubbleShape(
+    val edge: NoopCommandLensEdge,
+) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density,
+    ): Outline = Outline.Generic(noopCommandLensBubblePath(size, edge))
 }
 
 @Composable
@@ -2160,6 +2373,9 @@ private fun MovableNoopCommandLens(
         val density = LocalDensity.current
         val touchWidth = 48.dp
         val touchHeight = 52.dp
+        val bubbleWidth = Metrics.navigationLensSize - Metrics.space12
+        val bubbleHeight = Metrics.navigationLensSize - Metrics.space8
+        val bubbleEdgePull = (touchWidth - bubbleWidth) / 2
         val touchWidthPx = with(density) { touchWidth.roundToPx() }
         val touchHeightPx = with(density) { touchHeight.roundToPx() }
         val topInsetPx =
@@ -2451,13 +2667,13 @@ internal fun Modifier.navigationGlassSurface(
         }
 }
 
-/** One 48dp+ nav target. Only the selected destination exposes a visual label; every slot keeps
- * its full tab semantics and content description. */
+/** One 48dp+ nav target with a persistent label and independent preview/selection state. */
 @Composable
 private fun BarSlot(
     icon: ImageVector,
     label: String,
     active: Boolean,
+    selected: Boolean,
     accent: Color,
     testTag: String,
     labelMaxLines: Int,
@@ -2490,7 +2706,7 @@ private fun BarSlot(
             .heightIn(min = Metrics.controlHeight)
             .testTag(testTag)
             .selectable(
-                selected = active,
+                selected = selected,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 role = Role.Tab,
@@ -2534,30 +2750,30 @@ private fun BarSlot(
                 .height(Metrics.space16),
             contentAlignment = Alignment.TopCenter,
         ) {
-            if (active) {
-                Text(
-                    label,
-                    style = NoopType.footnote.copy(
-                        fontSize = (10f * labelScaleMultiplier).sp,
-                        lineHeight = (12f * labelScaleMultiplier).sp,
-                        fontWeight = FontWeight.SemiBold,
+            Text(
+                label,
+                style = NoopType.footnote.copy(
+                    fontSize = (10f * labelScaleMultiplier).sp,
+                    lineHeight = (12f * labelScaleMultiplier).sp,
+                    fontWeight = if (active) {
+                        FontWeight.SemiBold
+                    } else {
+                        FontWeight.Medium
+                    },
+                ),
+                color = tint,
+                minLines = labelMaxLines,
+                maxLines = labelMaxLines,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset(y = -Metrics.navigationLensLabelOffset)
+                    .padding(
+                        horizontal = Metrics.navigationLensLabelHorizontalPadding
                     ),
-                    color = tint,
-                    minLines = labelMaxLines,
-                    maxLines = labelMaxLines,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .offset(y = -Metrics.navigationLensLabelOffset)
-                        .padding(
-                            horizontal = Metrics.navigationLensLabelHorizontalPadding
-                        ),
-                )
-            } else {
-                Spacer(modifier = Modifier.fillMaxSize())
-            }
+            )
         }
     }
 }
