@@ -1733,6 +1733,28 @@ final class NOOPiOSUITests: XCTestCase {
                 withNormalizedOffset: CGVector(dx: 0.22, dy: 0.50)
             )
         )
+
+        reverseChart.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.50, dy: 0.50)
+        ).tap()
+        let recoveryNavigation = app.navigationBars["Recovery"]
+        let openedRecovery = recoveryNavigation.waitForExistence(timeout: 5)
+        XCTAssertTrue(
+            openedRecovery,
+            "The first real tap after a scrub must open Recovery without a suppression delay."
+        )
+        guard openedRecovery else {
+            keepScreenshot(app, name: "trends-recovery-post-scrub-navigation-missing")
+            return
+        }
+        let back = recoveryNavigation.buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(
+            app.otherElements[chartIdentifier].firstMatch.waitForExistence(timeout: 5),
+            "One back action must return to the scrubbed Trends chart."
+        )
+
         selectedChart = chartNodes.matching(selectedValuePredicate).firstMatch
         XCTAssertTrue(selectedChart.waitForExistence(timeout: 5))
         let reverseValue = selectedChart.value as? String ?? String(describing: selectedChart.value)

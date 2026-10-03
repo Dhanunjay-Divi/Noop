@@ -137,10 +137,6 @@ public struct TrendChart: View {
     #if os(iOS)
     /// Separates a deliberate hold-to-inspect interaction from the surrounding card's normal tap.
     @State private var scrubEngaged = false
-    /// A long-press release can also satisfy SwiftUI's simultaneous tap recognizer. Keep a short
-    /// suppression deadline instead of scheduling a delayed state mutation, so an immediate second
-    /// scrub cannot be cleared by the first scrub's stale timer.
-    @State private var suppressChartTapUntil: Date?
     #endif
 
     /// PERF: a 365-day (or longer) series feeds Swift Charts hundreds of LineMark/AreaMark vertices, each
@@ -215,7 +211,6 @@ public struct TrendChart: View {
         setSelectedPoint(nil)
         #if os(iOS)
         scrubEngaged = false
-        suppressChartTapUntil = nil
         #endif
     }
 
@@ -255,17 +250,12 @@ public struct TrendChart: View {
     private func engageTouchScrubIfNeeded() {
         guard !scrubEngaged else { return }
         scrubEngaged = true
-        suppressChartTapUntil = .distantFuture
         StrandHaptic.selection.play()
     }
 
     private func finishTouchScrub() {
-        let completedScrub = scrubEngaged
-        guard completedScrub else { return }
+        guard scrubEngaged else { return }
         scrubEngaged = false
-        // Keep the selected date visible after the finger lifts. A second scrub replaces it,
-        // while a later real pointer interaction takes ownership.
-        suppressChartTapUntil = Date().addingTimeInterval(0.4)
     }
 
     private func updateTouchScrub(atX x: CGFloat, proxy: ChartProxy, plot: CGRect) {
@@ -281,18 +271,7 @@ public struct TrendChart: View {
     }
 
     private func handleChartTap() {
-        if let deadline = suppressChartTapUntil {
-            suppressChartTapUntil = nil
-            if Date() <= deadline {
-                return
-            }
-        }
         tapAction?()
-    }
-
-    private var guardedChartTapAction: (() -> Void)? {
-        guard tapAction != nil else { return nil }
-        return handleChartTap
     }
     #endif
 
