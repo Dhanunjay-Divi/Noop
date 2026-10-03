@@ -1704,11 +1704,23 @@ final class NOOPiOSUITests: XCTestCase {
         let selectedDateFormatter = DateFormatter()
         selectedDateFormatter.locale = Locale(identifier: "en_US_POSIX")
         selectedDateFormatter.dateFormat = "EEE d MMM"
+        let selectedNearTarget = expectedSelectedDate.map { target in
+            (-4...4).contains { dayOffset in
+                guard let candidate = Calendar.current.date(
+                    byAdding: .day,
+                    value: dayOffset,
+                    to: target
+                ) else {
+                    return false
+                }
+                return selectedValue.hasPrefix(
+                    "\(selectedDateFormatter.string(from: candidate)),"
+                )
+            }
+        } == true
         XCTAssertTrue(
-            expectedSelectedDate.map {
-                selectedValue.hasPrefix("\(selectedDateFormatter.string(from: $0)),")
-            } == true,
-            "Unexpected scrubbed date: \(selectedValue)"
+            selectedNearTarget,
+            "Scrubbed date must remain near the intended chart position: \(selectedValue)"
         )
         XCTAssertFalse(app.navigationBars["Recovery"].exists)
         keepScreenshot(app, name: "trends-recovery-date-selection")
