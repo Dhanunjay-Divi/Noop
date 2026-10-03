@@ -17,14 +17,24 @@ Last updated: **2026-10-03**
   also slower than its prior wait. Test-only repair
   `9689bd3b88268eebfc7b174336281de6f9c74476` measures and clears the full
   gesture corridor and waits for explicit report readiness without changing
-  production interaction. The three focused failures pass together 3/3, both
-  chart cases pass 20/20 under repetition, StrandDesign passes 59/59, and the
-  complete iPhone Simulator graph executes 43 tests with one intentional skip
-  and zero failures. The complete Tools discovery passes 374 tests with one
-  intentional skip; the exact protected release-control subset passes 258/258;
-  local trust, calibration, terminology, localization, claims, privacy, legal,
-  operations, and diff gates pass. Private staging remains unchanged and
-  reverified at source merge
+  production interaction. A valid PR review then identified that the redundant
+  400-millisecond post-scrub deadline could discard the first deliberate tap.
+  Local implementation
+  `72f079a9ad6cda697dbcb6978a954826c89cadf9` removes that deadline, proves the
+  immediate tap and one-back path 10/10, and also fixes an onboarding
+  measurement clear action that reproduced keyboard-focus loss in 9/10 runs.
+  The repaired clear-and-retype workflow passes 10/10. The three original
+  hosted failures pass together 3/3, both geometry cases pass 20/20 under
+  repetition, StrandDesign passes 59/59, and the final complete iPhone
+  Simulator graph executes 43 tests with one intentional skip and zero
+  failures. The complete Tools discovery passes 374 tests with one intentional
+  skip; the exact protected release-control subset passes 258/258; local trust,
+  calibration, terminology, localization, claims, privacy, legal, operations,
+  release-shell, and diff gates pass on the final local candidate. The
+  regenerated terminology inventory records 18,626 classified occurrences
+  across 1,650 groups and is reviewed at digest
+  `32da17b04296d5319729f15830af076a57d39e97db41216cb1f31226cd6a6427`.
+  Private staging remains unchanged and reverified at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;
   no cloud rebuild, migration, or apply is required. Protected follow-up

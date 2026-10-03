@@ -7,9 +7,8 @@
 - Branch: `codex/mobile-cloud-release-finalization-20261003`
 - Start commit: `1cd401f69dd8b4df75872a830ed33a84918ea344`
 - End implementation commit:
-  `9689bd3b88268eebfc7b174336281de6f9c74476`
-- Record commit or PR: PR `#33`; final evidence update and protected
-  exact-head verification pending
+  `72f079a9ad6cda697dbcb6978a954826c89cadf9`
+- Record commit or PR: PR `#33`; protected exact-head verification pending
 - Environment: iPhone Simulator, protected GitHub repository, and private
   synthetic GCP staging
 
@@ -94,6 +93,21 @@ into a signed or physical-device claim.
 - Corrected the stale brand-localization unit ratchet from 15 to the 14 phrases
   intentionally retained after the earlier onboarding copy removal. The
   generator and all eight shipping non-English locales already verified 14.
+- Accepted the valid PR review finding that a 400-millisecond post-scrub
+  suppression window could discard the first deliberate chart tap. The native
+  recognizers already require the tap recognizer to wait for scrub failure, so
+  the redundant deadline was removed and the exact-date UI case now proves that
+  the first immediate tap opens Recovery and one back action returns.
+- A complete-graph rerun exposed a separate existing onboarding defect:
+  clearing the height draft preserved an unchanged SwiftUI focus value while
+  the clear control changed state, so the software keyboard was usually
+  dismissed. The clear action now performs an explicit nil-to-field focus
+  transition on the next main-loop turn. The workflow improved from one pass
+  in ten repetitions before the repair to ten passes in ten after it.
+- Regenerated the reviewed terminology inventory after the source and record
+  movement: 18,626 classified occurrences across 1,650 path/category groups,
+  with no active-use expansion. The inventory is pinned at SHA-256
+  `32da17b04296d5319729f15830af076a57d39e97db41216cb1f31226cd6a6427`.
 - Confirmed `server` and `infra/gcp` are unchanged from the reviewed deployment
   source through protected mobile main. No image build, migration, or OpenTofu
   apply was required.
@@ -123,8 +137,17 @@ into a signed or physical-device claim.
 - Gesture rejection is visible because the exact-date accessibility value must
   replace the chart summary after one held horizontal drag. Vertical scroll,
   direct navigation, and one-back behavior have separate assertions.
-- The complete iPhone run emitted its terminal passing XCTest result before
-  Xcode 27 stalled in teardown; only the owned test processes were then stopped.
+- The post-scrub regression immediately taps the chart after the reverse scrub,
+  requires Recovery to open without a delay, returns once, and then confirms
+  that the reverse selected value remains available.
+- The profile measurement regression requires both weight and height clear
+  actions to leave an empty editable field with keyboard focus before immediate
+  re-entry. It reproduced nine failures in ten iterations before the focus
+  transition repair and passed ten of ten afterward.
+- An earlier complete iPhone run emitted its terminal passing XCTest result
+  before Xcode 27 stalled in teardown; only the owned test processes were then
+  stopped. The final exact implementation run exited successfully without that
+  teardown stall.
 - Hosted-runner geometry is diagnosable through explicit pre-gesture corridor
   assertions and a failure screenshot before downstream navigation assertions.
   No personal health values or customer content are captured by those
@@ -146,17 +169,18 @@ into a signed or physical-device claim.
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | StrandDesign package | 59 tests passed | Shared chart rendering, selection intent, state reset, and design contracts | Rendered iPhone gestures or physical touch |
-| Recovery exact-date focused UI | Passed | One held horizontal drag exposes one exact dated value; reverse scrub selects another date | Every device, frame rate, or physical hand motion |
+| Recovery exact-date focused UI | 10/10 passed after review repair | One held horizontal drag exposes one exact dated value; reverse scrub selects another date; the first immediate tap opens Recovery and one back returns | Every device, frame rate, or physical hand motion |
 | Recovery scroll/tap focused UI | Passed | A vertical chart drag scrolls; a tap opens one detail route; one back returns | Physical-device gesture arbitration |
 | Hosted-failure focused repair | App report plus both Recovery cases passed 3/3 | The slow review state and both corrected gesture paths pass together | The complete app graph or hosted exact-head result |
 | Recovery geometry stress | Direct navigation/vertical scroll and exact scrub passed 20/20 across ten repetitions each | The safe-corridor correction remains stable across relaunched test processes | Statistical proof of zero future failures |
-| Complete iPhone Simulator graph | 43 tests executed, 1 intentionally skipped, 0 failures | The full local Apple integration boundary passed; the owned Xcode process was stopped only after terminal XCTest output | A clean Xcode teardown, signing, installation, or physical behavior |
+| Profile measurement clear/retype stress | Before repair: 1/10 passed; after repair: 10/10 passed | Clearing either profile measurement keeps the field empty, focused, and ready for immediate re-entry | Every keyboard, locale, or physical-device focus lifecycle |
+| Complete iPhone Simulator graph | 43 tests executed, 1 intentionally skipped, 0 failures after both review repairs | The full local Apple integration boundary passed on the final implementation commit | Signing, installation, or physical behavior |
 | Release-control source gate | 9 checks passed | The reviewed source release-control manifest is coherent | Hosted follow-up status |
 | Release-control unit wall | 258 tests passed | Release, evidence, supplier-boundary, and repository-control helpers pass | Runtime cloud or device behavior |
 | Complete Tools discovery | 374 tests passed, 1 intentional skip | Every repository Tools test, including the corrected brand-localization ratchet, passes on the exact candidate | Mobile, cloud, or device runtime behavior |
 | Local required-CI and trusted controls | Passed | Required context names and trusted reporter binding remain enforced locally | That this follow-up has run any hosted context |
 | PR `#32` protected contexts | 10/10 passed on exact head `cc6739996e11e466c33795bfd1f5d7a189350205` | The protected base integrated through the required hosted checks | This follow-up commit's hosted result |
-| Calibration and terminology | Passed | Apple/Android metric contracts remain aligned and the legacy-term ratchet did not expand | Sensor calibration or physical parity |
+| Calibration and terminology | 12 metrics, 3 revisions, 13 thresholds, and 16 guards passed; 18,626 classified occurrences across 1,650 groups passed with reviewed digest `32da17b04296d5319729f15830af076a57d39e97db41216cb1f31226cd6a6427` | Apple/Android metric contracts remain aligned and the legacy-term ratchet did not expand | Sensor calibration or physical parity |
 | Legal, private data, and claims | Passed; health-claims tests 8/8 | Distribution provenance, filename privacy, and health wording remain bounded | External legal, medical, or store approval |
 | Strict i18n audit | Passed | Supported string catalogs and rendered customer wording remain coherent | Every locale on every physical display |
 | Deployment-tree comparison | No `server` or `infra/gcp` changes | A cloud rebuild or apply would deploy identical source | That mobile runtime changes are deployed through a cloud service |
@@ -186,14 +210,16 @@ into a signed or physical-device claim.
 
 ## Git and release state
 
-- Changed paths: `TrendChart.swift`, focused StrandDesign tests, iPhone UI
-  interaction tests, the brand-localization ratchet, reviewed terminology
-  inventory/digest, `docs/ops/ACTIVE.md`, the round index, and this record.
+- Changed paths: `TrendChart.swift`, `OnboardingWizard.swift`, focused
+  StrandDesign tests, iPhone UI interaction tests, the brand-localization
+  ratchet, reviewed terminology inventory and `required-ci` digest,
+  `docs/ops/ACTIVE.md`, the round index, and this record.
 - Commits: protected base
   `1cd401f69dd8b4df75872a830ed33a84918ea344`; implementation
   `0d76116178a90f2a93cf7f61b9df579078672868`; initial evidence
   `b706fc8ad6181d3fdad9c2a28ce30800b3e4f5f5`; hosted-failure repair
-  `9689bd3b88268eebfc7b174336281de6f9c74476`.
+  `9689bd3b88268eebfc7b174336281de6f9c74476`; review and onboarding-focus
+  repair `72f079a9ad6cda697dbcb6978a954826c89cadf9`.
 - Branch and remote state: PR `#33` remains open. The final candidate update,
   protected exact-head checks, normal merge, and exact-main verification remain
   pending.
@@ -214,6 +240,12 @@ into a signed or physical-device claim.
 - Treat the hosted PR failure as invalid synthetic-input geometry after the
   captured coordinates proved the intended chart path was under persistent
   chrome. Keep production interaction unchanged and repair the test precondition.
+- Accept the valid review finding and remove the redundant post-scrub tap
+  deadline because native recognizer precedence already separates scrub from
+  deliberate tap.
+- Treat the repeatedly reproduced profile-clear focus loss as a product defect,
+  explicitly transition focus through nil, and retain the user-facing
+  empty-field plus immediate-re-entry assertions.
 - Do not rebuild or mutate private staging when cloud source is unchanged and
   the immutable runtime has passed policy, smoke, cleanup, and drift checks.
 - Integrate only through protected pull-request checks; do not dispatch or
