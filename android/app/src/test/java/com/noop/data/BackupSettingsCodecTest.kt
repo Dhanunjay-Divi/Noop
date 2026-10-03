@@ -793,7 +793,7 @@ class BackupSettingsCodecTest {
         assertNull(back["hydrationReminders.intervalMinutes"])
     }
 
-    @Test fun keyMetricSelectionIsDeduplicatedFilteredAndCappedAtFive() {
+    @Test fun keyMetricSelectionKeepsEveryValidUniqueMetric() {
         val json = requireNotNull(
             BackupSettingsCodec.encode(
                 mapOf(
@@ -804,7 +804,7 @@ class BackupSettingsCodecTest {
         )
         val back = BackupSettingsCodec.decode(json)
         assertEquals(
-            "charge,hrv,restingHr,bloodOxygen,respiratory",
+            "charge,hrv,restingHr,bloodOxygen,respiratory,steps",
             back["today.keyMetrics"],
         )
 

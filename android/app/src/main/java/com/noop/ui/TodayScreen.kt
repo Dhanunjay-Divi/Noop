@@ -47,10 +47,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.TrendingDown
-import androidx.compose.material.icons.automirrored.filled.TrendingFlat
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
@@ -598,6 +596,7 @@ fun TodayScreen(
     val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
     val healthSignals by viewModel.v5Signals.collectAsStateWithLifecycle()
+    val cycleTrackingEnabled by viewModel.cycleTrackingEnabled.collectAsStateWithLifecycle()
     val illnessWatchEnabled by viewModel.illnessWatchEnabled.collectAsStateWithLifecycle()
     val days by viewModel.recentDays.collectAsStateWithLifecycle()
     val sleepTargetMinutes by viewModel.windDownSleepNeedMinutes.collectAsStateWithLifecycle()
@@ -898,6 +897,8 @@ fun TodayScreen(
     val displayName = remember(displayNameVersion) { profileStore.displayName }
     val ageMetricProfileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
     val ageMetricState = remember(ageMetricProfileVersion) { profileStore.ageMetricStateToken }
+    val cycleMetricAvailable =
+        cycleTrackingEnabled || cycleOptInApplies(profileStore.sex)
     val ageMetricDataVersion by viewModel.ageMetricDataVersion.collectAsStateWithLifecycle()
     val restDataVersion by viewModel.restDataVersion.collectAsStateWithLifecycle()
     val workoutDataVersion by viewModel.workoutDataVersion.collectAsStateWithLifecycle()
@@ -1258,7 +1259,7 @@ fun TodayScreen(
     val journalReminderOn = remember { NoopPrefs.journalReminderEnabled(context) }
     // S4: the Synthesis card collapses to a one-liner that expands on tap (default collapsed). Mirrors iOS.
     var synthesisExpanded by remember { mutableStateOf(false) }
-    // Key Metrics stays focused on the user's selected three-to-six signals. Data Sources still
+    // Key Metrics stays focused on the user's selected signals. Data Sources still
     // collapses to its summary, and the complete metric catalog remains in history.
     var sourcesExpanded by remember { mutableStateOf(false) }
     var scoringCardSeen by remember { mutableStateOf(ScoringGuidePrefs.cardSeen(context)) }
@@ -1345,8 +1346,12 @@ fun TodayScreen(
         )
     }
 
-    // The newest Apple Health / Health Connect body weight at or before the displayed day.
+    // The newest Apple Health / Health Connect body weight at or before the displayed day, plus the
+    // sparse measured history used by the matching Key Metric trace.
     var weightKg by remember(activeStrapId) { mutableStateOf<Double?>(null) }
+    var importedWeightByDay by remember(activeStrapId) {
+        mutableStateOf<Map<String, Double>>(emptyMap())
+    }
     LaunchedEffect(days, selectedDayKey, activeStrapId, deferHistoricalQueries) {
         if (deferHistoricalQueries) return@LaunchedEffect
         val loaded = loadTodayBestEffort {
@@ -1407,11 +1412,15 @@ fun TodayScreen(
         activeStrapId,
         deferHistoricalQueries,
         ageMetricDataVersion,
+        keyMetricsWindowDays,
     ) {
         if (deferHistoricalQueries) return@LaunchedEffect
+        val trendWindowStart = selectedDay
+            .minusDays((keyMetricsWindowDays - 1).toLong())
+            .toString()
         val fromDay = minOf(
             days.minOfOrNull { it.day } ?: selectedDayKey,
-            selectedDayKey,
+            trendWindowStart,
         )
         val toDay = maxOf(
             days.maxOfOrNull { it.day } ?: selectedDayKey,
@@ -1427,15 +1436,26 @@ fun TodayScreen(
             fromDay,
             toDay,
         )
-        val loaded = (apple + healthConnect)
+        val importedRows = apple + healthConnect
+        val loadedSteps = importedRows
             .filter { row -> row.steps?.let { it >= 0 } == true }
             .groupBy { it.day }
             .mapValues { (_, rows) -> rows.mapNotNull { it.steps }.max() }
+        val loadedWeights = resolvedWeightKgByDay(apple, healthConnect)
         currentCoroutineContext().ensureActive()
         if (viewModel.activeStrapId == activeStrapId) {
-            importedStepsByDay = loaded
-            importedStepsForDay = loaded[selectedDayKey]
+            importedStepsByDay = loadedSteps
+            importedStepsForDay = loadedSteps[selectedDayKey]
+            importedWeightByDay = loadedWeights
         }
+    }
+
+    val weightSpark = remember(importedWeightByDay, selectedDay, keyMetricsWindowDays) {
+        val cutoff = selectedDay.minusDays((keyMetricsWindowDays - 1).toLong()).toString()
+        importedWeightByDay.entries
+            .filter { it.key in cutoff..selectedDayKey && it.value.isFinite() }
+            .sortedBy { it.key }
+            .map { it.value }
     }
 
     // Today-ready direct heart and cardio-fitness readings. Average/Max HR resolve active strap and
@@ -2293,15 +2313,12 @@ fun TodayScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            val heroRecovery = displayMetric?.recovery ?: lastScoredCharge?.value
-                            val heroTone = todayRecoveryHeroColors(
-                                recovery = heroRecovery,
-                                calibrationNights = recoveryCalibration,
-                            ).first
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .liquidTodayHeroSurface(heroTone)
+                                    .liquidTodayHeroSurface(
+                                        Palette.onDarkSecondary.copy(alpha = 0.28f),
+                                    )
                                     .staggeredAppear(stagger),
                             ) {
                                 Column {
@@ -2474,6 +2491,7 @@ fun TodayScreen(
                                     effortScale = effortScale,
                                     effortForDay = effortForDay,
                                     latestWeightKg = weightKg,
+                                    weightSpark = weightSpark,
                                     importedStepsForDay = importedStepsForDay,
                                     supplierMeasuredStepsForDay = supplierMeasuredStepsForDay,
                                     estimatedStepsForDay = stepsEstForDay,
@@ -2491,13 +2509,18 @@ fun TodayScreen(
                                     temperatureUnit = temperatureUnit,
                                     hydrationReadState = displayedHydrationRead,
                                     hydrationGoalMl = hydrationGoalMl,
-                                    enabledMetrics = enabledKeyMetrics,
+                                    cycleTrackingEnabled = cycleTrackingEnabled,
+                                    enabledMetrics = enabledKeyMetrics.filter {
+                                        it != KeyMetric.MENSTRUAL_CYCLE
+                                            || cycleMetricAvailable
+                                    },
                                     isToday = selectedDayOffset == 0,
                                     onScoreInfo = openGuide,
                                     detailed = keyMetricsDetailed,
                                     onOpenMetric = onOpenMetric,
                                     onOpenStress = onOpenStress,
                                     onOpenHydration = { onOpenHydration(selectedDayKey) },
+                                    onOpenCycle = onOpenHealth,
                                 )
                             }
                             TextButton(
@@ -2742,6 +2765,7 @@ fun TodayScreen(
             initialDetailed = keyMetricsDetailed,
             initialWindowDays = keyMetricsWindowDays,
             hydrationEnabled = hydrationEnabled,
+            cycleMetricAvailable = cycleMetricAvailable,
             onDismiss = { showMetricsEditor = false },
             onSave = { metrics, detailed, windowDays ->
                 KeyMetricPrefs.setEnabled(context, metrics)
@@ -2899,7 +2923,6 @@ private fun DailyPlanSectionHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Metrics.space2)
             .padding(top = Metrics.space4),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
@@ -5507,6 +5530,12 @@ private fun ScoreHeroRow(
             unit = if (recovery != null) "%" else "",
             progress = recoveryProgress,
             tint = recoveryColors.second,
+            washTint = when {
+                recovery == null -> Palette.onDarkSecondary
+                recovery < 34.0 -> DAILY_SIGNAL_ALERT_TINT
+                recovery < 67.0 -> Palette.statusWarning
+                else -> Palette.statusPositive
+            },
             indicator = recoveryIndicator,
             accessibilityLabel = recoveryAccessibility,
             onClick = {
@@ -5521,6 +5550,12 @@ private fun ScoreHeroRow(
             unit = if (restScore != null) "%" else "",
             progress = sleepProgress,
             tint = sleepTip,
+            washTint = when {
+                restScore == null -> Palette.onDarkSecondary
+                restScore < 60.0 -> DAILY_SIGNAL_ALERT_TINT
+                restScore < 80.0 -> Palette.statusWarning
+                else -> Palette.statusPositive
+            },
             indicator = sleepIndicator,
             accessibilityLabel = sleepAccessibility,
             onClick = { onScoreInfo(ScoreSection.REST) },
@@ -5538,6 +5573,7 @@ private fun ScoreHeroRow(
             },
             progress = effortProgress,
             tint = Palette.effortBright,
+            washTint = Palette.metricCyan,
             indicator = effortIndicator,
             accessibilityLabel = effortAccessibility,
             onClick = { onScoreInfo(ScoreSection.EFFORT) },
@@ -5601,6 +5637,7 @@ private data class CompactHeroMetricSpec(
     val unit: String,
     val progress: Float?,
     val tint: Color,
+    val washTint: Color,
     val indicator: String?,
     val accessibilityLabel: String,
     val onClick: () -> Unit,
@@ -5688,6 +5725,16 @@ private fun CompactHeroMetric(
                 role = Role.Button
             }
             .testTag(spec.testTag)
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        spec.washTint.copy(alpha = 0.13f),
+                        spec.washTint.copy(alpha = 0.045f),
+                        Color.Transparent,
+                    ),
+                ),
+            )
             .padding(
                 horizontal = if (compactLayout) Metrics.space6 else Metrics.space8,
                 vertical = Metrics.space8,
@@ -7679,6 +7726,7 @@ private fun MetricGrid(
     effortScale: EffortScale = EffortScale.HUNDRED,
     effortForDay: Double? = null,
     latestWeightKg: Double? = null,
+    weightSpark: List<Double> = emptyList(),
     importedStepsForDay: Int? = null,
     supplierMeasuredStepsForDay: Int? = null,
     estimatedStepsForDay: Int? = null,
@@ -7711,6 +7759,7 @@ private fun MetricGrid(
         status = TodayHydrationReadStatus.LOADING,
     ),
     hydrationGoalMl: Int? = null,
+    cycleTrackingEnabled: Boolean = false,
     enabledMetrics: List<KeyMetric> = KeyMetric.defaultSelection,
     isToday: Boolean = false,
     onScoreInfo: (ScoreSection) -> Unit = {},
@@ -7721,6 +7770,7 @@ private fun MetricGrid(
     onOpenMetric: (String) -> Unit = {},
     onOpenStress: () -> Unit = {},
     onOpenHydration: () -> Unit = {},
+    onOpenCycle: () -> Unit = {},
 ) {
     val hydrationNotLoggedText = uiString(R.string.appwide_hydration_not_logged)
     val hydrationUnavailableText = uiString(R.string.appwide_hydration_unavailable)
@@ -7828,7 +7878,7 @@ private fun MetricGrid(
                 label = uiString(R.string.l10n_today_screen_respiratory_1cd8c175),
                 value = v?.let { String.format(Locale.US, "%.1f", it) } ?: NO_DATA,
                 unit = if (v != null) "rpm" else "",
-                tint = Palette.accent,
+                tint = Palette.metricPurple,
                 frac = null,
                 spark = w.resp,
             )
@@ -7849,6 +7899,7 @@ private fun MetricGrid(
                 unit = "",
                 tint = Palette.metricAmber,
                 frac = null,
+                spark = w.skinTemp,
             )
         },
         KeyMetric.STEPS to run {
@@ -7864,7 +7915,7 @@ private fun MetricGrid(
                 label = stepsTileLabel(d?.steps, importedStepsForDay, estimatedStepsForDay),
                 value = steps?.let { intString(it.toDouble()) } ?: NO_DATA,
                 unit = "",
-                tint = Palette.metricCyan,
+                tint = Palette.statusPositive,
                 frac = null,
                 spark = w.steps,   // #616: was missing → no trend line under the tile
             )
@@ -7875,8 +7926,9 @@ private fun MetricGrid(
                 label = uiString(R.string.l10n_today_screen_weight_69c0b815),
                 value = weight.value,
                 unit = "",
-                tint = Palette.accent,
+                tint = Palette.metricAmber,
                 frac = null,
+                spark = weightSpark,
             )
         },
         KeyMetric.CALORIES to run {
@@ -7938,6 +7990,23 @@ private fun MetricGrid(
                     ?.let { goal -> confirmed?.div(goal.toDouble())?.coerceIn(0.0, 1.0) },
             )
         },
+        KeyMetric.MENSTRUAL_CYCLE to KeyTileData(
+            label = uiString(R.string.appwide_cycle_profile_title),
+            value = if (isToday) {
+                uiString(
+                    if (cycleTrackingEnabled) {
+                        R.string.appwide_cycle_status_on
+                    } else {
+                        R.string.l10n_data_sources_screen_off_e3de5ab0
+                    },
+                )
+            } else {
+                NO_DATA
+            },
+            unit = "",
+            tint = LIQUID_PURPLE,
+            frac = null,
+        ),
     )
 
     val tiles = enabledMetrics
@@ -7965,15 +8034,16 @@ private fun MetricGrid(
         KeyMetric.STRESS -> onOpenStress
         KeyMetric.VITALITY -> ({ onOpenMetric("vitality") })
         KeyMetric.HYDRATION -> onOpenHydration
+        KeyMetric.MENSTRUAL_CYCLE -> onOpenCycle
     }
     val metricColumnCount = if (LocalDensity.current.fontScale >= 1.3f) 1 else 2
-    // Match iOS: two columns normally and one at large text sizes. An odd final tile spans the row
-    // instead of leaving a dead half-column.
+    // Match iOS: two columns normally and one at large text sizes. An odd final tile keeps the same
+    // width as its peers instead of stretching across the row.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         tiles.chunked(metricColumnCount).forEach { rowTiles ->
             // Detailed rows equalise heights (IntrinsicSize.Max + fillMaxHeight, the #399 idiom): a
-            // graph-less tile (Steps/Weight/Calories) sharing a row with graphed neighbours must not
-            // shrink its card. Compact rows keep the plain layout, byte-identical to before.
+            // sparse or graph-less tile sharing a row with a graphed neighbour must not shrink its card.
+            // Compact rows keep the plain layout, byte-identical to before.
             Row(
                 modifier = if (detailed) Modifier.height(IntrinsicSize.Max) else Modifier,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -7989,6 +8059,9 @@ private fun MetricGrid(
                             .testTag("noop.today.metric.${metric.raw}")
                             .then(if (detailed) Modifier.fillMaxHeight() else Modifier),
                     )
+                }
+                repeat(metricColumnCount - rowTiles.size) {
+                    Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -8009,11 +8082,10 @@ private data class KeyTileData(
 
 private enum class KeyMetricTrendDirection(
     @StringRes val labelRes: Int,
-    val icon: ImageVector,
 ) {
-    UP(R.string.today_trend_direction_up, Icons.AutoMirrored.Filled.TrendingUp),
-    DOWN(R.string.today_trend_direction_down, Icons.AutoMirrored.Filled.TrendingDown),
-    STEADY(R.string.today_trend_direction_steady, Icons.AutoMirrored.Filled.TrendingFlat),
+    UP(R.string.today_trend_direction_up),
+    DOWN(R.string.today_trend_direction_down),
+    STEADY(R.string.today_trend_direction_steady),
 }
 
 /** Endpoint direction only, matching iOS's neutral tolerance and making no clinical claim. */
@@ -8032,7 +8104,7 @@ private fun keyMetricTrendDirection(values: List<Double>): KeyMetricTrendDirecti
     }
 }
 
-/** Current iOS `ktile`: a two-column dimensional glyph tile with a 24sp value and 26dp trend/progress lane. */
+/** Compact iOS-parity tile: one consistent header, dominant value, and a real 20dp trend lane. */
 @Composable
 private fun LiquidKeyTile(
     data: KeyTileData,
@@ -8058,23 +8130,23 @@ private fun LiquidKeyTile(
     }
     Column(
         modifier = base
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(16.dp))
             .frostedCardSurface(
                 tint = data.tint,
-                cornerRadius = 20.dp,
-                washStrength = 0.76f,
+                cornerRadius = 16.dp,
+                washStrength = 0.54f,
             )
-            .padding(horizontal = 12.dp, vertical = 12.dp)
+            .padding(horizontal = 11.dp, vertical = 10.dp)
             .semantics { contentDescription = uiString(R.string.l10n_today_screen_data_label_data_value_data_unit_27f6fd6b, data.label, data.value, data.unit).trim() },
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        if (showsTrend) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                MetricGlyph(icon = icon, size = 28.dp)
-                Spacer(Modifier.weight(1f))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MetricGlyph(icon = icon, size = 24.dp)
+            Spacer(Modifier.weight(1f))
+            if (showsTrend) {
                 keyMetricTrendDirection(trend)?.let { direction ->
                     val directionLabel = stringResource(direction.labelRes)
                     val directionDescription = stringResource(
@@ -8083,12 +8155,12 @@ private fun LiquidKeyTile(
                     )
                     Row(
                         modifier = Modifier
-                            .height(20.dp)
+                            .height(18.dp)
                             .clip(CircleShape)
-                            .background(Palette.surfaceInset.copy(alpha = 0.78f))
+                            .background(Palette.surfaceInset.copy(alpha = 0.58f))
                             .border(
                                 width = 0.6.dp,
-                                color = Palette.hairline.copy(alpha = 0.9f),
+                                color = Palette.hairline.copy(alpha = 0.68f),
                                 shape = CircleShape,
                             )
                             .padding(horizontal = 5.dp)
@@ -8104,7 +8176,7 @@ private fun LiquidKeyTile(
                             color = Palette.textTertiary,
                         )
                         Icon(
-                            imageVector = direction.icon,
+                            imageVector = Icons.AutoMirrored.Filled.ShowChart,
                             contentDescription = null,
                             tint = Palette.textTertiary,
                             modifier = Modifier.size(10.dp),
@@ -8112,34 +8184,19 @@ private fun LiquidKeyTile(
                     }
                 }
             }
-            Text(
-                data.label.uppercase(),
-                style = NoopType.overline.copy(fontSize = 9.5.sp, letterSpacing = 0.sp),
-                color = Palette.textSecondary,
-                maxLines = if (largeText) 2 else 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        } else {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                MetricGlyph(icon = icon, size = 28.dp)
-                Text(
-                    data.label.uppercase(),
-                    style = NoopType.overline.copy(fontSize = 9.5.sp, letterSpacing = 0.sp),
-                    color = Palette.textSecondary,
-                    maxLines = if (largeText) 2 else 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-            }
         }
+        Text(
+            data.label.uppercase(),
+            style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 0.sp),
+            color = Palette.textSecondary,
+            maxLines = if (largeText) 2 else 1,
+            overflow = TextOverflow.Ellipsis,
+        )
         if (largeText) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     data.value,
-                    style = NoopType.number(24f),
+                    style = NoopType.number(22f),
                     color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
                     maxLines = 1,
                 )
@@ -8156,7 +8213,7 @@ private fun LiquidKeyTile(
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     data.value,
-                    style = NoopType.number(24f),
+                    style = NoopType.number(22f),
                     color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
                     maxLines = 1,
                 )
@@ -8173,7 +8230,7 @@ private fun LiquidKeyTile(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(26.dp),
+                .height(20.dp),
             contentAlignment = Alignment.Center,
         ) {
             when {
@@ -8183,7 +8240,7 @@ private fun LiquidKeyTile(
                     color = data.tint,
                     modifier = Modifier
                         .fillMaxWidth()
-                            .height(26.dp),
+                        .height(20.dp),
                 )
             }
                 showsBoundedProgress -> {
@@ -9596,6 +9653,7 @@ private data class Window(
     val maxHr: List<Double>,
     val spo2: List<Double>,
     val resp: List<Double>,
+    val skinTemp: List<Double>,
     val vo2Max: List<Double>,
     // Primary Steps trend, populated only by imported pedometer values.
     val steps: List<Double>,
@@ -9657,6 +9715,7 @@ private fun rememberTrendWindow(
                 .map { it.value }
                 .ifEmpty { series { it.spo2Pct } },
             resp = series { it.respRateBpm },
+            skinTemp = series { it.skinTempDevC },
             vo2Max = mappedSeries(measuredVo2MaxByDay),
             steps = resolvedStepsSeries(
                 imported = measuredWindow,
@@ -9771,7 +9830,7 @@ private fun grouped(value: Int): String =
 //
 // A Today-local dialog for choosing which Key-Metric tiles lead the Control Center and in what order.
 // Display-only: it edits the persisted `today.keyMetrics` pins, never any stored metric. Every tile remains
-// visible; switches pin three to six, and explicit arrows reorder them consistently on every device.
+// visible; switches choose any supported metrics, and explicit arrows reorder them consistently.
 // Mirrors the Apple KeyMetricsEditorSheet.
 
 /** The Key-Metrics header's trailing label for the chosen detailed-graph window. */
@@ -9787,6 +9846,7 @@ private fun KeyMetricsEditorDialog(
     initialDetailed: Boolean = false,
     initialWindowDays: Int = 14,
     hydrationEnabled: Boolean,
+    cycleMetricAvailable: Boolean,
     onDismiss: () -> Unit,
     onSave: (List<KeyMetric>, Boolean, Int) -> Unit,
 ) {
@@ -9801,7 +9861,8 @@ private fun KeyMetricsEditorDialog(
     val selectedCount = selected.size
     val query = search.trim()
     val available = KeyMetric.defaultOrder.filter { metric ->
-        metric !in selected && (
+        (metric != KeyMetric.MENSTRUAL_CYCLE || cycleMetricAvailable) &&
+            metric !in selected && (
             query.isEmpty() ||
                 uiString(metric.titleRes).contains(query, ignoreCase = true) ||
                 keyMetricGroupTitle(metric.group).contains(query, ignoreCase = true) ||
@@ -9836,11 +9897,6 @@ private fun KeyMetricsEditorDialog(
                             style = NoopType.title2,
                             color = Palette.textPrimary,
                         )
-                        Text(
-                            uiString(R.string.key_metrics_selection_instructions),
-                            style = NoopType.subhead,
-                            color = Palette.textSecondary,
-                        )
                     }
                     IconButton(
                         onClick = onDismiss,
@@ -9868,14 +9924,9 @@ private fun KeyMetricsEditorDialog(
                         uiString(
                             R.string.key_metrics_selection_count,
                             selectedCount,
-                            KeyMetricPrefs.MAX_SELECTION_COUNT,
                         ),
                         style = NoopType.captionNumber,
-                        color = if (selectedCount == KeyMetricPrefs.MAX_SELECTION_COUNT) {
-                            Palette.accent
-                        } else {
-                            Palette.textTertiary
-                        },
+                        color = Palette.textTertiary,
                     )
                 }
 
@@ -9947,8 +9998,7 @@ private fun KeyMetricsEditorDialog(
                                 grouped.forEachIndexed { index, metric ->
                                     KeyMetricAvailableEditorRow(
                                         metric = metric,
-                                        addEnabled = selectedCount < KeyMetricPrefs.MAX_SELECTION_COUNT &&
-                                            (metric != KeyMetric.HYDRATION || hydrationEnabled),
+                                        addEnabled = metric != KeyMetric.HYDRATION || hydrationEnabled,
                                         hydrationEnabled = hydrationEnabled,
                                         onAdd = { selected.add(metric) },
                                     )

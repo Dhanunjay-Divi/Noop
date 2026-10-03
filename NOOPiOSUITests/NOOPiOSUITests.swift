@@ -1309,49 +1309,42 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "onboarding-editable-measurements")
     }
 
-    func testKeyMetricSelectionEnforcesAccessibleThreeToSixBoundaries() {
+    func testKeyMetricSelectionSupportsTheFullCatalogAndKeepsTheMinimumBoundary() {
         let app = launchDemoScreen("keymetricseditor")
         let count = app.descendants(matching: .any)["noop.key-metric.selection-count"]
         let selectedHRV = app.descendants(matching: .any)["noop.key-metric.selected.hrv"]
         let addRecovery = app.buttons["noop.key-metric.add.charge"]
 
         XCTAssertTrue(count.waitForExistence(timeout: 20))
-        XCTAssertEqual(count.label, "6 of 6 selected")
+        XCTAssertEqual(count.label, "6 metrics selected")
         XCTAssertTrue(selectedHRV.exists)
 
         for _ in 0..<10 where !addRecovery.exists {
             app.swipeUp()
         }
         XCTAssertTrue(addRecovery.exists)
-        XCTAssertFalse(addRecovery.isEnabled)
-
-        let removeHRV = app.buttons["noop.key-metric.remove.hrv"]
-        for _ in 0..<10 where !removeHRV.isHittable {
-            app.swipeDown()
-        }
-        XCTAssertTrue(removeHRV.isHittable)
-        removeHRV.tap()
-        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "5 of 6 selected" })
-        XCTAssertFalse(selectedHRV.exists)
-
-        for _ in 0..<10 where !addRecovery.isHittable {
-            app.swipeUp()
-        }
-        XCTAssertTrue(addRecovery.isHittable)
+        XCTAssertTrue(addRecovery.isEnabled)
         addRecovery.tap()
-        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "6 of 6 selected" })
+        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "7 metrics selected" })
         XCTAssertTrue(
             app.descendants(matching: .any)["noop.key-metric.selected.charge"].exists
         )
 
-        let addCalories = app.buttons["noop.key-metric.add.calories"]
-        for _ in 0..<10 where !addCalories.exists {
+        let addCycle = app.buttons["noop.key-metric.add.menstrualCycle"]
+        for _ in 0..<12 where !addCycle.isHittable {
             app.swipeUp()
         }
-        XCTAssertTrue(addCalories.exists)
-        XCTAssertFalse(addCalories.isEnabled)
+        XCTAssertTrue(addCycle.isHittable)
+        XCTAssertTrue(addCycle.isEnabled)
+        addCycle.tap()
+        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "8 metrics selected" })
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.key-metric.selected.menstrualCycle"
+            ].exists
+        )
 
-        for metric in ["restingHr", "bloodOxygen", "respiratory"] {
+        for metric in ["hrv", "restingHr", "bloodOxygen", "respiratory", "steps"] {
             let remove = app.buttons["noop.key-metric.remove.\(metric)"]
             for _ in 0..<10 where !remove.isHittable {
                 app.swipeDown()
@@ -1360,7 +1353,8 @@ final class NOOPiOSUITests: XCTestCase {
             remove.tap()
         }
 
-        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "3 of 6 selected" })
+        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "3 metrics selected" })
+        XCTAssertFalse(selectedHRV.exists)
         let removeRecovery = app.buttons["noop.key-metric.remove.charge"]
         for _ in 0..<10 where !removeRecovery.exists {
             app.swipeDown()
@@ -1374,34 +1368,38 @@ final class NOOPiOSUITests: XCTestCase {
         }
         XCTAssertTrue(addHRV.exists)
         XCTAssertTrue(addHRV.isEnabled)
-        keepScreenshot(app, name: "key-metrics-accessible-color-boundaries")
+        keepScreenshot(app, name: "key-metrics-full-catalog-boundaries")
     }
 
     func testTodayKeepsPinnedMetricsAndFullHistoryReachable() {
         let app = XCUIApplication()
         app.launchArguments = [
-            "-today.keyMetrics", "charge,effort,rest",
+            "-today.keyMetrics",
+            "charge,effort,rest,hrv,restingHr,bloodOxygen,respiratory,steps",
             "--demo-seed",
             "--demo-tab", "today",
             "--demo-key-metrics",
         ]
         app.launch()
 
-        let pinnedMetricIDs = ["charge", "effort", "rest"]
+        let pinnedMetricIDs = [
+            "charge", "effort", "rest", "hrv",
+            "restingHr", "bloodOxygen", "respiratory", "steps",
+        ]
         let unpinnedMetricIDs = [
-            "hrv", "restingHr",
-            "bloodOxygen", "respiratory", "steps", "weight", "calories",
+            "averageHr", "maxHr", "weight", "calories", "vo2Max",
+            "stress", "vitality", "skinTemp", "asleepTime", "menstrualCycle",
         ]
         let scroll = app.scrollViews["noop.today.scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 20))
-        let history = app.buttons["noop.today.key-metrics.open-history"]
-        for _ in 0..<12 where !history.isHittable {
-            scroll.swipeUp()
-        }
 
         for id in pinnedMetricIDs {
+            let metric = app.descendants(matching: .any)["noop.today.key-metric.\(id)"]
+            for _ in 0..<12 where !metric.exists {
+                scroll.swipeUp()
+            }
             XCTAssertTrue(
-                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists,
+                metric.exists,
                 "Pinned Today metric \(id) must remain visible."
             )
         }
@@ -1410,6 +1408,10 @@ final class NOOPiOSUITests: XCTestCase {
                 app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists,
                 "Unpinned metric \(id) must stay out of the focused Today grid."
             )
+        }
+        let history = app.buttons["noop.today.key-metrics.open-history"]
+        for _ in 0..<12 where !history.isHittable {
+            scroll.swipeUp()
         }
         XCTAssertTrue(history.isHittable, "The full metric history action must remain reachable.")
         keepScreenshot(app, name: "today-pinned-key-metrics")

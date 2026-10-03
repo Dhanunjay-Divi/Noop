@@ -451,12 +451,14 @@ public enum BackupSettings {
         return string
     }
 
-    /// Keep the portable dashboard preference inside the app's one-to-five pin contract. Older backups
-    /// may contain all ten metrics; their first five valid unique ids survive in the user's saved order.
+    /// Keep every valid unique Today metric in portable dashboard order. This list is intentionally
+    /// byte-identical to the Apple and Android KeyMetric catalogs so cross-platform restore cannot
+    /// silently discard a user's selected cards.
     private static func normalizedKeyMetricSelection(_ raw: String) -> String? {
         let allowed: Set<String> = [
-            "charge", "effort", "rest", "hrv", "restingHr",
-            "bloodOxygen", "respiratory", "steps", "weight", "calories",
+            "charge", "effort", "rest", "hrv", "restingHr", "averageHr", "maxHr",
+            "bloodOxygen", "respiratory", "vo2Max", "skinTemp", "asleepTime", "steps",
+            "calories", "weight", "hydration", "stress", "vitality", "menstrualCycle",
         ]
         var seen = Set<String>()
         var selected: [String] = []
@@ -464,7 +466,6 @@ public enum BackupSettings {
             let token = String(part).trimmingCharacters(in: .whitespaces)
             guard allowed.contains(token), seen.insert(token).inserted else { continue }
             selected.append(token)
-            if selected.count == 5 { break }
         }
         return selected.isEmpty ? nil : selected.joined(separator: ",")
     }

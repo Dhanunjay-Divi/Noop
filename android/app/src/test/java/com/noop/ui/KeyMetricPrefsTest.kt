@@ -31,9 +31,9 @@ class KeyMetricPrefsTest {
     }
 
     @Test
-    fun selectionContractMatchesProductLimitAndCatalog() {
+    fun selectionContractUsesTheCompleteCatalog() {
         assertEquals(3, KeyMetricPrefs.MIN_SELECTION_COUNT)
-        assertEquals(6, KeyMetricPrefs.MAX_SELECTION_COUNT)
+        assertEquals(KeyMetric.entries.size, KeyMetricPrefs.MAX_SELECTION_COUNT)
         assertEquals(KeyMetric.entries.toSet(), KeyMetric.defaultOrder.toSet())
         assertEquals(
             listOf(
@@ -55,6 +55,7 @@ class KeyMetricPrefsTest {
                 "hydration",
                 "stress",
                 "vitality",
+                "menstrualCycle",
             ),
             KeyMetric.defaultOrder.map(KeyMetric::raw),
         )
@@ -66,6 +67,7 @@ class KeyMetricPrefsTest {
         assertEquals(KeyMetric.VITALITY, KeyMetric.fromRaw("vitality"))
         assertEquals(KeyMetric.SKIN_TEMP, KeyMetric.fromRaw("skinTemp"))
         assertEquals(KeyMetric.HYDRATION, KeyMetric.fromRaw("hydration"))
+        assertEquals(KeyMetric.MENSTRUAL_CYCLE, KeyMetric.fromRaw("menstrualCycle"))
         assertEquals(KeyMetricGroup.WELLBEING, KeyMetric.STRESS.group)
         assertEquals(KeyMetricGroup.WELLBEING, KeyMetric.VITALITY.group)
         assertEquals(KeyMetricGroup.VITALS, KeyMetric.SKIN_TEMP.group)
@@ -73,7 +75,9 @@ class KeyMetricPrefsTest {
         assertEquals(KeyMetricGroup.SLEEP, KeyMetric.ASLEEP_TIME.group)
         assertEquals(KeyMetricGroup.ACTIVITY, KeyMetric.WEIGHT.group)
         assertEquals(KeyMetricGroup.ACTIVITY, KeyMetric.HYDRATION.group)
+        assertEquals(KeyMetricGroup.WELLBEING, KeyMetric.MENSTRUAL_CYCLE.group)
         assertEquals(KeyMetricOrigin.MEASURED_IMPORTED, KeyMetric.STEPS.origin)
+        assertEquals(KeyMetricOrigin.MEASURED_IMPORTED, KeyMetric.MENSTRUAL_CYCLE.origin)
         assertEquals(KeyMetricOrigin.SOURCE_DEPENDENT, KeyMetric.CALORIES.origin)
         assertEquals(KeyMetricOrigin.NOOP_INSIGHT, KeyMetric.STRESS.origin)
         assertEquals(false, KeyMetric.VITALITY.isBoundedProgress)
@@ -117,7 +121,7 @@ class KeyMetricPrefsTest {
     }
 
     @Test
-    fun decodePreservesOrderDeduplicatesAndCapsOlderSelections() {
+    fun decodePreservesEveryKnownUniqueSelectionInOrder() {
         assertEquals(
             listOf(
                 KeyMetric.STEPS,
@@ -126,6 +130,7 @@ class KeyMetricPrefsTest {
                 KeyMetric.RESTING_HR,
                 KeyMetric.CALORIES,
                 KeyMetric.WEIGHT,
+                KeyMetric.EFFORT,
             ),
             KeyMetricPrefs.decodeEnabled(
                 "steps, hrv,steps,bloodOxygen,restingHr,calories,weight,effort",

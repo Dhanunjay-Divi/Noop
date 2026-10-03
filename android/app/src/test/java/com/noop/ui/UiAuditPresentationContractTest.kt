@@ -167,7 +167,8 @@ class UiAuditPresentationContractTest {
 
         assertTrue(root.contains("rememberBottomBarLabelLayout("))
         assertTrue(barSlot.contains("contentDescription = label"))
-        assertTrue(barSlot.contains("selected = active"))
+        assertTrue(barSlot.contains("selected = selected"))
+        assertFalse(barSlot.contains("selected = active"))
         assertTrue(barSlot.contains("maxLines = labelMaxLines"))
         assertTrue(barSlot.contains("overflow = TextOverflow.Ellipsis"))
         assertFalse(barSlot.contains("overflow = TextOverflow.Clip"))

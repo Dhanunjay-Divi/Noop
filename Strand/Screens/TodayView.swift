@@ -372,9 +372,10 @@ struct TodayView: View {
     @AppStorage(UnitPrefs.hrvWindowKey) private var hrvWindowRaw = HrvWindow.whole.rawValue
     private var hrvWindow: HrvWindow { HrvWindow(rawValue: hrvWindowRaw) ?? .whole }
 
-    // Editable Key-Metrics layout (#251), persisted as the three-to-six tiles pinned first. Every metric
-    // remains visible; the "Edit" affordance only controls priority and order.
+    // Editable Key-Metrics layout (#251). Every selected metric remains visible and the "Edit"
+    // affordance controls selection and order.
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
+    @AppStorage(AppModel.cycleAwarenessKey) private var cycleAwarenessEnabled = false
     @State private var showingMetricsEditor = false
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
 
@@ -3635,8 +3636,8 @@ struct TodayView: View {
                 .accessibilityLabel("Edit Key Metrics")
                 .help("Choose and reorder pinned Key Metrics")
             }
-            // Keep Today focused on the editor-selected three-to-six metrics. The full catalog remains in
-            // Explore and each metric's history view.
+            // Keep Today focused on the editor-selected metrics. The full catalog remains in Explore and
+            // each metric's history view.
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                 ForEach(visibleKeyMetrics) { metric in
                     // Pin every tile to one height so the grid reads as an even matrix. A LazyVGrid only
@@ -3652,11 +3653,21 @@ struct TodayView: View {
             }
         }
         .sheet(isPresented: $showingMetricsEditor) {
-            KeyMetricsEditorSheet(layoutRaw: $keyMetricsRaw)
+            KeyMetricsEditorSheet(
+                layoutRaw: $keyMetricsRaw,
+                cycleMetricAvailable:
+                    profile.cycleAwarenessApplies || cycleAwarenessEnabled
+            )
         }
     }
 
-    private var visibleKeyMetrics: [KeyMetric] { enabledKeyMetrics }
+    private var visibleKeyMetrics: [KeyMetric] {
+        enabledKeyMetrics.filter {
+            $0 != .menstrualCycle
+                || profile.cycleAwarenessApplies
+                || cycleAwarenessEnabled
+        }
+    }
 
     /// A carried recovery-vital tile's (value, caption): today's own value wins (with the metric's
     /// static unit caption); otherwise, when we're carrying the last scored day (#543), the PRIOR row's
@@ -3699,6 +3710,11 @@ struct TodayView: View {
                 keyMetricTileContent(metric)
             }
             .buttonStyle(.plain)
+        } else if metric == .menstrualCycle {
+            NavigationLink(value: TabRoute.health) {
+                keyMetricTileContent(metric)
+            }
+            .buttonStyle(.plain)
         } else if metric == .hydration, hydrationEnabled {
             NavigationLink(value: TabRoute.hydration(day: selectedDayKey)) {
                 keyMetricTileContent(metric)
@@ -3738,7 +3754,7 @@ struct TodayView: View {
         case .vo2Max:      return MetricCatalog.metric(key: "vo2max", source: "apple-health")
         case .vitality:    return MetricCatalog.metric(key: "vitality", source: "my-whoop")
         case .skinTemp:    return MetricCatalog.metric(key: "skin_temp", source: "my-whoop")
-        case .stress, .hydration:
+        case .stress, .hydration, .menstrualCycle:
             return nil
         }
     }
@@ -3996,6 +4012,22 @@ struct TodayView: View {
                     : String(localized: "Enable hydration tracking in Settings"),
                 accent: hydrationEnabled
                     ? StrandPalette.metricCyan
+                    : StrandPalette.textPrimary
+            )
+        case .menstrualCycle:
+            StatTile(
+                label: "appwide.cycle.profile.title",
+                value: selectedDayOffset == 0
+                    ? (
+                        cycleAwarenessEnabled
+                            ? String(localized: "appwide.cycle.status.on")
+                            : String(localized: "Off")
+                    )
+                    : StrandFormat.missing,
+                systemImage: systemImage,
+                caption: String(localized: "appwide.cycle.profile.summary"),
+                accent: cycleAwarenessEnabled
+                    ? StrandPalette.metricPurple
                     : StrandPalette.textPrimary
             )
         }

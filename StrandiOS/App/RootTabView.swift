@@ -2070,16 +2070,14 @@ private struct FloatingTabBar: View {
 
     private static let labelLineCount = 1
     private static let labelMinimumScaleFactor: CGFloat = 0.56
-    private static let raisedLensDimension =
-        max(NoopMetrics.navigationLensSize, NoopMetrics.controlHeight)
+    private static let selectedLensDimension: CGFloat = 38
     private static let expandedRailTopInset =
-        NoopMetrics.navigationBarTopInset
-    private static let expandedRailCornerRadius =
-        NoopMetrics.pillRadius
+        NoopMetrics.space2
+    private static let expandedRailCornerRadius: CGFloat = 18
     private static let meniscusNotchDepth =
-        raisedLensDimension - expandedRailTopInset - NoopMetrics.space1
+        selectedLensDimension - expandedRailTopInset - NoopMetrics.space1
     private static let meniscusNotchReach =
-        raisedLensDimension / 2 + NoopMetrics.space3
+        selectedLensDimension / 2 + NoopMetrics.space3
 
     /// Compaction is suppressed at accessibility text sizes. Sighted low-vision users retain all five
     /// persistent destinations and labels, while every button also keeps its full VoiceOver name.
@@ -2098,11 +2096,11 @@ private struct FloatingTabBar: View {
         let labelHeight = boundedLabelLineHeight(labelLineHeight)
             * CGFloat(max(1, labelLineCount))
         return max(
-            NoopMetrics.controlHeight + NoopMetrics.space4,
-            NoopMetrics.space3
-                + NoopMetrics.space8
-                + NoopMetrics.space1
+            NoopMetrics.controlHeight,
+            selectedLensDimension
+                + NoopMetrics.navigationLensItemSpacing
                 + labelHeight
+                + NoopMetrics.space2
         )
     }
 
@@ -2196,10 +2194,9 @@ private struct FloatingTabBar: View {
     private var navigationScrim: Color {
         guard !reduceTransparency, colorSchemeContrast != .increased else { return .clear }
         if colorScheme == .dark {
-            // Keep labels readable without turning the shaped glass control into an opaque black bar.
-            return .black.opacity(appearanceMode == .black ? 0.68 : 0.64)
+            return .black.opacity(appearanceMode == .black ? 0.48 : 0.44)
         }
-        return .white.opacity(0.86)
+        return .white.opacity(0.72)
     }
     private var navigationGlassOpacity: Double {
         // Clear Glass still carries a strong milk-white optical body over a pearl canvas. Fade only
@@ -2208,8 +2205,8 @@ private struct FloatingTabBar: View {
         reduceTransparency || colorSchemeContrast == .increased
             ? 1
             : (colorScheme == .dark
-               ? (appearanceMode == .black ? 0.76 : 0.72)
-               : 0.62)
+               ? (appearanceMode == .black ? 0.58 : 0.54)
+               : 0.48)
     }
     private func navigationInk(active: Bool, accent: Color) -> Color {
         guard active else {
@@ -2386,12 +2383,12 @@ private struct FloatingTabBar: View {
                 ? .clear
                 : .black.opacity(
                     colorScheme == .dark
-                        ? (appearanceMode == .black ? 0.14 : 0.20)
-                        : 0.075
+                        ? (appearanceMode == .black ? 0.09 : 0.12)
+                        : 0.05
                 ),
-            radius: visuallyCompact ? 0 : 11,
+            radius: visuallyCompact ? 0 : 7,
             x: 0,
-            y: visuallyCompact ? 0 : 5
+            y: visuallyCompact ? 0 : 3
         )
         .animation(selectionAnimation, value: displayedIndex)
         .animation(reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.28),
@@ -2406,13 +2403,13 @@ private struct FloatingTabBar: View {
             ZStack(alignment: .topLeading) {
                 selectedBead(accent: displayedAccent)
                     .frame(
-                        width: Self.raisedLensDimension,
-                        height: Self.raisedLensDimension
+                        width: Self.selectedLensDimension,
+                        height: Self.selectedLensDimension
                     )
                     .position(
                         x: layout.centerX(for: displayedIndex),
-                        y: Self.raisedLensDimension / 2
-                            - NoopMetrics.navigationLensActiveOffset
+                        y: Self.selectedLensDimension / 2
+                            - NoopMetrics.space1
                     )
 
                 HStack(spacing: expandedItemSpacing) {
@@ -2509,8 +2506,8 @@ private struct FloatingTabBar: View {
                         )
                 }
                 .frame(
-                    width: Self.raisedLensDimension,
-                    height: Self.raisedLensDimension
+                    width: Self.selectedLensDimension,
+                    height: Self.selectedLensDimension
                 )
                 .offset(
                     y: visuallyActive ? -NoopMetrics.navigationLensActiveOffset : 0
@@ -2584,6 +2581,9 @@ private enum NoopCommandLensEdge: String {
 
 private struct NoopCommandLensLayout {
     static let touchSize = CGSize(width: 48, height: 52)
+    static let bodySize = CGSize(width: 30, height: 34)
+    static let bodyEdgePull =
+        (touchSize.width - bodySize.width) / 2 + 2
 
     let containerSize: CGSize
     let safeAreaInsets: EdgeInsets
@@ -2667,19 +2667,18 @@ private struct NoopCommandNMark: View {
                     endPoint: .topTrailing
                 ),
                 style: StrokeStyle(
-                    lineWidth: 2.5,
+                    lineWidth: 2.2,
                     lineCap: .round,
                     lineJoin: .round
                 )
             )
         }
-        .frame(width: 14, height: 14)
+        .frame(width: 12, height: 12)
     }
 }
 
-/// A mirrored liquid bulb whose narrow neck points toward the snapped safe-area edge. The complete
-/// silhouette remains visible inside the unchanged 48x52 interaction frame instead of being clipped
-/// into a rounded rectangle at the display boundary.
+/// A compact mirrored edge tab. The flat dock side communicates attachment while the rounded outer
+/// side keeps the control quiet inside its unchanged 48x52 interaction frame.
 private struct NoopCommandBubbleShape: Shape {
     let edge: NoopCommandLensEdge
 
@@ -2693,42 +2692,19 @@ private struct NoopCommandBubbleShape: Shape {
         }
 
         var path = Path()
-        path.move(to: point(1, 0.38))
+        path.move(to: point(1, 0.18))
+        path.addLine(to: point(0.30, 0.18))
         path.addCurve(
-            to: point(0.72, 0.22),
-            control1: point(0.92, 0.38),
-            control2: point(0.84, 0.25)
+            to: point(0.02, 0.50),
+            control1: point(0.11, 0.18),
+            control2: point(0.02, 0.32)
         )
         path.addCurve(
-            to: point(0.34, 0.06),
-            control1: point(0.62, 0.09),
-            control2: point(0.47, 0.04)
+            to: point(0.30, 0.82),
+            control1: point(0.02, 0.68),
+            control2: point(0.11, 0.82)
         )
-        path.addCurve(
-            to: point(0.06, 0.30),
-            control1: point(0.18, 0.07),
-            control2: point(0.08, 0.17)
-        )
-        path.addCurve(
-            to: point(0.06, 0.70),
-            control1: point(0.03, 0.40),
-            control2: point(0.03, 0.60)
-        )
-        path.addCurve(
-            to: point(0.34, 0.94),
-            control1: point(0.08, 0.83),
-            control2: point(0.18, 0.93)
-        )
-        path.addCurve(
-            to: point(0.72, 0.78),
-            control1: point(0.47, 0.96),
-            control2: point(0.62, 0.91)
-        )
-        path.addCurve(
-            to: point(1, 0.62),
-            control1: point(0.84, 0.75),
-            control2: point(0.92, 0.62)
-        )
+        path.addLine(to: point(1, 0.82))
         path.closeSubpath()
         return path
     }
@@ -2755,8 +2731,8 @@ private struct MovableNoopCommandLens: View {
             return colorScheme == .dark ? .black.opacity(0.96) : .white.opacity(0.98)
         }
         return colorScheme == .dark
-            ? .black.opacity(appearanceMode == .black ? 0.94 : 0.90)
-            : .white.opacity(0.94)
+            ? .black.opacity(appearanceMode == .black ? 0.64 : 0.58)
+            : .white.opacity(0.68)
     }
 
     private var lensShape: NoopCommandBubbleShape {
@@ -2771,9 +2747,9 @@ private struct MovableNoopCommandLens: View {
         } else {
             .black.opacity(0.08)
         }
-        let surfaceOpacity = reduceTransparency ? 1 : (colorScheme == .dark ? 0.82 : 0.70)
-        let rimTop = Color.white.opacity(colorScheme == .dark ? 0.24 : 0.52)
-        let shadowOpacity = colorScheme == .dark ? 0.12 : 0.06
+        let surfaceOpacity = reduceTransparency ? 1 : (colorScheme == .dark ? 0.60 : 0.52)
+        let rimTop = Color.white.opacity(colorScheme == .dark ? 0.16 : 0.36)
+        let shadowOpacity = colorScheme == .dark ? 0.08 : 0.04
 
         return ZStack {
             lensShape
@@ -2786,8 +2762,8 @@ private struct MovableNoopCommandLens: View {
                     LinearGradient(
                         colors: [
                             rimTop,
-                            StrandPalette.metricCyan.opacity(0.58),
-                            StrandPalette.chargeColor.opacity(0.34),
+                            StrandPalette.metricCyan.opacity(0.42),
+                            StrandPalette.chargeColor.opacity(0.22),
                         ],
                         startPoint: .top,
                         endPoint: .bottom
@@ -2803,14 +2779,16 @@ private struct MovableNoopCommandLens: View {
                             : NoopMetrics.navigationLensHighlightLightOpacity
                     )
                 )
-                .frame(width: 9, height: 1.5)
-                .rotationEffect(.degrees(edge == .leading ? -18 : 18))
-                .offset(x: edge == .leading ? 4 : -4, y: -11)
+                .frame(width: 7, height: 1.2)
+                .offset(x: edge == .leading ? 3 : -3, y: -8)
 
             NoopCommandNMark()
-                .offset(x: edge == .leading ? 2 : -2)
+                .offset(x: edge == .leading ? 1.5 : -1.5)
         }
-            .frame(width: 36, height: 40)
+            .frame(
+                width: NoopCommandLensLayout.bodySize.width,
+                height: NoopCommandLensLayout.bodySize.height
+            )
             .background {
                 lensShape
                     .fill(StrandPalette.chargeColor.opacity(shadowOpacity))
@@ -2823,8 +2801,11 @@ private struct MovableNoopCommandLens: View {
                 x: 0,
                 y: 2
             )
-            // Keep the entire bulb inside the safe area while its neck remains visually edge-directed.
-            .offset(x: edge == .leading ? -6 : 6)
+            .offset(
+                x: edge == .leading
+                    ? -NoopCommandLensLayout.bodyEdgePull
+                    : NoopCommandLensLayout.bodyEdgePull
+            )
             .frame(
                 width: NoopCommandLensLayout.touchSize.width,
                 height: NoopCommandLensLayout.touchSize.height

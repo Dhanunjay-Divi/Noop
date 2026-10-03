@@ -118,9 +118,33 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
 
     func testSleepAndVitalsKeepOnlyRealFinitePoints() {
         let days = [
-            metric("2026-08-20", rhr: 54, respiratory: 14.2, spo2: 97),
-            metric("2026-08-21", rhr: nil, respiratory: 14.4, spo2: nil),
-            metric("2026-08-22", rhr: 52, respiratory: nil, spo2: 98),
+            metric(
+                "2026-08-20",
+                rhr: 54,
+                respiratory: 14.2,
+                spo2: 97,
+                skinTemp: -0.2,
+                recovery: 61,
+                strain: 34
+            ),
+            metric(
+                "2026-08-21",
+                rhr: nil,
+                respiratory: 14.4,
+                spo2: nil,
+                skinTemp: nil,
+                recovery: 66,
+                strain: 41
+            ),
+            metric(
+                "2026-08-22",
+                rhr: 52,
+                respiratory: nil,
+                spo2: 98,
+                skinTemp: 0.1,
+                recovery: 72,
+                strain: 29
+            ),
         ]
         let rest = [
             (day: "2026-08-20", value: 71.0),
@@ -140,6 +164,26 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
         XCTAssertEqual(trends[.restingHr], [54, 52])
         XCTAssertEqual(trends[.respiratory], [14.2, 14.4])
         XCTAssertEqual(trends[.bloodOxygen], [97, 98])
+        XCTAssertEqual(trends[.charge], [61, 66, 72])
+        XCTAssertEqual(trends[.effort], [34, 41, 29])
+        XCTAssertEqual(trends[.skinTemp], [-0.2, 0.1])
+    }
+
+    func testWeightTrendUsesOnlyMeasuredRowsInsideTheSelectedWindow() {
+        let trends = LiquidTodayView.keyMetricTrendSeries(
+            days: [],
+            restSeries: [],
+            stepEstimates: [],
+            appleRows: [
+                appleDay("2026-08-01", steps: nil, weightKg: 81.4),
+                appleDay("2026-08-20", steps: nil, weightKg: 80.9),
+                appleDay("2026-08-22", steps: nil, weightKg: 80.6),
+                appleDay("2026-08-23", steps: nil, weightKg: 80.5),
+            ],
+            endingAt: "2026-08-22"
+        )
+
+        XCTAssertEqual(trends[.weight], [80.9, 80.6])
     }
 
     func testResolvedBloodOxygenFillsBandDaysWithoutCalibratedPercentages() {
@@ -335,6 +379,7 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
         rhr: Int? = nil,
         respiratory: Double? = nil,
         spo2: Double? = nil,
+        skinTemp: Double? = nil,
         steps: Int? = nil,
         sleepMinutes: Double? = nil,
         recovery: Double? = nil,
@@ -354,6 +399,7 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
             strain: strain,
             exerciseCount: nil,
             spo2Pct: spo2,
+            skinTempDevC: skinTemp,
             respRateBpm: respiratory,
             steps: steps
         )

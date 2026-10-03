@@ -1893,7 +1893,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(shell.contains("path.addLine(to: CGPoint(x: right, y: bottom))"))
         XCTAssertTrue(shell.contains("lineCap: .round"))
         XCTAssertTrue(shell.contains("lineJoin: .round"))
-        XCTAssertTrue(shell.contains(".frame(width: 14, height: 14)"))
+        XCTAssertTrue(shell.contains(".frame(width: 12, height: 12)"))
         XCTAssertFalse(shell.contains("private struct NoopCommandSignalMark"))
         XCTAssertFalse(commandLens.contains(#"Image(systemName: "message.fill")"#))
         XCTAssertFalse(commandLens.contains(#"Image(systemName: "waveform.path.ecg")"#))
@@ -1905,16 +1905,18 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(commandLens.contains(#"Text("Move to left edge")"#))
         XCTAssertTrue(commandLens.contains(#"Text("Move to right edge")"#))
         XCTAssertTrue(shell.contains("static let touchSize = CGSize(width: 48, height: 52)"))
+        XCTAssertTrue(shell.contains("static let bodySize = CGSize(width: 30, height: 34)"))
+        XCTAssertTrue(shell.contains("static let bodyEdgePull ="))
         XCTAssertTrue(shell.contains("private struct NoopCommandBubbleShape: Shape"))
         XCTAssertTrue(commandLens.contains("NoopCommandBubbleShape(edge: edge)"))
-        XCTAssertTrue(commandLens.contains(".frame(width: 36, height: 40)"))
-        XCTAssertTrue(commandLens.contains(".offset(x: edge == .leading ? -6 : 6)"))
+        XCTAssertTrue(commandLens.contains("width: NoopCommandLensLayout.bodySize.width"))
+        XCTAssertTrue(commandLens.contains("NoopCommandLensLayout.bodyEdgePull"))
         XCTAssertTrue(commandLens.contains(".navigationGlass(in: lensShape"))
         XCTAssertTrue(commandLens.contains("StrandPalette.navigationLensHighlight.opacity("))
         XCTAssertTrue(commandLens.contains("@Environment(\\.accessibilityReduceTransparency)"))
-        XCTAssertTrue(shell.contains("path.move(to: point(1, 0.38))"))
-        XCTAssertTrue(shell.contains("to: point(0.06, 0.30)"))
-        XCTAssertTrue(shell.contains("to: point(0.06, 0.70)"))
+        XCTAssertTrue(shell.contains("path.move(to: point(1, 0.18))"))
+        XCTAssertTrue(shell.contains("to: point(0.02, 0.50)"))
+        XCTAssertTrue(shell.contains("path.addLine(to: point(1, 0.82))"))
         XCTAssertFalse(commandLens.contains("UnevenRoundedRectangle"))
         XCTAssertTrue(commandLens.contains("private var verticalFraction = 0.76"))
         XCTAssertFalse(commandLens.contains(#"Image(systemName: "plus")"#))
@@ -1964,8 +1966,9 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(meniscus.contains("let leadingReach = min("))
         XCTAssertTrue(meniscus.contains("let trailingReach = min("))
         XCTAssertEqual(meniscus.components(separatedBy: "path.addCurve(").count - 1, 2)
-        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensSize"))
-        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationBarTopInset"))
+        XCTAssertTrue(tabBar.contains(
+            "private static let expandedRailTopInset =\n        NoopMetrics.space2"
+        ))
         XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensStrokeWidth"))
         XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensHighlightWidth"))
         XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensShadowRadius"))
@@ -1991,10 +1994,13 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             4
         )
         XCTAssertTrue(tabBar.contains(
-            "private static let expandedRailCornerRadius =\n        NoopMetrics.pillRadius"
+            "private static let expandedRailCornerRadius: CGFloat = 18"
         ))
+        XCTAssertTrue(tabBar.contains("private static let selectedLensDimension: CGFloat = 38"))
+        XCTAssertTrue(tabBar.contains("width: Self.selectedLensDimension"))
+        XCTAssertTrue(tabBar.contains("height: Self.selectedLensDimension"))
         XCTAssertTrue(tabBar.contains(
-            "max(NoopMetrics.navigationLensSize, NoopMetrics.controlHeight)"
+            "selectedLensDimension\n                + NoopMetrics.navigationLensItemSpacing"
         ))
         XCTAssertTrue(tabBar.contains(
             "(dynamicTypeSize.isAccessibilitySize ? 3 : 6) + NoopMetrics.space6"

@@ -54,6 +54,24 @@ internal fun lastWorkoutsFeed(rows: List<WorkoutRow>): List<WorkoutRow> =
 internal data class WeightTileText(val value: String, val caption: String?)
 
 /**
+ * One deterministic measured-weight value per day. Apple Health wins a same-day tie, matching the
+ * primary value arbitration used by [latestWeightKg], so the sparkline endpoint cannot describe a
+ * different source than the number rendered above it.
+ */
+internal fun resolvedWeightKgByDay(
+    apple: List<AppleDaily>,
+    healthConnect: List<AppleDaily>,
+): Map<String, Double> {
+    val resolved = linkedMapOf<String, Double>()
+    (healthConnect + apple).forEach { row ->
+        row.weightKg
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?.let { resolved[row.day] = it }
+    }
+    return resolved
+}
+
+/**
  * The newest measured body weight at or before [throughDay] across Apple Health and Health Connect.
  * A future reading must never appear while the user is viewing an earlier day.
  */
@@ -62,10 +80,10 @@ internal fun latestWeightKg(
     healthConnect: List<AppleDaily>,
     throughDay: String,
 ): Double? =
-    (apple + healthConnect)
-        .filter { it.day <= throughDay && it.weightKg != null }
-        .maxByOrNull { it.day }
-        ?.weightKg
+    resolvedWeightKgByDay(apple, healthConnect)
+        .filterKeys { it <= throughDay }
+        .maxByOrNull { it.key }
+        ?.value
 
 /**
  * Steps for [dayKey] from the imported Apple Health / Health Connect daily aggregates, or null when

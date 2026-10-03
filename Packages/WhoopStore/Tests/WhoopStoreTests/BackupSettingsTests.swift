@@ -219,15 +219,19 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertNil(back["hydrationReminders.intervalMinutes"])
     }
 
-    func testKeyMetricSelectionIsDeduplicatedFilteredAndCappedAtFive() throws {
+    func testKeyMetricSelectionKeepsEveryValidUniqueMetric() throws {
         let data = try XCTUnwrap(BackupSettings.encode([
             "today.keyMetrics":
-                "charge,charge,removedMetric,hrv,restingHr,bloodOxygen,respiratory,steps",
+                "charge,charge,removedMetric,hrv,restingHr,bloodOxygen,respiratory,steps,"
+                    + "averageHr,maxHr,vo2Max,skinTemp,asleepTime,weight,calories,hydration,"
+                    + "stress,vitality,menstrualCycle",
         ]))
         let back = BackupSettings.decode(data)
         XCTAssertEqual(
             back["today.keyMetrics"] as? String,
-            "charge,hrv,restingHr,bloodOxygen,respiratory"
+            "charge,hrv,restingHr,bloodOxygen,respiratory,steps,averageHr,maxHr,"
+                + "vo2Max,skinTemp,asleepTime,weight,calories,hydration,stress,vitality,"
+                + "menstrualCycle"
         )
 
         let invalid = Data(#"{"today.keyMetrics":"removedMetric,unknown"}"#.utf8)

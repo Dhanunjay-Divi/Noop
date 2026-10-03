@@ -4,8 +4,8 @@ import SwiftUI
 // MARK: - Editable Key-Metrics layout (#251)
 //
 // The Today screen's "Key Metrics" grid has a curated catalog of Today-ready tiles. This lets the user
-// pin three to six in
-// their preferred order. A fresh install starts with six useful secondary signals so the grid is complete
+// pin any supported metrics in their preferred order. A fresh install starts with six useful secondary
+// signals so the grid is complete
 // without repeating the Recovery, Sleep, and Effort summary immediately above it. Every other metric
 // remains in the complete catalog. Persistence is display-only: no metric is computed or stored differently.
 //
@@ -35,6 +35,7 @@ enum KeyMetric: String, CaseIterable, Identifiable {
     case vitality
     case skinTemp
     case hydration
+    case menstrualCycle
 
     var id: String { rawValue }
 
@@ -106,7 +107,8 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         case .calories:
             return .sourceDependent
         case .hrv, .restingHr, .averageHr, .maxHr, .bloodOxygen, .respiratory,
-             .asleepTime, .steps, .weight, .vo2Max, .skinTemp, .hydration:
+             .asleepTime, .steps, .weight, .vo2Max, .skinTemp, .hydration,
+             .menstrualCycle:
             return .measuredImported
         }
     }
@@ -122,7 +124,7 @@ enum KeyMetric: String, CaseIterable, Identifiable {
             return .sleep
         case .steps, .weight, .calories, .hydration:
             return .activity
-        case .stress, .vitality:
+        case .stress, .vitality, .menstrualCycle:
             return .wellbeing
         }
     }
@@ -137,7 +139,7 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         case .charge, .effort, .rest, .hydration: return true
         case .hrv, .restingHr, .averageHr, .maxHr, .bloodOxygen, .respiratory,
              .asleepTime, .steps, .weight, .calories, .vo2Max, .stress, .vitality,
-             .skinTemp:
+             .skinTemp, .menstrualCycle:
             return false
         }
     }
@@ -163,6 +165,8 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         case .vitality:    return String(localized: "Vitality")
         case .skinTemp:    return String(localized: "Skin Temp")
         case .hydration:   return String(localized: "Hydration")
+        case .menstrualCycle:
+            return String(localized: "appwide.cycle.profile.title")
         }
     }
 
@@ -188,6 +192,8 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         case .vitality:    return "sparkles"
         case .skinTemp:    return "thermometer.medium"
         case .hydration:   return "waterbottle.fill"
+        case .menstrualCycle:
+            return "drop.degreesign"
         }
     }
 
@@ -197,7 +203,7 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         .hrv, .restingHr, .averageHr, .maxHr, .bloodOxygen, .respiratory, .vo2Max,
         .skinTemp, .asleepTime,
         .steps, .calories, .weight, .hydration,
-        .stress, .vitality,
+        .stress, .vitality, .menstrualCycle,
     ]
 
     /// NOOP's useful fresh-install starting point. These complement the three Daily Signal scores instead
@@ -213,17 +219,16 @@ enum KeyMetricPrefs {
     /// UserDefaults key — a comma-joined list of `KeyMetric` rawValues in display order.
     static let layoutKey = "today.keyMetrics"
     static let minimumSelectionCount = 3
-    static let maximumSelectionCount = 6
+    static var maximumSelectionCount: Int { KeyMetric.allCases.count }
 
     /// Encode a valid ordered pin set. This boundary also protects callers other than the editor from
-    /// persisting duplicates, an empty dashboard, or more tiles than the Today surface supports.
+    /// persisting duplicates or an empty dashboard.
     static func encode(_ metrics: [KeyMetric]) -> String {
         normalized(metrics).map(\.rawValue).joined(separator: ",")
     }
 
     /// Decode the stored string into an ordered pin set. Empty, unset, or all-unknown data yields the
-    /// six fresh-install defaults. Older app versions allowed more than six; preserving their first
-    /// six makes that migration deterministic and keeps the user's strongest ordering signal.
+    /// six fresh-install defaults. Every known unique metric survives in the user's saved order.
     static func decodeEnabled(_ raw: String) -> [KeyMetric] {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return KeyMetric.defaultSelection }
@@ -233,7 +238,6 @@ enum KeyMetricPrefs {
             let rawValue = String(token).trimmingCharacters(in: .whitespaces)
             if let m = KeyMetric(rawValue: rawValue), seen.insert(m).inserted {
                 result.append(m)
-                if result.count == maximumSelectionCount { break }
             }
         }
         return normalized(result)
@@ -244,8 +248,7 @@ enum KeyMetricPrefs {
     /// intentional compact layout remains compact.
     static func normalized(_ metrics: [KeyMetric]) -> [KeyMetric] {
         var seen = Set<KeyMetric>()
-        var selected = Array(metrics.filter { seen.insert($0).inserted }
-            .prefix(maximumSelectionCount))
+        var selected = metrics.filter { seen.insert($0).inserted }
         if selected.isEmpty {
             return KeyMetric.defaultSelection
         }
@@ -257,7 +260,7 @@ enum KeyMetricPrefs {
     }
 
     /// The full dashboard catalog with the user's pinned metrics first. Resolving this display order never
-    /// changes or expands the saved three-to-six pin set.
+    /// changes or expands the saved pin set.
     static func catalogOrder(startingWith metrics: [KeyMetric]) -> [KeyMetric] {
         let selected = normalized(metrics)
         let selectedSet = Set(selected)

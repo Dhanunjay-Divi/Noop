@@ -54,7 +54,7 @@ class PrimaryNavigationContractTest {
         assertEquals(
             BottomBarLabelLayout(
                 maxLines = 1,
-                barHeightDp = 56,
+                barHeightDp = 50,
                 labelScaleMultiplier = 1f,
             ),
             bottomBarLabelLayout(
@@ -102,7 +102,7 @@ class PrimaryNavigationContractTest {
             )
             val widestWidth = widths.values.max().toFloat()
             assertEquals(1, layout.maxLines)
-            assertEquals(56, layout.barHeightDp)
+            assertEquals(50, layout.barHeightDp)
             assertEquals(
                 1f * (54.8f / widestWidth) * 0.98f,
                 layout.labelScaleMultiplier,
@@ -128,7 +128,7 @@ class PrimaryNavigationContractTest {
             },
         )
         assertEquals(1, accessibilityText.maxLines)
-        assertEquals(56, accessibilityText.barHeightDp)
+        assertEquals(50, accessibilityText.barHeightDp)
         assertTrue(
             accessibilityText.labelScaleMultiplier * 3f <=
                 BottomBarLabelFontScaleCap,
@@ -150,7 +150,7 @@ class PrimaryNavigationContractTest {
             },
         )
         assertEquals(1, unusuallyLongLabels.maxLines)
-        assertEquals(56, unusuallyLongLabels.barHeightDp)
+        assertEquals(50, unusuallyLongLabels.barHeightDp)
         assertTrue(unusuallyLongLabels.labelScaleMultiplier < 1f)
         assertEquals(
             BottomBarLabelEffectiveScaleFloor,
@@ -187,12 +187,12 @@ class PrimaryNavigationContractTest {
             .substringAfter("private fun GlassBottomBar(")
             .substringBefore("\ninternal enum class NoopCommandLensEdge")
         assertTrue(bottomBar.contains(".selectableGroup()"))
-        assertTrue(bottomBar.contains("val barHeight = labelLayout.barHeightDp.dp + Metrics.space12"))
+        assertTrue(bottomBar.contains("val barHeight = labelLayout.barHeightDp.dp + Metrics.space8"))
         assertTrue(bottomBar.contains(
             "labelScaleMultiplier = labelLayout.labelScaleMultiplier",
         ))
         assertFalse(bottomBar.contains("showVisualLabel"))
-        assertTrue(text.contains("BottomBarSingleLineHeightDp = 56"))
+        assertTrue(text.contains("BottomBarSingleLineHeightDp = 50"))
         assertFalse(text.contains("BottomBarTwoLineHeightDp"))
         assertTrue(text.contains("CompactBottomBarWidthDp = 360"))
         assertTrue(bottomBar.contains(
@@ -203,13 +203,12 @@ class PrimaryNavigationContractTest {
         assertTrue(bottomBar.contains("preferredPadding = Metrics.space24.value"))
         assertTrue(bottomBar.contains("MeniscusNavigationRail("))
         assertTrue(bottomBar.contains("MeniscusNavigationBead("))
-        assertTrue(bottomBar.contains(
-            "val compactBeadDiameter = Metrics.navigationLensSize - Metrics.space8"
-        ))
+        assertTrue(bottomBar.contains("val compactBeadDiameter = 34.dp"))
+        assertTrue(bottomBar.contains("val beadCanvasSize = 42.dp"))
         assertTrue(bottomBar.contains("selectedCenter = animatedLensCenter"))
         assertTrue(bottomBar.contains("beadDiameter = compactBeadDiameter"))
         assertTrue(bottomBar.contains("animationSpec = if (reduceMotion) snap() else NoopMotion.card()"))
-        assertTrue(bottomBar.contains("val railCornerRadius = Metrics.cornerPill"))
+        assertTrue(bottomBar.contains("val railCornerRadius = 18.dp"))
         assertTrue(bottomBar.contains("var scrubPreviewIndex by remember"))
         assertTrue(bottomBar.contains("detectHorizontalDragGestures("))
         assertTrue(bottomBar.contains("bottomBarNearestTabIndex("))
@@ -427,8 +426,8 @@ class PrimaryNavigationContractTest {
         assertTrue(lens.contains("CustomAccessibilityAction(moveUpLabel)"))
         assertTrue(lens.contains("CustomAccessibilityAction(moveDownLabel)"))
         assertTrue(lens.contains("NoopCommandLensBubbleShape(edge)"))
-        assertTrue(lens.contains("Metrics.navigationLensSize - Metrics.space12"))
-        assertTrue(lens.contains("Metrics.navigationLensSize - Metrics.space8"))
+        assertTrue(lens.contains("val bubbleWidth = 30.dp"))
+        assertTrue(lens.contains("val bubbleHeight = 34.dp"))
         assertTrue(lens.contains(".size(width = bubbleWidth, height = bubbleHeight)"))
         assertTrue(lens.contains("val bubbleEdgePull = (touchWidth - bubbleWidth) / 2"))
         assertTrue(lens.contains("NoopCommandLensBubbleHighlight(edge)"))
@@ -440,7 +439,7 @@ class PrimaryNavigationContractTest {
     }
 
     @Test
-    fun commandLensBubbleKeepsANarrowEdgeNeckAndMirroredBody() {
+    fun commandLensBubbleKeepsAFlatEdgeDockAndMirroredBody() {
         val left = noopCommandLensBubbleGeometry(
             widthPx = 32f,
             heightPx = 36f,
@@ -467,8 +466,11 @@ class PrimaryNavigationContractTest {
         assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
         val text = source!!
         assertTrue(text.contains("Outline.Generic(noopCommandLensBubblePath(size, edge))"))
-        assertTrue(text.contains("x(0.98f)"))
-        assertTrue(text.contains("size.height * 0.97f"))
+        assertTrue(text.contains("moveTo(geometry.edgeX, geometry.neckTopY)"))
+        assertTrue(text.contains("geometry.outerX"))
+        assertTrue(text.contains("geometry.bodyTopY"))
+        assertTrue(text.contains("geometry.bodyBottomY"))
+        assertTrue(text.contains("geometry.neckBottomY"))
         assertTrue(text.contains("Palette.navigationLensHighlight.copy("))
         assertTrue(text.contains("bottomClearancePx ="))
         assertTrue(text.contains("WindowInsets.navigationBars.getBottom(density)"))

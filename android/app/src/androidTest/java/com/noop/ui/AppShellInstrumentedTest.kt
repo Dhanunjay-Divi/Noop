@@ -14,6 +14,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -59,6 +60,8 @@ class AppShellInstrumentedTest {
     private var originalRequiredAccountVersion = 0
     private var changelogWasPresent = false
     private var originalLastSeenChangelog: String? = null
+    private var keyMetricsWasPresent = false
+    private var originalKeyMetrics: String? = null
 
     @Before
     fun launchAcceptedApp() {
@@ -108,7 +111,9 @@ class AppShellInstrumentedTest {
         changelogWasPresent = prefs.contains(NoopPrefs.KEY_LAST_SEEN_CHANGELOG)
         originalLastSeenChangelog =
             prefs.getString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, null)
-        prefs.edit()
+        keyMetricsWasPresent = prefs.contains(KeyMetricPrefs.KEY_LAYOUT)
+        originalKeyMetrics = prefs.getString(KeyMetricPrefs.KEY_LAYOUT, null)
+        val editor = prefs.edit()
             .putString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, Terms.CURRENT_VERSION)
             .putBoolean(NoopPrefs.KEY_ONBOARDED, true)
             .putInt(
@@ -116,7 +121,13 @@ class AppShellInstrumentedTest {
                 REQUIRED_ACCOUNT_ONBOARDING_VERSION,
             )
             .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
-            .commit()
+        if (testName.methodName == "todaySupportsMoreThanSixPinnedMetricsAndKeepsFullCatalogAvailable") {
+            editor.putString(
+                KeyMetricPrefs.KEY_LAYOUT,
+                "charge,effort,rest,hrv,restingHr,bloodOxygen,respiratory,steps",
+            )
+        }
+        editor.commit()
         scenario = ActivityScenario.launch(MainActivity::class.java)
         compose.waitUntil(timeoutMillis = 20_000) {
             runCatching {
@@ -217,6 +228,38 @@ class AppShellInstrumentedTest {
                 .isEmpty()
         }
         compose.onNodeWithTag("noop.today.list").assertIsDisplayed()
+    }
+
+    @Test
+    fun todaySupportsMoreThanSixPinnedMetricsAndKeepsFullCatalogAvailable() {
+        val selectedMetrics = listOf(
+            "charge",
+            "effort",
+            "rest",
+            "hrv",
+            "restingHr",
+            "bloodOxygen",
+            "respiratory",
+            "steps",
+        )
+        selectedMetrics.forEach { raw ->
+            compose.onNodeWithTag("noop.today.metric.$raw")
+                .performScrollTo()
+                .assertIsDisplayed()
+        }
+
+        compose.onNodeWithContentDescription("Edit Key Metrics")
+            .performScrollTo()
+            .performClick()
+        compose.onNodeWithText("8 selected").assertIsDisplayed()
+        selectedMetrics.forEach { raw ->
+            compose.onNodeWithTag("noop.today.metricEditor.selected.$raw")
+                .performScrollTo()
+                .assertIsDisplayed()
+        }
+        compose.onNodeWithTag("noop.today.metricEditor.available.vitality")
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test
@@ -402,6 +445,11 @@ class AppShellInstrumentedTest {
             )
         } else {
             editor.remove(NoopPrefs.KEY_LAST_SEEN_CHANGELOG)
+        }
+        if (keyMetricsWasPresent) {
+            editor.putString(KeyMetricPrefs.KEY_LAYOUT, originalKeyMetrics)
+        } else {
+            editor.remove(KeyMetricPrefs.KEY_LAYOUT)
         }
         editor.commit()
     }

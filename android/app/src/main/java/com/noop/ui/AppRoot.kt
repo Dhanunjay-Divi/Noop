@@ -134,8 +134,10 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -1499,7 +1501,7 @@ internal data class BottomBarLabelLayout(
 
 internal const val BottomBarLabelFontScaleCap = 1.30f
 internal const val BottomBarLabelEffectiveScaleFloor = 0.68f
-private const val BottomBarSingleLineHeightDp = 56
+private const val BottomBarSingleLineHeightDp = 50
 private const val CompactBottomBarWidthDp = 360
 
 internal fun bottomBarContentPadding(
@@ -1831,7 +1833,7 @@ private fun GlassBottomBar(
                 .fillMaxWidth()
                 .widthIn(max = 500.dp)
                 .padding(horizontal = outerHorizontalPadding)
-                .padding(top = 4.dp, bottom = 8.dp),
+                .padding(top = 2.dp, bottom = 6.dp),
         ) {
             val barContentPadding = bottomBarContentPadding(
                 availableWidth = maxWidth.value,
@@ -1848,10 +1850,10 @@ private fun GlassBottomBar(
                 labelHorizontalSafetyPadding =
                     Metrics.navigationLensLabelHorizontalPadding,
             )
-            val barHeight = labelLayout.barHeightDp.dp + Metrics.space12
-            val compactBeadDiameter = Metrics.navigationLensSize - Metrics.space8
-            val beadCanvasSize = Metrics.navigationLensSize
-            val railCornerRadius = Metrics.cornerPill
+            val barHeight = labelLayout.barHeightDp.dp + Metrics.space8
+            val compactBeadDiameter = 34.dp
+            val beadCanvasSize = 42.dp
+            val railCornerRadius = 18.dp
             val selectedIndex = bottomBarTabs
                 .indexOfFirst { it.dest == selected }
                 .coerceAtLeast(0)
@@ -1989,41 +1991,41 @@ private fun MeniscusNavigationRail(
         val body = Brush.verticalGradient(
             colorStops = arrayOf(
                 0f to Palette.navigationLensHighlight.copy(
-                    alpha = if (light) 0.46f else 0.12f,
+                    alpha = if (light) 0.28f else 0.07f,
                 ),
                 0.24f to Palette.surfaceRaised.copy(
-                    alpha = if (light) 0.90f else 0.84f,
+                    alpha = if (light) 0.78f else 0.66f,
                 ),
                 1f to Palette.surfaceInset.copy(
-                    alpha = if (light) 0.96f else 0.92f,
+                    alpha = if (light) 0.84f else 0.74f,
                 ),
             ),
         )
         val glint = Brush.linearGradient(
             colors = listOf(
                 Palette.navigationLensHighlight.copy(
-                    alpha = if (light) 0.20f else 0.045f,
+                    alpha = if (light) 0.14f else 0.03f,
                 ),
                 Color.Transparent,
-                Palette.surfaceBase.copy(alpha = if (light) 0.03f else 0.18f),
+                Palette.surfaceBase.copy(alpha = if (light) 0.02f else 0.10f),
             ),
             start = Offset.Zero,
             end = Offset(size.width, size.height),
         )
         drawPath(
             path = surfacePath,
-            color = Palette.surfaceBase.copy(alpha = if (light) 0.10f else 0.46f),
+            color = Palette.surfaceBase.copy(alpha = if (light) 0.06f else 0.28f),
         )
         drawPath(path = surfacePath, brush = body)
         drawPath(path = surfacePath, brush = glint)
         drawPath(
             path = surfacePath,
-            color = Palette.hairlineStrong.copy(alpha = if (light) 0.64f else 0.74f),
+            color = Palette.hairlineStrong.copy(alpha = if (light) 0.48f else 0.54f),
             style = Stroke(width = Metrics.navigationLensStrokeWidth.toPx()),
         )
         drawPath(
             path = contourPath,
-            color = accent.copy(alpha = if (light) 0.08f else 0.11f),
+            color = accent.copy(alpha = if (light) 0.05f else 0.07f),
             style = Stroke(
                 width = Metrics.space6.toPx(),
                 cap = StrokeCap.Round,
@@ -2031,7 +2033,7 @@ private fun MeniscusNavigationRail(
         )
         drawPath(
             path = contourPath,
-            color = accent.copy(alpha = if (light) 0.34f else 0.44f),
+            color = accent.copy(alpha = if (light) 0.24f else 0.30f),
             style = Stroke(
                 width = Metrics.navigationLensHighlightWidth.toPx(),
                 cap = StrokeCap.Round,
@@ -2257,50 +2259,34 @@ private fun noopCommandLensBubblePath(
     return Path().apply {
         moveTo(geometry.edgeX, geometry.neckTopY)
         cubicTo(
-            x(0.06f),
-            size.height * 0.34f,
-            x(0.16f),
-            size.height * 0.22f,
-            x(0.27f),
-            size.height * 0.18f,
-        )
-        cubicTo(
-            x(0.42f),
-            size.height * 0.03f,
-            x(0.66f),
-            size.height * 0.03f,
-            x(0.80f),
+            x(0.18f),
+            geometry.bodyTopY,
+            x(0.58f),
+            geometry.bodyTopY,
+            x(0.72f),
             geometry.bodyTopY,
         )
         cubicTo(
             x(0.93f),
-            size.height * 0.20f,
-            x(0.98f),
-            size.height * 0.34f,
-            x(0.98f),
+            geometry.bodyTopY,
+            geometry.outerX,
+            size.height * 0.32f,
+            geometry.outerX,
             size.height * 0.50f,
         )
         cubicTo(
-            x(0.98f),
-            size.height * 0.66f,
+            geometry.outerX,
+            size.height * 0.68f,
             x(0.93f),
-            size.height * 0.80f,
-            x(0.80f),
+            geometry.bodyBottomY,
+            x(0.72f),
             geometry.bodyBottomY,
         )
         cubicTo(
-            x(0.66f),
-            size.height * 0.97f,
-            x(0.42f),
-            size.height * 0.97f,
-            x(0.27f),
-            size.height * 0.82f,
-        )
-        cubicTo(
-            x(0.16f),
-            size.height * 0.78f,
-            x(0.06f),
-            size.height * 0.66f,
+            x(0.58f),
+            geometry.bodyBottomY,
+            x(0.18f),
+            geometry.bodyBottomY,
             geometry.edgeX,
             geometry.neckBottomY,
         )
@@ -2373,8 +2359,8 @@ private fun MovableNoopCommandLens(
         val density = LocalDensity.current
         val touchWidth = 48.dp
         val touchHeight = 52.dp
-        val bubbleWidth = Metrics.navigationLensSize - Metrics.space12
-        val bubbleHeight = Metrics.navigationLensSize - Metrics.space8
+        val bubbleWidth = 30.dp
+        val bubbleHeight = 34.dp
         val bubbleEdgePull = (touchWidth - bubbleWidth) / 2
         val touchWidthPx = with(density) { touchWidth.roundToPx() }
         val touchHeightPx = with(density) { touchHeight.roundToPx() }
@@ -2404,12 +2390,7 @@ private fun MovableNoopCommandLens(
             topInsetPx = topInsetPx,
             bottomClearancePx = bottomClearancePx,
         )
-        val lensShape = RoundedCornerShape(
-            topStart = if (edge == NoopCommandLensEdge.START) 7.dp else 16.dp,
-            bottomStart = if (edge == NoopCommandLensEdge.START) 7.dp else 16.dp,
-            topEnd = if (edge == NoopCommandLensEdge.END) 7.dp else 16.dp,
-            bottomEnd = if (edge == NoopCommandLensEdge.END) 7.dp else 16.dp,
-        )
+        val lensShape = NoopCommandLensBubbleShape(edge)
 
         Box(
             modifier = Modifier
@@ -2491,63 +2472,91 @@ private fun MovableNoopCommandLens(
         ) {
             Box(
                 modifier = Modifier
-                    .width(18.dp)
-                    .height(38.dp)
+                    .size(width = bubbleWidth, height = bubbleHeight)
                     .offset(
-                        x = if (edge == NoopCommandLensEdge.START) (-18).dp else 18.dp,
+                        x = if (edge == NoopCommandLensEdge.START) {
+                            -bubbleEdgePull
+                        } else {
+                            bubbleEdgePull
+                        },
                     )
                     .navigationGlassSurface(
                         shape = lensShape,
-                        accentRim = Palette.metricCyan.copy(alpha = 0.30f),
+                        accentRim = Palette.metricCyan.copy(alpha = 0.20f),
                     )
                     .border(
-                        width = 0.75.dp,
+                        width = 0.7.dp,
                         brush = Brush.verticalGradient(
                             listOf(
-                                Color.White.copy(alpha = if (Palette.isLight) 0.52f else 0.24f),
-                                Palette.metricCyan.copy(alpha = 0.58f),
-                                Palette.chargeColor.copy(alpha = 0.34f),
+                                Palette.navigationLensHighlight.copy(
+                                    alpha = if (Palette.isLight) 0.34f else 0.16f,
+                                ),
+                                Palette.metricCyan.copy(alpha = 0.42f),
+                                Palette.chargeColor.copy(alpha = 0.22f),
                             ),
                         ),
                         shape = lensShape,
-                    ),
+                ),
                 contentAlignment = Alignment.Center,
             ) {
+                NoopCommandLensBubbleHighlight(edge)
                 Box(
                     modifier = Modifier.offset(
-                        x = if (edge == NoopCommandLensEdge.START) 1.dp else (-1).dp,
+                        x = if (edge == NoopCommandLensEdge.START) {
+                            Metrics.space2
+                        } else {
+                            -Metrics.space2
+                        },
                     ),
                     contentAlignment = Alignment.Center,
                 ) {
                     NoopCommandNMark()
                 }
-                Box(
-                    modifier = Modifier
-                        .align(
-                            if (edge == NoopCommandLensEdge.START) {
-                                Alignment.CenterStart
-                            } else {
-                                Alignment.CenterEnd
-                            },
-                        )
-                        .padding(
-                            start = if (edge == NoopCommandLensEdge.START) 3.dp else 0.dp,
-                            end = if (edge == NoopCommandLensEdge.END) 3.dp else 0.dp,
-                        )
-                        .width(1.5.dp)
-                        .height(12.dp)
-                        .clip(CircleShape)
-                        .background(Palette.textSecondary.copy(alpha = 0.56f)),
-                )
             }
         }
     }
 }
 
 @Composable
+private fun NoopCommandLensBubbleHighlight(edge: NoopCommandLensEdge) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        fun x(startFraction: Float): Float = if (edge == NoopCommandLensEdge.START) {
+            size.width * startFraction
+        } else {
+            size.width * (1f - startFraction)
+        }
+        val path = Path().apply {
+            moveTo(x(0.54f), size.height * 0.22f)
+            cubicTo(
+                x(0.72f),
+                size.height * 0.18f,
+                x(0.84f),
+                size.height * 0.25f,
+                x(0.86f),
+                size.height * 0.34f,
+            )
+        }
+        drawPath(
+            path = path,
+            color = Palette.navigationLensHighlight.copy(
+                alpha = if (Palette.isLight) {
+                    Metrics.navigationLensHighlightLightAlpha
+                } else {
+                    Metrics.navigationLensHighlightDarkAlpha
+                },
+            ),
+            style = Stroke(
+                width = Metrics.navigationLensHighlightWidth.toPx(),
+                cap = StrokeCap.Round,
+            ),
+        )
+    }
+}
+
+@Composable
 private fun NoopCommandNMark() {
-    Canvas(modifier = Modifier.size(14.dp)) {
-        val strokeWidth = 2.5.dp.toPx()
+    Canvas(modifier = Modifier.size(12.dp)) {
+        val strokeWidth = 2.2.dp.toPx()
         val inset = maxOf(2.2.dp.toPx(), size.width * 0.18f)
         val left = inset
         val right = size.width - inset
@@ -2723,8 +2732,8 @@ private fun BarSlot(
     ) {
         Box(
             modifier = Modifier
-                .width(Metrics.navigationLensSize)
-                .height(Metrics.navigationLensSize - Metrics.space2),
+                .padding(top = Metrics.space2)
+                .size(34.dp),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

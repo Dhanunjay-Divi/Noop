@@ -45,6 +45,81 @@ class TodayMetricTilesTest {
         )
     }
 
+    @Test
+    fun everyMetricCardUsesTheSameIconThenLabelHeader() {
+        val source = todayScreenSource()
+        val tile = source
+            .substringAfter("private fun LiquidKeyTile(")
+            .substringBefore("// Workouts across every recorded")
+        val header = tile.substringBefore("if (largeText) {")
+
+        assertTrue(header.contains("MetricGlyph(icon = icon, size = 24.dp)"))
+        assertTrue(header.contains("if (showsTrend) {"))
+        assertTrue(header.contains("data.label.uppercase()"))
+        assertFalse(header.contains("} else {\n            Row("))
+        assertFalse(source.contains(".padding(horizontal = Metrics.space2)\n            .padding(top = Metrics.space4)"))
+    }
+
+    @Test
+    fun everyMetricCardUsesOneNeutralVisibleTrendBadge() {
+        val source = todayScreenSource()
+        val tile = source
+            .substringAfter("private fun LiquidKeyTile(")
+            .substringBefore("// Workouts across every recorded")
+
+        assertTrue(tile.contains("Icons.AutoMirrored.Filled.ShowChart"))
+        assertFalse(tile.contains("imageVector = direction.icon"))
+        assertTrue(tile.contains("contentDescription = directionDescription"))
+    }
+
+    @Test
+    fun defaultSignalsUseTheSharedCrossPlatformPalette() {
+        val source = todayScreenSource()
+
+        assertTrue(source.contains("KeyMetric.RESPIRATORY to run {"))
+        assertTrue(source.contains("tint = Palette.metricPurple"))
+        assertTrue(source.contains("tint = Palette.statusPositive"))
+        assertTrue(source.contains("tint = Palette.metricAmber"))
+    }
+
+    @Test
+    fun measuredWeightHistoryFeedsTheWeightCardSparkline() {
+        val source = todayScreenSource()
+
+        assertTrue(source.contains("var importedWeightByDay by remember"))
+        assertTrue(source.contains("val weightSpark = remember("))
+        assertTrue(source.contains("weightSpark = weightSpark"))
+        assertTrue(source.contains("spark = weightSpark"))
+    }
+
+    @Test
+    fun dailySignalUsesPerMetricStatusWashesWithoutJudgingEffort() {
+        val source = todayScreenSource()
+        val hero = source
+            .substringAfter("private fun ScoreHeroRow(")
+            .substringBefore("internal enum class CompactDailyMetricStatus")
+
+        assertTrue(hero.contains("washTint = when {"))
+        assertTrue(hero.contains("recovery < 34.0 -> DAILY_SIGNAL_ALERT_TINT"))
+        assertTrue(hero.contains("restScore < 80.0 -> Palette.statusWarning"))
+        assertTrue(hero.contains("washTint = Palette.metricCyan"))
+        val cell = source
+            .substringAfter("private fun CompactHeroMetric(")
+            .substringBefore("private fun DailySignalStateRow(")
+        assertTrue(cell.contains("Brush.horizontalGradient("))
+    }
+
+    @Test
+    fun skinTemperatureAndMeasuredWeightUseSparseRealHistory() {
+        val source = todayScreenSource()
+
+        assertTrue(source.contains("val trendWindowStart = selectedDay"))
+        assertTrue(source.contains("spark = weightSpark"))
+        assertTrue(source.contains("val skinTemp: List<Double>"))
+        assertTrue(source.contains("skinTemp = series { it.skinTempDevC }"))
+        assertTrue(source.contains("spark = w.skinTemp"))
+    }
+
     // MARK: latestWeightKg
 
     @Test
@@ -77,6 +152,20 @@ class TodayMetricTilesTest {
             AppleDaily(deviceId = "health-connect", day = "2026-01-06", weightKg = 77.0),
         )
         assertEquals(77.0, latestWeightKg(apple, healthConnect, "2026-01-06")!!, 1e-9)
+    }
+
+    @Test
+    fun latestWeight_andSparklineUseAppleForSameDaySourceTies() {
+        val apple = listOf(appleDay("2026-01-06", 78.0))
+        val healthConnect = listOf(
+            AppleDaily(deviceId = "health-connect", day = "2026-01-06", weightKg = 79.0),
+        )
+
+        assertEquals(78.0, latestWeightKg(apple, healthConnect, "2026-01-06")!!, 1e-9)
+        assertEquals(
+            mapOf("2026-01-06" to 78.0),
+            resolvedWeightKgByDay(apple, healthConnect),
+        )
     }
 
     @Test

@@ -238,20 +238,17 @@ object BackupSettingsCodec {
     private fun allowedString(value: Any, allowed: Set<String>): String? =
         (value as? String)?.takeIf(allowed::contains)
 
-    /**
-     * Keep the portable dashboard preference inside the app's one-to-five pin contract. Older backups
-     * may contain all ten metrics; their first five valid unique ids survive in saved order.
-     */
+    /** Keep every valid unique Today metric in portable dashboard order. */
     private fun normalizedKeyMetricSelection(raw: String): String? {
         val allowed = setOf(
-            "charge", "effort", "rest", "hrv", "restingHr",
-            "bloodOxygen", "respiratory", "steps", "weight", "calories",
+            "charge", "effort", "rest", "hrv", "restingHr", "averageHr", "maxHr",
+            "bloodOxygen", "respiratory", "vo2Max", "skinTemp", "asleepTime", "steps",
+            "calories", "weight", "hydration", "stress", "vitality", "menstrualCycle",
         )
         return raw.split(",").asSequence()
             .map(String::trim)
             .filter(allowed::contains)
             .distinct()
-            .take(5)
             .toList()
             .takeIf { it.isNotEmpty() }
             ?.joinToString(",")

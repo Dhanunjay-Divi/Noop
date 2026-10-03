@@ -1704,8 +1704,8 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Kalorien</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Wähle, welche Kacheln in deinem Kontrollzentrum erscheinen, und ordne sie mit den Pfeilen neu.</string>
-    <string name="key_metrics_selection_instructions">Pinne 3 bis 6 Messwerte oben an. Alle Messwerte bleiben sichtbar.</string>
-    <string name="key_metrics_selection_count">%1$d von %2$d angepinnt</string>
+    <string name="key_metrics_selection_instructions">Wähle beliebige Messwerte für Heute aus. Alle unterstützten Messwerte bleiben verfügbar.</string>
+    <string name="key_metrics_selection_count">%1$d ausgewählt</string>
     <string name="key_metrics_show_selected">Ausgewählte Messwerte anzeigen</string>
     <string name="key_metrics_show_all_count">Alle Messwerte anzeigen (%1$d)</string>
     <string name="key_metrics_open_history">Gesamten Messwertverlauf öffnen</string>

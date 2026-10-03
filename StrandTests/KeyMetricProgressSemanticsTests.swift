@@ -10,7 +10,7 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
     func testRawVitalsAndAssumedGoalsNeverLookLikeCompletion() {
         for metric in [KeyMetric.hrv, .restingHr, .bloodOxygen, .respiratory,
                        .averageHr, .maxHr, .asleepTime, .vo2Max, .steps, .weight,
-                       .calories, .stress, .vitality, .skinTemp] {
+                       .calories, .stress, .vitality, .skinTemp, .menstrualCycle] {
             XCTAssertFalse(metric.isBoundedProgress, "\(metric.rawValue) is not a fixed progress scale")
         }
     }
@@ -33,7 +33,7 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
         XCTAssertTrue(keyMetrics.contains("plus.circle.fill"))
         XCTAssertTrue(keyMetrics.contains("KeyMetric.Origin.allCases"))
         XCTAssertTrue(keyMetrics.contains("selected.count <= KeyMetricPrefs.minimumSelectionCount"))
-        XCTAssertTrue(keyMetrics.contains("selected.count >= KeyMetricPrefs.maximumSelectionCount"))
+        XCTAssertFalse(keyMetrics.contains("Six metrics are already selected."))
         XCTAssertTrue(keyMetrics.contains(".foregroundStyle(Color.black)"))
         XCTAssertTrue(keyMetrics.contains(
             #".accessibilityIdentifier("noop.key-metric.add.\(metric.rawValue)")"#
@@ -42,6 +42,55 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
         XCTAssertTrue(dashboard.contains(
             "enabled ? StrandPalette.statusPositive : StrandPalette.textTertiary"
         ))
+    }
+
+    func testTodayMetricCardsKeepOneStableHeaderGeometry() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let today = try String(
+            contentsOf: root.appendingPathComponent("Strand/Liquid/LiquidTodayView.swift"),
+            encoding: .utf8
+        )
+        let header = today
+            .components(separatedBy: "private func keyMetricTileHeader")
+            .dropFirst()
+            .first?
+            .components(separatedBy: "enum KeyMetricTrendDirection")
+            .first ?? ""
+        let sectionHeader = today
+            .components(separatedBy: "private func sectionHead")
+            .dropFirst()
+            .first?
+            .components(separatedBy: "private func card")
+            .first ?? ""
+
+        XCTAssertTrue(header.contains("VStack(alignment: .leading"))
+        XCTAssertTrue(header.contains("MetricGlyph(symbol, size: 24)"))
+        XCTAssertTrue(header.contains("if let trend, trend.count > 1"))
+        XCTAssertTrue(header.contains("Text(label.uppercased())"))
+        XCTAssertFalse(header.contains("} else {"))
+        XCTAssertFalse(sectionHeader.contains(".padding(.horizontal, 2)"))
+    }
+
+    func testTodayMetricCardsUseOneNeutralVisibleTrendBadge() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let today = try String(
+            contentsOf: root.appendingPathComponent("Strand/Liquid/LiquidTodayView.swift"),
+            encoding: .utf8
+        )
+        let badge = today
+            .components(separatedBy: "private func trendDirectionBadge")
+            .dropFirst()
+            .first?
+            .components(separatedBy: "/// Builds every compact tile trace")
+            .first ?? ""
+
+        XCTAssertTrue(badge.contains(#"Image(systemName: "chart.xyaxis.line")"#))
+        XCTAssertFalse(badge.contains("direction.symbol"))
+        XCTAssertTrue(badge.contains(".accessibilityValue(direction.spokenValue)"))
     }
 
     func testEditorCopyIsLocalizedAcrossEverySupportedLocale() throws {
@@ -65,9 +114,8 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
         )
         let requiredKeys = [
             "Choose your snapshot",
-            "Show 3 to 6 metrics on Today. Every other supported metric stays available here and in history.",
-            "%lld/%lld",
-            "%lld of %lld selected",
+            "%lld selected",
+            "%lld metrics selected",
             "Clear metric search",
             "All supported metrics are selected.",
             "No metrics match this search.",
@@ -101,17 +149,18 @@ final class KeyMetricPrefsTests: XCTestCase {
         )
     }
 
-    func testSelectionContractMatchesProductLimit() {
+    func testSelectionContractMatchesTheCompleteCatalog() {
         XCTAssertEqual(KeyMetricPrefs.minimumSelectionCount, 3)
-        XCTAssertEqual(KeyMetricPrefs.maximumSelectionCount, 6)
+        XCTAssertEqual(KeyMetricPrefs.maximumSelectionCount, KeyMetric.allCases.count)
         XCTAssertEqual(Set(KeyMetric.defaultOrder), Set(KeyMetric.allCases))
-        XCTAssertEqual(KeyMetric.allCases.count, 18)
+        XCTAssertEqual(KeyMetric.allCases.count, 19)
         XCTAssertEqual(
             Set(KeyMetric.allCases),
             Set([
                 .charge, .effort, .rest, .hrv, .restingHr, .bloodOxygen,
                 .averageHr, .maxHr, .respiratory, .asleepTime, .steps, .weight,
                 .calories, .vo2Max, .stress, .vitality, .skinTemp, .hydration,
+                .menstrualCycle,
             ])
         )
         XCTAssertEqual(
@@ -164,12 +213,12 @@ final class KeyMetricPrefsTests: XCTestCase {
         XCTAssertEqual(Set(catalog), Set(KeyMetric.allCases))
     }
 
-    func testDecodePreservesOrderDeduplicatesAndCapsOlderSelections() {
+    func testDecodePreservesEveryKnownUniqueSelectionInOrder() {
         XCTAssertEqual(
             KeyMetricPrefs.decodeEnabled(
                 "steps, hrv,steps,bloodOxygen,restingHr,calories,weight,effort"
             ),
-            [.steps, .hrv, .bloodOxygen, .restingHr, .calories, .weight]
+            [.steps, .hrv, .bloodOxygen, .restingHr, .calories, .weight, .effort]
         )
     }
 
