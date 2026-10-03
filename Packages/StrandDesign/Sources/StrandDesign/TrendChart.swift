@@ -3,6 +3,9 @@
 // never shows it, so the whole file is excluded there. iOS/macOS unchanged.
 import SwiftUI
 import Charts
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - Trend Chart (§9.4 Trends)
 //
@@ -13,7 +16,7 @@ import Charts
 // ramp for sleep, the teal HRV scale for HRV, the amber strain ramp for strain.
 
 /// One point on a trend line.
-public struct TrendPoint: Identifiable, Sendable {
+public struct TrendPoint: Identifiable, Sendable, Equatable {
     public var date: Date
     public var value: Double
 
@@ -134,18 +137,10 @@ public struct TrendChart: View {
     #if os(iOS)
     /// Separates a deliberate hold-to-inspect interaction from the surrounding card's normal tap.
     @State private var scrubEngaged = false
-    /// A touch scrub intentionally keeps its selected date visible after release.
-    /// iOS Simulator can emit a synthetic hover-ended event after the drag; keep
-    /// that pointer lifecycle from clearing the touch-pinned selection.
-    @State private var scrubPinnedSelection = false
     /// A long-press release can also satisfy SwiftUI's simultaneous tap recognizer. Keep a short
     /// suppression deadline instead of scheduling a delayed state mutation, so an immediate second
     /// scrub cannot be cleared by the first scrub's stale timer.
     @State private var suppressChartTapUntil: Date?
-    /// The plot bounds measured by the noninteractive chart overlay. The touch gesture lives on the
-    /// concrete Chart itself, then maps its local x through this rect so no transparent hit plane sits
-    /// between the chart and a surrounding NavigationLink.
-    @State private var touchPlotRect = CGRect.zero
     #endif
 
     /// PERF: a 365-day (or longer) series feeds Swift Charts hundreds of LineMark/AreaMark vertices, each
@@ -169,9 +164,12 @@ public struct TrendChart: View {
 
     /// The point nearest a given chart-local x, using the proxy to map back.
     private func nearestPoint(toX x: CGFloat, proxy: ChartProxy, plot: CGRect) -> TrendPoint? {
-        guard !points.isEmpty else { return nil }
+        guard !points.isEmpty, plot.width.isFinite, plot.width > 0, x.isFinite else {
+            return nil
+        }
         // Map the cursor x (relative to the plot area) back to a Date.
-        let relX = x - plot.minX
+        let clampedX = min(max(x, plot.minX), plot.maxX)
+        let relX = clampedX - plot.minX
         guard let date: Date = proxy.value(atX: relX) else { return nil }
         // Find the TrendPoint whose date is closest.
         return points.min(by: {
@@ -204,49 +202,82 @@ public struct TrendChart: View {
         showsBars ? min(0, resolvedYDomain.lowerBound)...resolvedYDomain.upperBound : resolvedYDomain
     }
 
+    private func setSelectedPoint(_ point: TrendPoint?) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            hoverX = nil
+            selectedPoint = point
+        }
+    }
+
+    private func clearSelection() {
+        setSelectedPoint(nil)
+        #if os(iOS)
+        scrubEngaged = false
+        suppressChartTapUntil = nil
+        #endif
+    }
+
+    private func adjustSelection(_ direction: AccessibilityAdjustmentDirection) {
+        guard showsHover, !points.isEmpty else { return }
+        let currentIndex = selectedPoint.flatMap { selected in
+            points.firstIndex(where: { $0.date == selected.date })
+        }
+        let nextIndex: Int
+        switch direction {
+        case .increment:
+            nextIndex = min((currentIndex ?? -1) + 1, points.count - 1)
+        case .decrement:
+            nextIndex = max((currentIndex ?? points.count) - 1, 0)
+        @unknown default:
+            return
+        }
+        setSelectedPoint(points[nextIndex])
+    }
+
+    static func isHorizontalTouchScrub(_ translation: CGSize) -> Bool {
+        let horizontal = abs(translation.width)
+        let vertical = abs(translation.height)
+        return horizontal >= 12 && horizontal >= vertical * 1.25
+    }
+
     #if os(iOS)
-    /// A short hold enters inspection; sliding then updates the same crosshair used by pointer hover.
-    /// The gesture shares the Chart's own touch stream, so a short tap remains available to a surrounding
-    /// NavigationLink. Dates use the same linear time domain Swift Charts renders in the measured plot.
-    private func touchScrubGesture(plot: CGRect) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.20, maximumDistance: 24)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-            .onChanged { value in
-                guard case .second(true, let drag) = value else { return }
-                if !scrubEngaged {
-                    scrubEngaged = true
-                    scrubPinnedSelection = true
-                    suppressChartTapUntil = .distantFuture
-                    StrandHaptic.selection.play()
-                }
-                if let drag, plot.width > 0,
-                   let first = points.first?.date,
-                   let last = points.last?.date {
-                    let x = min(max(drag.location.x, plot.minX), plot.maxX)
-                    let fraction = Double((x - plot.minX) / plot.width)
-                    let date = first.addingTimeInterval(
-                        last.timeIntervalSince(first) * fraction
-                    )
-                    guard let point = points.min(by: {
-                        abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
-                    }) else { return }
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        hoverX = nil
-                        selectedPoint = point
-                    }
-                }
-            }
-            .onEnded { _ in
-                scrubEngaged = false
-                // Keep the selected date visible after the finger lifts. A second scrub replaces it,
-                // while leaving the screen naturally clears this view-local state.
-                // If the overlapping tap already consumed the latch, do not re-arm it.
-                if suppressChartTapUntil != nil {
-                    suppressChartTapUntil = Date().addingTimeInterval(0.3)
-                }
-            }
+    @discardableResult
+    private func selectTouchPoint(atX x: CGFloat, proxy: ChartProxy, plot: CGRect) -> Bool {
+        guard let point = nearestPoint(toX: x, proxy: proxy, plot: plot) else {
+            return false
+        }
+        setSelectedPoint(point)
+        return true
+    }
+
+    private func engageTouchScrubIfNeeded() {
+        guard !scrubEngaged else { return }
+        scrubEngaged = true
+        suppressChartTapUntil = .distantFuture
+        StrandHaptic.selection.play()
+    }
+
+    private func finishTouchScrub() {
+        let completedScrub = scrubEngaged
+        guard completedScrub else { return }
+        scrubEngaged = false
+        // Keep the selected date visible after the finger lifts. A second scrub replaces it,
+        // while a later real pointer interaction takes ownership.
+        suppressChartTapUntil = Date().addingTimeInterval(0.4)
+    }
+
+    private func updateTouchScrub(atX x: CGFloat, proxy: ChartProxy, plot: CGRect) {
+        guard selectTouchPoint(atX: x, proxy: proxy, plot: plot) else { return }
+        engageTouchScrubIfNeeded()
+    }
+
+    private func endTouchScrub(atX x: CGFloat, proxy: ChartProxy, plot: CGRect) {
+        if selectTouchPoint(atX: x, proxy: proxy, plot: plot) {
+            engageTouchScrubIfNeeded()
+        }
+        finishTouchScrub()
     }
 
     private func handleChartTap() {
@@ -395,9 +426,34 @@ public struct TrendChart: View {
                             .position(x: px + plot.minX, y: py + plot.minY)
                             .allowsHitTesting(false)
                     }
+
+                    #if os(iOS)
+                    // UIKit's long-press recognizer fails quickly when an immediate vertical move starts,
+                    // so the enclosing ScrollView keeps its normal pan. SwiftUI's zero-distance and
+                    // sequenced drag gestures both claimed that stream before ScrollView could scroll.
+                    TrendChartTouchOverlay(
+                        scrubEnabled: showsHover,
+                        tapEnabled: tapAction != nil,
+                        onScrub: {
+                            updateTouchScrub(atX: $0, proxy: proxy, plot: plot)
+                        },
+                        onScrubEnded: {
+                            endTouchScrub(atX: $0, proxy: proxy, plot: plot)
+                        },
+                        onScrubCancelled: finishTouchScrub,
+                        onTap: handleChartTap
+                    )
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    #endif
                 }
-                .animation(StrandMotion.fade, value: hoverX)
+                .frame(
+                    width: geo.size.width,
+                    height: geo.size.height,
+                    alignment: .topLeading
+                )
                 .contentShape(Rectangle())
+                .animation(StrandMotion.fade, value: hoverX)
+                #if !os(iOS)
                 .onContinuousHover(coordinateSpace: .local) { phase in
                     guard showsHover else { return }
                     // Update the hover position in a NON-animating transaction. Otherwise entering or
@@ -410,44 +466,17 @@ public struct TrendChart: View {
                     withTransaction(tx) {
                         switch phase {
                         case .active(let location):
-                            #if os(iOS)
-                            guard !scrubPinnedSelection else { return }
-                            #endif
                             hoverX = location.x
                             selectedPoint = nearestPoint(toX: location.x, proxy: proxy, plot: plot)
                         case .ended:
                             hoverX = nil
-                            #if os(iOS)
-                            if !scrubPinnedSelection {
-                                selectedPoint = nil
-                            }
-                            #else
                             selectedPoint = nil
-                            #endif
                         }
                     }
                 }
-                .preference(key: TrendPlotRectPreferenceKey.self, value: plot)
-                #if os(iOS)
-                // Selection chrome is presentation only. Once the tooltip exists it becomes a concrete
-                // hit target; disabling overlay hits keeps the Chart's scrub recognizer and the enclosing
-                // card's normal tap reachable through the full plot.
-                .allowsHitTesting(false)
                 #endif
             }
         }
-        #if os(iOS)
-        .onPreferenceChange(TrendPlotRectPreferenceKey.self) { rect in
-            guard abs(rect.minX - touchPlotRect.minX) > 0.5
-                    || abs(rect.width - touchPlotRect.width) > 0.5 else { return }
-            touchPlotRect = rect
-        }
-        .simultaneousGesture(
-            touchScrubGesture(plot: touchPlotRect),
-            including: showsHover ? .all : .subviews
-        )
-        .modifier(OptionalChartTapModifier(action: guardedChartTapAction))
-        #endif
         .frame(height: height)
         // NOTE: no outer `.clipped()` here. The PLOT is already clipped to its own bounds by
         // `.chartPlotStyle { plotArea.clipped() }` above (that's what contains the catmullRom overshoot +
@@ -465,38 +494,136 @@ public struct TrendChart: View {
             "\(dateFormat($0.date)), \(valueFormat($0.value))"
         } ?? a11ySummary))
         .accessibilityHint(Text("Hold and drag to inspect each date", bundle: .module))
+        .accessibilityAdjustableAction(adjustSelection)
         .accessibilityIdentifier(accessibilityIdentifier ?? "")
         .accessibilityHidden(!showsHover && accessibilityLabel == nil)
-    }
-}
-
-private struct TrendPlotRectPreferenceKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        let next = nextValue()
-        if next.width > 0 {
-            value = next
+        .onChange(of: points) { _ in
+            clearSelection()
+        }
+        .onChange(of: showsHover) { enabled in
+            if !enabled {
+                clearSelection()
+            }
         }
     }
 }
 
 #if os(iOS)
-private struct OptionalChartTapModifier: ViewModifier {
-    let action: (() -> Void)?
+private struct TrendChartTouchOverlay: UIViewRepresentable {
+    let scrubEnabled: Bool
+    let tapEnabled: Bool
+    let onScrub: (CGFloat) -> Void
+    let onScrubEnded: (CGFloat) -> Void
+    let onScrubCancelled: () -> Void
+    let onTap: () -> Void
 
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let action {
-            // The explicit tap keeps chart-area navigation reliable inside NavigationLink. A scrub
-            // latches its release first, so this recognizer consumes that event without navigating.
-            content.simultaneousGesture(
-                TapGesture().onEnded(action),
-                including: .all
+    func makeUIView(context: Context) -> TrendChartInteractionView {
+        TrendChartInteractionView()
+    }
+
+    func updateUIView(_ view: TrendChartInteractionView, context: Context) {
+        view.onScrub = onScrub
+        view.onScrubEnded = onScrubEnded
+        view.onScrubCancelled = onScrubCancelled
+        view.onTap = onTap
+        view.setEnabled(scrub: scrubEnabled, tap: tapEnabled)
+    }
+}
+
+private final class TrendChartInteractionView: UIView, UIGestureRecognizerDelegate {
+    var onScrub: ((CGFloat) -> Void)?
+    var onScrubEnded: ((CGFloat) -> Void)?
+    var onScrubCancelled: (() -> Void)?
+    var onTap: (() -> Void)?
+
+    private let holdRecognizer = UILongPressGestureRecognizer()
+    private let tapRecognizer = UITapGestureRecognizer()
+    private var holdOrigin: CGPoint?
+    private var scrubActive = false
+
+    init() {
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isOpaque = false
+        isAccessibilityElement = false
+        accessibilityElementsHidden = true
+
+        holdRecognizer.minimumPressDuration = 0.20
+        holdRecognizer.allowableMovement = 18
+        holdRecognizer.cancelsTouchesInView = true
+        holdRecognizer.delaysTouchesBegan = false
+        holdRecognizer.delaysTouchesEnded = false
+        holdRecognizer.delegate = self
+        holdRecognizer.addTarget(self, action: #selector(handleHold(_:)))
+
+        tapRecognizer.cancelsTouchesInView = true
+        tapRecognizer.delaysTouchesBegan = false
+        tapRecognizer.delaysTouchesEnded = false
+        tapRecognizer.delegate = self
+        tapRecognizer.addTarget(self, action: #selector(handleTap))
+        tapRecognizer.require(toFail: holdRecognizer)
+
+        addGestureRecognizer(holdRecognizer)
+        addGestureRecognizer(tapRecognizer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func setEnabled(scrub: Bool, tap: Bool) {
+        holdRecognizer.isEnabled = scrub
+        tapRecognizer.isEnabled = tap
+        isUserInteractionEnabled = scrub || tap
+    }
+
+    @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
+        let location = recognizer.location(in: self)
+        switch recognizer.state {
+        case .began:
+            holdOrigin = location
+            scrubActive = false
+        case .changed:
+            let origin = holdOrigin ?? location
+            let translation = CGSize(
+                width: location.x - origin.x,
+                height: location.y - origin.y
             )
-        } else {
-            content
+            guard scrubActive || TrendChart.isHorizontalTouchScrub(translation) else {
+                return
+            }
+            scrubActive = true
+            onScrub?(location.x)
+        case .ended:
+            if scrubActive {
+                onScrubEnded?(location.x)
+            } else {
+                onScrubCancelled?()
+            }
+            resetHoldState()
+        case .cancelled, .failed:
+            onScrubCancelled?()
+            resetHoldState()
+        default:
+            break
         }
+    }
+
+    @objc private func handleTap() {
+        onTap?()
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer.view is UIScrollView || otherGestureRecognizer.view is UIScrollView
+    }
+
+    private func resetHoldState() {
+        holdOrigin = nil
+        scrubActive = false
     }
 }
 #endif

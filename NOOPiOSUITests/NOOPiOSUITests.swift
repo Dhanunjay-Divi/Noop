@@ -1685,22 +1685,15 @@ final class NOOPiOSUITests: XCTestCase {
             "points"
         )
         var selectedChart = chartNodes.matching(selectedValuePredicate).firstMatch
-        if !selectedChart.waitForExistence(timeout: 3) {
-            let retryChart = app.otherElements[chartIdentifier].firstMatch
-            XCTAssertTrue(retryChart.waitForExistence(timeout: 5))
-            let retryStart = retryChart.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.28, dy: 0.50)
-            )
-            let retryEnd = retryChart.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.46, dy: 0.50)
-            )
-            retryStart.press(forDuration: 1.0, thenDragTo: retryEnd)
-            selectedChart = chartNodes.matching(selectedValuePredicate).firstMatch
-        }
+        let selectedValueExists = selectedChart.waitForExistence(timeout: 5)
         XCTAssertTrue(
-            selectedChart.waitForExistence(timeout: 5),
-            "The chart must expose an exact dated value after a bounded scrub retry."
+            selectedValueExists,
+            "The chart must expose an exact dated value after one normal held drag."
         )
+        guard selectedValueExists else {
+            keepScreenshot(app, name: "trends-recovery-date-selection-missing")
+            return
+        }
         let selectedValue = selectedChart.value as? String ?? String(describing: selectedChart.value)
         XCTAssertNotEqual(selectedValue, initialSummary)
         XCTAssertFalse(selectedValue.localizedCaseInsensitiveContains("points"))
@@ -1713,8 +1706,89 @@ final class NOOPiOSUITests: XCTestCase {
             ) != nil,
             "Scrubbing must expose one exact dated metric value: \(selectedValue)"
         )
+
+        let reverseChart = app.otherElements[chartIdentifier].firstMatch
+        XCTAssertTrue(reverseChart.waitForExistence(timeout: 5))
+        reverseChart.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.42, dy: 0.50)
+        ).press(
+            forDuration: 0.8,
+            thenDragTo: reverseChart.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.22, dy: 0.50)
+            )
+        )
+        selectedChart = chartNodes.matching(selectedValuePredicate).firstMatch
+        XCTAssertTrue(selectedChart.waitForExistence(timeout: 5))
+        let reverseValue = selectedChart.value as? String ?? String(describing: selectedChart.value)
+        XCTAssertNotEqual(
+            reverseValue,
+            selectedValue,
+            "A second scrub in the opposite direction must select and persist a different date."
+        )
         XCTAssertFalse(app.navigationBars["Recovery"].exists)
         keepScreenshot(app, name: "trends-recovery-date-selection")
+    }
+
+    func testRecoveryTrendPreservesVerticalScrollAndDirectNavigation() {
+        let app = launchApp(tab: "trends")
+        let chartIdentifier = "noop.trends.recovery.chart"
+        var chart = app.otherElements[chartIdentifier].firstMatch
+        XCTAssertTrue(chart.waitForExistence(timeout: 20))
+        let scroll = app.scrollViews["noop.trends.scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        for _ in 0..<6 where !chart.isHittable {
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(chart.isHittable)
+
+        let chartNodes = app.descendants(matching: .any)
+            .matching(identifier: chartIdentifier)
+        let summaryNode = chartNodes.matching(
+            NSPredicate(format: "value CONTAINS[c] %@", "points")
+        ).firstMatch
+        XCTAssertTrue(summaryNode.waitForExistence(timeout: 5))
+        let initialChartY = chart.frame.minY
+        chart.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.50, dy: 0.72)
+        ).press(
+            forDuration: 0.05,
+            thenDragTo: chart.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.50, dy: 0.28)
+            ),
+            withVelocity: .slow,
+            thenHoldForDuration: 0
+        )
+
+        chart = app.otherElements[chartIdentifier].firstMatch
+        XCTAssertTrue(chart.waitForExistence(timeout: 5))
+        XCTAssertLessThan(
+            chart.frame.minY,
+            initialChartY - 20,
+            "A vertical drag inside the chart must remain available to the surrounding scroll view."
+        )
+        XCTAssertTrue(
+            chartNodes.matching(
+                NSPredicate(format: "value CONTAINS[c] %@", "points")
+            ).firstMatch.waitForExistence(timeout: 5),
+            "Vertical scrolling must not leave the chart in date-scrub mode."
+        )
+        XCTAssertFalse(app.navigationBars["Recovery"].exists)
+
+        chart.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.50, dy: 0.50)
+        ).tap()
+        XCTAssertTrue(
+            app.navigationBars["Recovery"].waitForExistence(timeout: 5),
+            "A short chart tap must open the full Recovery metric detail."
+        )
+        let back = app.navigationBars["Recovery"].buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(
+            app.otherElements[chartIdentifier].firstMatch.waitForExistence(timeout: 5),
+            "One back action must return to Trends; the chart tap must not push Recovery twice."
+        )
+        XCTAssertFalse(app.navigationBars["Recovery"].exists)
     }
 
     func testTrendsRangeCopyStaysClearAtCompactWidths() {
