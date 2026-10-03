@@ -5,7 +5,7 @@
     "customer": 889,
     "fixture": 5997,
     "generated": 21,
-    "historical": 3451,
+    "historical": 3450,
     "import": 870,
     "persisted": 688
   },
@@ -37273,40 +37273,39 @@
     {
       "category": "historical",
       "lineNumbers": [
-        13,
-        52,
-        106,
+        57,
         111,
-        154,
-        177,
-        352,
-        355,
-        416,
-        576,
-        631,
-        652,
-        654,
-        709,
-        717,
-        729,
-        735,
-        790,
-        835,
-        903,
-        951,
-        972,
-        1116,
-        1251,
-        1357,
-        1361
+        116,
+        159,
+        182,
+        357,
+        360,
+        421,
+        581,
+        636,
+        657,
+        659,
+        714,
+        722,
+        734,
+        740,
+        795,
+        840,
+        908,
+        956,
+        977,
+        1121,
+        1256,
+        1362,
+        1366
       ],
-      "occurrenceCount": 26,
+      "occurrenceCount": 25,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "23dc8945174b166b12bfb3db68005c0ed93ec62d7d0e5e28df70b389160423cf",
+      "sha256": "fd1fa51f1fd5111eed6f6d36537b4c125b87be0e2280213cfb0bba7cebfc0950",
       "tokenCounts": {
         "whoop": 16,
         "whoop-first": 1,
-        "whoopstore": 9
+        "whoopstore": 8
       }
     },
     {
@@ -40267,7 +40266,7 @@
       }
     }
   ],
-  "occurrenceCount": 18627,
+  "occurrenceCount": 18626,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

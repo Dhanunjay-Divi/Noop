@@ -8,18 +8,23 @@ Last updated: **2026-10-03**
   `codex/mobile-cloud-release-finalization-20261003`, based on protected merge
   `1cd401f69dd8b4df75872a830ed33a84918ea344`. Exact-main Apple workflow
   `37108981075` isolated one intermittent Recovery date-scrub failure after the
-  other nine required contexts passed. The integrated mobile base retains its
-  prior closeout evidence: Apple
-  focused source tests pass 90/90, WhoopStore backup tests pass 21/21, Android
-  Full/Demo walls and Android-test compilation pass. This follow-up maps touch
-  through the live chart scale, clears stale selection, preserves macOS hover,
-  adds adjustable date stepping, and uses a native iOS hold/tap surface with
-  explicit horizontal intent. Vertical drags scroll, held horizontal drags
-  inspect exact dates, and direct taps open one detail route. StrandDesign
-  passes 59/59; focused UI cases pass; relaunch stress passes 10/10; and the
+  other nine required contexts passed. Production implementation
+  `0d76116178a90f2a93cf7f61b9df579078672868` maps touch through the live chart
+  scale, preserves scroll/tap and macOS hover, and adds adjustable date
+  stepping. PR `#33` hosted run `37120314609` later failed on Xcode 26.6 because
+  only a chart sliver was hittable while the synthesized gesture coordinates
+  remained under persistent bottom navigation; the app-report review state was
+  also slower than its prior wait. Test-only repair
+  `9689bd3b88268eebfc7b174336281de6f9c74476` measures and clears the full
+  gesture corridor and waits for explicit report readiness without changing
+  production interaction. The three focused failures pass together 3/3, both
+  chart cases pass 20/20 under repetition, StrandDesign passes 59/59, and the
   complete iPhone Simulator graph executes 43 tests with one intentional skip
-  and zero failures. Local repository gates pass. Private staging remains unchanged
-  and reverified at source merge
+  and zero failures. The complete Tools discovery passes 374 tests with one
+  intentional skip; the exact protected release-control subset passes 258/258;
+  local trust, calibration, terminology, localization, claims, privacy, legal,
+  operations, and diff gates pass. Private staging remains unchanged and
+  reverified at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;
   no cloud rebuild, migration, or apply is required. Protected follow-up
