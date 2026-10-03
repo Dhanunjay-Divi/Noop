@@ -4,28 +4,28 @@ Last updated: **2026-10-03**
 
 ## Authoritative context
 
-- The final mobile UI release-closeout slice is locally verified on branch
-  `codex/noop-release-candidate-handoff-20261002`. Today now accepts all 19
-  eligible metrics while retaining the focused six-card default; sparse card
-  traces, source grouping, cycle eligibility/history truth, same-day Weight
-  arbitration, Apple backup parity, compact bottom navigation, and the
-  edge-reaching movable NOOP N are matched across iPhone and Android. Apple
+- The current follow-up candidate is on
+  `codex/mobile-cloud-release-finalization-20261003`, based on protected merge
+  `1cd401f69dd8b4df75872a830ed33a84918ea344`. Exact-main Apple workflow
+  `37108981075` isolated one intermittent Recovery date-scrub failure after the
+  other nine required contexts passed. The integrated mobile base retains its
+  prior closeout evidence: Apple
   focused source tests pass 90/90, WhoopStore backup tests pass 21/21, Android
-  Full/Demo walls and Android-test compilation pass, the Android API 35
-  over-six case passes, and both Apple rendered cases pass before the known
-  Xcode 27 post-test teardown stall. Exact managed artifacts build with iOS
-  executable SHA-256
-  `b6054189869c025840d8dac4b9015e2861731635f96b9e954e6c2886a4f148c5`
-  and Android Full APK SHA-256
-  `d90bb7764863d49d29104084adb1788abe8ed0c943f44653f987185b8ba1895c`.
-  Fresh uninstall/install opens matching Terms gates; a 21-scenario iPhone
-  matrix and current Android Today plus eight-selected editor were reviewed
-  without observed clipping or overlap. Private staging remains unchanged at
-  protected merge `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable
-  digest
-  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`.
-  Protected exact-head integration and every signed or physical-device gate
-  remain pending.
+  Full/Demo walls and Android-test compilation pass. This follow-up maps touch
+  through the live chart scale, clears stale selection, preserves macOS hover,
+  adds adjustable date stepping, and uses a native iOS hold/tap surface with
+  explicit horizontal intent. Vertical drags scroll, held horizontal drags
+  inspect exact dates, and direct taps open one detail route. StrandDesign
+  passes 59/59; focused UI cases pass; relaunch stress passes 10/10; and the
+  complete iPhone Simulator graph executes 43 tests with one intentional skip
+  and zero failures. Local repository gates pass. Private staging remains unchanged
+  and reverified at source merge
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
+  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;
+  no cloud rebuild, migration, or apply is required. Protected follow-up
+  integration remains pending. Every signed or physical-device validation gate
+  also remains pending; simulator evidence remains explicitly
+  nonphysical.
 
 - One local release-candidate branch now combines the mobile tab/OTP and
   exact-date scrub correction, supplier optional-read request fencing, and the
