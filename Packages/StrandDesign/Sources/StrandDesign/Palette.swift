@@ -170,6 +170,7 @@ public enum StrandPalette {
     public static let focusRing      = Color(light: "#333330", dark: "#E7E7E2")
     /// Ink placed on the dynamic accent fill: white on light-mode black, black on dark-mode white.
     public static let accentInk      = Color(light: "#FFFFFF", dark: "#070707")
+    public static let navigationLensHighlight = Color.white
     /// Opacity for dimmed/disabled sections (shared so screens don't invent their own value).
     public static let disabledOpacity: Double = 0.45
 

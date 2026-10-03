@@ -118,6 +118,7 @@ object Palette {
     val accentMuted get() = active.accentMuted
     val focusRing get() = active.focusRing
     val accentInk get() = active.accentInk
+    val navigationLensHighlight = Color.White
     const val disabledOpacity = 0.45f
 
     // Recovery / Charge gradient.
@@ -468,6 +469,36 @@ object Metrics {
     val iconSmall = 18.dp
     val selectorPadding = 10.dp
     val selectorSpacing = 8.dp
+    val controlHeight = 48.dp
+    val navigationBarRadius = 22.dp
+    val navigationLensSize = 44.dp
+    val navigationBarTopInset = 10.dp
+    val navigationBarReservedHeight = 88.dp
+    val navigationLensItemSpacing = 1.dp
+    val navigationLensStrokeWidth = 0.8.dp
+    val navigationLensHighlightWidth = 1.1.dp
+    val navigationLensHighlightInset = 3.dp
+    val navigationLensShadowRadius = 8.dp
+    val navigationLensLabelHorizontalPadding = 1.dp
+    val navigationLensIconSize = 18.dp
+    val navigationLensActiveOffset = 6.dp
+    val navigationLensLabelOffset = 2.dp
+    const val navigationLensSelectedScale = 1.04f
+    const val navigationLensBodyLightStartAlpha = 0.24f
+    const val navigationLensBodyDarkStartAlpha = 0.30f
+    const val navigationLensBodyLightEndAlpha = 0.10f
+    const val navigationLensBodyDarkEndAlpha = 0.14f
+    const val navigationLensRimLightAlpha = 0.58f
+    const val navigationLensRimDarkAlpha = 0.68f
+    const val navigationLensHighlightLightAlpha = 0.54f
+    const val navigationLensHighlightDarkAlpha = 0.30f
+    const val navigationLensShadowLightAlpha = 0.16f
+    const val navigationLensShadowDarkAlpha = 0.24f
+    const val navigationLensHighlightStartAngle = 205f
+    const val navigationLensHighlightSweepAngle = 74f
+    val verificationCodeSlotRadius = 12.dp
+    val verificationCodeSlotHeight = 56.dp
+    val verificationSuccessDiameter = 96.dp
     val sparkWidthWide = 48.dp   // inline trend beside a tile value — kept compact so the value (which
                                  // shrinks to fit, #332) keeps enough room to stay legible at full size
     val sparkWidth = 58.dp

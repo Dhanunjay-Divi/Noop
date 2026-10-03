@@ -1717,8 +1717,8 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calories</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Choose which tiles show on your Control Center and reorder them with the arrows.</string>
-    <string name="key_metrics_selection_instructions">Pin 3 to 6 metrics at the top. Every metric stays visible.</string>
-    <string name="key_metrics_selection_count">%1$d of %2$d pinned</string>
+    <string name="key_metrics_selection_instructions">Choose any metrics for Today. Every supported metric remains available.</string>
+    <string name="key_metrics_selection_count">%1$d selected</string>
     <string name="key_metrics_show_selected">Show selected metrics</string>
     <string name="key_metrics_show_all_count">Show all metrics (%1$d)</string>
     <string name="key_metrics_open_history">Open all metric history</string>

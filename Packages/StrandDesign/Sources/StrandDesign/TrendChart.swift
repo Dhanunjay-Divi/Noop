@@ -134,6 +134,10 @@ public struct TrendChart: View {
     #if os(iOS)
     /// Separates a deliberate hold-to-inspect interaction from the surrounding card's normal tap.
     @State private var scrubEngaged = false
+    /// A touch scrub intentionally keeps its selected date visible after release.
+    /// iOS Simulator can emit a synthetic hover-ended event after the drag; keep
+    /// that pointer lifecycle from clearing the touch-pinned selection.
+    @State private var scrubPinnedSelection = false
     /// A long-press release can also satisfy SwiftUI's simultaneous tap recognizer. Keep a short
     /// suppression deadline instead of scheduling a delayed state mutation, so an immediate second
     /// scrub cannot be cleared by the first scrub's stale timer.
@@ -211,6 +215,7 @@ public struct TrendChart: View {
                 guard case .second(true, let drag) = value else { return }
                 if !scrubEngaged {
                     scrubEngaged = true
+                    scrubPinnedSelection = true
                     suppressChartTapUntil = .distantFuture
                     StrandHaptic.selection.play()
                 }
@@ -405,11 +410,20 @@ public struct TrendChart: View {
                     withTransaction(tx) {
                         switch phase {
                         case .active(let location):
+                            #if os(iOS)
+                            guard !scrubPinnedSelection else { return }
+                            #endif
                             hoverX = location.x
                             selectedPoint = nearestPoint(toX: location.x, proxy: proxy, plot: plot)
                         case .ended:
                             hoverX = nil
+                            #if os(iOS)
+                            if !scrubPinnedSelection {
+                                selectedPoint = nil
+                            }
+                            #else
                             selectedPoint = nil
+                            #endif
                         }
                     }
                 }

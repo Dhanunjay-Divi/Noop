@@ -1514,8 +1514,8 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calories</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Choisissez les vignettes à afficher dans votre Centre de contrôle et réorganisez-les avec les flèches.</string>
-    <string name="key_metrics_selection_instructions">Épinglez 3 à 6 métriques en haut. Toutes les métriques restent visibles.</string>
-    <string name="key_metrics_selection_count">%1$d sur %2$d épinglées</string>
+    <string name="key_metrics_selection_instructions">Choisissez les mesures voulues pour Aujourd’hui. Toutes les mesures prises en charge restent disponibles.</string>
+    <string name="key_metrics_selection_count">%1$d sélectionnées</string>
     <string name="key_metrics_show_selected">Afficher les métriques sélectionnées</string>
     <string name="key_metrics_show_all_count">Afficher toutes les métriques (%1$d)</string>
     <string name="key_metrics_open_history">Ouvrir tout l’historique des mesures</string>

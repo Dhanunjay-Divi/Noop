@@ -1,52 +1,144 @@
 # Active NOOP handoff
 
-Last updated: **2026-10-02**
+Last updated: **2026-10-03**
 
 ## Authoritative context
 
-- The mobile command-lens regression repair is locally verified on branch
-  `codex/mobile-command-n-visual-close-20261002` and is being synchronized with
-  protected `main` `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`. The prior
-  protected source had
-  replaced the previously approved geometric NOOP `N` with an 80-percent arc
-  and center dot that read as an activity ring. The local repair restores one
-  matched rounded-stroke N on iPhone and Android while preserving the
-  `48x52` target, bounded drag, edge snap, persistence, nine-action launcher,
-  and accessibility movement actions. Android focused compile/unit and APK
-  assembly pass; Apple focused shell 1/1 and the complete iPhone Simulator
-  graph pass. Current `1080x2424` Android and `1206x2622` iPhone captures were
-  reviewed without observed clipping or overlap. The Android follow-up also
-  closes the stale Today/editor visual gap: Steps is in the default six and
-  all 18 choices remain grouped as measured/imported, source-dependent, and
-  NOOP insights. Protected checks, normal merge, exact-main verification, and
-  every signed physical-device/source gate remain pending.
+- The final mobile UI release-closeout slice is locally verified on branch
+  `codex/noop-release-candidate-handoff-20261002`. Today now accepts all 19
+  eligible metrics while retaining the focused six-card default; sparse card
+  traces, source grouping, cycle eligibility/history truth, same-day Weight
+  arbitration, Apple backup parity, compact bottom navigation, and the
+  edge-reaching movable NOOP N are matched across iPhone and Android. Apple
+  focused source tests pass 90/90, WhoopStore backup tests pass 21/21, Android
+  Full/Demo walls and Android-test compilation pass, the Android API 35
+  over-six case passes, and both Apple rendered cases pass before the known
+  Xcode 27 post-test teardown stall. Exact managed artifacts build with iOS
+  executable SHA-256
+  `b6054189869c025840d8dac4b9015e2861731635f96b9e954e6c2886a4f148c5`
+  and Android Full APK SHA-256
+  `d90bb7764863d49d29104084adb1788abe8ed0c943f44653f987185b8ba1895c`.
+  Fresh uninstall/install opens matching Terms gates; a 21-scenario iPhone
+  matrix and current Android Today plus eight-selected editor were reviewed
+  without observed clipping or overlap. Private staging remains unchanged at
+  protected merge `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable
+  digest
+  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`.
+  Protected exact-head integration and every signed or physical-device gate
+  remain pending.
 
-- A replacement private synthetic GCP staging deployment is live and locally
-  verified and its source is integrated through PR `#31` at protected merge
-  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`. The owner-selected replacement
-  account is authenticated, a dedicated billing-enabled project exists, and
-  CLI plus application-default quota context are pinned to it. No prior state,
-  credential, user, database, or health data is being imported. Protected
-  remote state, the zero-runtime foundation, budget alerts, Firebase iOS and
-  Android registrations, App Check registration, synthetic phone OTP, the
-  retained fictional pilot claim, and email/password account identity are
-  applied. Generated native pilot configuration is ignored and mode `0600`.
-  The server dependency gate also moved PyJWT to the first non-vulnerable
-  release after the live audit finding. One immutable image digest scanned with
-  zero findings; Cloud SQL, migrations, workload-specific credentials, the
-  private API, managed API, processor, managed lifecycle, feedback lifecycle,
-  App Check enforcement, and the enabled lifecycle scheduler are deployed.
-  The final three-account fictional OTP/runtime smoke passed in 210 seconds,
-  including upload/processing/isolation/restore/erasure, social, and Safety
-  fail-closed behavior with disposable fictional push destinations. Identity
-  configuration was restored to one retained fictional phone, zero App Check
-  debug tokens remain, a scheduled lifecycle execution completed in 17.33
-  seconds, the private-runtime verifier passes, and OpenTofu reports no drift.
-  Every PR `#31` required context passed before merge. Exact-main Apple and
-  server jobs are still running; signed native clients, real OTP/push, and all
-  physical-device claims remain pending.
-  Public invocation, real health data, payment entitlement, and physical-band
-  claims remain disabled.
+- One local release-candidate branch now combines the mobile tab/OTP and
+  exact-date scrub correction, supplier optional-read request fencing, and the
+  production physical-validation handoff. Implementation/evidence base
+  `e5f11cfe1602ec02e8b08bc4a766f7b07689e752` passes focused Apple supplier
+  88/88, the complete iPhone Simulator graph, clean first-run 2/2, the Recovery
+  exact-date case 1/1 on the dedicated review simulator, StrandDesign 58/58,
+  Android navigation/OTP 12/12 with production and Android-test compilation,
+  Android API 35 first-run 3/3, supplier/quarantine Python 62/62, and
+  repository controls. The exact consolidated UI paths are unchanged from the
+  paired `1206x2622` iPhone and `1080x2424` Android visual-review revision,
+  which had no observed clipping or overlap. The retained PR27 simulator did
+  not preserve the selected trend value while the dedicated review simulator
+  did; protected exact-head execution remains authoritative. Source and
+  contract audits also confirm that historical screenshots containing the
+  local-first welcome, local-test account bypass, self-hosted Friends setup, or
+  the old plus/grid command control are not current customer runtime; the
+  consolidated candidate uses required account onboarding, managed Friends,
+  and the movable NOOP N.
+  No push, merge, workflow dispatch, deployment mutation, signed install, or
+  physical claim occurred. Private staging remains at protected merge
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
+  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`.
+  WHOOP physical comparison may proceed only after protected integration and
+  signing. Supplier physical validation remains blocked because available
+  local archives do not match approved trust evidence.
+
+- The matched mobile tab/OTP motion refinement has one local hosted-failure
+  correction on branch
+  `codex/mobile-liquid-tab-otp-motion-20261002`. iPhone and Android use one
+  raised selected lens across the same five labeled tabs while preserving
+  reselect behavior, touch targets, accessibility roles, Reduced Motion, and
+  the separate movable NOOP N. Managed verification preserves the four-through-
+  eight digit service contract, localized decimal normalization, platform OTP
+  autofill, immediate secret clearing, masked editable-field accessibility,
+  and a three-second server-confirmed success state that never stores or
+  redraws the code. The final token pass covers lens body, rim, highlight,
+  spacing, label padding, and palette ownership on both platforms. iPhone now
+  reserves the measured dock footprint at every text size, matching Android's
+  non-overlapping content boundary. Exact-current evidence passes Android
+  focused 12/12, production and instrumentation-source compile,
+  onboarding/Trends/package wall, Full APK
+  SHA-256 `3a134fc284b029c82afb2e9859191f0cdbd01d055d145a5761b12808ec6ada05`,
+  Apple focused 86/86, direct dock-boundary UI 1/1, the complete iPhone graph,
+  clean first-run 2/2, all-platform i18n, and reviewed `1080x2424` /
+  `1206x2622` captures. Private native-pilot assertions compile but were not
+  executed without their private inputs. PR `#32` replacement run
+  `37033095763` passed every Android, macOS, package, policy, and repository-
+  control boundary but failed one iOS shell case after 41 passes and one
+  intentional skip: touch scrub selected the exact Recovery date, then a
+  synthetic iOS hover-end lifecycle cleared the shared chart state after finger
+  release. Local commit `3d8256978` preserves the documented touch-pinned
+  selection while leaving macOS hover behavior unchanged. The exact-date UI
+  case passes 1/1 in `23.557` seconds and `StrandDesign` passes 58/58. XCTest
+  completed before an abnormal local Xcode teardown, so full replacement
+  hosted execution remains the integration authority. The remote PR head
+  remains `1d2543ba1`; the local correction has not been pushed under the
+  current no-push/no-Actions handoff. One authorized replacement push,
+  exact-head protected checks, normal merge, and exact-main verification
+  remain.
+  Real OTP, signed-device accessibility, and every physical band/source gate
+  remain pending.
+
+- Supplier optional step/sleep read serialization is completed locally on
+  branch `codex/supplier-read-serialization-20261002` from protected-main
+  baseline `a8a617593b4b81485fca672353ebcebe2d073f55`. A due sleep read now
+  queues behind the active step result or failure, step polling pauses while
+  sleep is pending or in flight, and every command carries an app-owned request
+  ID through the wrapper callback. Late or duplicate callbacks cannot satisfy a
+  newer request, bounded step/sleep timeouts release the lane and reset the
+  transport, and disconnect/stop clear every optional-read state. Existing
+  supplier qualification, persistence, fixed-category diagnostics, existing
+  comparison-transport behavior, formulas, source routing, and SDK artifact
+  boundaries are unchanged. Focused Apple supplier tests pass 75/75 and the
+  complete iPhone Simulator graph builds. No raw logging, push, merge,
+  deployment, or physical BLE/accuracy/background/battery/retention claim is
+  part of this round. The consolidated production handoff now links the exact
+  install/evidence commands, candidate signature checks, WHOOP-first gate,
+  account/cloud and metric protocols, and privacy-safe hand-back contract. The
+  currently available local supplier archives do not match protected-main or
+  transferred October 1 trust evidence, so supplier physical testing remains
+  blocked until an authoritative approved artifact bundle is restored and
+  reverified; WHOOP comparison testing can proceed independently.
+
+- The mobile command-lens regression repair is integrated on protected `main`
+  through PR `#30` at squash merge
+  `a8a617593b4b81485fca672353ebcebe2d073f55`. It restores one matched
+  rounded-stroke N on iPhone and Android while preserving the `48x52` target,
+  bounded drag, edge snap, persistence, nine-action launcher, and accessibility
+  movement actions. Android focused compile/unit and APK assembly, Apple shell
+  1/1, the complete iPhone Simulator graph, paired visual review, terminology,
+  localization, operations, claims, legal, private-data, and required-CI
+  controls passed before protected integration. The Android follow-up also
+  confirmed Steps in the default six and all 18 choices grouped as
+  measured/imported, source-dependent, and NOOP insights. Signed physical
+  device/source behavior remains unvalidated and unclaimed.
+
+- A replacement private synthetic GCP staging deployment is live and its source
+  is integrated through PR `#31` at protected merge
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`. The dedicated
+  billing-enabled project has protected remote state, budget alerts, Firebase
+  iOS/Android registration, App Check registration, synthetic phone OTP, one
+  retained fictional pilot claim, and email/password account identity. One
+  immutable image digest scanned with zero findings; Cloud SQL, migrations,
+  workload-specific credentials, IAM-only APIs, processors, lifecycle jobs,
+  App Check enforcement, and the scheduler are deployed. A three-account
+  fictional OTP/runtime smoke covered upload, processing, tenant isolation,
+  restore, erasure, social, and Safety fail-closed behavior; disposable
+  fictional push destinations and App Check debug tokens were removed, the
+  scheduled lifecycle completed, the private-runtime verifier passes, and
+  OpenTofu reports no drift. Public invocation, real health data, payment
+  entitlement, real OTP/push, and physical-band claims remain disabled or
+  unvalidated.
 
 - The direct-and-derived Today metric expansion is integrated on protected
   `main` through PR `#27` at squash merge

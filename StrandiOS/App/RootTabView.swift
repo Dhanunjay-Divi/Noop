@@ -225,9 +225,9 @@ struct RootTabView: View {
                     .frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))
                     .accessibilityHidden(true)
             }
-            // At accessibility sizes, letting the floating rail overlap this viewport can split a
-            // sentence across persistent controls. Reserve the measured control footprint in layout
-            // instead of merely painting over the text. Ordinary sizes retain the floating treatment.
+            // Persistent navigation must not cover a metric card or split large text while it is being
+            // read. Reserve the measured control footprint in the viewport at every text size; the rail
+            // still renders as a floating glass surface over the page background rather than a system bar.
             .padding(.bottom, tabContentBottomReservation)
             if !keyboardVisible,
                dynamicTypeSize.isAccessibilitySize ||
@@ -528,7 +528,7 @@ struct RootTabView: View {
     }
 
     private var tabContentBottomReservation: CGFloat {
-        guard !keyboardVisible, dynamicTypeSize.isAccessibilitySize else { return 0 }
+        guard !keyboardVisible else { return 0 }
         return visibleTabBarHeight
     }
 
@@ -1861,17 +1861,184 @@ private struct FloatingTabBarHeightPreferenceKey: PreferenceKey {
     }
 }
 
-/// The signature bottom bar: one compact smoked-glass dock plus a separate movable edge action lens.
-/// Selection is an icon-sized halo rather than a full tab capsule, then becomes the current-tab
-/// disclosure when scrolling compacts navigation. Real iOS 26 Liquid Glass is used where available,
-/// with a material fallback.
+/// Shared geometry for the five equal tab targets, the moving bead, the meniscus socket, and direct
+/// rail scrubbing. Keeping one calculation prevents the bead from drifting away from the icon centers.
+private struct MeniscusTabRailLayout {
+    let width: CGFloat
+    let itemCount: Int
+    let horizontalInset: CGFloat
+    let itemSpacing: CGFloat
+
+    private var boundedCount: CGFloat {
+        CGFloat(max(1, itemCount))
+    }
+
+    private var itemWidth: CGFloat {
+        let totalSpacing = max(0, itemSpacing) * CGFloat(max(0, itemCount - 1))
+        return max(0, width - horizontalInset * 2 - totalSpacing) / boundedCount
+    }
+
+    private var itemStride: CGFloat {
+        itemWidth + max(0, itemSpacing)
+    }
+
+    func centerX(for index: CGFloat) -> CGFloat {
+        guard itemCount > 0 else { return width / 2 }
+        let boundedIndex = index.clamped(to: 0...CGFloat(itemCount - 1))
+        return horizontalInset + itemWidth / 2 + itemStride * boundedIndex
+    }
+
+    func continuousIndex(at x: CGFloat) -> CGFloat {
+        guard itemCount > 1, itemStride > 0 else { return 0 }
+        return ((x - centerX(for: 0)) / itemStride)
+            .clamped(to: 0...CGFloat(itemCount - 1))
+    }
+
+    func nearestIndex(at x: CGFloat) -> Int {
+        Int(continuousIndex(at: x).rounded())
+            .clamped(to: 0...max(0, itemCount - 1))
+    }
+}
+
+/// One continuous rail silhouette with a socket beneath the selected lens. The two cubic shoulders
+/// share horizontal tangents with both the rail top and the socket floor, so selection can interpolate
+/// continuously during a scrub without welding separate circles or masks onto a rounded rectangle.
+private struct MeniscusTabRailShape: Shape {
+    var selectedIndex: CGFloat
+    let itemCount: Int
+    let horizontalInset: CGFloat
+    let itemSpacing: CGFloat
+    let cornerRadius: CGFloat
+    let notchDepth: CGFloat
+    let notchReach: CGFloat
+
+    var animatableData: CGFloat {
+        get { selectedIndex }
+        set { selectedIndex = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        guard rect.width > 0, rect.height > 0, itemCount > 0 else {
+            return Path()
+        }
+
+        let radius = min(
+            max(0, cornerRadius),
+            min(rect.width, rect.height) / 2
+        )
+        let layout = MeniscusTabRailLayout(
+            width: rect.width,
+            itemCount: itemCount,
+            horizontalInset: horizontalInset,
+            itemSpacing: itemSpacing
+        )
+        let selectedCenterX = rect.minX + layout.centerX(for: selectedIndex)
+        let topY = rect.minY
+        let socketFloorY = topY + min(
+            max(0, notchDepth),
+            max(0, rect.height - radius)
+        )
+        let topLeadingTangentX = rect.minX + radius
+        let topTrailingTangentX = rect.maxX - radius
+        // End tabs naturally tighten only their outer shoulder as it approaches a rounded rail corner.
+        // The inner shoulder keeps the full reach, preserving the socket instead of shifting the lens.
+        let leadingReach = min(
+            notchReach,
+            max(0, selectedCenterX - topLeadingTangentX)
+        )
+        let trailingReach = min(
+            notchReach,
+            max(0, topTrailingTangentX - selectedCenterX)
+        )
+        let socketStartX = selectedCenterX - leadingReach
+        let socketEndX = selectedCenterX + trailingReach
+
+        var path = Path()
+        path.move(to: CGPoint(x: topLeadingTangentX, y: topY))
+        path.addLine(to: CGPoint(x: socketStartX, y: topY))
+        path.addCurve(
+            to: CGPoint(x: selectedCenterX, y: socketFloorY),
+            control1: CGPoint(
+                x: socketStartX + leadingReach * 0.44,
+                y: topY
+            ),
+            control2: CGPoint(
+                x: selectedCenterX - leadingReach * 0.34,
+                y: socketFloorY
+            )
+        )
+        path.addCurve(
+            to: CGPoint(x: socketEndX, y: topY),
+            control1: CGPoint(
+                x: selectedCenterX + trailingReach * 0.34,
+                y: socketFloorY
+            ),
+            control2: CGPoint(
+                x: socketEndX - trailingReach * 0.44,
+                y: topY
+            )
+        )
+        path.addLine(to: CGPoint(x: topTrailingTangentX, y: topY))
+        path.addArc(
+            center: CGPoint(
+                x: topTrailingTangentX,
+                y: rect.minY + radius
+            ),
+            radius: radius,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(0),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+        path.addArc(
+            center: CGPoint(
+                x: rect.maxX - radius,
+                y: rect.maxY - radius
+            ),
+            radius: radius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+        path.addArc(
+            center: CGPoint(
+                x: rect.minX + radius,
+                y: rect.maxY - radius
+            ),
+            radius: radius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addArc(
+            center: CGPoint(
+                x: rect.minX + radius,
+                y: rect.minY + radius
+            ),
+            radius: radius,
+            startAngle: .degrees(180),
+            endAngle: .degrees(270),
+            clockwise: false
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// The signature bottom bar: one compact smoked-glass meniscus rail plus a separate movable edge
+/// action lens. Selection remains an icon-sized halo, but the rail itself now forms a smooth socket
+/// around it before becoming the current-tab disclosure when scrolling compacts navigation. Real
+/// iOS 26 Liquid Glass is used where available, with a material fallback.
 private struct FloatingTabBar: View {
     /// Reserve the expanded bar from the first layout pass. Its 48pt body plus bottom breathing room
     /// measures about 56pt; 76pt leaves an optical/touch margin and keeps the next card's rounded edge
     /// fully below the fold instead of peeking into the navigation mask at the initial scroll position.
     /// A larger Dynamic Type measurement can still raise this value, and the shell intentionally preserves
     /// that largest value when the bar compacts.
-    static let expandedReservedHeight: CGFloat = 76
+    static let expandedReservedHeight =
+        NoopMetrics.navigationBarReservedHeight
 
     @Binding var selection: Int
     /// Scroll-reactive presentation supplied by the shell. Compact mode keeps the same 48pt target and
@@ -1889,6 +2056,7 @@ private struct FloatingTabBar: View {
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.noopAppearanceMode) private var appearanceMode
     @ScaledMetric(relativeTo: .footnote) private var scaledLabelLineHeight: CGFloat = 13
+    @GestureState private var scrubbedIndex: CGFloat?
     @Namespace private var navigationMorph
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
@@ -1902,10 +2070,17 @@ private struct FloatingTabBar: View {
 
     private static let labelLineCount = 1
     private static let labelMinimumScaleFactor: CGFloat = 0.56
+    private static let selectedLensDimension: CGFloat = 38
+    private static let expandedRailTopInset =
+        NoopMetrics.space2
+    private static let expandedRailCornerRadius: CGFloat = 18
+    private static let meniscusNotchDepth =
+        selectedLensDimension - expandedRailTopInset - NoopMetrics.space1
+    private static let meniscusNotchReach =
+        selectedLensDimension / 2 + NoopMetrics.space3
 
-    /// Compaction is suppressed at accessibility text sizes. Sighted low-vision users retain the same
-    /// five persistent localized wayfinding labels; only this fixed navigation chrome receives a bounded
-    /// scale so the rail stays stable without clamping the user's text size anywhere else in the app.
+    /// Compaction is suppressed at accessibility text sizes. Sighted low-vision users retain all five
+    /// persistent destinations and labels, while every button also keeps its full VoiceOver name.
     private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
     private var expandedHeight: CGFloat {
         Self.expandedBodyHeight(
@@ -1920,7 +2095,13 @@ private struct FloatingTabBar: View {
     ) -> CGFloat {
         let labelHeight = boundedLabelLineHeight(labelLineHeight)
             * CGFloat(max(1, labelLineCount))
-        return max(48, 12 + 18 + 3 + labelHeight)
+        return max(
+            NoopMetrics.controlHeight,
+            selectedLensDimension
+                + NoopMetrics.navigationLensItemSpacing
+                + labelHeight
+                + NoopMetrics.space2
+        )
     }
 
     private static func boundedLabelLineHeight(_ scaledLineHeight: CGFloat) -> CGFloat {
@@ -1936,8 +2117,43 @@ private struct FloatingTabBar: View {
     private var currentItem: Item {
         nav.first(where: { $0.tag == selection }) ?? nav[0]
     }
+    private var selectedIndex: Int {
+        nav.firstIndex(where: { $0.tag == selection }) ?? 0
+    }
+    private var displayedIndex: CGFloat {
+        scrubbedIndex ?? CGFloat(selectedIndex)
+    }
+    private var displayedItem: Item {
+        nav[Int(displayedIndex.rounded()).clamped(to: 0...(nav.count - 1))]
+    }
     private var currentAccent: Color {
         navigationAccent(for: currentItem.tag)
+    }
+    private var displayedAccent: Color {
+        navigationAccent(for: displayedItem.tag)
+    }
+    private var expandedItemSpacing: CGFloat {
+        dynamicTypeSize.isAccessibilitySize ? 0 : IPhonePrimaryTab.itemSpacing
+    }
+    private var expandedRailHorizontalInset: CGFloat {
+        // Keep the end-tab socket clear of the rounded rail corners. Even on the narrowest supported
+        // phone, the remaining five equal slots stay above the 44pt minimum interaction width.
+        (dynamicTypeSize.isAccessibilitySize ? 3 : 6) + NoopMetrics.space6
+    }
+    private var expandedRailShape: MeniscusTabRailShape {
+        MeniscusTabRailShape(
+            selectedIndex: displayedIndex,
+            itemCount: nav.count,
+            horizontalInset: expandedRailHorizontalInset,
+            itemSpacing: expandedItemSpacing,
+            cornerRadius: Self.expandedRailCornerRadius,
+            notchDepth: Self.meniscusNotchDepth,
+            notchReach: Self.meniscusNotchReach
+        )
+    }
+    private var selectionAnimation: Animation? {
+        guard scrubbedIndex == nil else { return nil }
+        return NoopMotion.gated(NoopMotion.card, reduced: reduceMotion)
     }
     private func navigationAccent(for tag: Int) -> Color {
         switch tag {
@@ -1978,10 +2194,9 @@ private struct FloatingTabBar: View {
     private var navigationScrim: Color {
         guard !reduceTransparency, colorSchemeContrast != .increased else { return .clear }
         if colorScheme == .dark {
-            // Keep labels readable without turning the shaped glass control into an opaque black bar.
-            return .black.opacity(appearanceMode == .black ? 0.68 : 0.64)
+            return .black.opacity(appearanceMode == .black ? 0.48 : 0.44)
         }
-        return .white.opacity(0.86)
+        return .white.opacity(0.72)
     }
     private var navigationGlassOpacity: Double {
         // Clear Glass still carries a strong milk-white optical body over a pearl canvas. Fade only
@@ -1990,22 +2205,30 @@ private struct FloatingTabBar: View {
         reduceTransparency || colorSchemeContrast == .increased
             ? 1
             : (colorScheme == .dark
-               ? (appearanceMode == .black ? 0.76 : 0.72)
-               : 0.62)
+               ? (appearanceMode == .black ? 0.58 : 0.54)
+               : 0.48)
     }
     private func navigationInk(active: Bool, accent: Color) -> Color {
         guard active else {
             return colorScheme == .dark
-                ? .white.opacity(colorSchemeContrast == .increased ? 0.82 : 0.70)
-                : .black.opacity(colorSchemeContrast == .increased ? 0.76 : 0.62)
+                ? .white.opacity(colorSchemeContrast == .increased ? 0.82 : 0.52)
+                : .black.opacity(colorSchemeContrast == .increased ? 0.76 : 0.46)
         }
         return accent
     }
     private func selectedHaloFill(accent: Color) -> LinearGradient {
         LinearGradient(
             colors: [
-                accent.opacity(colorScheme == .dark ? 0.28 : 0.18),
-                accent.opacity(colorScheme == .dark ? 0.10 : 0.07),
+                accent.opacity(
+                    colorScheme == .dark
+                        ? NoopMetrics.navigationLensBodyDarkStartOpacity
+                        : NoopMetrics.navigationLensBodyLightStartOpacity
+                ),
+                accent.opacity(
+                    colorScheme == .dark
+                        ? NoopMetrics.navigationLensBodyDarkEndOpacity
+                        : NoopMetrics.navigationLensBodyLightEndOpacity
+                ),
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -2014,9 +2237,99 @@ private struct FloatingTabBar: View {
     private func selectedHaloStroke(accent: Color) -> Color {
         accent.opacity(
             reduceTransparency || colorSchemeContrast == .increased
-                ? 0.72
-                : (colorScheme == .dark ? 0.52 : 0.42)
+                ? NoopMetrics.navigationLensRimHighContrastOpacity
+                : (
+                    colorScheme == .dark
+                        ? NoopMetrics.navigationLensRimDarkOpacity
+                        : NoopMetrics.navigationLensRimLightOpacity
+            )
         )
+    }
+    private func expandedRailLayout(width: CGFloat) -> MeniscusTabRailLayout {
+        MeniscusTabRailLayout(
+            width: width,
+            itemCount: nav.count,
+            horizontalInset: expandedRailHorizontalInset,
+            itemSpacing: expandedItemSpacing
+        )
+    }
+    private func selectedBead(accent: Color) -> some View {
+        Circle()
+            .fill(selectedHaloFill(accent: accent))
+            .overlay(
+                Circle()
+                    .strokeBorder(
+                        selectedHaloStroke(accent: accent),
+                        lineWidth: NoopMetrics.navigationLensStrokeWidth
+                    )
+            )
+            .overlay(alignment: .topLeading) {
+                Circle()
+                    .trim(
+                        from: NoopMetrics.navigationLensHighlightStartAngle / 360,
+                        to: (
+                            NoopMetrics.navigationLensHighlightStartAngle
+                                + NoopMetrics.navigationLensHighlightSweepAngle
+                        ) / 360
+                    )
+                    .stroke(
+                        StrandPalette.navigationLensHighlight.opacity(
+                            colorScheme == .dark
+                                ? NoopMetrics.navigationLensHighlightDarkOpacity
+                                : NoopMetrics.navigationLensHighlightLightOpacity
+                        ),
+                        style: StrokeStyle(
+                            lineWidth: NoopMetrics.navigationLensHighlightWidth,
+                            lineCap: .round
+                        )
+                    )
+                    .padding(NoopMetrics.navigationLensHighlightInset)
+            }
+            .shadow(
+                color: accent.opacity(
+                    colorScheme == .dark
+                        ? NoopMetrics.navigationLensShadowDarkOpacity
+                        : NoopMetrics.navigationLensShadowLightOpacity
+                ),
+                radius: NoopMetrics.navigationLensShadowRadius,
+                x: 0,
+                y: NoopMetrics.navigationLensShadowY
+            )
+            .matchedGeometryEffect(
+                id: "selected-tab-indicator",
+                in: navigationMorph
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+    private func railScrubGesture(
+        layout: MeniscusTabRailLayout
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .local)
+            .updating($scrubbedIndex) { value, state, transaction in
+                guard abs(value.translation.width) >= abs(value.translation.height) else {
+                    return
+                }
+                transaction.animation = nil
+                state = layout.continuousIndex(at: value.location.x)
+            }
+            .onEnded { value in
+                guard abs(value.translation.width) >= abs(value.translation.height),
+                      abs(value.translation.width) >= 6 else {
+                    return
+                }
+                let destinationTag = nav[layout.nearestIndex(at: value.location.x)].tag
+                // Scrubbing to the current tab only settles the bead; it must not invoke the separate
+                // tap/reselect contract that pops a stack or scrolls a root to the top.
+                guard destinationTag != selection else { return }
+                if reduceMotion {
+                    selection = destinationTag
+                } else {
+                    withAnimation(NoopMotion.card) {
+                        selection = destinationTag
+                    }
+                }
+            }
     }
 
     var body: some View {
@@ -2034,32 +2347,35 @@ private struct FloatingTabBar: View {
                alignment: .leading)
         .background {
             if !visuallyCompact {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                expandedRailShape
                     .fill(.clear)
                     .navigationGlass(
-                        in: RoundedRectangle(cornerRadius: 20, style: .continuous),
+                        in: expandedRailShape,
                         tint: navigationGlassTint
                     )
                     .opacity(navigationGlassOpacity)
+                    .padding(.top, Self.expandedRailTopInset)
             }
         }
         .background {
             if !visuallyCompact {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                expandedRailShape
                     .fill(navigationScrim)
+                    .padding(.top, Self.expandedRailTopInset)
             }
         }
         .overlay {
             if !visuallyCompact {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(
+                expandedRailShape
+                    .stroke(
                     LinearGradient(colors: [
-                        currentAccent.opacity(colorScheme == .dark ? 0.30 : 0.20),
+                        displayedAccent.opacity(colorScheme == .dark ? 0.30 : 0.20),
                         .white.opacity(colorScheme == .dark ? 0.13 : 0.42),
-                        currentAccent.opacity(colorScheme == .dark ? 0.14 : 0.08),
+                        displayedAccent.opacity(colorScheme == .dark ? 0.14 : 0.08),
                     ], startPoint: .leading, endPoint: .trailing),
                     lineWidth: 0.8
                 )
+                .padding(.top, Self.expandedRailTopInset)
             }
         }
         .shadow(
@@ -2067,29 +2383,46 @@ private struct FloatingTabBar: View {
                 ? .clear
                 : .black.opacity(
                     colorScheme == .dark
-                        ? (appearanceMode == .black ? 0.14 : 0.20)
-                        : 0.075
+                        ? (appearanceMode == .black ? 0.09 : 0.12)
+                        : 0.05
                 ),
-            radius: visuallyCompact ? 0 : 11,
+            radius: visuallyCompact ? 0 : 7,
             x: 0,
-            y: visuallyCompact ? 0 : 5
+            y: visuallyCompact ? 0 : 3
         )
+        .animation(selectionAnimation, value: displayedIndex)
         .animation(reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.28),
                    value: visuallyCompact)
     }
 
-    /// The full wayfinding state. The movable action lens is composed independently by RootTabView,
-    /// so the dock always reads as exactly five destinations in expanded and compact presentations.
+    /// The full wayfinding state. All five labels remain visible while one bead and one continuous socket
+    /// move together. A horizontal drag previews the nearest destination and commits it on release.
     private var expandedBar: some View {
-        HStack(spacing: dynamicTypeSize.isAccessibilitySize ? 0 : IPhonePrimaryTab.itemSpacing) {
-            ForEach(nav) { item in tabButton(item) }
+        GeometryReader { geometry in
+            let layout = expandedRailLayout(width: geometry.size.width)
+            ZStack(alignment: .topLeading) {
+                selectedBead(accent: displayedAccent)
+                    .frame(
+                        width: Self.selectedLensDimension,
+                        height: Self.selectedLensDimension
+                    )
+                    .position(
+                        x: layout.centerX(for: displayedIndex),
+                        y: Self.selectedLensDimension / 2
+                            - NoopMetrics.space1
+                    )
+
+                HStack(spacing: expandedItemSpacing) {
+                    ForEach(nav) { item in tabButton(item) }
+                }
+                .padding(.horizontal, expandedRailHorizontalInset)
+                .frame(height: expandedHeight)
+            }
+            .contentShape(Rectangle())
+            .highPriorityGesture(railScrubGesture(layout: layout))
         }
-        .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 3 : 6)
         .frame(height: expandedHeight)
-        .animation(
-            reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.26),
-            value: selection
-        )
+        .animation(selectionAnimation, value: displayedIndex)
     }
 
     /// Farther down a screen, navigation yields to a borderless current-tab disclosure. Its fixed frame
@@ -2103,14 +2436,21 @@ private struct FloatingTabBar: View {
                     .foregroundStyle(
                         navigationInk(active: true, accent: currentAccent)
                     )
-                    .frame(width: 26, height: 26)
+                    .frame(width: 28, height: 28)
                     .background {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        Circle()
                             .fill(selectedHaloFill(accent: currentAccent))
-                        .matchedGeometryEffect(
-                            id: "selected-tab-indicator",
-                            in: navigationMorph
-                        )
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(
+                                        selectedHaloStroke(accent: currentAccent),
+                                        lineWidth: 0.8
+                                    )
+                            }
+                            .matchedGeometryEffect(
+                                id: "selected-tab-indicator",
+                                in: navigationMorph
+                            )
                     }
 
                 Text(visualTitle(for: currentItem))
@@ -2141,60 +2481,45 @@ private struct FloatingTabBar: View {
     }
 
     private func tabButton(_ item: Item) -> some View {
-        let active = selection == item.tag
+        let selected = selection == item.tag
+        let visuallyActive = displayedItem.tag == item.tag
         let accent = navigationAccent(for: item.tag)
         return Button {
-            if active {
+            if selected {
                 onReselect(item.tag)
             } else {
                 selection = item.tag
             }
         } label: {
-            VStack(spacing: 2) {
+            VStack(spacing: NoopMetrics.navigationLensItemSpacing) {
                 ZStack {
-                    if active {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(selectedHaloFill(accent: accent))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .strokeBorder(
-                                        selectedHaloStroke(accent: accent),
-                                        lineWidth: 0.8
-                                    )
-                            )
-                            .matchedGeometryEffect(
-                                id: "selected-tab-indicator",
-                                in: navigationMorph
-                            )
-                    }
                     Image(systemName: item.icon)
-                        .font(.system(size: 17, weight: active ? .semibold : .regular))
-                        .symbolRenderingMode(.hierarchical)
-                        // Selection gets one brief, physical lift. It communicates the tab change without
-                        // turning navigation into another continuously moving part of the health dashboard.
-                        .scaleEffect(active ? 1.06 : 1)
-                        .offset(y: active ? -0.5 : 0)
-                }
-                .frame(width: 34, height: 24)
-                .overlay(alignment: .top) {
-                    if active {
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [accent.opacity(0.45), accent],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
+                        .font(
+                            .system(
+                                size: NoopMetrics.navigationLensIconSize,
+                                weight: visuallyActive ? .semibold : .regular
                             )
-                            .frame(width: 16, height: 2)
-                            .offset(y: -3)
-                    }
+                        )
+                        .symbolRenderingMode(.hierarchical)
+                        .scaleEffect(
+                            visuallyActive ? NoopMetrics.navigationLensSelectedScale : 1
+                        )
                 }
+                .frame(
+                    width: Self.selectedLensDimension,
+                    height: Self.selectedLensDimension
+                )
+                .offset(
+                    y: visuallyActive ? -NoopMetrics.navigationLensActiveOffset : 0
+                )
                 Text(visualTitle(for: item))
-                    // Fixed navigation remains one line like a native tab bar. The local Dynamic Type cap,
-                    // tightening and bounded scaling keep every shipped localized title whole; tail
-                    // truncation is only a defensive fallback for a future translation outside that bound.
-                    .font(StrandFont.footnote.weight(active ? .semibold : .medium))
+                    // Fixed navigation remains one line like a native tab bar. Dynamic Type is bounded
+                    // only inside this fixed chrome so every localized destination remains visible.
+                    .font(
+                        StrandFont.footnote.weight(
+                            visuallyActive ? .semibold : .medium
+                        )
+                    )
                     .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                     .lineLimit(Self.labelLineCount)
                     .minimumScaleFactor(Self.labelMinimumScaleFactor)
@@ -2205,14 +2530,30 @@ private struct FloatingTabBar: View {
                         minHeight: Self.boundedLabelLineHeight(scaledLabelLineHeight)
                             * CGFloat(Self.labelLineCount)
                     )
+                    .offset(
+                        y: -NoopMetrics.navigationLensLabelOffset
+                            - (visuallyActive ? NoopMetrics.space1 : 0)
+                    )
+                    .padding(
+                        .horizontal,
+                        NoopMetrics.navigationLensLabelHorizontalPadding
+                    )
+                    .accessibilityHidden(true)
             }
-            .foregroundStyle(navigationInk(active: active, accent: accent))
+            .foregroundStyle(
+                navigationInk(active: visuallyActive, accent: accent)
+            )
             .frame(maxWidth: .infinity)
             .frame(minWidth: IPhonePrimaryTab.minimumTouchDimension)
             .frame(minHeight: IPhonePrimaryTab.minimumTouchDimension)
             .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 0 : 2)
             .contentShape(Rectangle())
-            .animation(NoopMotion.gated(NoopMotion.value, reduced: reduceMotion), value: active)
+            .animation(
+                scrubbedIndex == nil
+                    ? NoopMotion.gated(NoopMotion.value, reduced: reduceMotion)
+                    : nil,
+                value: visuallyActive
+            )
         }
         .buttonStyle(.plain)
         .accessibilityLabel(item.title)
@@ -2221,8 +2562,8 @@ private struct FloatingTabBar: View {
         }
         .accessibilityIdentifier("noop.tab.\(item.tag)")
         .accessibilityAddTraits(.isButton)
-        .accessibilityAddTraits(active ? .isSelected : [])
-        .accessibilityRemoveTraits(active ? [] : .isSelected)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityRemoveTraits(selected ? [] : .isSelected)
     }
 
 }
@@ -2240,6 +2581,9 @@ private enum NoopCommandLensEdge: String {
 
 private struct NoopCommandLensLayout {
     static let touchSize = CGSize(width: 48, height: 52)
+    static let bodySize = CGSize(width: 30, height: 34)
+    static let bodyEdgePull =
+        (touchSize.width - bodySize.width) / 2 + 2
 
     let containerSize: CGSize
     let safeAreaInsets: EdgeInsets
@@ -2323,13 +2667,46 @@ private struct NoopCommandNMark: View {
                     endPoint: .topTrailing
                 ),
                 style: StrokeStyle(
-                    lineWidth: 2.5,
+                    lineWidth: 2.2,
                     lineCap: .round,
                     lineJoin: .round
                 )
             )
         }
-        .frame(width: 14, height: 14)
+        .frame(width: 12, height: 12)
+    }
+}
+
+/// A compact mirrored edge tab. The flat dock side communicates attachment while the rounded outer
+/// side keeps the control quiet inside its unchanged 48x52 interaction frame.
+private struct NoopCommandBubbleShape: Shape {
+    let edge: NoopCommandLensEdge
+
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            let mirroredX = edge == .trailing ? x : 1 - x
+            return CGPoint(
+                x: rect.minX + rect.width * mirroredX,
+                y: rect.minY + rect.height * y
+            )
+        }
+
+        var path = Path()
+        path.move(to: point(1, 0.18))
+        path.addLine(to: point(0.30, 0.18))
+        path.addCurve(
+            to: point(0.02, 0.50),
+            control1: point(0.11, 0.18),
+            control2: point(0.02, 0.32)
+        )
+        path.addCurve(
+            to: point(0.30, 0.82),
+            control1: point(0.02, 0.68),
+            control2: point(0.11, 0.82)
+        )
+        path.addLine(to: point(1, 0.82))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -2354,20 +2731,12 @@ private struct MovableNoopCommandLens: View {
             return colorScheme == .dark ? .black.opacity(0.96) : .white.opacity(0.98)
         }
         return colorScheme == .dark
-            ? .black.opacity(appearanceMode == .black ? 0.94 : 0.90)
-            : .white.opacity(0.94)
+            ? .black.opacity(appearanceMode == .black ? 0.64 : 0.58)
+            : .white.opacity(0.68)
     }
 
-    private var lensShape: UnevenRoundedRectangle {
-        let outerRadius: CGFloat = 7
-        let innerRadius: CGFloat = 16
-        return UnevenRoundedRectangle(
-            topLeadingRadius: edge == .leading ? outerRadius : innerRadius,
-            bottomLeadingRadius: edge == .leading ? outerRadius : innerRadius,
-            bottomTrailingRadius: edge == .trailing ? outerRadius : innerRadius,
-            topTrailingRadius: edge == .trailing ? outerRadius : innerRadius,
-            style: .continuous
-        )
+    private var lensShape: NoopCommandBubbleShape {
+        NoopCommandBubbleShape(edge: edge)
     }
 
     private var lensFace: some View {
@@ -2378,32 +2747,53 @@ private struct MovableNoopCommandLens: View {
         } else {
             .black.opacity(0.08)
         }
-        let surfaceOpacity = reduceTransparency ? 1 : (colorScheme == .dark ? 0.82 : 0.70)
-        let rimTop = Color.white.opacity(colorScheme == .dark ? 0.24 : 0.52)
-        let shadowOpacity = colorScheme == .dark ? 0.12 : 0.06
+        let surfaceOpacity = reduceTransparency ? 1 : (colorScheme == .dark ? 0.60 : 0.52)
+        let rimTop = Color.white.opacity(colorScheme == .dark ? 0.16 : 0.36)
+        let shadowOpacity = colorScheme == .dark ? 0.08 : 0.04
 
-        return NoopCommandNMark()
-            .offset(x: edge == .leading ? 1 : -1)
-            .frame(width: 18, height: 38)
-            .background {
-                lensShape
-                    .fill(opticalScrim)
-                    .navigationGlass(in: lensShape, tint: glassTint)
-                    .opacity(surfaceOpacity)
-            }
-            .overlay {
-                lensShape.strokeBorder(
+        return ZStack {
+            lensShape
+                .fill(opticalScrim)
+                .navigationGlass(in: lensShape, tint: glassTint)
+                .opacity(surfaceOpacity)
+
+            lensShape
+                .stroke(
                     LinearGradient(
                         colors: [
                             rimTop,
-                            StrandPalette.metricCyan.opacity(0.58),
-                            StrandPalette.chargeColor.opacity(0.34),
+                            StrandPalette.metricCyan.opacity(0.42),
+                            StrandPalette.chargeColor.opacity(0.22),
                         ],
                         startPoint: .top,
                         endPoint: .bottom
                     ),
                     lineWidth: 0.75
                 )
+
+            Capsule()
+                .fill(
+                    StrandPalette.navigationLensHighlight.opacity(
+                        colorScheme == .dark
+                            ? NoopMetrics.navigationLensHighlightDarkOpacity
+                            : NoopMetrics.navigationLensHighlightLightOpacity
+                    )
+                )
+                .frame(width: 7, height: 1.2)
+                .offset(x: edge == .leading ? 3 : -3, y: -8)
+
+            NoopCommandNMark()
+                .offset(x: edge == .leading ? 1.5 : -1.5)
+        }
+            .frame(
+                width: NoopCommandLensLayout.bodySize.width,
+                height: NoopCommandLensLayout.bodySize.height
+            )
+            .background {
+                lensShape
+                    .fill(StrandPalette.chargeColor.opacity(shadowOpacity))
+                    .blur(radius: 5)
+                    .offset(y: 2)
             }
             .shadow(
                 color: StrandPalette.chargeColor.opacity(shadowOpacity),
@@ -2411,7 +2801,11 @@ private struct MovableNoopCommandLens: View {
                 x: 0,
                 y: 2
             )
-            .offset(x: edge == .leading ? -18 : 18)
+            .offset(
+                x: edge == .leading
+                    ? -NoopCommandLensLayout.bodyEdgePull
+                    : NoopCommandLensLayout.bodyEdgePull
+            )
             .frame(
                 width: NoopCommandLensLayout.touchSize.width,
                 height: NoopCommandLensLayout.touchSize.height

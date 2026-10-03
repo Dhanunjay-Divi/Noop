@@ -29,13 +29,13 @@ final class ApplePairingRegistryRegressionTests: XCTestCase {
         func verifyPassword(_ password: String) {}
         private(set) var readStepsCount = 0
 
-    func readSteps() {
+    func readSteps(requestID: UInt64) {
         readStepsCount += 1
     }
 
     private(set) var readSleepCount = 0
 
-    func readSleep() {
+    func readSleep(requestID: UInt64) {
         readSleepCount += 1
     }
 

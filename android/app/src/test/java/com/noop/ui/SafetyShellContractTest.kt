@@ -62,7 +62,7 @@ class SafetyShellContractTest {
         val commandLens = text
             .substringAfter("private fun MovableNoopCommandLens(")
             .substringBefore("\n}\n\n/**")
-        assertTrue(commandLens.contains("Canvas(modifier = Modifier.size(14.dp))"))
+        assertTrue(commandLens.contains("Canvas(modifier = Modifier.size(12.dp))"))
         assertTrue(commandLens.contains("NoopCommandNMark()"))
         assertTrue(commandLens.contains("val path = Path().apply"))
         assertTrue(commandLens.contains("lineTo(right, bottom)"))

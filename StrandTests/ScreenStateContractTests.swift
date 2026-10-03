@@ -803,7 +803,9 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
         XCTAssertFalse(android.contains(#"title = "Nutrition""#))
         XCTAssertFalse(android.contains("NutritionMixedSourceCard"))
 
-        XCTAssertTrue(shell.contains("expandedReservedHeight: CGFloat = 76"))
+        XCTAssertTrue(shell.contains(
+            "NoopMetrics.navigationBarReservedHeight"
+        ))
         XCTAssertTrue(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         XCTAssertTrue(shell.contains(
             ".frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))"
@@ -1137,10 +1139,18 @@ final class ReferenceSurfaceContractTests: XCTestCase {
 
         XCTAssertTrue(classic.contains("private var visibleKeyMetrics: [KeyMetric]"))
         XCTAssertTrue(classic.contains("ForEach(visibleKeyMetrics)"))
-        XCTAssertTrue(classic.contains("{ enabledKeyMetrics }"))
+        XCTAssertTrue(classic.contains("enabledKeyMetrics.filter {"))
+        XCTAssertTrue(classic.contains("$0 != .menstrualCycle"))
+        XCTAssertTrue(classic.contains("profile.cycleAwarenessApplies"))
+        XCTAssertTrue(classic.contains("cycleAwarenessEnabled"))
         XCTAssertTrue(liquid.contains("private var visibleKeyMetrics: [KeyMetric]"))
-        XCTAssertTrue(liquid.contains("to: visibleKeyMetrics.count") && liquid.contains("ForEach(rowMetrics)"))
-        XCTAssertTrue(liquid.contains("{ enabledKeyMetrics }"))
+        XCTAssertTrue(liquid.contains("LazyVGrid(columns: columns"))
+        XCTAssertTrue(liquid.contains("ForEach(visibleKeyMetrics)"))
+        XCTAssertFalse(liquid.contains("ForEach(rowMetrics)"))
+        XCTAssertTrue(liquid.contains("enabledKeyMetrics.filter {"))
+        XCTAssertTrue(liquid.contains("$0 != .menstrualCycle"))
+        XCTAssertTrue(liquid.contains("profile.cycleAwarenessApplies"))
+        XCTAssertTrue(liquid.contains("cycleAwarenessEnabled"))
         XCTAssertTrue(liquid.contains("Open all metric history"))
         XCTAssertTrue(androidToday.contains("val tiles = enabledMetrics"))
         XCTAssertFalse(androidToday.contains("val tiles = KeyMetricPrefs.catalogOrder(enabledMetrics)"))

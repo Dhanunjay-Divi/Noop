@@ -8,6 +8,7 @@ import StrandDesign
 
 struct KeyMetricsEditorSheet: View {
     @Binding var layoutRaw: String
+    private let cycleMetricAvailable: Bool
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage(HydrationStore.enabledKey) private var hydrationEnabled = false
@@ -15,16 +16,28 @@ struct KeyMetricsEditorSheet: View {
     @State private var selected: [KeyMetric]
     @State private var searchText = ""
 
-    init(layoutRaw: Binding<String>) {
+    init(
+        layoutRaw: Binding<String>,
+        cycleMetricAvailable: Bool = true
+    ) {
         _layoutRaw = layoutRaw
+        self.cycleMetricAvailable = cycleMetricAvailable
         _selected = State(initialValue: KeyMetricPrefs.decodeEnabled(layoutRaw.wrappedValue))
     }
 
     private var selectedSet: Set<KeyMetric> { Set(selected) }
 
+    private var catalogMetrics: [KeyMetric] {
+        KeyMetric.defaultOrder.filter {
+            $0 != .menstrualCycle
+                || cycleMetricAvailable
+                || selectedSet.contains(.menstrualCycle)
+        }
+    }
+
     private var availableMetrics: [KeyMetric] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return KeyMetric.defaultOrder.filter { metric in
+        return catalogMetrics.filter { metric in
             !selectedSet.contains(metric)
                 && (query.isEmpty
                     || metric.title.localizedCaseInsensitiveContains(query)
@@ -84,19 +97,11 @@ struct KeyMetricsEditorSheet: View {
                 Text(String(localized: "Choose your snapshot"))
                     .font(StrandFont.rounded(24, weight: .bold))
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text(String(localized: "Show 3 to 6 metrics on Today. Every other supported metric stays available here and in history."))
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: NoopMetrics.space2)
-            Text(String(localized: "\(selected.count)/\(KeyMetricPrefs.maximumSelectionCount)"))
+            Text(String(localized: "\(selected.count) selected"))
                 .font(StrandFont.captionNumber)
-                .foregroundStyle(
-                    selected.count == KeyMetricPrefs.maximumSelectionCount
-                        ? StrandPalette.statusPositive
-                        : StrandPalette.textSecondary
-                )
+                .foregroundStyle(StrandPalette.textSecondary)
                 .padding(.horizontal, 10)
                 .frame(minHeight: 30)
                 .background(
@@ -105,7 +110,7 @@ struct KeyMetricsEditorSheet: View {
                         .overlay(Capsule().strokeBorder(StrandPalette.hairline, lineWidth: 1))
                 )
                 .accessibilityLabel(
-                    String(localized: "\(selected.count) of \(KeyMetricPrefs.maximumSelectionCount) selected")
+                    String(localized: "\(selected.count) metrics selected")
                 )
                 .accessibilityIdentifier("noop.key-metric.selection-count")
         }
@@ -158,7 +163,7 @@ struct KeyMetricsEditorSheet: View {
 
     private var availableSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.space4) {
-            sectionHeader("AVAILABLE METRICS", trailing: "\(KeyMetric.allCases.count) supported")
+            sectionHeader("AVAILABLE METRICS", trailing: "\(catalogMetrics.count) supported")
 
             if availableMetrics.isEmpty {
                 Text(
@@ -276,8 +281,7 @@ struct KeyMetricsEditorSheet: View {
 
     private func availableRow(_ metric: KeyMetric) -> some View {
         let hydrationBlocked = metric == .hydration && !hydrationEnabled
-        let atLimit = selected.count >= KeyMetricPrefs.maximumSelectionCount
-        let canAdd = !hydrationBlocked && !atLimit
+        let canAdd = !hydrationBlocked
 
         return Button {
             add(metric)
@@ -313,7 +317,7 @@ struct KeyMetricsEditorSheet: View {
         .buttonStyle(.plain)
         .disabled(!canAdd)
         .accessibilityLabel(String(localized: "Add \(metric.title) to Today"))
-        .accessibilityHint(availableHint(hydrationBlocked: hydrationBlocked, atLimit: atLimit))
+        .accessibilityHint(availableHint(hydrationBlocked: hydrationBlocked))
         .accessibilityIdentifier("noop.key-metric.add.\(metric.rawValue)")
     }
 
@@ -329,12 +333,9 @@ struct KeyMetricsEditorSheet: View {
             )
     }
 
-    private func availableHint(hydrationBlocked: Bool, atLimit: Bool) -> String {
+    private func availableHint(hydrationBlocked: Bool) -> String {
         if hydrationBlocked {
             return String(localized: "Enable hydration tracking in Settings before adding this metric.")
-        }
-        if atLimit {
-            return String(localized: "Six metrics are already selected.")
         }
         return String(localized: "Adds this metric to the Today snapshot.")
     }
@@ -368,8 +369,7 @@ struct KeyMetricsEditorSheet: View {
     }
 
     private func add(_ metric: KeyMetric) {
-        guard selected.count < KeyMetricPrefs.maximumSelectionCount,
-              !selected.contains(metric),
+        guard !selected.contains(metric),
               metric != .hydration || hydrationEnabled else {
             return
         }
@@ -393,7 +393,7 @@ struct KeyMetricsEditorSheet: View {
             return StrandPalette.accent
         case .effort, .calories, .skinTemp, .maxHr:
             return StrandPalette.metricAmber
-        case .rest, .hrv, .asleepTime, .vitality:
+        case .rest, .hrv, .asleepTime, .vitality, .menstrualCycle:
             return StrandPalette.metricPurple
         case .restingHr, .averageHr:
             return StrandPalette.metricRose

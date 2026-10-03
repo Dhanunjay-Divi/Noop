@@ -442,11 +442,20 @@ final class NOOPiOSUITests: XCTestCase {
         let codeField = app.textFields["noop.noop-plus.code"]
         XCTAssertTrue(codeField.waitForExistence(timeout: 30))
         focusAndType(code, into: codeField, in: app)
+        let maskedValue = codeField.value as? String ?? ""
+        XCTAssertEqual(maskedValue.count, code.count)
+        XCTAssertFalse(
+            maskedValue.contains(where: \.isNumber),
+            "The editable OTP field must not expose verification digits to accessibility."
+        )
 
         let verifyCode = app.buttons["noop.noop-plus.verify-code"]
         XCTAssertTrue(verifyCode.isEnabled)
         verifyCode.tap()
 
+        let verified = app.descendants(matching: .any)["noop.noop-plus.verified"]
+        XCTAssertTrue(verified.waitForExistence(timeout: 30))
+        XCTAssertFalse(codeField.exists, "The verified secret must clear with the phase transition.")
         XCTAssertTrue(consent.waitForExistence(timeout: 30))
         let enroll = app.buttons["noop.noop-plus.enroll"]
         XCTAssertTrue(enroll.exists)
@@ -867,6 +876,23 @@ final class NOOPiOSUITests: XCTestCase {
         }
     }
 
+    func testTodayOrdinaryTextViewportReservesExpandedNavigation() {
+        let app = launchApp()
+        let scroll = app.scrollViews["noop.today.scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 20))
+        let tabs = (0...4).map { app.buttons["noop.tab.\($0)"] }
+        for tab in tabs {
+            XCTAssertTrue(tab.waitForExistence(timeout: 5))
+        }
+        let navigationBoundary = tabs.map(\.frame.minY).min() ?? 0
+        XCTAssertGreaterThan(navigationBoundary, 0)
+        XCTAssertLessThanOrEqual(
+            scroll.frame.maxY,
+            navigationBoundary + 2,
+            "Ordinary text must end above the expanded navigation controls."
+        )
+    }
+
     func testTrendsTimeoutShowsRetryAndRetryLeavesTheTerminalFailure() {
         let app = launchApp(
             tab: "trends",
@@ -1283,49 +1309,42 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "onboarding-editable-measurements")
     }
 
-    func testKeyMetricSelectionEnforcesAccessibleThreeToSixBoundaries() {
+    func testKeyMetricSelectionSupportsTheFullCatalogAndKeepsTheMinimumBoundary() {
         let app = launchDemoScreen("keymetricseditor")
         let count = app.descendants(matching: .any)["noop.key-metric.selection-count"]
         let selectedHRV = app.descendants(matching: .any)["noop.key-metric.selected.hrv"]
         let addRecovery = app.buttons["noop.key-metric.add.charge"]
 
         XCTAssertTrue(count.waitForExistence(timeout: 20))
-        XCTAssertEqual(count.label, "6 of 6 selected")
+        XCTAssertEqual(count.label, "6 metrics selected")
         XCTAssertTrue(selectedHRV.exists)
 
         for _ in 0..<10 where !addRecovery.exists {
             app.swipeUp()
         }
         XCTAssertTrue(addRecovery.exists)
-        XCTAssertFalse(addRecovery.isEnabled)
-
-        let removeHRV = app.buttons["noop.key-metric.remove.hrv"]
-        for _ in 0..<10 where !removeHRV.isHittable {
-            app.swipeDown()
-        }
-        XCTAssertTrue(removeHRV.isHittable)
-        removeHRV.tap()
-        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "5 of 6 selected" })
-        XCTAssertFalse(selectedHRV.exists)
-
-        for _ in 0..<10 where !addRecovery.isHittable {
-            app.swipeUp()
-        }
-        XCTAssertTrue(addRecovery.isHittable)
+        XCTAssertTrue(addRecovery.isEnabled)
         addRecovery.tap()
-        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "6 of 6 selected" })
+        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "7 metrics selected" })
         XCTAssertTrue(
             app.descendants(matching: .any)["noop.key-metric.selected.charge"].exists
         )
 
-        let addCalories = app.buttons["noop.key-metric.add.calories"]
-        for _ in 0..<10 where !addCalories.exists {
+        let addCycle = app.buttons["noop.key-metric.add.menstrualCycle"]
+        for _ in 0..<12 where !addCycle.isHittable {
             app.swipeUp()
         }
-        XCTAssertTrue(addCalories.exists)
-        XCTAssertFalse(addCalories.isEnabled)
+        XCTAssertTrue(addCycle.isHittable)
+        XCTAssertTrue(addCycle.isEnabled)
+        addCycle.tap()
+        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "8 metrics selected" })
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "noop.key-metric.selected.menstrualCycle"
+            ].exists
+        )
 
-        for metric in ["restingHr", "bloodOxygen", "respiratory"] {
+        for metric in ["hrv", "restingHr", "bloodOxygen", "respiratory", "steps"] {
             let remove = app.buttons["noop.key-metric.remove.\(metric)"]
             for _ in 0..<10 where !remove.isHittable {
                 app.swipeDown()
@@ -1334,7 +1353,8 @@ final class NOOPiOSUITests: XCTestCase {
             remove.tap()
         }
 
-        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "3 of 6 selected" })
+        XCTAssertTrue(waitUntil(timeout: 3) { count.label == "3 metrics selected" })
+        XCTAssertFalse(selectedHRV.exists)
         let removeRecovery = app.buttons["noop.key-metric.remove.charge"]
         for _ in 0..<10 where !removeRecovery.exists {
             app.swipeDown()
@@ -1348,34 +1368,38 @@ final class NOOPiOSUITests: XCTestCase {
         }
         XCTAssertTrue(addHRV.exists)
         XCTAssertTrue(addHRV.isEnabled)
-        keepScreenshot(app, name: "key-metrics-accessible-color-boundaries")
+        keepScreenshot(app, name: "key-metrics-full-catalog-boundaries")
     }
 
     func testTodayKeepsPinnedMetricsAndFullHistoryReachable() {
         let app = XCUIApplication()
         app.launchArguments = [
-            "-today.keyMetrics", "charge,effort,rest",
+            "-today.keyMetrics",
+            "charge,effort,rest,hrv,restingHr,bloodOxygen,respiratory,steps",
             "--demo-seed",
             "--demo-tab", "today",
             "--demo-key-metrics",
         ]
         app.launch()
 
-        let pinnedMetricIDs = ["charge", "effort", "rest"]
+        let pinnedMetricIDs = [
+            "charge", "effort", "rest", "hrv",
+            "restingHr", "bloodOxygen", "respiratory", "steps",
+        ]
         let unpinnedMetricIDs = [
-            "hrv", "restingHr",
-            "bloodOxygen", "respiratory", "steps", "weight", "calories",
+            "averageHr", "maxHr", "weight", "calories", "vo2Max",
+            "stress", "vitality", "skinTemp", "asleepTime", "menstrualCycle",
         ]
         let scroll = app.scrollViews["noop.today.scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 20))
-        let history = app.buttons["noop.today.key-metrics.open-history"]
-        for _ in 0..<12 where !history.isHittable {
-            scroll.swipeUp()
-        }
 
         for id in pinnedMetricIDs {
+            let metric = app.descendants(matching: .any)["noop.today.key-metric.\(id)"]
+            for _ in 0..<12 where !metric.exists {
+                scroll.swipeUp()
+            }
             XCTAssertTrue(
-                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists,
+                metric.exists,
                 "Pinned Today metric \(id) must remain visible."
             )
         }
@@ -1384,6 +1408,10 @@ final class NOOPiOSUITests: XCTestCase {
                 app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists,
                 "Unpinned metric \(id) must stay out of the focused Today grid."
             )
+        }
+        let history = app.buttons["noop.today.key-metrics.open-history"]
+        for _ in 0..<12 where !history.isHittable {
+            scroll.swipeUp()
         }
         XCTAssertTrue(history.isHittable, "The full metric history action must remain reachable.")
         keepScreenshot(app, name: "today-pinned-key-metrics")
@@ -1613,17 +1641,21 @@ final class NOOPiOSUITests: XCTestCase {
             NSPredicate(format: "value CONTAINS[c] %@", "points")
         ).firstMatch
         XCTAssertTrue(summaryNode.waitForExistence(timeout: 5))
-        let initialSummary = String(describing: summaryNode.value)
+        let initialSummary = summaryNode.value as? String ?? String(describing: summaryNode.value)
         XCTAssertTrue(initialSummary.localizedCaseInsensitiveContains("points"))
 
-        let july29Area = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.71, dy: 0.50))
-        let nearby = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.50))
+        let scrubStartCoordinate = chart.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.22, dy: 0.50)
+        )
+        let scrubEndCoordinate = chart.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.42, dy: 0.50)
+        )
         let scrubStart = CGPoint(
-            x: chartFrame.minX + chartFrame.width * 0.71,
+            x: chartFrame.minX + chartFrame.width * 0.22,
             y: chartFrame.midY
         )
         let scrubEnd = CGPoint(
-            x: chartFrame.minX + chartFrame.width * 0.76,
+            x: chartFrame.minX + chartFrame.width * 0.42,
             y: chartFrame.midY
         )
         XCTAssertFalse(
@@ -1634,20 +1666,53 @@ final class NOOPiOSUITests: XCTestCase {
             quickActions.frame.contains(scrubEnd),
             "The date-scrub path must remain clear of the movable action lens."
         )
-        july29Area.press(forDuration: 0.35, thenDragTo: nearby)
+        let scrubPath = CGRect(
+            x: min(scrubStart.x, scrubEnd.x),
+            y: chartFrame.midY - 22,
+            width: abs(scrubEnd.x - scrubStart.x),
+            height: 44
+        )
+        XCTAssertFalse(
+            quickActions.frame.intersects(scrubPath),
+            "The complete date-scrub path must remain clear of the movable action lens."
+        )
+        scrubStartCoordinate.press(forDuration: 0.8, thenDragTo: scrubEndCoordinate)
 
         // SwiftUI may replace the chart's accessibility node after its value changes.
         // Re-query without pinning the stale pre-scrub element type.
-        let selectedChart = chartNodes.matching(
-            NSPredicate(
-                format: "value != nil AND NOT (value CONTAINS[c] %@)",
-                "points"
+        let selectedValuePredicate = NSPredicate(
+            format: "value != nil AND NOT (value CONTAINS[c] %@)",
+            "points"
+        )
+        var selectedChart = chartNodes.matching(selectedValuePredicate).firstMatch
+        if !selectedChart.waitForExistence(timeout: 3) {
+            let retryChart = app.otherElements[chartIdentifier].firstMatch
+            XCTAssertTrue(retryChart.waitForExistence(timeout: 5))
+            let retryStart = retryChart.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.28, dy: 0.50)
             )
-        ).firstMatch
-        XCTAssertTrue(selectedChart.waitForExistence(timeout: 5))
-        let selectedValue = String(describing: selectedChart.value)
+            let retryEnd = retryChart.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.46, dy: 0.50)
+            )
+            retryStart.press(forDuration: 1.0, thenDragTo: retryEnd)
+            selectedChart = chartNodes.matching(selectedValuePredicate).firstMatch
+        }
+        XCTAssertTrue(
+            selectedChart.waitForExistence(timeout: 5),
+            "The chart must expose an exact dated value after a bounded scrub retry."
+        )
+        let selectedValue = selectedChart.value as? String ?? String(describing: selectedChart.value)
         XCTAssertNotEqual(selectedValue, initialSummary)
         XCTAssertFalse(selectedValue.localizedCaseInsensitiveContains("points"))
+        let rangeDates = app.staticTexts["noop.trends.range-dates"]
+        XCTAssertTrue(rangeDates.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            selectedValue.range(
+                of: #"^[A-Za-z]{3} [0-9]{1,2} [A-Za-z]{3}, "#,
+                options: .regularExpression
+            ) != nil,
+            "Scrubbing must expose one exact dated metric value: \(selectedValue)"
+        )
         XCTAssertFalse(app.navigationBars["Recovery"].exists)
         keepScreenshot(app, name: "trends-recovery-date-selection")
     }

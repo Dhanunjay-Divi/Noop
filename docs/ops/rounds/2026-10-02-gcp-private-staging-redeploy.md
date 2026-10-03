@@ -2,12 +2,12 @@
 
 ## Status
 
-- State: `private synthetic staging deployed and verified; protected integration pending`
+- State: `private synthetic staging deployed, verified, and integrated`
 - Owner: project team
 - Branch: `codex/gcp-staging-redeploy-20261002`
 - Start commit: `e840874872f5e7eb7f38afcecd7aaa826b12288e`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`
+- Record commit or PR: protected PR `#31`
 - Environment: new private synthetic GCP staging only
 
 ## Objective
@@ -222,10 +222,11 @@ claim.
 - Changed paths: GCP foundation/runtime/identity/IAM/database configuration and
   tests, synthetic deployment/smoke tooling, server PyJWT runtime inputs and
   notices, terminology inventory, and operations records.
-- Commits: implementation commits `783568e75` through `9eb61ad20`; final
-  smoke/TTL/documentation commit pending.
-- Branch and remote state: local deployment branch from exact GitHub protected
-  `main`; protected pull request pending.
+- Commits: protected squash
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c`.
+- Branch and remote state: PR `#31` passed required protected checks and is
+  integrated on `main`; later protected commit `a8a617593` retains the deployed
+  source and operations record.
 - Repository visibility verified: public repository; private credentials and
   generated configuration remain excluded.
 - Version/build impact: none.
@@ -259,13 +260,7 @@ claim.
 
 ## Next round
 
-1. Run the complete source/release/privacy operations gates on the exact branch
-   head.
-2. Push one protected pull request, allow required hosted checks to complete,
-   and merge without bypass.
-3. Verify exact protected `main` and remove round-owned temporary logs and
-   build output after evidence is durable.
-4. Configure signed iPhone and Android candidates against this private staging
+1. Configure signed iPhone and Android candidates against this private staging
    project and run the physical-device handoff without enabling public
    invocation or real health data.
 

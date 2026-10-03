@@ -715,6 +715,25 @@ final class VeepooPendingCredentialCleanupReconciler {
 /// injected sinks; unsupported signals remain absent.
 @MainActor
 final class VeepooBandSource: LiveHRSource {
+    private enum ActiveMetricRead: Equatable {
+        case steps(UInt64)
+        case sleep(UInt64)
+
+        var requestID: UInt64 {
+            switch self {
+            case .steps(let requestID), .sleep(let requestID):
+                return requestID
+            }
+        }
+
+        var stage: VeepooBandAdapterStage {
+            switch self {
+            case .steps: return .steps
+            case .sleep: return .sleep
+            }
+        }
+    }
+
     nonisolated static let displayFreshnessInterval: TimeInterval = 30
 
     private let live: LiveState
@@ -747,8 +766,9 @@ final class VeepooBandSource: LiveHRSource {
     private var liveRestartTask: Task<Void, Never>?
     private var stepPollTask: Task<Void, Never>?
     private var sleepReadTask: Task<Void, Never>?
-    private var stepReadInFlight = false
-    private var sleepReadInFlight = false
+    private var activeMetricRead: ActiveMetricRead?
+    private var nextMetricRequestID: UInt64 = 0
+    private var sleepReadPending = false
     private var credentialRetryTask: Task<Void, Never>?
     private var protectedDataCancellable: AnyCancellable?
     private var displayFreshnessTask: Task<Void, Never>?
@@ -977,12 +997,33 @@ final class VeepooBandSource: LiveHRSource {
             scheduleSleepRead()
             cancelLiveRestart(resetAttempt: true)
             adapter.startLiveHeartRate()
-        case .steps(let reading):
-            stepReadInFlight = false
+        case .steps(let requestID, let reading):
+            guard activeMetricRead == .steps(requestID) else { return }
+            activeMetricRead = nil
             persistSteps?(reading)
-        case .sleep(let reading):
-            sleepReadInFlight = false
+            startPendingSleepReadIfPossible()
+        case .sleep(let requestID, let reading):
+            guard activeMetricRead == .sleep(requestID) else { return }
+            activeMetricRead = nil
             persistSleep?(reading)
+        case .metricReadFailed(let requestID, let stage, let failure):
+            guard activeMetricRead?.requestID == requestID,
+                  activeMetricRead?.stage == stage
+            else {
+                return
+            }
+            activeMetricRead = nil
+            if failure == .timeout
+                || failure == .busy
+                || failure == .invalidState
+                || failure == .staleCallback
+            {
+                adapter.disconnect()
+                return
+            }
+            if stage == .steps {
+                startPendingSleepReadIfPossible()
+            }
         case .heartRate(let reading):
             guard Self.freshnessRemaining(
                 receivedAt: reading.receivedAt,
@@ -1079,11 +1120,6 @@ final class VeepooBandSource: LiveHRSource {
                 reconnectTask?.cancel()
                 reconnectTask = nil
                 scheduleReconnect()
-            }
-            if stage == .steps {
-                stepReadInFlight = false
-            } else if stage == .sleep {
-                sleepReadInFlight = false
             }
         case .liveStopped:
             flushHeartRatePersistence()
@@ -1281,9 +1317,12 @@ final class VeepooBandSource: LiveHRSource {
         stepPollTask = Task { @MainActor [weak self] in
             guard let self else { return }
             while !Task.isCancelled, !self.stopped {
-                if !self.stepReadInFlight {
-                    self.stepReadInFlight = true
-                    self.adapter.readSteps()
+                if self.activeMetricRead == nil
+                    && !self.sleepReadPending
+                {
+                    let requestID = self.makeMetricRequestID()
+                    self.activeMetricRead = .steps(requestID)
+                    self.adapter.readSteps(requestID: requestID)
                 }
                 try? await Task.sleep(
                     nanoseconds: self.stepPollIntervalNanoseconds
@@ -1307,9 +1346,25 @@ final class VeepooBandSource: LiveHRSource {
                 )
             }
             guard !Task.isCancelled, !self.stopped else { return }
-            self.sleepReadInFlight = true
-            self.adapter.readSleep()
+            self.sleepReadPending = true
+            self.startPendingSleepReadIfPossible()
         }
+    }
+
+    /// Optional supplier commands share one lane. A due sleep read goes next
+    /// after the current step result or failure instead of overlapping the
+    /// transport or waiting behind another step poll.
+    private func startPendingSleepReadIfPossible() {
+        guard !stopped,
+              sleepReadPending,
+              activeMetricRead == nil
+        else {
+            return
+        }
+        sleepReadPending = false
+        let requestID = makeMetricRequestID()
+        activeMetricRead = .sleep(requestID)
+        adapter.readSleep(requestID: requestID)
     }
 
     private func cancelMetricReads() {
@@ -1317,8 +1372,16 @@ final class VeepooBandSource: LiveHRSource {
         stepPollTask = nil
         sleepReadTask?.cancel()
         sleepReadTask = nil
-        stepReadInFlight = false
-        sleepReadInFlight = false
+        activeMetricRead = nil
+        sleepReadPending = false
+    }
+
+    private func makeMetricRequestID() -> UInt64 {
+        nextMetricRequestID &+= 1
+        if nextMetricRequestID == 0 {
+            nextMetricRequestID = 1
+        }
+        return nextMetricRequestID
     }
 
     private func enqueueHeartRateForPersistence(
@@ -1871,7 +1934,8 @@ final class VeepooBandPairingSession: ObservableObject {
             if ignoringExpectedDisconnect { return }
             lastFailure = .disconnected
             if phase != .idle { phase = .failed(.disconnected) }
-        case .state, .liveStarted, .liveStopped, .steps, .sleep:
+        case .state, .liveStarted, .liveStopped, .steps, .sleep,
+             .metricReadFailed:
             break
         }
     }

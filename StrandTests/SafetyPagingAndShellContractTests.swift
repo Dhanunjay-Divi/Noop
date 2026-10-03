@@ -1893,7 +1893,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(shell.contains("path.addLine(to: CGPoint(x: right, y: bottom))"))
         XCTAssertTrue(shell.contains("lineCap: .round"))
         XCTAssertTrue(shell.contains("lineJoin: .round"))
-        XCTAssertTrue(shell.contains(".frame(width: 14, height: 14)"))
+        XCTAssertTrue(shell.contains(".frame(width: 12, height: 12)"))
         XCTAssertFalse(shell.contains("private struct NoopCommandSignalMark"))
         XCTAssertFalse(commandLens.contains(#"Image(systemName: "message.fill")"#))
         XCTAssertFalse(commandLens.contains(#"Image(systemName: "waveform.path.ecg")"#))
@@ -1905,8 +1905,19 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(commandLens.contains(#"Text("Move to left edge")"#))
         XCTAssertTrue(commandLens.contains(#"Text("Move to right edge")"#))
         XCTAssertTrue(shell.contains("static let touchSize = CGSize(width: 48, height: 52)"))
-        XCTAssertTrue(commandLens.contains(".frame(width: 18, height: 38)"))
-        XCTAssertTrue(commandLens.contains(".offset(x: edge == .leading ? -18 : 18)"))
+        XCTAssertTrue(shell.contains("static let bodySize = CGSize(width: 30, height: 34)"))
+        XCTAssertTrue(shell.contains("static let bodyEdgePull ="))
+        XCTAssertTrue(shell.contains("private struct NoopCommandBubbleShape: Shape"))
+        XCTAssertTrue(commandLens.contains("NoopCommandBubbleShape(edge: edge)"))
+        XCTAssertTrue(commandLens.contains("width: NoopCommandLensLayout.bodySize.width"))
+        XCTAssertTrue(commandLens.contains("NoopCommandLensLayout.bodyEdgePull"))
+        XCTAssertTrue(commandLens.contains(".navigationGlass(in: lensShape"))
+        XCTAssertTrue(commandLens.contains("StrandPalette.navigationLensHighlight.opacity("))
+        XCTAssertTrue(commandLens.contains("@Environment(\\.accessibilityReduceTransparency)"))
+        XCTAssertTrue(shell.contains("path.move(to: point(1, 0.18))"))
+        XCTAssertTrue(shell.contains("to: point(0.02, 0.50)"))
+        XCTAssertTrue(shell.contains("path.addLine(to: point(1, 0.82))"))
+        XCTAssertFalse(commandLens.contains("UnevenRoundedRectangle"))
         XCTAssertTrue(commandLens.contains("private var verticalFraction = 0.76"))
         XCTAssertFalse(commandLens.contains(#"Image(systemName: "plus")"#))
         XCTAssertTrue(shell.contains("--demo-quick-actions"))
@@ -1924,6 +1935,105 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         }
         XCTAssertTrue(launcher.contains(#".accessibilityIdentifier("noop.quick-actions.updates")"#))
         XCTAssertTrue(shell.contains("Double-tap to open. Drag to move."))
+    }
+
+    func testPrimaryTabBarUsesOneRaisedMovingLensWithoutLosingSemantics() throws {
+        let shell = try source("StrandiOS/App/RootTabView.swift")
+        let railLayout = try XCTUnwrap(
+            shell.components(separatedBy: "private struct MeniscusTabRailLayout").last?
+                .components(separatedBy: "private struct MeniscusTabRailShape").first
+        )
+        let meniscus = try XCTUnwrap(
+            shell.components(separatedBy: "private struct MeniscusTabRailShape: Shape").last?
+                .components(separatedBy: "private struct FloatingTabBar: View").first
+        )
+        let tabBar = try XCTUnwrap(
+            shell.components(separatedBy: "private struct FloatingTabBar: View").last?
+                .components(separatedBy: "private extension Comparable").first
+        )
+        let tabButton = try XCTUnwrap(
+            tabBar.components(separatedBy: "private func tabButton(_ item: Item)").last
+        )
+
+        XCTAssertTrue(railLayout.contains("func centerX(for index: CGFloat)"))
+        XCTAssertTrue(railLayout.contains("func continuousIndex(at x: CGFloat)"))
+        XCTAssertTrue(railLayout.contains("func nearestIndex(at x: CGFloat)"))
+        XCTAssertTrue(railLayout.contains("itemWidth + max(0, itemSpacing)"))
+        XCTAssertTrue(meniscus.contains("var animatableData: CGFloat"))
+        XCTAssertTrue(meniscus.contains("MeniscusTabRailLayout("))
+        XCTAssertTrue(meniscus.contains("itemSpacing: itemSpacing"))
+        XCTAssertTrue(meniscus.contains("layout.centerX(for: selectedIndex)"))
+        XCTAssertTrue(meniscus.contains("let leadingReach = min("))
+        XCTAssertTrue(meniscus.contains("let trailingReach = min("))
+        XCTAssertEqual(meniscus.components(separatedBy: "path.addCurve(").count - 1, 2)
+        XCTAssertTrue(tabBar.contains(
+            "private static let expandedRailTopInset =\n        NoopMetrics.space2"
+        ))
+        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensStrokeWidth"))
+        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensHighlightWidth"))
+        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensShadowRadius"))
+        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensIconSize"))
+        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensActiveOffset"))
+        XCTAssertTrue(tabBar.contains("NoopMetrics.navigationLensLabelOffset"))
+        XCTAssertTrue(tabBar.contains("StrandPalette.navigationLensHighlight"))
+        XCTAssertTrue(
+            tabBar.contains("NoopMetrics.navigationLensHighlightStartAngle")
+        )
+        XCTAssertTrue(
+            tabBar.contains("NoopMetrics.navigationLensHighlightSweepAngle")
+        )
+        XCTAssertTrue(tabBar.contains("matchedGeometryEffect("))
+        XCTAssertTrue(tabBar.contains(#"id: "selected-tab-indicator""#))
+        XCTAssertTrue(tabBar.contains("Circle()"))
+        XCTAssertTrue(tabBar.contains("@GestureState private var scrubbedIndex: CGFloat?"))
+        XCTAssertTrue(tabBar.contains("private var displayedIndex: CGFloat"))
+        XCTAssertTrue(tabBar.contains("private var displayedItem: Item"))
+        XCTAssertTrue(tabBar.contains("private var expandedRailShape: MeniscusTabRailShape"))
+        XCTAssertGreaterThanOrEqual(
+            tabBar.components(separatedBy: "expandedRailShape").count - 1,
+            4
+        )
+        XCTAssertTrue(tabBar.contains(
+            "private static let expandedRailCornerRadius: CGFloat = 18"
+        ))
+        XCTAssertTrue(tabBar.contains("private static let selectedLensDimension: CGFloat = 38"))
+        XCTAssertTrue(tabBar.contains("width: Self.selectedLensDimension"))
+        XCTAssertTrue(tabBar.contains("height: Self.selectedLensDimension"))
+        XCTAssertTrue(tabBar.contains(
+            "selectedLensDimension\n                + NoopMetrics.navigationLensItemSpacing"
+        ))
+        XCTAssertTrue(tabBar.contains(
+            "(dynamicTypeSize.isAccessibilitySize ? 3 : 6) + NoopMetrics.space6"
+        ))
+        XCTAssertTrue(tabBar.contains("NoopMotion.gated(NoopMotion.card"))
+        XCTAssertTrue(tabBar.contains(".animation(selectionAnimation, value: displayedIndex)"))
+        XCTAssertTrue(tabBar.contains(
+            "DragGesture(minimumDistance: 6, coordinateSpace: .local)"
+        ))
+        XCTAssertTrue(tabBar.contains(".updating($scrubbedIndex)"))
+        XCTAssertTrue(tabBar.contains(
+            "state = layout.continuousIndex(at: value.location.x)"
+        ))
+        XCTAssertTrue(tabBar.contains(
+            "nav[layout.nearestIndex(at: value.location.x)].tag"
+        ))
+        XCTAssertTrue(tabBar.contains(
+            "guard destinationTag != selection else { return }"
+        ))
+        XCTAssertTrue(tabBar.contains(".highPriorityGesture(railScrubGesture(layout: layout))"))
+        XCTAssertTrue(tabButton.contains("if selected {\n                onReselect(item.tag)"))
+        XCTAssertTrue(tabButton.contains("Text(visualTitle(for: item))"))
+        XCTAssertTrue(tabButton.contains(
+            "visuallyActive ? .semibold : .medium"
+        ))
+        XCTAssertFalse(tabButton.contains("if active {"))
+        XCTAssertTrue(tabBar.contains(".accessibilityHidden(true)"))
+        XCTAssertTrue(tabBar.contains("@Environment(\\.accessibilityReduceMotion)"))
+        XCTAssertTrue(tabBar.contains("NoopMotion.gated("))
+        XCTAssertTrue(tabBar.contains(".accessibilityAddTraits(.isButton)"))
+        XCTAssertTrue(tabBar.contains(".accessibilityAddTraits(selected ? .isSelected : [])"))
+        XCTAssertTrue(tabBar.contains("IPhonePrimaryTab.minimumTouchDimension"))
+        XCTAssertFalse(tabBar.contains("sweepAngle"))
     }
 
     func testBandRhythmClassifierCannotEscapeProtocolDiagnostics() throws {

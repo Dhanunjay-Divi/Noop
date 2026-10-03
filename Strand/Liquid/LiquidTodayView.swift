@@ -146,9 +146,10 @@ struct LiquidTodayView: View {
         #endif
         return saved
     }
-    // Today stays focused on the user's three-to-six selected metrics. The full catalog remains one
-    // tap away through "Open all metric history".
+    // Today shows every metric the user selects. The full catalog remains one tap away through
+    // "Open all metric history".
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
+    @AppStorage(AppModel.cycleAwarenessKey) private var cycleAwarenessEnabled = false
     #if DEBUG
     @State private var showKeyMetricsEditor =
         CommandLine.arguments.contains("--demo-key-metrics-editor")
@@ -156,7 +157,13 @@ struct LiquidTodayView: View {
     @State private var showKeyMetricsEditor = false
     #endif
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
-    private var visibleKeyMetrics: [KeyMetric] { enabledKeyMetrics }
+    private var visibleKeyMetrics: [KeyMetric] {
+        enabledKeyMetrics.filter {
+            $0 != .menstrualCycle
+                || profile.cycleAwarenessApplies
+                || cycleAwarenessEnabled
+        }
+    }
     /// One shared, selected-day-anchored history cache for the compact tile traces. Building this in
     /// `load()` keeps the grid body O(1), and prevents an older selected day from seeing future readings.
     @State private var keyMetricTrends: [KeyMetric: [Double]] = [:]
@@ -641,7 +648,11 @@ struct LiquidTodayView: View {
         // sheet the classic macOS grid uses, bound to the same persisted layout string.
         .sheet(isPresented: $showKeyMetricsEditor) {
             if allowsLocalMutations {
-                KeyMetricsEditorSheet(layoutRaw: $keyMetricsRaw)
+                KeyMetricsEditorSheet(
+                    layoutRaw: $keyMetricsRaw,
+                    cycleMetricAvailable:
+                        profile.cycleAwarenessApplies || cycleAwarenessEnabled
+                )
             }
         }
         #if os(macOS)
@@ -1416,6 +1427,7 @@ struct LiquidTodayView: View {
             maximum: 100,
             unit: "%",
             tint: recoveryHeroTone,
+            washTint: recoveryHeroWashTone,
             context: recoveryHeroContext,
             decimals: 0,
             progressOverride: chargeDisplay.calibrationFraction,
@@ -1432,6 +1444,7 @@ struct LiquidTodayView: View {
             maximum: 100,
             unit: "%",
             tint: sleepHeroTone,
+            washTint: sleepHeroWashTone,
             context: restScore
                 .flatMap { CompactDailyMetricStatus.sleep(score: $0) }
                 .map(\.label)
@@ -1454,6 +1467,7 @@ struct LiquidTodayView: View {
             maximum: maximum,
             unit: effortScale == .whoop ? "/ 21" : "/ 100",
             tint: StrandPalette.effortColor,
+            washTint: StrandPalette.metricCyan,
             context: canonicalValue
                 .flatMap { CompactDailyMetricStatus.effort(score: $0) }
                 .map(\.label)
@@ -1524,6 +1538,24 @@ struct LiquidTodayView: View {
         if score < 50 { return StrandPalette.recovery000 }
         if score < 70 { return StrandPalette.statusWarning }
         return StrandPalette.restColor
+    }
+
+    private var recoveryHeroWashTone: Color {
+        guard let score = chargeDisplay.pct else {
+            return StrandPalette.onDarkTertiary
+        }
+        if score < 34 { return DailySignalAppearance.alertTint }
+        if score < 67 { return StrandPalette.statusWarning }
+        return StrandPalette.statusPositive
+    }
+
+    private var sleepHeroWashTone: Color {
+        guard let score = restScore else {
+            return StrandPalette.onDarkTertiary
+        }
+        if score < 60 { return DailySignalAppearance.alertTint }
+        if score < 80 { return StrandPalette.statusWarning }
+        return StrandPalette.statusPositive
     }
 
     private func openHeroMetric(_ key: String) {
@@ -2899,25 +2931,17 @@ struct LiquidTodayView: View {
                 }
             }
             // Show only the editor-selected metrics here. The full catalog remains in metric history.
-            // Row construction is explicit so a three- or five-card custom layout ends with one useful
-            // full-width card rather than an empty half-column.
+            // LazyVGrid preserves equal column widths, including an odd final card.
             let resolvedColumnCount = max(1, columnCount)
-            let metricRows = stride(
-                from: 0,
-                to: visibleKeyMetrics.count,
-                by: resolvedColumnCount
-            ).map { start in
-                Array(visibleKeyMetrics[start..<min(start + resolvedColumnCount, visibleKeyMetrics.count)])
-            }
-            VStack(spacing: NoopMetrics.space3) {
-                ForEach(Array(metricRows.enumerated()), id: \.offset) { _, rowMetrics in
-                    HStack(spacing: NoopMetrics.space3) {
-                        ForEach(rowMetrics) { metric in
-                            ktileFor(metric, hrv: hrv, rhr: rhr)
-                                .frame(maxWidth: .infinity)
-                                .accessibilityIdentifier("noop.today.key-metric.\(metric.rawValue)")
-                        }
-                    }
+            let columns = Array(
+                repeating: GridItem(.flexible(), spacing: NoopMetrics.space3, alignment: .top),
+                count: resolvedColumnCount
+            )
+            LazyVGrid(columns: columns, alignment: .leading, spacing: NoopMetrics.space3) {
+                ForEach(visibleKeyMetrics) { metric in
+                    ktileFor(metric, hrv: hrv, rhr: rhr)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("noop.today.key-metric.\(metric.rawValue)")
                 }
             }
             Group {
@@ -2978,14 +3002,16 @@ struct LiquidTodayView: View {
             // Charge on one screen. (#543: one prior row feeds every recovery-derived read-out.) Strain below
             // stays raw, matching the Effort hero, which correctly does not carry.
             ktile(String(localized: "Recovery"), intText(chargeDisplay.pct), "%", recoveryHeroTone,
-                  frac(chargeDisplay.pct), symbol: metric.icon, key: "recovery")
+                  frac(chargeDisplay.pct), trend: keyMetricTrends[.charge],
+                  symbol: metric.icon, key: "recovery")
         case .effort:
             let display = effortScale == .whoop
                 ? effortText(displayDay?.strain)
                 : intText(displayDay?.strain)
             ktile(String(localized: "Effort"), display,
                   "/ \(UnitFormatter.effortScaleMax(effortScale))", StrandPalette.effortColor,
-                  frac(displayDay?.strain), symbol: metric.icon, key: "strain")
+                  frac(displayDay?.strain), trend: keyMetricTrends[.effort],
+                  symbol: metric.icon, key: "strain")
         case .rest:
             ktile(String(localized: "Sleep"), intText(restScore), "%", StrandPalette.restColor,
                   frac(restScore), trend: keyMetricTrends[.rest],
@@ -3025,7 +3051,7 @@ struct LiquidTodayView: View {
         case .respiratory:
             let resp = displayDay?.respRateBpm ?? vitalsDay?.respRateBpm
             ktile(String(localized: "Respiratory"), resp.map { String(format: "%.1f", $0) } ?? StrandFormat.missing,
-                  "rpm", StrandPalette.effortColor, nil, trend: keyMetricTrends[.respiratory],
+                  "rpm", StrandPalette.metricPurple, nil, trend: keyMetricTrends[.respiratory],
                   symbol: metric.icon, key: "resp_rate")
         case .asleepTime:
             ktile(
@@ -3039,7 +3065,7 @@ struct LiquidTodayView: View {
                 key: "sleep_total_min"
             )
         case .steps:
-            ktile(String(localized: "Steps"), stepsText, "", StrandPalette.chargeColor,
+            ktile(String(localized: "Steps"), stepsText, "", StrandPalette.statusPositive,
                   nil, trend: keyMetricTrends[.steps], symbol: metric.icon, key: nil,
                   detailMetric: stepsDetailMetric)
         case .weight:
@@ -3087,6 +3113,7 @@ struct LiquidTodayView: View {
                 "",
                 StrandPalette.metricAmber,
                 nil,
+                trend: keyMetricTrends[.skinTemp],
                 symbol: metric.icon,
                 key: "skin_temp"
             )
@@ -3111,6 +3138,22 @@ struct LiquidTodayView: View {
                 progress,
                 symbol: metric.icon,
                 route: hydrationEnabled ? .hydration(day: selectedDayKey) : nil
+            )
+        case .menstrualCycle:
+            ktile(
+                String(localized: "appwide.cycle.profile.title"),
+                selectedDayOffset == 0
+                    ? (
+                        cycleAwarenessEnabled
+                            ? String(localized: "appwide.cycle.status.on")
+                            : String(localized: "Off")
+                    )
+                    : StrandFormat.missing,
+                "",
+                StrandPalette.metricPurple,
+                nil,
+                symbol: metric.icon,
+                route: .health
             )
         }
     }
@@ -3203,21 +3246,21 @@ struct LiquidTodayView: View {
         let showsTrend = (trend?.count ?? 0) > 1
         let tile = VStack(
             alignment: .leading,
-            spacing: showsTrend ? NoopMetrics.space1 : NoopMetrics.space2
+            spacing: NoopMetrics.space1
         ) {
             keyMetricTileHeader(label, symbol: symbol, trend: trend)
             Group {
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: NoopMetrics.space1) {
                         Text(value)
-                            .font(StrandFont.metricValue)
+                            .font(StrandFont.number(22))
                         if !unit.isEmpty {
                             Text(unit)
                                 .font(StrandFont.subhead)
                         }
                     }
                 } else {
-                    (Text(value).font(StrandFont.metricValue)
+                    (Text(value).font(StrandFont.number(22))
                         + Text(unit.isEmpty ? "" : " \(unit)").font(StrandFont.subhead))
                         .lineLimit(1)
                 }
@@ -3236,28 +3279,29 @@ struct LiquidTodayView: View {
                         return unit.isEmpty ? formatted : "\(formatted) \(unit)"
                     }
                 )
-                .frame(height: 26)
+                .frame(height: 20)
             } else if let frac {
                 // Only real bounded scores earn a progress rail. Raw vital signs use their value and
                 // optional trend below; normalizing RHR/HRV/respiration to arbitrary maxima makes a
                 // fuller bar look "better" when it is not a health-goal scale.
                 LiquidTube(frac: frac, tint: tint, height: 7, animated: false)
-                    .frame(height: 26)
+                    .frame(height: 20)
                     .accessibilityHidden(true)
             } else {
                 // Preserve the two-column baseline without drawing a fake zero/progress sliver or
                 // connecting a single reading into a synthetic trend.
-                Color.clear.frame(height: 26).accessibilityHidden(true)
+                Color.clear.frame(height: 20).accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, NoopMetrics.space3)
-        .padding(.vertical, showsTrend ? NoopMetrics.space2 : NoopMetrics.space3)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(minHeight: dynamicTypeSize.isAccessibilitySize ? 132 : 116)
         .background(
             FrostedCardSurface(
                 tint: tint,
-                cornerRadius: 20,
-                washStrength: 0.76
+                cornerRadius: 16,
+                washStrength: 0.54
             )
         )
         // #430 parity: tap -> the metric's trend detail (the same Explore dossier its MetricRow pushes).
@@ -3289,30 +3333,20 @@ struct LiquidTodayView: View {
 
     @ViewBuilder
     private func keyMetricTileHeader(_ label: String, symbol: String, trend: [Double]?) -> some View {
-        if let trend, trend.count > 1 {
-            VStack(alignment: .leading, spacing: NoopMetrics.space1) {
-                HStack(alignment: .center, spacing: NoopMetrics.space2) {
-                    MetricGlyph(symbol, size: 28)
-                    Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+            HStack(alignment: .center, spacing: NoopMetrics.space2) {
+                MetricGlyph(symbol, size: 24)
+                Spacer(minLength: 0)
+                if let trend, trend.count > 1 {
                     trendDirectionBadge(trend)
                 }
-                Text(label.uppercased())
-                    .font(StrandFont.metricLabel)
-                    .tracking(0)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-        } else {
-            HStack(alignment: .center, spacing: NoopMetrics.space2) {
-                MetricGlyph(symbol, size: 28)
-                Text(label.uppercased())
-                    .font(StrandFont.metricLabel)
-                    .tracking(0)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                Spacer(minLength: 0)
-            }
+            Text(label.uppercased())
+                .font(StrandFont.metricLabel)
+                .tracking(0)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -3320,14 +3354,6 @@ struct LiquidTodayView: View {
         case up
         case down
         case steady
-
-        var symbol: String {
-            switch self {
-            case .up: return "arrow.up.right"
-            case .down: return "arrow.down.right"
-            case .steady: return "arrow.right"
-            }
-        }
 
         var spokenValue: String {
             switch self {
@@ -3356,16 +3382,16 @@ struct LiquidTodayView: View {
         if let direction = Self.keyMetricTrendDirection(values) {
             HStack(spacing: 3) {
                 Text("14D")
-                Image(systemName: direction.symbol)
+                Image(systemName: "chart.xyaxis.line")
                     .font(.system(size: 8, weight: .bold))
             }
             .font(StrandFont.overlineScaled(7.5))
             .tracking(0)
             .foregroundStyle(StrandPalette.textTertiary)
             .padding(.horizontal, 5)
-            .frame(height: 20)
-            .background(Capsule().fill(StrandPalette.surfaceInset.opacity(0.78)))
-            .overlay(Capsule().strokeBorder(StrandPalette.hairline.opacity(0.9), lineWidth: 0.6))
+            .frame(height: 18)
+            .background(Capsule().fill(StrandPalette.surfaceInset.opacity(0.58)))
+            .overlay(Capsule().strokeBorder(StrandPalette.hairline.opacity(0.68), lineWidth: 0.6))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("14-day direction")
             .accessibilityValue(direction.spokenValue)
@@ -3417,11 +3443,14 @@ struct LiquidTodayView: View {
         // reverse-engineered wrist motion, so it cannot populate the primary Steps trend without a
         // registry-qualified supplier input.
         for day in days {
+            record(.charge, day: day.day, value: day.recovery)
+            record(.effort, day: day.day, value: day.strain)
             record(.hrv, day: day.day, value: day.avgHrv)
             record(.restingHr, day: day.day, value: day.restingHr.map(Double.init))
             record(.bloodOxygen, day: day.day, value: day.spo2Pct)
             record(.respiratory, day: day.day, value: day.respRateBpm)
             record(.asleepTime, day: day.day, value: day.totalSleepMin)
+            record(.skinTemp, day: day.day, value: day.skinTempDevC)
         }
 
         for point in supplierSteps {
@@ -3629,7 +3658,6 @@ struct LiquidTodayView: View {
                 }
             }
         }
-        .padding(.horizontal, 2)
         .padding(.top, 4)
     }
 
@@ -5196,6 +5224,7 @@ private struct CompactDailyMetricCell: View {
     let maximum: Double
     let unit: String
     let tint: Color
+    let washTint: Color
     let context: String?
     let decimals: Int
     var progressOverride: Double? = nil
@@ -5289,6 +5318,18 @@ private struct CompactDailyMetricCell: View {
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+            .background(
+                LinearGradient(
+                    colors: [
+                        washTint.opacity(0.13),
+                        washTint.opacity(0.045),
+                        .clear,
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

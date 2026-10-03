@@ -22,6 +22,147 @@ final class ManagedCloudRetryContractTests: XCTestCase {
         return (try XCTUnwrap(UserDefaults(suiteName: name)), name)
     }
 
+    #if os(iOS)
+    func testManagedVerificationCodeAcceptsFourToEightLocalizedDigits() {
+        XCTAssertEqual(
+            sanitizedManagedVerificationCode(" 12a3-4567 "),
+            "1234567"
+        )
+        XCTAssertEqual(
+            sanitizedManagedVerificationCode("١٢٣456"),
+            "123456"
+        )
+        XCTAssertEqual(
+            sanitizedManagedVerificationCode("１２３456"),
+            "123456"
+        )
+        XCTAssertEqual(
+            sanitizedManagedVerificationCode("123456", maximumLength: 4),
+            "1234"
+        )
+        XCTAssertEqual(
+            sanitizedManagedVerificationCode("123", maximumLength: 0),
+            ""
+        )
+        XCTAssertTrue(isManagedVerificationCodeComplete("1234"))
+        XCTAssertTrue(isManagedVerificationCodeComplete("12345678"))
+        XCTAssertFalse(isManagedVerificationCodeComplete("123"))
+        XCTAssertFalse(isManagedVerificationCodeComplete("123456789"))
+    }
+    #endif
+
+    func testManagedVerificationUIKeepsAutofillAndServerConfirmedSuccess() throws {
+        let source = try source("StrandiOS/System/ManagedCloudViews.swift")
+        let policy = try self.source(
+            "Strand/System/ManagedVerificationSuccessPolicy.swift"
+        )
+
+        XCTAssertTrue(source.contains(".textContentType(.oneTimeCode)"))
+        XCTAssertTrue(source.contains("managedVerificationCodeLengthRange = 4...8"))
+        XCTAssertTrue(source.contains("ManagedVerificationCodeSlot("))
+        XCTAssertTrue(source.contains("ManagedVerificationNudge("))
+        XCTAssertTrue(source.contains("service.phase == .consentRequired"))
+        XCTAssertTrue(source.contains("ManagedVerificationSuccessOverlay()"))
+        XCTAssertTrue(source.contains("verificationSuccessVisible"))
+        XCTAssertFalse(source.contains("verificationSuccessCode"))
+        XCTAssertTrue(source.contains("@Environment(\\.accessibilityReduceMotion)"))
+        XCTAssertTrue(source.contains("@AccessibilityFocusState"))
+        XCTAssertTrue(
+            source.contains(".accessibilityHidden(verificationSuccessVisible)")
+        )
+        XCTAssertTrue(source.contains(".accessibilityFocused($accessibilityFocused)"))
+        XCTAssertTrue(
+            source.contains(
+                #".accessibilityIdentifier("noop.noop-plus.verified")"#
+            )
+        )
+        XCTAssertTrue(
+            source.contains(
+                #".accessibilityValue(String(repeating: "•", count: code.count))"#
+            )
+        )
+        XCTAssertTrue(
+            policy.contains("durationNanoseconds: UInt64 = 3_000_000_000")
+        )
+        XCTAssertTrue(
+            source.contains(
+                "ManagedVerificationSuccessPolicy.dismissalTask"
+            )
+        )
+        let phaseLifecycle = try XCTUnwrap(
+            source.components(separatedBy: ".task(id: service.phase)").last?
+                .components(separatedBy: ".onDisappear").first
+        )
+        XCTAssertGreaterThanOrEqual(
+            phaseLifecycle.components(
+                separatedBy: "verificationSuccessTask?.cancel()"
+            ).count - 1,
+            2
+        )
+        let disposalLifecycle = try XCTUnwrap(
+            source.components(separatedBy: ".onDisappear").last
+        )
+        XCTAssertTrue(
+            disposalLifecycle.contains(
+                "verificationSuccessTask?.cancel()"
+            )
+        )
+        XCTAssertTrue(disposalLifecycle.contains("verificationSuccessVisible = false"))
+        XCTAssertFalse(
+            source.contains("No verification code digits entered")
+        )
+        XCTAssertFalse(
+            source.contains(
+                "Enter or paste the verification code from Messages"
+            )
+        )
+        XCTAssertFalse(source.contains("AppDiagnosticsRecorder"))
+
+        let clearsCode = try XCTUnwrap(source.range(of: "code = \"\""))
+        let refreshesOverview = try XCTUnwrap(
+            source.range(
+                of: "await service.refreshOverview()",
+                range: clearsCode.upperBound..<source.endIndex
+            )
+        )
+        XCTAssertLessThan(clearsCode.lowerBound, refreshesOverview.lowerBound)
+    }
+
+    @MainActor
+    func testManagedVerificationSuccessWaitsForTheFullWindow() async {
+        let clock = ContinuousClock()
+        let started = clock.now
+        var dismissed = false
+
+        let task = ManagedVerificationSuccessPolicy.dismissalTask {
+            dismissed = true
+        }
+        XCTAssertFalse(dismissed)
+        await task.value
+
+        XCTAssertTrue(dismissed)
+        XCTAssertGreaterThanOrEqual(
+            started.duration(to: clock.now),
+            .seconds(3)
+        )
+    }
+
+    @MainActor
+    func testManagedVerificationSuccessCancellationSuppressesDismissal() async {
+        var dismissed = false
+        let task = ManagedVerificationSuccessPolicy.dismissalTask(
+            durationNanoseconds: 60_000_000_000
+        ) {
+            dismissed = true
+        }
+
+        await Task.yield()
+        task.cancel()
+        await task.value
+
+        XCTAssertFalse(dismissed)
+    }
+
     func testScopedRetryStateClearsWithoutTouchingOtherScopesOrDefaults()
         throws
     {

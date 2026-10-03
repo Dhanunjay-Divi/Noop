@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.MonitorHeart
@@ -18,8 +19,8 @@ import com.noop.R
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
-// The Today screen's "Key Metrics" grid exposes every Today-ready tile. This lets the user pin three to six in
-// their preferred order. Recovery, Sleep, and Effort already lead the Today hero, so a fresh install starts
+// The Today screen's "Key Metrics" grid exposes every Today-ready tile. This lets the user pin any supported
+// metrics in their preferred order. Recovery, Sleep, and Effort already lead the Today hero, so a fresh install starts
 // with six complementary signals: HRV, resting heart rate, blood oxygen, respiratory rate, steps, and
 // weight. Every metric remains available in the editor and full history.
 // Persistence is display-only.
@@ -187,6 +188,13 @@ enum class KeyMetric(
         KeyMetricGroup.ACTIVITY,
         KeyMetricOrigin.MEASURED_IMPORTED,
         isBoundedProgress = true,
+    ),
+    MENSTRUAL_CYCLE(
+        "menstrualCycle",
+        R.string.appwide_cycle_profile_title,
+        Icons.Filled.CalendarMonth,
+        KeyMetricGroup.WELLBEING,
+        KeyMetricOrigin.MEASURED_IMPORTED,
     );
 
     companion object {
@@ -199,7 +207,7 @@ enum class KeyMetric(
             BLOOD_OXYGEN, RESPIRATORY, VO2_MAX, SKIN_TEMP,
             ASLEEP_TIME,
             STEPS, CALORIES, WEIGHT, HYDRATION,
-            STRESS, VITALITY,
+            STRESS, VITALITY, MENSTRUAL_CYCLE,
         )
 
         /** Fresh-install secondary signals; the hero already owns Recovery, Sleep, and Effort. */
@@ -223,7 +231,7 @@ enum class KeyMetric(
 object KeyMetricPrefs {
     internal const val KEY_LAYOUT = "today.keyMetrics"
     const val MIN_SELECTION_COUNT = 3
-    const val MAX_SELECTION_COUNT = 6
+    val MAX_SELECTION_COUNT: Int get() = KeyMetric.entries.size
     private const val KEY_DETAILED = "today.keyMetricsDetailed"
 
     /** Whether the Key-Metrics tiles render DETAILED — taller/squarer with a 14-day trend graph under the
@@ -256,37 +264,35 @@ object KeyMetricPrefs {
         NoopPrefs.of(context).edit().putString(KEY_LAYOUT, encode(metrics)).apply()
     }
 
-    /** Encode an ordered, deduplicated pin set capped at six. */
+    /** Encode an ordered, deduplicated pin set. */
     fun encode(metrics: List<KeyMetric>): String =
         normalized(metrics).joinToString(",") { it.raw }
 
     /**
      * Decode the stored string into an ordered pin set. Empty, unset, or all-unknown data yields the
-     * fresh-install defaults. Older versions allowed more than six; their first six survive in order.
+     * fresh-install defaults. Every known unique metric survives in the user's saved order.
      */
     fun decodeEnabled(raw: String?): List<KeyMetric> {
         val trimmed = raw?.trim().orEmpty()
         if (trimmed.isEmpty()) return KeyMetric.defaultSelection
         val seen = LinkedHashSet<KeyMetric>()
         trimmed.split(",").forEach { token ->
-            if (seen.size < MAX_SELECTION_COUNT) {
-                KeyMetric.fromRaw(token.trim())?.let { seen.add(it) }
-            }
+            KeyMetric.fromRaw(token.trim())?.let { seen.add(it) }
         }
         return normalized(seen.toList())
     }
 
     /** Ordered dedupe + bounds. Empty restores the complete default; short custom layouts fill to three. */
     fun normalized(metrics: List<KeyMetric>): List<KeyMetric> {
-        val selected = LinkedHashSet(metrics.distinct().take(MAX_SELECTION_COUNT))
+        val selected = LinkedHashSet(metrics.distinct())
         if (selected.isEmpty()) return KeyMetric.defaultSelection
         (KeyMetric.defaultSelection + KeyMetric.defaultOrder).forEach { fallback ->
             if (selected.size < MIN_SELECTION_COUNT) selected.add(fallback)
         }
-        return selected.take(MAX_SELECTION_COUNT)
+        return selected.toList()
     }
 
-    /** Full catalog with the saved 3-to-6 pins first; display ordering never mutates the saved pins. */
+    /** Full catalog with the saved pins first; display ordering never mutates the saved pins. */
     fun catalogOrder(startingWith: List<KeyMetric>): List<KeyMetric> {
         val selected = normalized(startingWith)
         val selectedSet = selected.toHashSet()
