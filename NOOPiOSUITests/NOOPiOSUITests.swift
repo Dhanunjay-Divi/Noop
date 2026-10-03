@@ -1670,13 +1670,25 @@ final class NOOPiOSUITests: XCTestCase {
 
         // SwiftUI may replace the chart's accessibility node after its value changes.
         // Re-query without pinning the stale pre-scrub element type.
-        let selectedChart = chartNodes.matching(
-            NSPredicate(
-                format: "value != nil AND NOT (value CONTAINS[c] %@)",
-                "points"
+        let selectedValuePredicate = NSPredicate(
+            format: "value != nil AND NOT (value CONTAINS[c] %@)",
+            "points"
+        )
+        var selectedChart = chartNodes.matching(selectedValuePredicate).firstMatch
+        if !selectedChart.waitForExistence(timeout: 3) {
+            let retryStart = chart.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.68, dy: 0.50)
             )
-        ).firstMatch
-        XCTAssertTrue(selectedChart.waitForExistence(timeout: 5))
+            let retryEnd = chart.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.82, dy: 0.50)
+            )
+            retryStart.press(forDuration: 1.0, thenDragTo: retryEnd)
+            selectedChart = chartNodes.matching(selectedValuePredicate).firstMatch
+        }
+        XCTAssertTrue(
+            selectedChart.waitForExistence(timeout: 5),
+            "The chart must expose an exact dated value after a bounded scrub retry."
+        )
         let selectedValue = selectedChart.value as? String ?? String(describing: selectedChart.value)
         XCTAssertNotEqual(selectedValue, initialSummary)
         XCTAssertFalse(selectedValue.localizedCaseInsensitiveContains("points"))
