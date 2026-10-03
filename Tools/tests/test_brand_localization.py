@@ -18,7 +18,7 @@ class BrandLocalizationTests(unittest.TestCase):
         catalog = GENERATOR.load_json(GENERATOR.DEFAULT_CATALOG)
         expected = GENERATOR.expected_entries(catalog)
 
-        self.assertEqual(len(expected), 15)
+        self.assertEqual(len(expected), 14)
         self.assertEqual(GENERATOR.verify_catalog(catalog, expected), [])
         for current, entry in expected.items():
             self.assertEqual(

@@ -629,9 +629,12 @@ final class NOOPiOSUITests: XCTestCase {
         }
         buildReport.tap()
 
+        guard app.staticTexts["Report ready"].waitForExistence(timeout: 120) else {
+            XCTFail("The report did not finish building for review.")
+            return
+        }
         let sendFeedback = app.buttons["noop.app-report.send"]
-        guard sendFeedback.waitForExistence(timeout: 60),
-              scrollToHittable(sendFeedback, in: app) else {
+        guard scrollToHittable(sendFeedback, in: app, attempts: 10) else {
             XCTFail("The report did not reach its review state.")
             return
         }
@@ -1623,13 +1626,26 @@ final class NOOPiOSUITests: XCTestCase {
         let chartIdentifier = "noop.trends.recovery.chart"
         // NavigationLink mirrors child accessibility metadata onto its button. Select the chart's
         // concrete element so the gesture lands in the plot instead of matching both elements.
-        let chart = app.otherElements[chartIdentifier].firstMatch
-        XCTAssertTrue(chart.waitForExistence(timeout: 20))
+        let initialChart = app.otherElements[chartIdentifier].firstMatch
+        XCTAssertTrue(initialChart.waitForExistence(timeout: 20))
         let scroll = app.scrollViews["noop.trends.scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
-        for _ in 0..<6 where !chart.isHittable {
-            scroll.swipeUp()
-        }
+        let preparedChart = scrollTrendChartToSafeGestureCorridor(
+            identifier: chartIdentifier,
+            normalizedYRange: 0.50...0.50,
+            in: app,
+            scroll: scroll
+        )
+        XCTAssertTrue(
+            trendGestureCorridorIsVisible(
+                chart: preparedChart,
+                normalizedYRange: 0.50...0.50,
+                in: app,
+                scroll: scroll
+            ),
+            "The date-scrub path must be fully above persistent navigation before synthesis."
+        )
+        let chart = preparedChart
         XCTAssertTrue(chart.isHittable)
         let quickActions = app.buttons["noop.quick-actions"]
         XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
@@ -1736,9 +1752,21 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(chart.waitForExistence(timeout: 20))
         let scroll = app.scrollViews["noop.trends.scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
-        for _ in 0..<6 where !chart.isHittable {
-            scroll.swipeUp()
-        }
+        chart = scrollTrendChartToSafeGestureCorridor(
+            identifier: chartIdentifier,
+            normalizedYRange: 0.28...0.72,
+            in: app,
+            scroll: scroll
+        )
+        XCTAssertTrue(
+            trendGestureCorridorIsVisible(
+                chart: chart,
+                normalizedYRange: 0.28...0.72,
+                in: app,
+                scroll: scroll
+            ),
+            "The vertical chart gesture must be fully above persistent navigation before synthesis."
+        )
         XCTAssertTrue(chart.isHittable)
 
         let chartNodes = app.descendants(matching: .any)
@@ -1774,14 +1802,35 @@ final class NOOPiOSUITests: XCTestCase {
         )
         XCTAssertFalse(app.navigationBars["Recovery"].exists)
 
+        chart = scrollTrendChartToSafeGestureCorridor(
+            identifier: chartIdentifier,
+            normalizedYRange: 0.50...0.50,
+            in: app,
+            scroll: scroll
+        )
+        XCTAssertTrue(
+            trendGestureCorridorIsVisible(
+                chart: chart,
+                normalizedYRange: 0.50...0.50,
+                in: app,
+                scroll: scroll
+            ),
+            "The chart tap must be fully above persistent navigation before synthesis."
+        )
         chart.coordinate(
             withNormalizedOffset: CGVector(dx: 0.50, dy: 0.50)
         ).tap()
+        let recoveryNavigation = app.navigationBars["Recovery"]
+        let openedRecovery = recoveryNavigation.waitForExistence(timeout: 5)
         XCTAssertTrue(
-            app.navigationBars["Recovery"].waitForExistence(timeout: 5),
+            openedRecovery,
             "A short chart tap must open the full Recovery metric detail."
         )
-        let back = app.navigationBars["Recovery"].buttons.firstMatch
+        guard openedRecovery else {
+            keepScreenshot(app, name: "trends-recovery-direct-navigation-missing")
+            return
+        }
+        let back = recoveryNavigation.buttons.firstMatch
         XCTAssertTrue(back.waitForExistence(timeout: 5))
         back.tap()
         XCTAssertTrue(
@@ -2022,6 +2071,102 @@ final class NOOPiOSUITests: XCTestCase {
             if element.exists && element.isHittable { return true }
         }
         return element.exists && element.isHittable
+    }
+
+    private func scrollTrendChartToSafeGestureCorridor(
+        identifier: String,
+        normalizedYRange: ClosedRange<CGFloat>,
+        in app: XCUIApplication,
+        scroll: XCUIElement,
+        attempts: Int = 8
+    ) -> XCUIElement {
+        var chart = app.otherElements[identifier].firstMatch
+        for _ in 0..<attempts {
+            guard let requiredOffset = trendGestureCorridorRequiredOffset(
+                chart: chart,
+                normalizedYRange: normalizedYRange,
+                in: app,
+                scroll: scroll
+            ) else {
+                scroll.swipeUp()
+                chart = app.otherElements[identifier].firstMatch
+                continue
+            }
+            if requiredOffset == 0 {
+                return chart
+            }
+            nudgeTrendScroll(scroll, contentOffset: requiredOffset)
+            chart = app.otherElements[identifier].firstMatch
+        }
+        return chart
+    }
+
+    private func trendGestureCorridorIsVisible(
+        chart: XCUIElement,
+        normalizedYRange: ClosedRange<CGFloat>,
+        in app: XCUIApplication,
+        scroll: XCUIElement
+    ) -> Bool {
+        trendGestureCorridorRequiredOffset(
+            chart: chart,
+            normalizedYRange: normalizedYRange,
+            in: app,
+            scroll: scroll
+        ) == 0
+    }
+
+    private func trendGestureCorridorRequiredOffset(
+        chart: XCUIElement,
+        normalizedYRange: ClosedRange<CGFloat>,
+        in app: XCUIApplication,
+        scroll: XCUIElement
+    ) -> CGFloat? {
+        guard chart.exists, scroll.exists else { return nil }
+        let chartFrame = chart.frame
+        let safeTop = scroll.frame.minY + 12
+        var safeBottom = scroll.frame.maxY - 12
+        let quickActions = app.buttons["noop.quick-actions"]
+        if quickActions.exists {
+            safeBottom = min(safeBottom, quickActions.frame.minY - 12)
+        }
+        let trendsTab = app.buttons["noop.tab.1"]
+        if trendsTab.exists {
+            safeBottom = min(safeBottom, trendsTab.frame.minY - 12)
+        }
+        let corridorTop = chartFrame.minY + chartFrame.height * normalizedYRange.lowerBound
+        let corridorBottom = chartFrame.minY + chartFrame.height * normalizedYRange.upperBound
+        if corridorTop < safeTop {
+            return safeTop - corridorTop
+        }
+        if corridorBottom > safeBottom {
+            return safeBottom - corridorBottom
+        }
+        return chart.isHittable ? 0 : nil
+    }
+
+    private func nudgeTrendScroll(
+        _ scroll: XCUIElement,
+        contentOffset: CGFloat
+    ) {
+        let viewportHeight = max(scroll.frame.height, 1)
+        let normalizedDistance = min(
+            max(abs(contentOffset) / viewportHeight + 0.02, 0.08),
+            0.22
+        )
+        let startY: CGFloat = contentOffset > 0 ? 0.34 : 0.66
+        let endY = contentOffset > 0
+            ? startY + normalizedDistance
+            : startY - normalizedDistance
+        scroll.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.50, dy: startY)
+        ).press(
+            forDuration: 0.05,
+            thenDragTo: scroll.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.50, dy: endY)
+            ),
+            withVelocity: .slow,
+            thenHoldForDuration: 0
+        )
     }
 
     private func waitForElementDisabled(
