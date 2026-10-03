@@ -2,12 +2,12 @@
 
 ## Status
 
-- State: `locally verified release candidate; protected integration pending`
+- State: `protected pull request correction locally verified; hosted rerun pending`
 - Owner: project team
 - Branch: `codex/noop-release-candidate-handoff-20261002`
 - Start commit: `f2b2612ed`
-- End implementation commit: commit containing this round record
-- Record commit or PR: pending protected review
+- End implementation commit: `dc69db4bfa00122ad74f44ebe0dba02b2012eb50`
+- Record commit or PR: PR `#32`
 
 ## Objective
 
@@ -87,6 +87,9 @@ integration:
 - The full-history action remains one tap away and opens the complete metric
   explorer. Existing Trends range, exact-date interaction, and export behavior
   remain unchanged.
+- The first hosted release-control run exposed a stale reviewed digest for the
+  regenerated terminology inventory. The exact inventory was reviewed and its
+  SHA-256 was repinned without changing or weakening the terminology policy.
 
 ## Review findings closed
 
@@ -147,6 +150,8 @@ were an explicit layout requirement.
 | iOS key captures | Today top `9c95b4335ebeae8fa450edb34eb117f4943e11735b3e190b7287cd9d6287a7e6`; Today bottom `af5d6474a264fd74db8bfab04bc5d16e829e767a266ac61522d6544aa26c0782`; quick actions `fe2a777f23cb788c3b2702eeab003dd55f9efc9e3cc616f25f70f549f217538a`; Trends `867a7891518973ec4210441de3b92442dcd8c39c9e7ffd63dbc6189ba567f6b7` | Current tab shell, N, cards, history, and Trends render coherently | Physical touch comfort or assistive technology |
 | Android visual review | Today SHA-256 `60c39f8c3b66599c8670f024f6e43c73008f28337e5ea03cc618d254af9f7d19`; eight-selected editor SHA-256 `665df32feea608caf3ea12379a72b15c12dbfecccdff1c94aaf76226ae765faa` | Current Today, bottom shell, N, aligned cards, full editor, and over-six state render without observed overlap | Physical display, TalkBack, or sensor data |
 | Repository controls | Private-data guard, 1,325-file health-claims scan, nine release controls, legal inventory of 230 runtime components plus three container inputs, terminology ratchet, string-catalog parse, and diff hygiene passed | Final source/evidence remains coherent and policy-bounded | Hosted exact-head status or release approval |
+| Initial PR `#32` hosted release-controls | Run `37096468132`, job `111127317490`, failed three source-contract assertions because `release/terminology/legacy-inventory.json` no longer matched its reviewed digest | The hosted control failed closed on stale generated-evidence metadata rather than accepting an unreviewed snapshot | Replacement exact-head result |
+| Local digest correction | Focused required-CI, trusted-release, and terminology suites passed 70/70; required-CI verified all 10 contexts; trusted self-check passed | The reviewed inventory and fail-closed source contract agree locally without weakening required contexts | Hosted exact-head execution |
 
 ## Managed configuration and cloud state
 
@@ -183,9 +188,12 @@ were an explicit layout requirement.
 - Changed paths: Apple and Android Today/editor/shell source, focused tests,
   localized compact editor copy, backup parity, terminology inventory, and
   operations records.
-- Branch and remote state at record creation: local candidate verified; one
-  authorized push, protected exact-head checks, normal merge, and exact-main
-  verification remain.
+- Branch and remote state: implementation commit
+  `dc69db4bfa00122ad74f44ebe0dba02b2012eb50` was pushed to the in-repository
+  head `codex/mobile-liquid-tab-otp-motion-20261002` for PR `#32`. Its first
+  release-control run failed only on the stale terminology digest; the
+  correction requires a normal follow-up push, all protected checks, normal
+  merge, and exact-main verification.
 - Repository visibility: unchanged. Public-source exclusions for supplier
   binaries, firmware, credentials, signing material, private references, and
   personal or health data remain in force.
@@ -205,7 +213,7 @@ were an explicit layout requirement.
 
 ## Open risks and honest limitations
 
-- Protected exact-head checks and merge are still pending at record creation.
+- Replacement protected exact-head checks and merge remain pending.
 - Physical WHOOP comparison has not run on a signed candidate.
 - Supplier physical validation remains blocked until the exact approved
   artifact tuple and trust manifest are restored and verified.
@@ -217,8 +225,9 @@ were an explicit layout requirement.
 
 ## Next round
 
-1. Push this exact branch once, wait for every required protected context, merge
-   normally only when green, and verify exact protected `main`.
+1. Push the terminology digest correction to PR `#32`, wait for every required
+   protected context, merge normally only when green, and verify exact
+   protected `main`.
 2. Start the signed physical round from clean protected `main`.
 3. Follow `docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`, validate
    WHOOP first, and do not enable the quarantined supplier source without the
