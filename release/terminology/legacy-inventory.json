@@ -5,7 +5,7 @@
     "customer": 889,
     "fixture": 5997,
     "generated": 21,
-    "historical": 3451,
+    "historical": 3450,
     "import": 870,
     "persisted": 688
   },
@@ -692,16 +692,16 @@
       "lineNumbers": [
         154,
         157,
-        1115,
-        1117,
-        1139,
-        1139,
-        1140,
-        1140,
+        1118,
+        1120,
+        1142,
+        1142,
         1143,
-        1144,
+        1143,
         1146,
-        1147
+        1147,
+        1149,
+        1150
       ],
       "occurrenceCount": 12,
       "path": "NOOPiOSUITests/NOOPiOSUITests.swift",
@@ -12389,15 +12389,15 @@
       "category": "core",
       "lineNumbers": [
         4,
-        2568,
-        2627,
-        2697,
-        2697,
-        2705,
-        2705,
-        2718,
-        2726,
-        2734
+        2570,
+        2629,
+        2699,
+        2699,
+        2707,
+        2707,
+        2720,
+        2728,
+        2736
       ],
       "occurrenceCount": 10,
       "path": "Strand/Onboarding/OnboardingWizard.swift",
@@ -12412,7 +12412,7 @@
       "category": "customer",
       "lineNumbers": [
         1330,
-        2623
+        2625
       ],
       "occurrenceCount": 2,
       "path": "Strand/Onboarding/OnboardingWizard.swift",
@@ -37273,40 +37273,39 @@
     {
       "category": "historical",
       "lineNumbers": [
-        13,
-        52,
-        106,
-        111,
-        154,
-        177,
-        352,
-        355,
-        416,
-        576,
-        631,
-        652,
-        654,
-        709,
-        717,
-        729,
-        735,
-        790,
-        835,
-        903,
-        951,
-        972,
-        1116,
-        1251,
-        1357,
-        1361
+        67,
+        121,
+        126,
+        169,
+        192,
+        367,
+        370,
+        431,
+        591,
+        646,
+        667,
+        669,
+        724,
+        732,
+        744,
+        750,
+        805,
+        850,
+        918,
+        966,
+        987,
+        1131,
+        1266,
+        1372,
+        1376
       ],
-      "occurrenceCount": 26,
+      "occurrenceCount": 25,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "23dc8945174b166b12bfb3db68005c0ed93ec62d7d0e5e28df70b389160423cf",
+      "sha256": "fd1fa51f1fd5111eed6f6d36537b4c125b87be0e2280213cfb0bba7cebfc0950",
       "tokenCounts": {
         "whoop": 16,
         "whoop-first": 1,
-        "whoopstore": 9
+        "whoopstore": 8
       }
     },
     {
@@ -40267,7 +40266,7 @@
       }
     }
   ],
-  "occurrenceCount": 18627,
+  "occurrenceCount": 18626,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

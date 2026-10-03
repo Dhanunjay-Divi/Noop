@@ -4,28 +4,43 @@ Last updated: **2026-10-03**
 
 ## Authoritative context
 
-- The final mobile UI release-closeout slice is locally verified on branch
-  `codex/noop-release-candidate-handoff-20261002`. Today now accepts all 19
-  eligible metrics while retaining the focused six-card default; sparse card
-  traces, source grouping, cycle eligibility/history truth, same-day Weight
-  arbitration, Apple backup parity, compact bottom navigation, and the
-  edge-reaching movable NOOP N are matched across iPhone and Android. Apple
-  focused source tests pass 90/90, WhoopStore backup tests pass 21/21, Android
-  Full/Demo walls and Android-test compilation pass, the Android API 35
-  over-six case passes, and both Apple rendered cases pass before the known
-  Xcode 27 post-test teardown stall. Exact managed artifacts build with iOS
-  executable SHA-256
-  `b6054189869c025840d8dac4b9015e2861731635f96b9e954e6c2886a4f148c5`
-  and Android Full APK SHA-256
-  `d90bb7764863d49d29104084adb1788abe8ed0c943f44653f987185b8ba1895c`.
-  Fresh uninstall/install opens matching Terms gates; a 21-scenario iPhone
-  matrix and current Android Today plus eight-selected editor were reviewed
-  without observed clipping or overlap. Private staging remains unchanged at
-  protected merge `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable
-  digest
-  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`.
-  Protected exact-head integration and every signed or physical-device gate
-  remain pending.
+- The current follow-up candidate is on
+  `codex/mobile-cloud-release-finalization-20261003`, based on protected merge
+  `1cd401f69dd8b4df75872a830ed33a84918ea344`. Exact-main Apple workflow
+  `37108981075` isolated one intermittent Recovery date-scrub failure after the
+  other nine required contexts passed. Production implementation
+  `0d76116178a90f2a93cf7f61b9df579078672868` maps touch through the live chart
+  scale, preserves scroll/tap and macOS hover, and adds adjustable date
+  stepping. PR `#33` hosted run `37120314609` later failed on Xcode 26.6 because
+  only a chart sliver was hittable while the synthesized gesture coordinates
+  remained under persistent bottom navigation; the app-report review state was
+  also slower than its prior wait. Test-only repair
+  `9689bd3b88268eebfc7b174336281de6f9c74476` measures and clears the full
+  gesture corridor and waits for explicit report readiness without changing
+  production interaction. A valid PR review then identified that the redundant
+  400-millisecond post-scrub deadline could discard the first deliberate tap.
+  Local implementation
+  `72f079a9ad6cda697dbcb6978a954826c89cadf9` removes that deadline, proves the
+  immediate tap and one-back path 10/10, and also fixes an onboarding
+  measurement clear action that reproduced keyboard-focus loss in 9/10 runs.
+  The repaired clear-and-retype workflow passes 10/10. The three original
+  hosted failures pass together 3/3, both geometry cases pass 20/20 under
+  repetition, StrandDesign passes 59/59, and the final complete iPhone
+  Simulator graph executes 43 tests with one intentional skip and zero
+  failures. The complete Tools discovery passes 374 tests with one intentional
+  skip; the exact protected release-control subset passes 258/258; local trust,
+  calibration, terminology, localization, claims, privacy, legal, operations,
+  release-shell, and diff gates pass on the final local candidate. The
+  regenerated terminology inventory records 18,626 classified occurrences
+  across 1,650 groups and is reviewed at digest
+  `32da17b04296d5319729f15830af076a57d39e97db41216cb1f31226cd6a6427`.
+  Private staging remains unchanged and reverified at source merge
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
+  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;
+  no cloud rebuild, migration, or apply is required. Protected follow-up
+  integration remains pending. Every signed or physical-device validation gate
+  also remains pending; simulator evidence remains explicitly
+  nonphysical.
 
 - One local release-candidate branch now combines the mobile tab/OTP and
   exact-date scrub correction, supplier optional-read request fencing, and the

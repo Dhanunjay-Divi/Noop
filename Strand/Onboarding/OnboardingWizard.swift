@@ -2373,6 +2373,9 @@ private struct ProfileStep: View {
     private func clearDraft(_ field: InputField) {
         isEditing = true
         clearTransitionField = field
+        // Force a real focus transition. Reassigning the already-focused field is a no-op,
+        // and the clear button's state change can otherwise leave the keyboard dismissed.
+        focusedField = nil
         switch field {
         case .weight:
             weightDraft = ""
@@ -2383,7 +2386,6 @@ private struct ProfileStep: View {
         case .heightInches:
             heightInchesDraft = ""
         }
-        focusedField = field
         DispatchQueue.main.async {
             guard clearTransitionField == field else { return }
             focusedField = field
