@@ -16498,8 +16498,8 @@
         681,
         684,
         684,
-        1286,
-        1426
+        1292,
+        1432
       ],
       "occurrenceCount": 7,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -16513,7 +16513,7 @@
       "category": "persisted",
       "lineNumbers": [
         1018,
-        1709
+        1715
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -38010,9 +38010,9 @@
         42,
         57,
         141,
-        181,
-        217,
-        233
+        183,
+        219,
+        235
       ],
       "occurrenceCount": 6,
       "path": "docs/ops/rounds/2026-10-03-mobile-ui-release-closeout.md",

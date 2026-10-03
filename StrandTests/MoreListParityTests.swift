@@ -232,7 +232,7 @@ final class MoreListParityTests: XCTestCase {
         ), "Opaque accessibility fallbacks must cover the complete current control footprint.")
         XCTAssertFalse(shell.contains(".mask(alignment: .bottom)"),
                        "A shell mask washes out the final visible row before it reaches the reserved strip.")
-        XCTAssertTrue(shell.contains("appearanceMode == .black ? 0.68 : 0.64"),
+        XCTAssertTrue(shell.contains("appearanceMode == .black ? 0.48 : 0.44"),
                       "Floating navigation needs a readable translucent base, not an opaque black bar.")
         XCTAssertTrue(shell.contains("private var opticalScrim: Color"),
                       "The separate quick-action lens must use the same text-occlusion contract.")
@@ -394,13 +394,13 @@ final class MoreListParityTests: XCTestCase {
                 && tabBar.contains("in: navigationMorph"),
             "The selected capsule must morph between expanded tabs and the compact control."
         )
-        XCTAssertTrue(shell.contains("value: selection"),
+        XCTAssertTrue(shell.contains("value: displayedIndex"),
                       "Tab selection needs a local animation so the capsule moves instead of jumping.")
         XCTAssertTrue(shell.contains("return .black.opacity(0.11)"),
                       "Light mode needs a transparent smoke tint instead of a milk-white plate.")
-        XCTAssertTrue(shell.contains("return .white.opacity(0.86)"),
+        XCTAssertTrue(shell.contains("return .white.opacity(0.72)"),
                       "Light mode must obscure body copy beneath the shape while retaining glass highlights.")
-        XCTAssertTrue(tabBar.contains("navigationInk(active: active, accent: accent)"),
+        XCTAssertTrue(tabBar.contains("navigationInk(active: visuallyActive, accent: accent)"),
                       "Navigation ink must adapt to light and dark glass.")
         XCTAssertTrue(shell.contains(".opacity(navigationGlassOpacity)"),
                       "Light mode must fade only the material layer, never the navigation ink.")
@@ -446,9 +446,9 @@ final class MoreListParityTests: XCTestCase {
         ), "Localized navigation labels need bounded one-line fitting before fallback containment.")
         XCTAssertTrue(shell.contains("accessibilityShowsLargeContentViewer"),
                       "Every visual label must expose its full title through Large Content Viewer.")
-        XCTAssertTrue(shell.contains(".accessibilityAddTraits(active ? .isSelected : [])"),
+        XCTAssertTrue(shell.contains(".accessibilityAddTraits(selected ? .isSelected : [])"),
                       "The active tab must add its selected trait on the persistent accessibility node.")
-        XCTAssertTrue(shell.contains(".accessibilityRemoveTraits(active ? [] : .isSelected)"),
+        XCTAssertTrue(shell.contains(".accessibilityRemoveTraits(selected ? [] : .isSelected)"),
                       "Inactive tabs must explicitly clear stale selected traits after repeated navigation.")
         XCTAssertFalse(shell.contains(#"? "Train" : item.title"#),
                        "An untranslated English tab label must not be reintroduced; add a catalog key instead.")
