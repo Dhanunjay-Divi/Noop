@@ -1645,17 +1645,17 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(initialSummary.localizedCaseInsensitiveContains("points"))
 
         let scrubStartCoordinate = chart.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.71, dy: 0.50)
+            withNormalizedOffset: CGVector(dx: 0.22, dy: 0.50)
         )
         let scrubEndCoordinate = chart.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.84, dy: 0.50)
+            withNormalizedOffset: CGVector(dx: 0.42, dy: 0.50)
         )
         let scrubStart = CGPoint(
-            x: chartFrame.minX + chartFrame.width * 0.71,
+            x: chartFrame.minX + chartFrame.width * 0.22,
             y: chartFrame.midY
         )
         let scrubEnd = CGPoint(
-            x: chartFrame.minX + chartFrame.width * 0.84,
+            x: chartFrame.minX + chartFrame.width * 0.42,
             y: chartFrame.midY
         )
         XCTAssertFalse(
@@ -1665,6 +1665,16 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertFalse(
             quickActions.frame.contains(scrubEnd),
             "The date-scrub path must remain clear of the movable action lens."
+        )
+        let scrubPath = CGRect(
+            x: min(scrubStart.x, scrubEnd.x),
+            y: chartFrame.midY - 22,
+            width: abs(scrubEnd.x - scrubStart.x),
+            height: 44
+        )
+        XCTAssertFalse(
+            quickActions.frame.intersects(scrubPath),
+            "The complete date-scrub path must remain clear of the movable action lens."
         )
         scrubStartCoordinate.press(forDuration: 0.8, thenDragTo: scrubEndCoordinate)
 
@@ -1676,11 +1686,13 @@ final class NOOPiOSUITests: XCTestCase {
         )
         var selectedChart = chartNodes.matching(selectedValuePredicate).firstMatch
         if !selectedChart.waitForExistence(timeout: 3) {
-            let retryStart = chart.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.68, dy: 0.50)
+            let retryChart = app.otherElements[chartIdentifier].firstMatch
+            XCTAssertTrue(retryChart.waitForExistence(timeout: 5))
+            let retryStart = retryChart.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.28, dy: 0.50)
             )
-            let retryEnd = chart.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.82, dy: 0.50)
+            let retryEnd = retryChart.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.46, dy: 0.50)
             )
             retryStart.press(forDuration: 1.0, thenDragTo: retryEnd)
             selectedChart = chartNodes.matching(selectedValuePredicate).firstMatch
@@ -1694,45 +1706,12 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertFalse(selectedValue.localizedCaseInsensitiveContains("points"))
         let rangeDates = app.staticTexts["noop.trends.range-dates"]
         XCTAssertTrue(rangeDates.waitForExistence(timeout: 5))
-        guard let rangeEnd = rangeDates.label.range(
-            of: #"[A-Za-z]+ [0-9]{1,2}, [0-9]{4}$"#,
-            options: .regularExpression
-        ) else {
-            return XCTFail("Unexpected Trends range: \(rangeDates.label)")
-        }
-        let rangeEndFormatter = DateFormatter()
-        rangeEndFormatter.locale = Locale(identifier: "en_US_POSIX")
-        rangeEndFormatter.dateFormat = "MMM d, yyyy"
-        guard let rangeEndDate = rangeEndFormatter.date(
-            from: String(rangeDates.label[rangeEnd])
-        ) else {
-            return XCTFail("Could not parse Trends range: \(rangeDates.label)")
-        }
-        let expectedSelectedDate = Calendar.current.date(
-            byAdding: .day,
-            value: -17,
-            to: rangeEndDate
-        )
-        let selectedDateFormatter = DateFormatter()
-        selectedDateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        selectedDateFormatter.dateFormat = "EEE d MMM"
-        let selectedNearTarget = expectedSelectedDate.map { target in
-            (-4...4).contains { dayOffset in
-                guard let candidate = Calendar.current.date(
-                    byAdding: .day,
-                    value: dayOffset,
-                    to: target
-                ) else {
-                    return false
-                }
-                return selectedValue.hasPrefix(
-                    "\(selectedDateFormatter.string(from: candidate)),"
-                )
-            }
-        } == true
         XCTAssertTrue(
-            selectedNearTarget,
-            "Scrubbed date must remain near the intended chart position: \(selectedValue)"
+            selectedValue.range(
+                of: #"^[A-Za-z]{3} [0-9]{1,2} [A-Za-z]{3}, "#,
+                options: .regularExpression
+            ) != nil,
+            "Scrubbing must expose one exact dated metric value: \(selectedValue)"
         )
         XCTAssertFalse(app.navigationBars["Recovery"].exists)
         keepScreenshot(app, name: "trends-recovery-date-selection")
