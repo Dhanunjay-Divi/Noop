@@ -1520,6 +1520,9 @@ private fun WhoopPickStep(
     onOpenSupplierBand: (() -> Unit)? = null,
 ) {
     val found by viewModel.discoveredWhoops.collectAsStateWithLifecycle()
+    val pairAnotherSupportedBand = uiString(
+        R.string.appwide_action_pair_another_supported_band,
+    )
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         PickList(searching = true, isEmpty = found.isEmpty(), onRescan = onRescan) {
             found.sortedByDescending { it.rssi }.forEach { strap ->
@@ -1540,7 +1543,7 @@ private fun WhoopPickStep(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .semantics {
-                        contentDescription = "Pair another supported band"
+                        contentDescription = pairAnotherSupportedBand
                     },
             ) {
                 Icon(
@@ -1551,7 +1554,7 @@ private fun WhoopPickStep(
                 )
                 Spacer(Modifier.width(Metrics.space8))
                 Text(
-                    "Pair another supported band",
+                    pairAnotherSupportedBand,
                     style = NoopType.subhead,
                     color = Palette.accent,
                 )

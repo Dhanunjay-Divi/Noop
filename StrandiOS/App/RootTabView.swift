@@ -1056,7 +1056,7 @@ struct RootTabView: View {
                                 .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Close quick action")
+                        .accessibilityLabel(Text("Close"))
                         .accessibilityIdentifier("noop.quick-action.close")
                     }
                 }
@@ -2571,13 +2571,14 @@ private struct FloatingTabBar: View {
         .accessibilityLabel("Show navigation")
         .accessibilityValue(
             Text(currentItem.title)
-                + Text(dockEdge == .leading ? ", left corner" : ", right corner")
+                + Text(verbatim: ", ")
+                + Text(dockEdge == .leading ? "Left edge" : "Right edge")
         )
         .accessibilityHint("Expands the tab bar. Drag horizontally to move.")
-        .accessibilityAction(named: Text("Move navigation to left corner")) {
+        .accessibilityAction(named: Text("Move to left edge")) {
             onDockEdgeChange(.leading)
         }
-        .accessibilityAction(named: Text("Move navigation to right corner")) {
+        .accessibilityAction(named: Text("Move to right edge")) {
             onDockEdgeChange(.trailing)
         }
         .accessibilityShowsLargeContentViewer {

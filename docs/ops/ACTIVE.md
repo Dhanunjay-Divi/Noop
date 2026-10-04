@@ -32,7 +32,11 @@ Last updated: **2026-10-04**
   digest
   `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`,
   and inventory digest
-  `6a7b0ef143b541dc26570602675c7df6a9d5b362c68eeb65f77e0368eaed0d4c`.
+  `055e593e1fda1508115bc8d7f49118bfb9fb3e26cdb21bb32fa85cd46eee8939`.
+  Initial hosted localization run `37230079611` rejected 13 newly authored
+  labels. They now use the Apple and Android resource systems; the exact CI
+  audit passes, all four Android production/test source sets compile, and the
+  iPhone Simulator build succeeds.
   Private staging remains unchanged at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;

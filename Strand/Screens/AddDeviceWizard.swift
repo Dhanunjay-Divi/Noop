@@ -1372,7 +1372,7 @@ struct AddDeviceWizard: View {
                             step = .prep
                         } label: {
                             Label(
-                                "Pair another supported band",
+                                String(localized: "Pair another supported band"),
                                 systemImage: "waveform.path.ecg.rectangle"
                             )
                                 .font(StrandFont.subhead)

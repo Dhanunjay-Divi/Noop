@@ -2999,4 +2999,7 @@
     <string name="noop_command_lens_move_down">Nach unten verschieben</string>
     <string name="noop_command_lens_left_edge">Linker Rand</string>
     <string name="noop_command_lens_right_edge">Rechter Rand</string>
+    <string name="appwide_action_pair_another_supported_band">Weiteres unterstütztes Band koppeln</string>
+    <string name="compact_navigation_show">Navigation anzeigen</string>
+    <string name="compact_navigation_state">%1$s, %2$s</string>
 </resources>

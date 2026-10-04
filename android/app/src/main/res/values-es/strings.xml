@@ -2983,4 +2983,7 @@
     <string name="noop_command_lens_move_down">Mover hacia abajo</string>
     <string name="noop_command_lens_left_edge">Borde izquierdo</string>
     <string name="noop_command_lens_right_edge">Borde derecho</string>
+    <string name="appwide_action_pair_another_supported_band">Emparejar otra banda compatible</string>
+    <string name="compact_navigation_show">Mostrar navegación</string>
+    <string name="compact_navigation_state">%1$s, %2$s</string>
 </resources>

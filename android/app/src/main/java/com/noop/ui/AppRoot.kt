@@ -1999,7 +1999,6 @@ private fun FloatingCompactBottomBar(
             } else {
                 tween(durationMillis = 340, easing = NavEasing)
             },
-            label = "NOOP compact navigation corner",
         )
         CompactBottomBar(
             selected = selected,
@@ -2026,10 +2025,18 @@ private fun CompactBottomBar(
     val dragThresholdPx = with(density) { 44.dp.toPx() }
     var dragOffsetPx by remember { mutableFloatStateOf(0f) }
     val cornerDescription = if (dockEdge == CompactNavigationDockEdge.START) {
-        "Left corner"
+        stringResource(R.string.noop_command_lens_left_edge)
     } else {
-        "Right corner"
+        stringResource(R.string.noop_command_lens_right_edge)
     }
+    val showNavigation = stringResource(R.string.compact_navigation_show)
+    val navigationState = stringResource(
+        R.string.compact_navigation_state,
+        label,
+        cornerDescription,
+    )
+    val moveLeft = stringResource(R.string.noop_command_lens_move_left)
+    val moveRight = stringResource(R.string.noop_command_lens_move_right)
     Row(
         modifier = Modifier
             .offset(x = horizontalOffset)
@@ -2068,14 +2075,14 @@ private fun CompactBottomBar(
                 onClick = onExpand,
             )
             .semantics {
-                contentDescription = "Show navigation"
-                stateDescription = "$label, $cornerDescription"
+                contentDescription = showNavigation
+                stateDescription = navigationState
                 customActions = listOf(
-                    CustomAccessibilityAction("Move navigation to left corner") {
+                    CustomAccessibilityAction(moveLeft) {
                         onDockEdgeChange(CompactNavigationDockEdge.START)
                         true
                     },
-                    CustomAccessibilityAction("Move navigation to right corner") {
+                    CustomAccessibilityAction(moveRight) {
                         onDockEdgeChange(CompactNavigationDockEdge.END)
                         true
                     },

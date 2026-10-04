@@ -2983,4 +2983,7 @@
     <string name="noop_command_lens_move_down">Déplacer vers le bas</string>
     <string name="noop_command_lens_left_edge">Bord gauche</string>
     <string name="noop_command_lens_right_edge">Bord droit</string>
+    <string name="appwide_action_pair_another_supported_band">Associer un autre bracelet compatible</string>
+    <string name="compact_navigation_show">Afficher la navigation</string>
+    <string name="compact_navigation_state">%1$s, %2$s</string>
 </resources>

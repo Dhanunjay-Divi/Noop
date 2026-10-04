@@ -2977,4 +2977,7 @@
     <string name="noop_command_lens_move_down">Mover para baixo</string>
     <string name="noop_command_lens_left_edge">Margem esquerda</string>
     <string name="noop_command_lens_right_edge">Margem direita</string>
+    <string name="appwide_action_pair_another_supported_band">Emparelhar outra pulseira compatível</string>
+    <string name="compact_navigation_show">Mostrar navegação</string>
+    <string name="compact_navigation_state">%1$s, %2$s</string>
 </resources>

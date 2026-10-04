@@ -108,6 +108,7 @@ scroll timing without changing data, ordering, or card dimensions.
 | Final iPhone build | `BUILD SUCCEEDED`; simulator executable SHA-256 `ee765debf4ab5463e2f794dcd9c3552e3c4332d9f5525ff00f1e051cf35c8e63` | Exact source compiles for the iPhone Simulator | Signing or installation on a phone |
 | Final Android artifacts | Demo APK SHA-256 `455a523fb67de460c22e6da8e0c439b17c4d3de3fea1a6837edb3ddc5c30c415`; Full APK SHA-256 `ec3bbc03161e40d0bab33136c8655eb8c0b1320497ead10d93b93e2e246861b0` | Exact affected Android artifacts package | Release signing or physical installation |
 | Protected release-control subset | 258/258 unit tests passed; source controls 9/9; required CI 10/10; trusted controls, calibration, terminology, legal, privacy, claims, shell, operations, and diff checks passed | Exact local candidate satisfies the repository's protected source-policy wall | Hosted runner execution or protected merge |
+| Hosted localization correction | Initial PR run `37230079611` rejected 13 new hardcoded navigation, scan, and close labels. Those labels now use the existing Apple and Android resource systems; the exact CI audit passes, all four Android production/test source sets compile, and the iPhone Simulator build succeeds. | New customer and accessibility text is resource-backed on both platforms | Translation quality beyond the recorded locale gate or physical accessibility services |
 | Diff hygiene | `git diff --check` passed before the product commit | No whitespace-error regression | Runtime behavior |
 
 The first combined iPhone onboarding run exposed a test-query defect: the
@@ -121,7 +122,7 @@ across 1,651 groups, with the customer category unchanged at 889 and no
 forbidden active use. The active allowlist SHA-256 is
 `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`;
 the legacy inventory SHA-256 is
-`6a7b0ef143b541dc26570602675c7df6a9d5b362c68eeb65f77e0368eaed0d4c`.
+`055e593e1fda1508115bc8d7f49118bfb9fb3e26cdb21bb32fa85cd46eee8939`.
 
 ## Data, privacy, and medical truth
 
