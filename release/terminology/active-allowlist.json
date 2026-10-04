@@ -1352,12 +1352,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 51,
+      "occurrenceCount": 56,
       "owner": "project team",
       "path": "Strand/Screens/AddDeviceWizard.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "dd6546c05d879acd741c35723d8cd4c9d74682b9629806c1ee8bfd2afe26a2c0"
+      "sha256": "40c543c876ec69d8396046c465850678610c13c9bed9e3b270386504d865fe7f"
     },
     {
       "category": "customer",
@@ -3656,12 +3656,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 56,
+      "occurrenceCount": 65,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/AddDeviceWizard.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "ab798e3232a7bb5100f1b6f186748ff9fbeb39f2dc42945372ba19fa981b1689"
+      "sha256": "12cf8ad8beb51e34a19533bc96c63eed46e1f2a679e68f7e16f10523ab640dc5"
     },
     {
       "category": "customer",

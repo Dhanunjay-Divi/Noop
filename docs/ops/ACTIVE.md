@@ -1,8 +1,43 @@
 # Active NOOP handoff
 
-Last updated: **2026-10-03**
+Last updated: **2026-10-04**
 
 ## Authoritative context
+
+- The current PR `#33` replacement candidate is on
+  `codex/mobile-cloud-release-finalization-20261003`, based exactly on GitHub
+  protected merge `1cd401f69dd8b4df75872a830ed33a84918ea344`.
+  Product commit `fc2343ff5f96304ccca95fc802d3b6252b467d5b`
+  removes Android's invisible measured-height Today gaps, gives both phones a
+  calmer scroll-reactive floating navigation disclosure that snaps and
+  persists at either bottom corner, preserves all five named tabs and complete
+  metric history, replaces the quick-action `Done` capsule with an accessible
+  close icon, and starts customer setup in one unified compatible-band scan.
+  Android Demo/Full unit and build matrices plus Android-test source
+  compilation pass; the final navigation recheck passes 15/15. Apple affected
+  contracts pass 107/107, StrandDesign passes 59/59, iPhone navigation passes
+  2/2, complete metric history passes 1/1, and the configured, fresh-install,
+  unified-scan, and quick-action flows pass after correcting one covered-parent
+  accessibility query. The exact iPhone Simulator executable digest is
+  `ee765debf4ab5463e2f794dcd9c3552e3c4332d9f5525ff00f1e051cf35c8e63`;
+  the Demo and Full APK digests are
+  `455a523fb67de460c22e6da8e0c439b17c4d3de3fea1a6837edb3ddc5c30c415`
+  and
+  `ec3bbc03161e40d0bab33136c8655eb8c0b1320497ead10d93b93e2e246861b0`.
+  The exact protected release-control subset passes 258/258, source controls
+  pass 9/9, required-CI policy verifies all 10 contexts, and trusted controls,
+  calibration, terminology, legal, privacy, claims, shell, operations, and
+  diff gates pass. The reviewed terminology snapshot records 18,638
+  occurrences across 1,651 groups, no forbidden active use, active-allowlist
+  digest
+  `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`,
+  and inventory digest
+  `6a7b0ef143b541dc26570602675c7df6a9d5b362c68eeb65f77e0368eaed0d4c`.
+  Private staging remains unchanged at source merge
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
+  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;
+  no cloud build, migration, deploy, or apply is required. Protected hosted
+  integration and every signed or physical-device gate remain pending.
 
 - The current follow-up candidate is on
   `codex/mobile-cloud-release-finalization-20261003`, based on protected merge
