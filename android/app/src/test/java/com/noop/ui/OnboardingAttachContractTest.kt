@@ -235,7 +235,12 @@ class OnboardingAttachContractTest {
             "automaticallyScansLaunchBands && supplierAvailable",
         ))
         assertTrue(pickerCall.contains("onOpenSupplierBand"))
-        assertTrue(picker.contains("Pair another supported band"))
+        assertTrue(
+            picker.contains(
+                "R.string.appwide_action_pair_another_supported_band",
+            ),
+        )
+        assertTrue(picker.contains("contentDescription = pairAnotherSupportedBand"))
         assertFalse(picker.contains("DeviceType.HrStrap"))
         assertFalse(picker.contains("DeviceType.GymEquipment"))
         assertFalse(picker.contains("DeviceType.Oura"))
