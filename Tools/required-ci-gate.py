@@ -71,7 +71,7 @@ RELEASE_SOURCE_DIGESTS = {
         "b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147"
     ),
     "release/terminology/legacy-inventory.json": (
-        "ac2ab789f822bac3ea45d2b371bb36872dadf1e997167c5ea67d9c51a1ccfb06"
+        "e9cbd08fe7cf6870ce987b88d353c7d68de961a0d429c0d7e274b28bba2414ac"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -137,7 +137,7 @@ RELEASE_SOURCE_DIGESTS = {
         "f0b63ead11c0eefbd98dff1c5489d7eb9a16d01e7c7b5c064bfbcc950c102406"
     ),
     "Tools/terminology-audit.py": (
-        "8cb907cd981db978a895668bfc97e9c66d9ae632957032dec727ea5c8450b983"
+        "55a0a0b3767ac0bfa47d8689720db994bb18e791b244beb4fc7f00ea25744c71"
     ),
     "Tools/trusted-release-controls.py": (
         "cb4260aae16ace02a58c69655414db649199c104bd09c116dad719341a9f11ab"

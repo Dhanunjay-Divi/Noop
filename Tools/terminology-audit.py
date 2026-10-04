@@ -15,6 +15,7 @@ import json
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -107,6 +108,13 @@ class Occurrence:
     token: str
     category: str
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class CustomerVisibleValueViolation:
+    path: str
+    key: str
+    locale: str
 
 
 def tracked_files(root: Path) -> list[str]:
@@ -270,6 +278,70 @@ def scan(
     ), forbidden
 
 
+def customer_visible_value_violations(
+    root: Path,
+) -> list[CustomerVisibleValueViolation]:
+    violations: list[CustomerVisibleValueViolation] = []
+
+    apple_path = root / "Strand" / "Resources" / "Localizable.xcstrings"
+    try:
+        catalog = json.loads(apple_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        catalog = {}
+    for key, entry in catalog.get("strings", {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for locale, localization in entry.get("localizations", {}).items():
+            if not isinstance(localization, dict):
+                continue
+            pending: list[object] = [localization]
+            while pending:
+                value = pending.pop()
+                if isinstance(value, dict):
+                    for field, nested in value.items():
+                        if (
+                            field == "value"
+                            and isinstance(nested, str)
+                            and LEGACY.search(nested)
+                        ):
+                            violations.append(
+                                CustomerVisibleValueViolation(
+                                    path=apple_path.relative_to(root).as_posix(),
+                                    key=key,
+                                    locale=locale,
+                                )
+                            )
+                        else:
+                            pending.append(nested)
+                elif isinstance(value, list):
+                    pending.extend(value)
+
+    resources = root / "android" / "app" / "src" / "main" / "res"
+    for resource_path in sorted(resources.glob("values*/*.xml")):
+        try:
+            resource_root = ET.parse(resource_path).getroot()
+        except (OSError, ET.ParseError):
+            continue
+        locale = resource_path.parent.name
+        for element in resource_root.iter():
+            if element.tag not in {"string", "item"}:
+                continue
+            value = "".join(element.itertext())
+            if LEGACY.search(value):
+                violations.append(
+                    CustomerVisibleValueViolation(
+                        path=resource_path.relative_to(root).as_posix(),
+                        key=element.attrib.get("name", ""),
+                        locale=locale,
+                    )
+                )
+
+    return sorted(
+        set(violations),
+        key=lambda item: (item.path, item.locale, item.key),
+    )
+
+
 def grouped_inventory(occurrences: Iterable[Occurrence]) -> dict[str, object]:
     grouped: dict[tuple[str, str], list[Occurrence]] = defaultdict(list)
     category_counts: Counter[str] = Counter()
@@ -352,6 +424,13 @@ def write_json(path: Path, value: dict[str, object]) -> None:
 
 
 def check(root: Path, inventory_path: Path, allowlist_path: Path) -> None:
+    visible_violations = customer_visible_value_violations(root)
+    if visible_violations:
+        first = visible_violations[0]
+        raise AuditError(
+            "customer-visible legacy terminology: "
+            f"{first.path} ({first.locale}, {first.key})"
+        )
     occurrences, forbidden = scan(root)
     if forbidden:
         first = forbidden[0]
@@ -392,6 +471,7 @@ def main() -> int:
             check(root, inventory_path, allowlist_path)
             print("Terminology inventory and active-use ratchet passed.")
             return 0
+        visible_violations = customer_visible_value_violations(root)
         occurrences, forbidden = scan(root)
         inventory = grouped_inventory(occurrences)
         if args.command == "summary":
@@ -401,11 +481,18 @@ def main() -> int:
                         "occurrenceCount": inventory["occurrenceCount"],
                         "categoryCounts": inventory["categoryCounts"],
                         "forbiddenCount": len(forbidden),
+                        "customerVisibleValueCount": len(visible_violations),
                     },
                     sort_keys=True,
                 )
             )
-            return 1 if forbidden else 0
+            return 1 if forbidden or visible_violations else 0
+        if visible_violations:
+            first = visible_violations[0]
+            raise AuditError(
+                "snapshot refused while customer-visible legacy terminology remains: "
+                f"{first.path} ({first.locale}, {first.key})"
+            )
         if forbidden:
             first = forbidden[0]
             raise AuditError(

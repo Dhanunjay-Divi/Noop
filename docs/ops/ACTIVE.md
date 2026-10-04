@@ -61,7 +61,27 @@ Last updated: **2026-10-04**
   viewport, and separately preserve the accessibility-text reservation. The
   complete local Strand suite passes 2,446 tests with one intentional skip and
   zero failures, and both corrected iPhone viewport cases pass 2/2. Product
-  source is unchanged by this correction.
+  source is unchanged by this correction. A local follow-up on remote head
+  `e7c35610c3930916c95ceda6a08e96fe369474fe` adds exact coverage for
+  `More > Devices > Connect band`, installs the rebuilt Full candidate on API
+  35, and proves that both the normal Devices entry and first-run onboarding
+  open the same live scanner while rejecting the three legacy model rows. The
+  complete Full/Demo unit, product APK, and Android-test APK matrix passes.
+  Current Demo and Full APK digests are
+  `5d8dc888d5f9ab18af0939cd3b658dbebe9bbc530ff0a43176667fafaf8e0022`
+  and
+  `26cfaf9cb8170cdbe7a0a0e23c6ff2a29d84e1f350b9f83a51fb6c194daf9e92`.
+  Apple customer-brand tests pass 4/4 and terminology tests pass 7/7. The
+  terminology gate now parses every shipped Apple and Android localization
+  value and reports zero customer-visible legacy-name values. The reviewed
+  inventory records 18,644 occurrences across 1,651 groups, with digest
+  `e9cbd08fe7cf6870ce987b88d353c7d68de961a0d429c0d7e274b28bba2414ac`;
+  the unchanged active-allowlist digest is
+  `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`.
+  The exact protected release-control subset passes 260/260 and the complete
+  Tools suite passes 376 tests with one intentional skip after both reviewed
+  source digests were repinned; all direct release, trust, localization,
+  operations, claims, legal, privacy, shell, and diff gates pass.
   Private staging remains unchanged at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;

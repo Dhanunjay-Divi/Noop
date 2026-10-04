@@ -66,6 +66,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import com.noop.ble.WhoopBleClient
 import androidx.compose.ui.semantics.contentDescription
@@ -957,6 +958,7 @@ private fun AddDeviceButton(onClick: () -> Unit) {
         fullWidth = true,
         modifier = Modifier
             .padding(top = 4.dp)
+            .testTag("noop.devices.connect")
             .semantics {
                 contentDescription = uiString(
                     R.string.appwide_devices_connect_action,

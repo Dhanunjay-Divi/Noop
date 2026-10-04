@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -85,6 +86,106 @@ class TerminologyAuditTests(unittest.TestCase):
             occurrences, forbidden = AUDIT.scan(root, [inventory])
         self.assertEqual(occurrences, [])
         self.assertEqual(forbidden, [])
+
+    def test_localization_keys_may_preserve_history_but_visible_values_may_not(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            apple = root / "Strand" / "Resources" / "Localizable.xcstrings"
+            apple.parent.mkdir(parents=True)
+            apple.write_text(
+                json.dumps(
+                    {
+                        "strings": {
+                            "Import WHOOP export": {
+                                "localizations": {
+                                    "en": {
+                                        "stringUnit": {
+                                            "state": "translated",
+                                            "value": "Import wearable export",
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            android = (
+                root
+                / "android"
+                / "app"
+                / "src"
+                / "main"
+                / "res"
+                / "values"
+                / "strings.xml"
+            )
+            android.parent.mkdir(parents=True)
+            android.write_text(
+                '<resources><string name="legacy_key">Compatible band</string></resources>',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                AUDIT.customer_visible_value_violations(root),
+                [],
+            )
+
+            catalog = json.loads(apple.read_text(encoding="utf-8"))
+            catalog["strings"]["Import WHOOP export"]["localizations"]["en"][
+                "stringUnit"
+            ]["value"] = "Import WHOOP export"
+            apple.write_text(json.dumps(catalog), encoding="utf-8")
+            android.write_text(
+                '<resources><string name="legacy_key">WHOOP band</string></resources>',
+                encoding="utf-8",
+            )
+
+            violations = AUDIT.customer_visible_value_violations(root)
+            self.assertEqual(len(violations), 2)
+            self.assertEqual(
+                {violation.path for violation in violations},
+                {
+                    "Strand/Resources/Localizable.xcstrings",
+                    "android/app/src/main/res/values/strings.xml",
+                },
+            )
+
+    def test_android_dynamic_customer_copy_is_sanitized_at_render_boundaries(self) -> None:
+        whats_new = (
+            ROOT / "android/app/src/main/java/com/noop/ui/WhatsNewSheet.kt"
+        ).read_text(encoding="utf-8")
+        onboarding = (
+            ROOT / "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt"
+        ).read_text(encoding="utf-8")
+        updates = (
+            ROOT / "android/app/src/main/java/com/noop/ui/UpdatesInboxScreen.kt"
+        ).read_text(encoding="utf-8")
+
+        for required in (
+            "Text(CustomerFacingBrand.text(e.title)",
+            "Text(CustomerFacingBrand.text(e.body)",
+            "CustomerFacingBrand.text(release.title)",
+            "val rendered = CustomerFacingBrand.text(source)",
+        ):
+            self.assertIn(required, whats_new)
+        self.assertIn(
+            "Text(CustomerFacingBrand.text(e.title)",
+            onboarding,
+        )
+        self.assertIn(
+            "Text(CustomerFacingBrand.text(e.body)",
+            onboarding,
+        )
+        self.assertIn(
+            "val visibleTitle = CustomerFacingBrand.text(item.title)",
+            updates,
+        )
+        self.assertIn(
+            "val visibleMessage = CustomerFacingBrand.text(item.message)",
+            updates,
+        )
 
     def test_repository_snapshot_is_current(self) -> None:
         AUDIT.check(

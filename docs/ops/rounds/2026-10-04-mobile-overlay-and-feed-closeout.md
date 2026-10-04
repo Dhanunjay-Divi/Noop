@@ -8,6 +8,8 @@
 - Protected base: `1cd401f69dd8b4df75872a830ed33a84918ea344`
 - Product implementation commit:
   `fc2343ff5f96304ccca95fc802d3b6252b467d5b`
+- Current remote PR head:
+  `e7c35610c3930916c95ceda6a08e96fe369474fe`
 - Pull request: `#33`
 
 ## Objective
@@ -29,6 +31,9 @@ claims:
 - preserve all five named destinations and complete metric-history access;
 - begin customer band setup with one compatible-band scan instead of static
   product rows or an unavailable placeholder;
+- keep the normal post-onboarding Devices entry on that same scan-only path;
+- prevent the legacy transport name from reaching any shipped localization
+  value or dynamic release-note surface;
 - keep iPhone and Android behavior and accessibility semantics aligned.
 
 ## Starting evidence
@@ -81,8 +86,15 @@ claims:
   scan directly. Static model-choice rows and unavailable account-linked
   placeholders are absent from that path. The optional supplier route is shown
   only when its quarantined build capability is actually present.
-- Full Add Device catalog behavior remains separate and continues to defer its
-  optional scanner construction until an explicit scan action.
+- The normal `More > Devices > Connect band` entry now has a stable automation
+  identifier and is covered independently from onboarding. Both production
+  customer entries use the same scan-only scope; the broader source catalog
+  remains limited to explicit development/test scope.
+- The terminology gate now parses every shipped Apple string-catalog value and
+  Android string-resource value, and fails if the legacy transport name is
+  rendered in any locale. Historical localization keys and internal protocol
+  identifiers remain unchanged. Dynamic changelog and onboarding expectation
+  copy continues through `CustomerFacingBrand` on both platforms.
 
 ## Root cause
 
@@ -106,8 +118,10 @@ scroll timing without changing data, ordering, or card dimensions.
 | iPhone metric-history UI | Complete selected-metric and history route case passed 1/1 | Eight configured metrics remain represented and the history action reaches the metric explorer | Real provider history delivery |
 | iPhone first-run and quick actions | Configured completion and quick-action cases passed; fresh Terms-to-scan and unified-scan cases passed on corrected recheck | Terms, Bluetooth, scan-before-account ordering, scan-only presentation, and icon close behavior | Real account provider or BLE discovery |
 | Final iPhone build | `BUILD SUCCEEDED`; simulator executable SHA-256 `ee765debf4ab5463e2f794dcd9c3552e3c4332d9f5525ff00f1e051cf35c8e63` | Exact source compiles for the iPhone Simulator | Signing or installation on a phone |
-| Final Android artifacts | Demo APK SHA-256 `455a523fb67de460c22e6da8e0c439b17c4d3de3fea1a6837edb3ddc5c30c415`; Full APK SHA-256 `ec3bbc03161e40d0bab33136c8655eb8c0b1320497ead10d93b93e2e246861b0` | Exact affected Android artifacts package | Release signing or physical installation |
-| Protected release-control subset | 258/258 unit tests passed; source controls 9/9; required CI 10/10; trusted controls, calibration, terminology, legal, privacy, claims, shell, operations, and diff checks passed | Exact local candidate satisfies the repository's protected source-policy wall | Hosted runner execution or protected merge |
+| Final Android artifacts | Demo APK SHA-256 `5d8dc888d5f9ab18af0939cd3b658dbebe9bbc530ff0a43176667fafaf8e0022`; Full APK SHA-256 `26cfaf9cb8170cdbe7a0a0e23c6ff2a29d84e1f350b9f83a51fb6c194daf9e92`; Demo Android-test APK SHA-256 `792e572a18d7f322f2c30e96c8767c8e29bba214f1ab1b9c3374983acda1d87d`; Full Android-test APK SHA-256 `abdf906720e11da024139c48c746c75b73523c5d207f9677feff0097a781f1f7` | Exact affected Android product and instrumentation artifacts package | Release signing or physical installation |
+| Android customer-entry scan recheck | The rebuilt Full APK and Android-test APK were installed on API 35 without clearing app data. `AppShellInstrumentedTest#devicesConnectBandStartsUnifiedScanWithoutLegacyModelRows` and `OnboardingFlowInstrumentedTest#postTermsBandFirstFlowReachesSupportedBandPickerWithoutAccountBypass` passed 1/1 each. Both require the localized picker title and live searching state while rejecting Band 5.0 / MG, Band 4.0, and account-linked model rows. | First-run and normal post-onboarding customer entries resolve to the same implemented live scanner in the exact rebuilt artifact | Physical discovery, pairing, claim, or stale APKs installed elsewhere |
+| Customer-visible terminology wall | `CustomerFacingBrandTests` passed 4/4; terminology unit tests passed 7/7; the parser reports zero legacy-name values across all Apple localizations and Android values resources; the active-use ratchet passes; reviewed source digests pin the exact audit and inventory | Shipped static localization values and reviewed dynamic release/onboarding surfaces cannot render the legacy transport name | Arbitrary future server copy outside the current reviewed boundaries |
+| Protected release-control subset | 260/260 unit tests passed; complete Tools suite 376 with one intentional skip; source controls 9/9; required CI 10/10; trusted controls, calibration, terminology, legal, privacy, claims, shell, operations, and diff checks passed | Exact local candidate satisfies the repository's protected source-policy wall | Hosted runner execution or protected merge |
 | Hosted localization correction | Initial PR run `37230079611` rejected 13 new hardcoded navigation, scan, and close labels. Those labels now use the existing Apple and Android resource systems; the exact CI audit passes, all four Android production/test source sets compile, and the iPhone Simulator build succeeds. Replacement Android run `37231077501` then exposed one missing complete-locale resource and two stale source contracts; the three exact failures and both complete Full/Demo unit suites pass after correction. | New customer and accessibility text is resource-backed on both platforms, with complete-locale and source-contract enforcement | Translation quality beyond the recorded locale gate or physical accessibility services |
 | Hosted release-control stabilization | Run `37231919823` passed source controls, then one release-evidence test hit `Directory not empty: objects` while Python removed a temporary Git fixture. Fixture Git commands now disable automatic garbage collection and maintenance, preventing detached writes during cleanup; the formerly failing test passes 100 consecutive runs. | Temporary release-evidence repositories clean up synchronously on hosted Git versions | Unrelated hosted runner or network failures |
 | Hosted Android unified-scan correction | Run `37232335010` executed 126 production-shell instrumentation tests and failed only two onboarding assertions that still waited for the removed static Band 5.0 / MG and Band 4.0 rows. The assertions now require the localized device-picker title and searching state while rejecting the static rows. Both Android-test source sets compile, focused onboarding and pairing contracts pass, and the exact API 35 cases pass 2/2. | The first-run and post-Terms customer paths enter the implemented unified live scan without reintroducing model-choice cards or an account bypass | Physical BLE discovery, device names, or account activation |
@@ -120,12 +134,13 @@ under the scan sheet. The wizard's own back control was already hidden. It now
 has a stable identifier, and the scan-only tests query that exact control. Both
 previously affected cases then passed.
 
-The reviewed terminology snapshot contains 18,638 classified occurrences
+The reviewed terminology snapshot contains 18,644 classified occurrences
 across 1,651 groups, with the customer category unchanged at 889 and no
-forbidden active use. The active allowlist SHA-256 is
+forbidden active use or customer-visible localization value. The active
+allowlist SHA-256 is
 `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`;
 the legacy inventory SHA-256 is
-`ac2ab789f822bac3ea45d2b371bb36872dadf1e997167c5ea67d9c51a1ccfb06`.
+`e9cbd08fe7cf6870ce987b88d353c7d68de961a0d429c0d7e274b28bba2414ac`.
 
 ## Data, privacy, and medical truth
 
@@ -175,7 +190,10 @@ the legacy inventory SHA-256 is
   context. No workflow is to be manually dispatched or re-run.
 - Exact head `2d1b35249f8c7e4621877a09a726ca2ea844312a` completed all hosted
   work and exposed the bounded Apple test-contract drift recorded above. The
-  corrected local replacement must run through the same protected contexts.
+  corrected remote replacement is
+  `e7c35610c3930916c95ceda6a08e96fe369474fe`. The current local
+  customer-entry and terminology follow-up must be committed, pushed normally,
+  and run through the same protected contexts.
 - Merge only the exact green PR head through protected `main`, then verify the
   resulting protected-main SHA before handing off physical validation.
 
@@ -189,6 +207,10 @@ the legacy inventory SHA-256 is
   state or scroll position.
 - Keep complete metric history and the separate Add Device catalog reachable;
   the unified customer scan changes presentation, not source authority.
+- Route every production band-entry action through one generation-agnostic
+  scanner; keep broader source selection restricted to development/test scope.
+- Enforce neutral customer copy at both static localization and dynamic
+  rendering boundaries without renaming protocol or persisted identifiers.
 - Treat cloud deployment as a verified no-op because no cloud source,
   migration, image, infrastructure, or managed runtime input changed.
 
