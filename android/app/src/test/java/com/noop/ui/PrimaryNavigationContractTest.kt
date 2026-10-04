@@ -184,7 +184,7 @@ class PrimaryNavigationContractTest {
         assertFalse(barSlot.contains("showVisualLabel"))
 
         val bottomBar = text
-            .substringAfter("private fun GlassBottomBar(")
+            .substringAfter("private fun ExpandedGlassBottomBarHost(")
             .substringBefore("\ninternal enum class NoopCommandLensEdge")
         assertTrue(bottomBar.contains(".selectableGroup()"))
         assertTrue(bottomBar.contains("val barHeight = labelLayout.barHeightDp.dp + Metrics.space8"))
@@ -203,6 +203,21 @@ class PrimaryNavigationContractTest {
         assertTrue(bottomBar.contains("preferredPadding = Metrics.space24.value"))
         assertTrue(bottomBar.contains("MeniscusNavigationRail("))
         assertTrue(bottomBar.contains("MeniscusNavigationBead("))
+        assertTrue(bottomBar.contains("private fun CompactBottomBar("))
+        assertTrue(bottomBar.contains("private fun FloatingCompactBottomBar("))
+        assertTrue(bottomBar.contains(".testTag(\"noop.tab.compact\")"))
+        assertTrue(bottomBar.contains("contentDescription = \"Show navigation\""))
+        assertTrue(text.contains("CompactNavigationControlWidth = 136.dp"))
+        assertTrue(text.contains("CompactNavigationDockPrefs.write("))
+        assertTrue(bottomBar.contains("animateDpAsState("))
+        assertTrue(bottomBar.contains("detectHorizontalDragGestures("))
+        assertTrue(bottomBar.contains("Move navigation to left corner"))
+        assertTrue(bottomBar.contains("Move navigation to right corner"))
+        assertTrue(bottomBar.contains(".height(Metrics.navigationBarReservedHeight)"))
+        assertTrue(text.contains("bottomBarVisuallyCompact = bottomBarCompact && density.fontScale < 1.6f"))
+        assertTrue(text.contains("if (bottomBarVisuallyCompact)"))
+        assertTrue(text.contains("Spacer("))
+        assertTrue(text.contains("modifier = Modifier.align(Alignment.BottomCenter)"))
         assertTrue(bottomBar.contains("val compactBeadDiameter = 34.dp"))
         assertTrue(bottomBar.contains("val beadCanvasSize = 42.dp"))
         assertTrue(bottomBar.contains("selectedCenter = animatedLensCenter"))
@@ -221,6 +236,12 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains("Canvas(modifier = modifier)"))
         assertFalse(bottomBar.contains("MovableNoopCommandLens("))
         assertTrue(text.contains("MovableNoopCommandLens("))
+        assertTrue(text.contains("NestedScrollConnection"))
+        assertTrue(text.contains(".nestedScroll(bottomBarScrollConnection)"))
+        assertTrue(text.contains("with(density) { 72.dp.toPx() }"))
+        assertTrue(text.contains("with(density) { 52.dp.toPx() }"))
+        assertTrue(text.contains("bottomBarDirectionalTravel <= -compactThresholdPx"))
+        assertTrue(text.contains("bottomBarDirectionalTravel >= expandThresholdPx"))
     }
 
     @Test
@@ -355,6 +376,42 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains(
             "composable(Destination.Workouts.route) { WorkoutsScreen(viewModel) }"
         ))
+    }
+
+    @Test
+    fun compactNavigationSnapsOnlyAfterAnInwardCornerDrag() {
+        assertEquals(
+            CompactNavigationDockEdge.END,
+            compactNavigationDockDestination(
+                current = CompactNavigationDockEdge.START,
+                horizontalDragPx = 48f,
+                thresholdPx = 44f,
+            ),
+        )
+        assertEquals(
+            CompactNavigationDockEdge.START,
+            compactNavigationDockDestination(
+                current = CompactNavigationDockEdge.END,
+                horizontalDragPx = -48f,
+                thresholdPx = 44f,
+            ),
+        )
+        assertEquals(
+            CompactNavigationDockEdge.START,
+            compactNavigationDockDestination(
+                current = CompactNavigationDockEdge.START,
+                horizontalDragPx = 20f,
+                thresholdPx = 44f,
+            ),
+        )
+        assertEquals(
+            CompactNavigationDockEdge.END,
+            compactNavigationDockDestination(
+                current = CompactNavigationDockEdge.END,
+                horizontalDragPx = 20f,
+                thresholdPx = 44f,
+            ),
+        )
     }
 
     @Test

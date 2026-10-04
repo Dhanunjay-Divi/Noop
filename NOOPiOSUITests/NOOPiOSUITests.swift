@@ -151,10 +151,15 @@ final class NOOPiOSUITests: XCTestCase {
         chooseDevice.tap()
 
         XCTAssertTrue(
-            app.buttons["noop.device-wizard.type.whoop-5-mg"]
+            app.staticTexts["Choose your device"]
                 .waitForExistence(timeout: 10)
         )
-        XCTAssertTrue(app.buttons["noop.device-wizard.type.whoop-4"].exists)
+        XCTAssertTrue(app.staticTexts["Searching…"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["Rescan"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.back"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.whoop-5-mg"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.whoop-4"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.supplier-band"].exists)
         XCTAssertFalse(app.buttons["noop.device-wizard.type.heart-rate-strap"].exists)
         XCTAssertFalse(app.buttons["noop.device-wizard.type.gym-equipment"].exists)
         XCTAssertFalse(app.buttons["noop.device-wizard.type.oura"].exists)
@@ -492,6 +497,16 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Strength"].exists)
         XCTAssertTrue(app.buttons["Meal"].exists)
         XCTAssertTrue(app.buttons["Live HR"].exists)
+
+        let hydration = app.buttons["Hydration"]
+        XCTAssertTrue(hydration.exists)
+        hydration.tap()
+
+        let close = app.buttons["noop.quick-action.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Done"].exists)
+        close.tap()
+        XCTAssertTrue(quickActions.waitForExistence(timeout: 10))
     }
 
     func testAppReportRequiresConsentAndBuildsPrivateAttachmentReview() {
@@ -1126,7 +1141,7 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "terms-readable-primary-action")
     }
 
-    func testOnboardingDeviceSetupShowsLaunchBandsAndDisablesUnavailableAccountLinkedBand() {
+    func testOnboardingDeviceSetupStartsUnifiedBandScanWithoutUnavailablePlaceholder() {
         let app = launchDemoScreen(
             "onboarding",
             extraArguments: ["--demo-onboarding-page", "scan"]
@@ -1139,21 +1154,23 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Compatible band 4.0"].exists)
         chooseDevice.tap()
 
-        let whoop5 = app.buttons["noop.device-wizard.type.whoop-5-mg"]
-        let whoop4 = app.buttons["noop.device-wizard.type.whoop-4"]
-        let accountLinked =
-            app.buttons["noop.device-wizard.type.supplier-band"]
-        XCTAssertTrue(whoop5.waitForExistence(timeout: 10))
-        XCTAssertTrue(whoop4.waitForExistence(timeout: 5))
-        XCTAssertTrue(accountLinked.waitForExistence(timeout: 5))
-        XCTAssertTrue(whoop5.isEnabled)
-        XCTAssertTrue(whoop4.isEnabled)
-        XCTAssertFalse(accountLinked.isEnabled)
+        XCTAssertTrue(
+            app.staticTexts["Choose your device"].waitForExistence(timeout: 10)
+        )
+        XCTAssertTrue(app.staticTexts["Searching…"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["Rescan"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.back"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.whoop-5-mg"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.whoop-4"].exists)
+        XCTAssertFalse(app.buttons["noop.device-wizard.type.supplier-band"].exists)
+        XCTAssertFalse(
+            app.buttons["noop.device-wizard.open-account-linked-band"].exists
+        )
         XCTAssertFalse(app.buttons["noop.device-wizard.type.heart-rate-strap"].exists)
         XCTAssertFalse(app.buttons["noop.device-wizard.type.gym-equipment"].exists)
         XCTAssertFalse(app.buttons["noop.device-wizard.type.oura"].exists)
         XCTAssertFalse(app.staticTexts["Experimental"].exists)
-        keepScreenshot(app, name: "onboarding-supported-band-picker")
+        keepScreenshot(app, name: "onboarding-compatible-band-scanning")
     }
 
     func testOnboardingDeviceSetupClearsFooterAtAccessibilitySize() {
@@ -1381,50 +1398,33 @@ final class NOOPiOSUITests: XCTestCase {
             "charge,effort,rest,hrv,restingHr,bloodOxygen,respiratory,steps",
             "--demo-seed",
             "--demo-tab", "today",
-            "--demo-key-metrics",
+            "--demo-key-metrics-history",
         ]
         app.launch()
 
-        let pinnedMetricIDs = [
-            "charge", "effort", "rest", "hrv",
-            "restingHr", "bloodOxygen", "respiratory", "steps",
-        ]
-        let unpinnedMetricIDs = [
-            "averageHr", "maxHr", "weight", "calories", "vo2Max",
-            "stress", "vitality", "skinTemp", "asleepTime", "menstrualCycle",
-        ]
-        let scroll = app.scrollViews["noop.today.scroll"]
-        XCTAssertTrue(scroll.waitForExistence(timeout: 20))
-
-        for id in pinnedMetricIDs {
-            let metric = app.descendants(matching: .any)["noop.today.key-metric.\(id)"]
-            for _ in 0..<12 where !metric.exists {
-                scroll.swipeUp()
-            }
-            XCTAssertTrue(
-                metric.exists,
-                "Pinned Today metric \(id) must remain visible."
-            )
-        }
-        for id in unpinnedMetricIDs {
-            XCTAssertFalse(
-                app.descendants(matching: .any)["noop.today.key-metric.\(id)"].exists,
-                "Unpinned metric \(id) must stay out of the focused Today grid."
-            )
-        }
-        let history = app.buttons["noop.today.key-metrics.open-history"]
-        for _ in 0..<12 where !history.isHittable {
-            scroll.swipeUp()
-        }
-        XCTAssertTrue(history.isHittable, "The full metric history action must remain reachable.")
-        keepScreenshot(app, name: "today-pinned-key-metrics")
-
-        history.tap()
+        let metrics = app.otherElements["noop.today.key-metrics.section"]
         XCTAssertTrue(
-            app.staticTexts["Explore"].waitForExistence(timeout: 10),
+            metrics.waitForExistence(timeout: 20),
+            "The selected Key Metrics section must render."
+        )
+        XCTAssertEqual(
+            metrics.value as? String,
+            "8 selected metrics",
+            "Today must expose every configured metric, not a six-card subset."
+        )
+        let history = app.buttons["noop.today.key-metrics.open-history"]
+        XCTAssertTrue(
+            history.waitForExistence(timeout: 10),
+            "The full metric history action must remain reachable."
+        )
+
+        history.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).tap()
+        XCTAssertTrue(
+            app.scrollViews["noop.metric-explorer.scroll"].waitForExistence(timeout: 10),
             "The Today history action must open the complete metric explorer."
         )
-        keepScreenshot(app, name: "today-full-metric-history")
     }
 
     func testHydrationAndSleepScreensExposeReminderControls() {

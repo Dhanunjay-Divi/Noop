@@ -67,10 +67,9 @@ struct AddDeviceWizard: View {
     let onClose: () -> Void
     let onAddedSource: (SourceKind) -> Void
     let selectionScope: SelectionScope
-    /// Captured explicitly instead of resolving the environment during scanner construction. The wizard
-    /// keeps no discovery source alive until a user-initiated Scan action calls one of the `ensure*Scanner`
-    /// helpers below; merely presenting this sheet must not create a `CBCentralManager` or prompt for
-    /// Bluetooth access.
+    /// Captured explicitly instead of resolving the environment during scanner construction. Optional
+    /// catalog sources stay deferred until their explicit Scan action. Launch-band and ownership-claim
+    /// entry points intentionally begin the existing combined compatible-band scan on presentation.
     private let scannerLive: LiveState
     private let wizardLog: (String) -> Void
 
@@ -278,6 +277,7 @@ struct AddDeviceWizard: View {
     @State private var veepooHandoff = VeepooPairingTransportHandoff()
     @State private var veepooFailure: VeepooPairingFailurePresentation?
     @State private var registrationFailed = false
+    @State private var didStartAutomaticBandScan = false
 
     /// - Parameter startAt: Optional route into a specific (type, step). Devices uses it to send a removed
     ///   supplier row back through mandatory pairing after its credential is cleared. DEBUG seeded builds
@@ -298,6 +298,11 @@ struct AddDeviceWizard: View {
            ) {
             _type = State(initialValue: startAt.type)
             _step = State(initialValue: startAt.step)
+        } else if selectionScope != .allDevices {
+            // Customer setup is generation-agnostic. Enter the existing combined scan directly; the
+            // discovered advertisement still records the actual transport family before registration.
+            _type = State(initialValue: .whoop4)
+            _step = State(initialValue: .pick)
         }
         // Route each throwaway scanner's diagnostics into the SAME exported strap log the active source
         // path uses (issue #421 parity), so a tester's wizard scan, including the Oura discovery scan and
@@ -338,6 +343,9 @@ struct AddDeviceWizard: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StrandPalette.surfaceBase)
+        .onAppear {
+            beginAutomaticBandScanIfNeeded()
+        }
         // Stop whichever scan is live whenever the sheet goes away (belt-and-braces alongside the
         // per-transition stops below) so neither central keeps scanning after dismiss.
         .onDisappear {
@@ -394,6 +402,7 @@ struct AddDeviceWizard: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Back")
+                .accessibilityIdentifier("noop.device-wizard.back")
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(headerTitle).font(StrandFont.title2)
@@ -419,6 +428,9 @@ struct AddDeviceWizard: View {
     /// Adopting progress (no back while a key install is in flight). Parity with the Android `showBack`.
     private var showBack: Bool {
         if type == .oura { return ouraStep != .adopting }
+        if selectionScope != .allDevices, step == .pick, type?.isWhoop == true {
+            return false
+        }
         return step != .type
     }
 
@@ -478,17 +490,18 @@ struct AddDeviceWizard: View {
             BandPairingDiscoveryView(state: .ready)
 
             VStack(spacing: 0) {
-                typeRow(
-                    .veepoo,
-                    icon: "waveform.path.ecg.rectangle",
-                    title: String(
-                        localized:
-                            "appwide.onboarding.device_wizard.account_linked_title"
-                    ),
-                    subtitle: accountLinkedBandSubtitle,
-                    enabled: Self.supplierPairingAvailableForCurrentBuild
-                )
-                typeDivider
+                if Self.supplierPairingAvailableForCurrentBuild {
+                    typeRow(
+                        .veepoo,
+                        icon: "waveform.path.ecg.rectangle",
+                        title: String(
+                            localized:
+                                "appwide.onboarding.device_wizard.account_linked_title"
+                        ),
+                        subtitle: accountLinkedBandSubtitle
+                    )
+                    typeDivider
+                }
                 typeRow(
                     .whoop5mg,
                     icon: "applewatch.side.right",
@@ -1331,24 +1344,49 @@ struct AddDeviceWizard: View {
     // MARK: Step 3 — pick from the live scan
 
     @ViewBuilder private var pickStep: some View {
-        if let type {
-            if type.isWhoop {
-                // Observe BLEManager directly so the list updates as `discoveredWhoops` grows. The
-                // subview holds the @ObservedObject; the wizard owns selection + scan lifecycle.
-                WhoopPickList(ble: model.ble) { strap in
-                    pickedWhoop = strap
-                    pickedStrap = nil
-                    pickedMachine = nil
-                    pickedHuami = nil
-                    nameDraft = Self.compatibleBandIdentity(
-                        for: strap.model
-                    ).displayName
-                    model.stopWhoopScan()
-                    step = .confirm
-                } onRescan: {
-                    model.presentWhoopScan(model: WhoopModel.persisted)
+        if let selectedType = type {
+            if selectedType.isWhoop {
+                VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                    // Observe BLEManager directly so the list updates as `discoveredWhoops` grows. The
+                    // subview holds the @ObservedObject; the wizard owns selection + scan lifecycle.
+                    WhoopPickList(ble: model.ble) { strap in
+                        self.type = strap.model == .whoop5mg ? .whoop5mg : .whoop4
+                        pickedWhoop = strap
+                        pickedStrap = nil
+                        pickedMachine = nil
+                        pickedHuami = nil
+                        nameDraft = Self.compatibleBandIdentity(
+                            for: strap.model
+                        ).displayName
+                        model.stopWhoopScan()
+                        step = .confirm
+                    } onRescan: {
+                        model.presentWhoopScan(model: WhoopModel.persisted)
+                    }
+
+                    if selectionScope != .allDevices,
+                       Self.supplierPairingAvailableForCurrentBuild {
+                        Button {
+                            model.stopWhoopScan()
+                            self.type = .veepoo
+                            step = .prep
+                        } label: {
+                            Label(
+                                "Pair another supported band",
+                                systemImage: "waveform.path.ecg.rectangle"
+                            )
+                                .font(StrandFont.subhead)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, NoopMetrics.space2)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(StrandPalette.accent)
+                        .accessibilityIdentifier(
+                            "noop.device-wizard.open-account-linked-band"
+                        )
+                    }
                 }
-            } else if type == .gymEquipment, let ftmsScanner {
+            } else if selectedType == .gymEquipment, let ftmsScanner {
                 FTMSPickList(scanner: ftmsScanner) { machine in
                     pickedMachine = machine
                     clearOtherPicks(except: .gymEquipment)
@@ -1358,18 +1396,19 @@ struct AddDeviceWizard: View {
                 } onRescan: {
                     startScan(for: .gymEquipment)
                 }
-            } else if (type == .amazfit || type == .miBand), let huamiScanner {
+            } else if (selectedType == .amazfit || selectedType == .miBand),
+                      let huamiScanner {
                 // EXPERIMENTAL Huami pick list (Amazfit / Zepp / Mi Band).
                 HuamiPickList(scanner: huamiScanner) { dev in
                     pickedHuami = dev
-                    clearOtherPicks(except: type)
+                    clearOtherPicks(except: selectedType)
                     nameDraft = CustomerFacingBrand.text(dev.name)
                     huamiScanner.stopScan()
                     step = .confirm
                 } onRescan: {
-                    startScan(for: type)
+                    startScan(for: selectedType)
                 }
-            } else if type == .veepoo {
+            } else if selectedType == .veepoo {
                 if let veepooFailure {
                     VeepooPairingFailureFace(
                         registrationFailed: veepooFailure == .registration,
@@ -1384,23 +1423,23 @@ struct AddDeviceWizard: View {
                         onFailure: handleVeepooFailure
                     )
                 } else {
-                    scanNotStarted(for: type)
+                    scanNotStarted(for: selectedType)
                 }
             } else if let hrScanner {
                 // Heart-rate strap AND Garmin (Broadcast HR is the standard 0x180D path).
                 HRPickList(scanner: hrScanner) { strap in
                     pickedStrap = strap
-                    clearOtherPicks(except: type)
+                    clearOtherPicks(except: selectedType)
                     nameDraft = CustomerFacingBrand.text(strap.name)
                     hrScanner.stopScan()
                     step = .confirm
                 } onRescan: {
-                    startScan(for: type)
+                    startScan(for: selectedType)
                 }
             } else {
                 // Defensive fallback for DEBUG deep-links or restored UI state that enters `.pick`
                 // without the preceding button action. Construction still waits for this explicit tap.
-                scanNotStarted(for: type)
+                scanNotStarted(for: selectedType)
             }
         }
     }
@@ -1614,11 +1653,22 @@ struct AddDeviceWizard: View {
         }
     }
 
+    private func beginAutomaticBandScanIfNeeded() {
+        guard selectionScope != .allDevices,
+              step == .pick,
+              type?.isWhoop == true,
+              !didStartAutomaticBandScan else {
+            return
+        }
+        didStartAutomaticBandScan = true
+        model.presentWhoopScan(model: WhoopModel.persisted)
+    }
+
     /// These are the only construction points for the wizard's four discovery-only sources. Since each
     /// source creates its private `CBCentralManager` in `init`, keeping the constructors behind
-    /// `startScan(for:)` is the consent boundary: opening Add Device is inert; an explicit Scan creates only
-    /// the manager needed for the selected device family. Active/persisted sources remain owned by
-    /// `SourceCoordinator` and are intentionally unaffected.
+    /// `startScan(for:)` is the consent boundary for the full Add Device catalog. Customer launch-band
+    /// setup uses BLEManager's already-owned, generation-agnostic scanner and starts it on presentation.
+    /// Active/persisted sources remain owned by `SourceCoordinator` and are intentionally unaffected.
     private func ensureHRScanner() -> StandardHRSource {
         if let hrScanner { return hrScanner }
         let scanner = StandardHRSource(

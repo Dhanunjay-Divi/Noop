@@ -319,8 +319,10 @@ struct MetricExplorerView: View {
         // `staggeredAppear` here and identical column alignment/spacing (20) + per-child bottom padding,
         // so the layout is byte-identical to the eager VStack.
         ScreenScaffold(title: "Explore", subtitle: "Every signal, one tap deep.",
-                       onRefresh: { await repo.refresh() }, lazy: true,
-                       topBackground: liquidScaffoldSky()) {
+                       onRefresh: { await repo.refresh() },
+                       lazy: true,
+                       topBackground: liquidScaffoldSky(),
+                       scrollAccessibilityIdentifier: "noop.metric-explorer.scroll") {
             // The headline tap-through (#575): a full-day, full-resolution, zoomable timeline. Sits above
             // the per-metric catalog because it's a different kind of view — every second of one day rather
             // than one number per day. Closure-based NavigationLink, matching the metric rows below (#38/#199).

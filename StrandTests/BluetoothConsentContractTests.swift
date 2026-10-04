@@ -46,14 +46,15 @@ final class BluetoothConsentContractTests: XCTestCase {
         XCTAssertTrue(source.contains("func connect(_ id: UUID) {\n        guard allowsBluetoothRuntime else {"))
     }
 
-    func testAddDeviceWizardConstructsOnlyTheSelectedScannerAfterScan() throws {
+    func testAddDeviceWizardDefersOptionalCatalogScanners() throws {
         let source = try text("Strand/Screens/AddDeviceWizard.swift")
         let initializer = try slice(source, from: "init(live: LiveState", to: "var body: some View")
         let startScan = try slice(source, from: "private func startScan(for type: DeviceType)",
                                   to: "/// These are the only construction points")
 
-        // Presenting Add Device may render type/prep guidance but must not instantiate any discovery source:
+        // Presenting the full Add Device catalog must not instantiate any optional discovery source:
         // each source constructs a CBCentralManager in its initializer, which can trigger iOS permission UI.
+        // Launch-band setup intentionally uses BLEManager's combined scanner on presentation.
         for constructor in ["StandardHRSource(", "FTMSSource(", "HuamiHRSource(", "OuraLiveSource("] {
             XCTAssertFalse(initializer.contains(constructor),
                            "Opening Add Device must not construct \(constructor) before a Scan gesture.")
@@ -140,7 +141,14 @@ final class BluetoothConsentContractTests: XCTestCase {
         )
         XCTAssertTrue(
             addDevice.contains(
-                "enabled: Self.supplierPairingAvailableForCurrentBuild"
+                "if Self.supplierPairingAvailableForCurrentBuild"
+            )
+        )
+        XCTAssertTrue(addDevice.contains("else if selectionScope != .allDevices"))
+        XCTAssertTrue(addDevice.contains("beginAutomaticBandScanIfNeeded()"))
+        XCTAssertTrue(
+            addDevice.contains(
+                "model.presentWhoopScan(model: WhoopModel.persisted)"
             )
         )
         XCTAssertTrue(addDevice.contains("return \"whoop-5-mg\""))
@@ -232,7 +240,7 @@ final class BluetoothConsentContractTests: XCTestCase {
 
         XCTAssertTrue(
             source.contains(
-                "enabled: Self.supplierPairingAvailableForCurrentBuild"
+                "if Self.supplierPairingAvailableForCurrentBuild"
             )
         )
         XCTAssertTrue(source.contains("appwide.devices.supplier_display_model"))

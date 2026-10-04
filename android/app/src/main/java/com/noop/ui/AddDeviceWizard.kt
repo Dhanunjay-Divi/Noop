@@ -221,22 +221,26 @@ fun AddDeviceWizard(
     val scope = rememberCoroutineScope()
     val supplierAvailable = allowSupplierBand && viewModel.supplierBandAvailable
     val resolvedStart = resolvedAddDeviceStart(start, supplierAvailable)
+    val automaticallyScansLaunchBands =
+        selectionScope == AddDeviceSelectionScope.ClaimEligibleBands &&
+            resolvedStart == AddDeviceStart.DevicePicker
 
-    var step by remember(resolvedStart) {
+    var step by remember(resolvedStart, automaticallyScansLaunchBands) {
         mutableStateOf(
-            if (resolvedStart == AddDeviceStart.SupplierBandPairing) {
-                WizardStep.Prep
-            } else {
-                WizardStep.Type
+            when {
+                resolvedStart == AddDeviceStart.SupplierBandPairing -> WizardStep.Prep
+                automaticallyScansLaunchBands -> WizardStep.Pick
+                else -> WizardStep.Type
             },
         )
     }
-    var type by remember(resolvedStart) {
+    var type by remember(resolvedStart, automaticallyScansLaunchBands) {
         mutableStateOf<DeviceType?>(
-            if (resolvedStart == AddDeviceStart.SupplierBandPairing) {
-                DeviceType.SupplierBand
-            } else {
-                null
+            when {
+                resolvedStart == AddDeviceStart.SupplierBandPairing ->
+                    DeviceType.SupplierBand
+                automaticallyScansLaunchBands -> DeviceType.Whoop4
+                else -> null
             },
         )
     }
@@ -339,6 +343,14 @@ fun AddDeviceWizard(
                     ouraStep = OuraStep.Failed
                 }
             }
+        }
+    }
+
+    // Customer band setup opens directly in the existing generation-agnostic scan. The full Add Device
+    // catalog remains inert until its explicit Scan action, and all optional scanners stay deferred.
+    LaunchedEffect(automaticallyScansLaunchBands) {
+        if (automaticallyScansLaunchBands) {
+            viewModel.presentWhoopScan(WhoopModel.WHOOP4)
         }
     }
 
@@ -591,7 +603,14 @@ fun AddDeviceWizard(
             val hSub = if (isOura) ouraHeaderSubtitle(ouraStep, ouraAdvanced) else headerSubtitle(step)
             // Back is offered on every step except the very first (the type list). The Adopting progress
             // step hides back so the user can't interrupt the key install mid-flight.
-            val showBack = if (isOura) ouraStep != OuraStep.Adopting else step != WizardStep.Type
+            val showBack = if (isOura) {
+                ouraStep != OuraStep.Adopting
+            } else {
+                step != WizardStep.Type &&
+                    !(automaticallyScansLaunchBands &&
+                        step == WizardStep.Pick &&
+                        type?.isWhoop == true)
+            }
             Row(verticalAlignment = Alignment.Top) {
                 if (showBack && !registrationBusy) {
                     IconButton(onClick = { goBack() }, modifier = Modifier.size(28.dp)) {
@@ -706,12 +725,27 @@ fun AddDeviceWizard(
                             t.isWhoop -> WhoopPickStep(
                                 viewModel = viewModel,
                                 onSelect = { strap ->
+                                    type = when (strap.model) {
+                                        WhoopModel.WHOOP5_MG -> DeviceType.Whoop5MG
+                                        WhoopModel.WHOOP4 -> DeviceType.Whoop4
+                                    }
                                     pickedWhoop = strap; pickedStrap = null; pickedMachine = null; pickedHuami = null
                                     nameDraft = strap.model.registrationLabel()
                                     viewModel.stopWhoopScan()
                                     step = WizardStep.Confirm
                                 },
                                 onRescan = { viewModel.presentWhoopScan(t.whoopModel ?: WhoopModel.WHOOP4) },
+                                onOpenSupplierBand = if (
+                                    automaticallyScansLaunchBands && supplierAvailable
+                                ) {
+                                    {
+                                        viewModel.stopWhoopScan()
+                                        type = DeviceType.SupplierBand
+                                        step = WizardStep.Prep
+                                    }
+                                } else {
+                                    null
+                                },
                             )
                             t == DeviceType.GymEquipment -> FtmsPickStep(
                                 scanner = ftmsScanner.get(),
@@ -999,20 +1033,17 @@ private fun TypeStep(
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
         BandPairingDiscoveryStage(searching = false)
         BandPairingOptionGroup {
-            BandPairingOptionRow(
-                Icons.Filled.GraphicEq,
-                DeviceType.SupplierBand.title,
-                uiString(
-                    if (supplierAvailable) {
+            if (supplierAvailable) {
+                BandPairingOptionRow(
+                    Icons.Filled.GraphicEq,
+                    DeviceType.SupplierBand.title,
+                    uiString(
                         R.string.appwide_onboarding_device_wizard_account_linked_subtitle
-                    } else {
-                        R.string.appwide_onboarding_device_wizard_account_linked_unavailable
-                    },
-                ),
-                enabled = supplierAvailable,
-                showDivider = true,
-            ) {
-                onPick(DeviceType.SupplierBand)
+                    ),
+                    showDivider = true,
+                ) {
+                    onPick(DeviceType.SupplierBand)
+                }
             }
             BandPairingOptionRow(
                 Icons.Filled.Watch,
@@ -1486,18 +1517,45 @@ private fun WhoopPickStep(
     viewModel: AppViewModel,
     onSelect: (WhoopBleClient.DiscoveredWhoop) -> Unit,
     onRescan: () -> Unit,
+    onOpenSupplierBand: (() -> Unit)? = null,
 ) {
     val found by viewModel.discoveredWhoops.collectAsStateWithLifecycle()
-    PickList(searching = true, isEmpty = found.isEmpty(), onRescan = onRescan) {
-        found.sortedByDescending { it.rssi }.forEach { strap ->
-            DiscoveredRow(
-                name = strap.model.registrationLabel(),
-                subtitle = uiString(
-                    R.string.appwide_onboarding_device_wizard_compatible_band,
-                ),
-                rssi = strap.rssi,
-                onTap = { onSelect(strap) },
-            )
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        PickList(searching = true, isEmpty = found.isEmpty(), onRescan = onRescan) {
+            found.sortedByDescending { it.rssi }.forEach { strap ->
+                DiscoveredRow(
+                    name = strap.model.registrationLabel(),
+                    subtitle = uiString(
+                        R.string.appwide_onboarding_device_wizard_compatible_band,
+                    ),
+                    rssi = strap.rssi,
+                    onTap = { onSelect(strap) },
+                )
+            }
+        }
+        onOpenSupplierBand?.let { openSupplierBand ->
+            TextButton(
+                onClick = openSupplierBand,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .semantics {
+                        contentDescription = "Pair another supported band"
+                    },
+            ) {
+                Icon(
+                    Icons.Filled.GraphicEq,
+                    contentDescription = null,
+                    tint = Palette.accent,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(Metrics.space8))
+                Text(
+                    "Pair another supported band",
+                    style = NoopType.subhead,
+                    color = Palette.accent,
+                )
+            }
         }
     }
 }

@@ -116,6 +116,18 @@ class TodayCompactHeroContractTest {
         assertFalse(today.contains("private fun DailySignalSourceBadgeLive("))
     }
 
+    @Test
+    fun reorderableFeedNeverReservesInvisibleSectionHeight() {
+        val today = source()
+        val feed = today.substring(
+            today.indexOf("sectionOrder.forEach { section ->"),
+            today.indexOf("// Auto-detect workouts (MVP"),
+        )
+
+        assertFalse(feed.contains(".staggeredAppear("))
+        assertTrue(feed.contains("Reorderable sections render at full opacity."))
+    }
+
     private fun source(): String {
         val root = File(System.getProperty("user.dir") ?: ".")
         return listOf(

@@ -36,6 +36,7 @@ struct LiquidTodayView: View {
     // only publishes connect/discovery state, never HR. Injected at the app roots beside .environmentObject(model).
     @EnvironmentObject var ble: BLEManager
     @Environment(\.openURL) private var openURL
+    @Environment(\.pushTabRoute) private var pushTabRoute
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     #if os(iOS)
@@ -140,7 +141,8 @@ struct LiquidTodayView: View {
         }
         // Screenshot QA can bring the otherwise off-screen metrics grid into the first lazy-stack batch.
         // Reordering the same production sections is more deterministic than synthesizing swipe coordinates.
-        if CommandLine.arguments.contains("--demo-key-metrics") {
+        if CommandLine.arguments.contains("--demo-key-metrics")
+            || CommandLine.arguments.contains("--demo-key-metrics-history") {
             return [.hero, .keyMetrics] + saved.filter { $0 != .hero && $0 != .keyMetrics }
         }
         #endif
@@ -412,12 +414,14 @@ struct LiquidTodayView: View {
     /// Scroll-to-top on an at-root Today re-tap (#198 follow-up); default 0 so macOS/other contexts stay inert.
     @Environment(\.scrollToTopSignal) private var scrollToTopSignal
     @Environment(\.scrollPositionReporter) private var reportScrollPosition
+    @Environment(\.persistentBottomChromeInset) private var persistentBottomChromeInset
     private static let topAnchorID = "liquidToday.top"
     private static let bottomAnchorID = "liquidToday.bottom"
     private static let patternsAnchorID = "liquidToday.patterns"
     private static let dailyPlanDisclosureAnchorID = "liquidToday.dailyPlanDisclosure"
     private static let dailyPlanAnchorID = "liquidToday.dailyPlan"
     private static let keyMetricsAnchorID = "liquidToday.keyMetrics"
+    private static let keyMetricsHistoryAnchorID = "liquidToday.keyMetricsHistory"
     private static var initialTodayDetailsExpanded: Bool {
         #if DEBUG
         CommandLine.arguments.contains("--demo-daily-plan") &&
@@ -479,9 +483,9 @@ struct LiquidTodayView: View {
                 }
                 .padding(.horizontal, todayContentHorizontalPadding)
                 .padding(.top, todaySceneTopPadding)
-                // The shell reserves the bar's layout height. Keep the same small content breathing room
-                // as ScreenScaffold so the bar's upward-cast shadow never washes over the final card.
-                .padding(.bottom, NoopMetrics.space4)
+                // The shell floats over the viewport. Keep its measured footprint in the scroll tail so
+                // the final card can clear the rail without leaving a permanent black footer mid-scroll.
+                .padding(.bottom, NoopMetrics.space4 + persistentBottomChromeInset)
 
                 // Layout-neutral end marker. The iOS tab shell reserves its measured bar height around
                 // this entire root, so scrolling here must expose the true final card above that bar.
@@ -588,6 +592,8 @@ struct LiquidTodayView: View {
                     guard !Task.isCancelled else { return }
                     proxy.scrollTo(framingID, anchor: framingAnchor)
                 }
+            } else if CommandLine.arguments.contains("--demo-key-metrics-history") {
+                proxy.scrollTo(Self.keyMetricsHistoryAnchorID, anchor: .bottom)
             } else if CommandLine.arguments.contains("--demo-key-metrics") {
                 proxy.scrollTo(Self.keyMetricsAnchorID, anchor: .top)
             } else if CommandLine.arguments.contains("--demo-patterns") {
@@ -2946,7 +2952,9 @@ struct LiquidTodayView: View {
             }
             Group {
                 if allowsLocalMutations {
-                    NavigationLink(value: TabRoute.metricExplorer) {
+                    Button {
+                        pushTabRoute(.metricExplorer)
+                    } label: {
                         openMetricHistoryLabel
                     }
                 } else {
@@ -2959,7 +2967,12 @@ struct LiquidTodayView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("noop.today.key-metrics.open-history")
+            .id(Self.keyMetricsHistoryAnchorID)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Key metrics")
+        .accessibilityValue("\(visibleKeyMetrics.count) selected metrics")
+        .accessibilityIdentifier("noop.today.key-metrics.section")
     }
 
     private var openMetricHistoryLabel: some View {

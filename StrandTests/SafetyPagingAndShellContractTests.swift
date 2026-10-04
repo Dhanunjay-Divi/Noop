@@ -1934,6 +1934,8 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             XCTAssertTrue(launcher.contains("tile(\"\(title)\""), title)
         }
         XCTAssertTrue(launcher.contains(#".accessibilityIdentifier("noop.quick-actions.updates")"#))
+        XCTAssertTrue(shell.contains(#".accessibilityIdentifier("noop.quick-action.close")"#))
+        XCTAssertFalse(shell.contains(#"Button("Done")"#))
         XCTAssertTrue(shell.contains("Double-tap to open. Drag to move."))
     }
 
@@ -2094,6 +2096,19 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             "Band classifier output must stay decode-only; escaped into:\n"
                 + violations.sorted().joined(separator: "\n")
         )
+    }
+
+    func testCompactNavigationDocksToAPersistedAccessibleCorner() throws {
+        let shell = try source("StrandiOS/App/RootTabView.swift")
+        XCTAssertTrue(shell.contains("private enum CompactNavigationDockEdge"))
+        XCTAssertTrue(shell.contains(#"@AppStorage("noop.navigation.compactDockEdge")"#))
+        XCTAssertTrue(shell.contains("dockEdge: compactNavigationDockEdge"))
+        XCTAssertTrue(shell.contains("DragGesture(minimumDistance: 8)"))
+        XCTAssertTrue(shell.contains("value.predictedEndTranslation.width"))
+        XCTAssertTrue(shell.contains(#"Text("Move navigation to left corner")"#))
+        XCTAssertTrue(shell.contains(#"Text("Move navigation to right corner")"#))
+        XCTAssertTrue(shell.contains("value: compactNavigationDockRaw"))
+        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize"))
     }
 
     func testEcgSpotRecordingClosesItsStreamAndInvalidatesStaleTimers() throws {

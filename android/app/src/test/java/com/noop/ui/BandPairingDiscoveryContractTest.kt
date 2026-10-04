@@ -7,58 +7,45 @@ import org.junit.Test
 
 class BandPairingDiscoveryContractTest {
     @Test
-    fun claimEligiblePickerShowsThreeNeutralLaunchRowsInRequiredOrder() {
+    fun claimEligiblePickerStartsCombinedScanWithoutModelChoiceRows() {
         val wizard = source("AddDeviceWizard.kt").readText()
-        val typeStep = wizard
-            .substringAfter("private fun TypeStep(")
-            .substringBefore("/** A shared \"this tier is experimental\" note")
+        val picker = wizard
+            .substringAfter("private fun WhoopPickStep(")
+            .substringBefore("@Composable\nprivate fun HrPickStep(")
 
-        val supplier = typeStep.indexOf("onPick(DeviceType.SupplierBand)")
-        val compatible5 = typeStep.indexOf("onPick(DeviceType.Whoop5MG)")
-        val compatible4 = typeStep.indexOf("onPick(DeviceType.Whoop4)")
-
-        assertTrue(supplier >= 0)
-        assertTrue(compatible5 > supplier)
-        assertTrue(compatible4 > compatible5)
-        assertTrue(
-            wizard.contains(
-                "R.string.appwide_onboarding_device_wizard_account_linked_title",
-            ),
-        )
-        assertTrue(
-            typeStep.contains(
-                "R.string.appwide_onboarding_device_wizard_account_linked_subtitle",
-            ),
-        )
-        assertTrue(
-            typeStep.contains(
-                "R.string.appwide_onboarding_device_wizard_compatible_band",
-            ),
-        )
-        assertFalse(typeStep.contains("appwide_devices_supplier_display_model"))
-        assertFalse(typeStep.contains("appwide_onboarding_device_wizard_whoop_subtitle"))
+        assertTrue(wizard.contains(
+            "selectionScope == AddDeviceSelectionScope.ClaimEligibleBands",
+        ))
+        assertTrue(wizard.contains(
+            "automaticallyScansLaunchBands -> WizardStep.Pick",
+        ))
+        assertTrue(wizard.contains(
+            "automaticallyScansLaunchBands -> DeviceType.Whoop4",
+        ))
+        assertTrue(wizard.contains(
+            "viewModel.presentWhoopScan(WhoopModel.WHOOP4)",
+        ))
+        assertTrue(picker.contains("found.sortedByDescending { it.rssi }"))
+        assertTrue(picker.contains("strap.model.registrationLabel()"))
+        assertTrue(picker.contains("onOpenSupplierBand?.let"))
+        assertFalse(picker.contains("BandPairingOptionRow("))
     }
 
     @Test
-    fun unavailableAccountLinkedTransportStaysVisibleAndDisabled() {
+    fun unavailableAccountLinkedTransportIsNotRenderedAsADeadRow() {
         val wizard = source("AddDeviceWizard.kt").readText()
         val discovery = source("BandPairingDiscovery.kt").readText()
         val typeStep = wizard
             .substringAfter("private fun TypeStep(")
             .substringBefore("/** A shared \"this tier is experimental\" note")
-        val supplierRow = typeStep
-            .substringAfter("DeviceType.SupplierBand.title")
-            .substringBefore("onPick(DeviceType.SupplierBand)")
         val optionRow = discovery
             .substringAfter("internal fun BandPairingOptionRow(")
             .substringBefore("internal fun shouldAnimateBandPairingDiscovery(")
 
-        assertTrue(supplierRow.contains("enabled = supplierAvailable"))
-        assertTrue(
-            supplierRow.contains(
-                "R.string.appwide_onboarding_device_wizard_account_linked_unavailable",
-            ),
-        )
+        assertTrue(typeStep.contains("if (supplierAvailable)"))
+        assertFalse(typeStep.contains(
+            "R.string.appwide_onboarding_device_wizard_account_linked_unavailable",
+        ))
         assertTrue(optionRow.contains(".heightIn(min = 64.dp)"))
         assertTrue(
             optionRow.contains(

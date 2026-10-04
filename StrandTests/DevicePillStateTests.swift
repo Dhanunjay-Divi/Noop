@@ -136,7 +136,7 @@ final class DevicePillStateTests: XCTestCase {
                        "A disclosure cannot be nested in the whole-card activation button.")
     }
 
-    func testLaunchBandPickerOmitsUnavailableAndExperimentalRows() throws {
+    func testLaunchBandPickerStartsUnifiedScanAndKeepsCatalogSeparate() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("Strand/Screens/AddDeviceWizard.swift"))
         let typeStep = source
@@ -150,6 +150,11 @@ final class DevicePillStateTests: XCTestCase {
         )
         XCTAssertTrue(source.contains("if selectionScope == .allDevices"))
         XCTAssertTrue(source.contains("type.isWhoop || type == .veepoo"))
+        XCTAssertTrue(source.contains("else if selectionScope != .allDevices"))
+        XCTAssertTrue(source.contains("_step = State(initialValue: .pick)"))
+        XCTAssertTrue(source.contains("beginAutomaticBandScanIfNeeded()"))
+        XCTAssertTrue(source.contains("if selectionScope != .allDevices,"))
+        XCTAssertTrue(source.contains("Pair another supported band"))
     }
 
     func testArchivedSupplierAffordanceUsesAddDeviceInsteadOfMakeActive() {
