@@ -111,6 +111,7 @@ scroll timing without changing data, ordering, or card dimensions.
 | Hosted localization correction | Initial PR run `37230079611` rejected 13 new hardcoded navigation, scan, and close labels. Those labels now use the existing Apple and Android resource systems; the exact CI audit passes, all four Android production/test source sets compile, and the iPhone Simulator build succeeds. Replacement Android run `37231077501` then exposed one missing complete-locale resource and two stale source contracts; the three exact failures and both complete Full/Demo unit suites pass after correction. | New customer and accessibility text is resource-backed on both platforms, with complete-locale and source-contract enforcement | Translation quality beyond the recorded locale gate or physical accessibility services |
 | Hosted release-control stabilization | Run `37231919823` passed source controls, then one release-evidence test hit `Directory not empty: objects` while Python removed a temporary Git fixture. Fixture Git commands now disable automatic garbage collection and maintenance, preventing detached writes during cleanup; the formerly failing test passes 100 consecutive runs. | Temporary release-evidence repositories clean up synchronously on hosted Git versions | Unrelated hosted runner or network failures |
 | Hosted Android unified-scan correction | Run `37232335010` executed 126 production-shell instrumentation tests and failed only two onboarding assertions that still waited for the removed static Band 5.0 / MG and Band 4.0 rows. The assertions now require the localized device-picker title and searching state while rejecting the static rows. Both Android-test source sets compile, focused onboarding and pairing contracts pass, and the exact API 35 cases pass 2/2. | The first-run and post-Terms customer paths enter the implemented unified live scan without reintroducing model-choice cards or an account bypass | Physical BLE discovery, device names, or account activation |
+| Hosted Apple shell-contract correction | Exact-head run `37233895083` on `2d1b35249f8c7e4621877a09a726ca2ea844312a` built both Apple products, then exposed only stale tests: the macOS suite still bounded the active-tab closure by an obsolete one-line frame expression and expected superseded compact-navigation action labels, while the iOS UI suite still required ordinary text to stop above the floating bar. The contracts now bound the closure at `onDockEdgeChange`, require the current `Move to left edge` / `Move to right edge` accessibility actions, verify that ordinary text uses the full viewport, and separately verify that accessibility text reserves space. The complete local Strand suite passes 2,446 tests with one intentional skip and zero failures; both corrected iPhone viewport cases pass 2/2. | Hosted failures were obsolete assertions against the delivered floating-overlay behavior, and the current tests protect both blank-footer removal and large-text safety without changing product source | Replacement hosted execution or physical VoiceOver behavior |
 | Diff hygiene | `git diff --check` passed before the product commit | No whitespace-error regression | Runtime behavior |
 
 The first combined iPhone onboarding run exposed a test-query defect: the
@@ -124,7 +125,7 @@ across 1,651 groups, with the customer category unchanged at 889 and no
 forbidden active use. The active allowlist SHA-256 is
 `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`;
 the legacy inventory SHA-256 is
-`ca5a71a6402c870ae62f347d4da545e5c49906c170095a318642eb249d201631`.
+`ac2ab789f822bac3ea45d2b371bb36872dadf1e997167c5ea67d9c51a1ccfb06`.
 
 ## Data, privacy, and medical truth
 
@@ -172,6 +173,9 @@ the legacy inventory SHA-256 is
   and was intentionally not merged into this candidate.
 - PR `#33` must receive the normal replacement push and every required hosted
   context. No workflow is to be manually dispatched or re-run.
+- Exact head `2d1b35249f8c7e4621877a09a726ca2ea844312a` completed all hosted
+  work and exposed the bounded Apple test-contract drift recorded above. The
+  corrected local replacement must run through the same protected contexts.
 - Merge only the exact green PR head through protected `main`, then verify the
   resulting protected-main SHA before handing off physical validation.
 

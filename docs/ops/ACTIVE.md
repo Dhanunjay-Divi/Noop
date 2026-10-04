@@ -32,7 +32,7 @@ Last updated: **2026-10-04**
   digest
   `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`,
   and inventory digest
-  `ca5a71a6402c870ae62f347d4da545e5c49906c170095a318642eb249d201631`.
+  `ac2ab789f822bac3ea45d2b371bb36872dadf1e997167c5ea67d9c51a1ccfb06`.
   Initial hosted localization run `37230079611` rejected 13 newly authored
   labels. They now use the Apple and Android resource systems; the exact CI
   audit passes, all four Android production/test source sets compile, and the
@@ -50,6 +50,18 @@ Last updated: **2026-10-04**
   device-picker title and searching state while rejecting those static rows;
   both Android-test source sets compile, the focused onboarding and pairing
   contracts pass, and the exact API 35 cases pass 2/2.
+  Exact-head Apple run `37233895083` on
+  `2d1b35249f8c7e4621877a09a726ca2ea844312a` then built both products and
+  exposed only stale shell tests: the macOS contracts still parsed an obsolete
+  one-line frame boundary and expected superseded compact-navigation action
+  labels, while one iOS UI case still required ordinary text to end above the
+  floating bar. The corrected contracts now follow the structured
+  `onReselect` closure, require the current `Move to left edge` and
+  `Move to right edge` accessibility actions, verify a full-height ordinary
+  viewport, and separately preserve the accessibility-text reservation. The
+  complete local Strand suite passes 2,446 tests with one intentional skip and
+  zero failures, and both corrected iPhone viewport cases pass 2/2. Product
+  source is unchanged by this correction.
   Private staging remains unchanged at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;

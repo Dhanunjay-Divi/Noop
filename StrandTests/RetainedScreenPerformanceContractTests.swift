@@ -257,7 +257,7 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         let start = try XCTUnwrap(shell.range(of: "onReselect: { tag in"))
         let end = try XCTUnwrap(
             shell.range(
-                of: "\n                )\n                .frame(maxWidth: 500",
+                of: "\n                    onDockEdgeChange:",
                 range: start.upperBound..<shell.endIndex
             )
         )

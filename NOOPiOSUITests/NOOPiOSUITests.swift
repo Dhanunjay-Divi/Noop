@@ -894,8 +894,32 @@ final class NOOPiOSUITests: XCTestCase {
         }
     }
 
-    func testTodayOrdinaryTextViewportReservesExpandedNavigation() {
+    func testTodayOrdinaryTextViewportExtendsBehindFloatingNavigation() {
         let app = launchApp()
+        let scroll = app.scrollViews["noop.today.scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 20))
+        let tabs = (0...4).map { app.buttons["noop.tab.\($0)"] }
+        for tab in tabs {
+            XCTAssertTrue(tab.waitForExistence(timeout: 5))
+        }
+        let navigationBoundary = tabs.map(\.frame.minY).min() ?? 0
+        XCTAssertGreaterThan(navigationBoundary, 0)
+        XCTAssertGreaterThan(
+            scroll.frame.maxY,
+            navigationBoundary + 2,
+            "Ordinary text should use the full viewport behind floating navigation instead of reserving a blank footer."
+        )
+        XCTAssertLessThanOrEqual(
+            scroll.frame.maxY,
+            app.frame.maxY + 2,
+            "The Today viewport must remain bounded by the application window."
+        )
+    }
+
+    func testTodayAccessibilityTextViewportReservesExpandedNavigation() {
+        let app = launchApp(
+            preferredContentSize: PreferredContentSize.accessibilityLarge
+        )
         let scroll = app.scrollViews["noop.today.scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 20))
         let tabs = (0...4).map { app.buttons["noop.tab.\($0)"] }
@@ -907,7 +931,7 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertLessThanOrEqual(
             scroll.frame.maxY,
             navigationBoundary + 2,
-            "Ordinary text must end above the expanded navigation controls."
+            "Accessibility text must reserve a stable viewport above persistent navigation."
         )
     }
 

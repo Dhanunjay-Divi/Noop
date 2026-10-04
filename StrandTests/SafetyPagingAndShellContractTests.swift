@@ -2098,15 +2098,15 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         )
     }
 
-    func testCompactNavigationDocksToAPersistedAccessibleCorner() throws {
+    func testCompactNavigationDocksToAPersistedAccessibleEdge() throws {
         let shell = try source("StrandiOS/App/RootTabView.swift")
         XCTAssertTrue(shell.contains("private enum CompactNavigationDockEdge"))
         XCTAssertTrue(shell.contains(#"@AppStorage("noop.navigation.compactDockEdge")"#))
         XCTAssertTrue(shell.contains("dockEdge: compactNavigationDockEdge"))
         XCTAssertTrue(shell.contains("DragGesture(minimumDistance: 8)"))
         XCTAssertTrue(shell.contains("value.predictedEndTranslation.width"))
-        XCTAssertTrue(shell.contains(#"Text("Move navigation to left corner")"#))
-        XCTAssertTrue(shell.contains(#"Text("Move navigation to right corner")"#))
+        XCTAssertTrue(shell.contains(#"Text("Move to left edge")"#))
+        XCTAssertTrue(shell.contains(#"Text("Move to right edge")"#))
         XCTAssertTrue(shell.contains("value: compactNavigationDockRaw"))
         XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize"))
     }
