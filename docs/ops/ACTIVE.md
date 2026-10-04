@@ -32,7 +32,7 @@ Last updated: **2026-10-04**
   digest
   `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`,
   and inventory digest
-  `92869b7084833311f804aa758b3b93f7f959b97168f4c455e68a710b83582410`.
+  `ca5a71a6402c870ae62f347d4da545e5c49906c170095a318642eb249d201631`.
   Initial hosted localization run `37230079611` rejected 13 newly authored
   labels. They now use the Apple and Android resource systems; the exact CI
   audit passes, all four Android production/test source sets compile, and the
@@ -43,6 +43,13 @@ Last updated: **2026-10-04**
   temporary Git-fixture cleanup race after its source controls passed. Fixture
   Git commands now disable automatic garbage collection and maintenance; the
   formerly failing release-evidence test passes 100 consecutive runs.
+  Final hosted Android run `37232335010` then executed 126 production-shell
+  instrumentation tests and exposed two stale onboarding assertions that still
+  waited for the removed static Band 5.0 / MG and Band 4.0 rows. The product
+  correctly opened the unified live scan. The tests now require the localized
+  device-picker title and searching state while rejecting those static rows;
+  both Android-test source sets compile, the focused onboarding and pairing
+  contracts pass, and the exact API 35 cases pass 2/2.
   Private staging remains unchanged at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;

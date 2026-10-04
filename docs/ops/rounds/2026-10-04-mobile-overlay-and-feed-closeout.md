@@ -110,6 +110,7 @@ scroll timing without changing data, ordering, or card dimensions.
 | Protected release-control subset | 258/258 unit tests passed; source controls 9/9; required CI 10/10; trusted controls, calibration, terminology, legal, privacy, claims, shell, operations, and diff checks passed | Exact local candidate satisfies the repository's protected source-policy wall | Hosted runner execution or protected merge |
 | Hosted localization correction | Initial PR run `37230079611` rejected 13 new hardcoded navigation, scan, and close labels. Those labels now use the existing Apple and Android resource systems; the exact CI audit passes, all four Android production/test source sets compile, and the iPhone Simulator build succeeds. Replacement Android run `37231077501` then exposed one missing complete-locale resource and two stale source contracts; the three exact failures and both complete Full/Demo unit suites pass after correction. | New customer and accessibility text is resource-backed on both platforms, with complete-locale and source-contract enforcement | Translation quality beyond the recorded locale gate or physical accessibility services |
 | Hosted release-control stabilization | Run `37231919823` passed source controls, then one release-evidence test hit `Directory not empty: objects` while Python removed a temporary Git fixture. Fixture Git commands now disable automatic garbage collection and maintenance, preventing detached writes during cleanup; the formerly failing test passes 100 consecutive runs. | Temporary release-evidence repositories clean up synchronously on hosted Git versions | Unrelated hosted runner or network failures |
+| Hosted Android unified-scan correction | Run `37232335010` executed 126 production-shell instrumentation tests and failed only two onboarding assertions that still waited for the removed static Band 5.0 / MG and Band 4.0 rows. The assertions now require the localized device-picker title and searching state while rejecting the static rows. Both Android-test source sets compile, focused onboarding and pairing contracts pass, and the exact API 35 cases pass 2/2. | The first-run and post-Terms customer paths enter the implemented unified live scan without reintroducing model-choice cards or an account bypass | Physical BLE discovery, device names, or account activation |
 | Diff hygiene | `git diff --check` passed before the product commit | No whitespace-error regression | Runtime behavior |
 
 The first combined iPhone onboarding run exposed a test-query defect: the
@@ -123,7 +124,7 @@ across 1,651 groups, with the customer category unchanged at 889 and no
 forbidden active use. The active allowlist SHA-256 is
 `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`;
 the legacy inventory SHA-256 is
-`92869b7084833311f804aa758b3b93f7f959b97168f4c455e68a710b83582410`.
+`ca5a71a6402c870ae62f347d4da545e5c49906c170095a318642eb249d201631`.
 
 ## Data, privacy, and medical truth
 
