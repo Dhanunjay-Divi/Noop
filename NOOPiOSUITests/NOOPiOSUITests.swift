@@ -1058,16 +1058,14 @@ final class NOOPiOSUITests: XCTestCase {
 
         let sync = app.descendants(matching: .any)["noop.today.pull-sync"]
         XCTAssertTrue(sync.waitForExistence(timeout: 3))
-        XCTAssertTrue(
-            sync.label.localizedCaseInsensitiveContains("refresh")
-                || sync.label.localizedCaseInsensitiveContains("sync"),
-            "Unexpected pull feedback: \(sync.label)"
-        )
         let feedbackLabel = sync.label.lowercased()
-        let feedbackValue = String(describing: sync.value).lowercased()
+        XCTAssertTrue(
+            feedbackLabel.contains("refresh")
+                || feedbackLabel.contains("sync"),
+            "Unexpected pull feedback: \(feedbackLabel)"
+        )
         let isActiveFeedback =
-            feedbackValue.contains("progress")
-                || feedbackLabel.contains("refreshing")
+            feedbackLabel.contains("refreshing")
                 || feedbackLabel.contains("syncing")
         let isTerminalFeedback =
             feedbackLabel.contains("synced")
@@ -1075,7 +1073,7 @@ final class NOOPiOSUITests: XCTestCase {
                 || feedbackLabel.contains("did not finish")
         XCTAssertTrue(
             isActiveFeedback || isTerminalFeedback,
-            "Pull gesture did not reach an active or terminal sync state: \(sync.label), \(feedbackValue)"
+            "Pull gesture did not reach an active or terminal sync state: \(feedbackLabel)"
         )
         keepScreenshot(app, name: "today-pull-sync-circular-feedback")
     }

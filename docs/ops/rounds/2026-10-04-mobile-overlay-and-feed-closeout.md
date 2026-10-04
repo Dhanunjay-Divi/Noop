@@ -2,14 +2,14 @@
 
 ## Status
 
-- State: `exact local candidate verified; protected PR integration pending`
+- State: `hosted iOS timing correction locally verified; replacement checks pending`
 - Owner: project team
 - Branch: `codex/mobile-cloud-release-finalization-20261003`
 - Protected base: `1cd401f69dd8b4df75872a830ed33a84918ea344`
 - Product implementation commit:
   `fc2343ff5f96304ccca95fc802d3b6252b467d5b`
 - Current remote PR head:
-  `e7c35610c3930916c95ceda6a08e96fe369474fe`
+  `db9ccda25e8ea55f01273972f998172beac34c0b`
 - Pull request: `#33`
 
 ## Objective
@@ -126,6 +126,7 @@ scroll timing without changing data, ordering, or card dimensions.
 | Hosted release-control stabilization | Run `37231919823` passed source controls, then one release-evidence test hit `Directory not empty: objects` while Python removed a temporary Git fixture. Fixture Git commands now disable automatic garbage collection and maintenance, preventing detached writes during cleanup; the formerly failing test passes 100 consecutive runs. | Temporary release-evidence repositories clean up synchronously on hosted Git versions | Unrelated hosted runner or network failures |
 | Hosted Android unified-scan correction | Run `37232335010` executed 126 production-shell instrumentation tests and failed only two onboarding assertions that still waited for the removed static Band 5.0 / MG and Band 4.0 rows. The assertions now require the localized device-picker title and searching state while rejecting the static rows. Both Android-test source sets compile, focused onboarding and pairing contracts pass, and the exact API 35 cases pass 2/2. | The first-run and post-Terms customer paths enter the implemented unified live scan without reintroducing model-choice cards or an account bypass | Physical BLE discovery, device names, or account activation |
 | Hosted Apple shell-contract correction | Exact-head run `37233895083` on `2d1b35249f8c7e4621877a09a726ca2ea844312a` built both Apple products, then exposed only stale tests: the macOS suite still bounded the active-tab closure by an obsolete one-line frame expression and expected superseded compact-navigation action labels, while the iOS UI suite still required ordinary text to stop above the floating bar. The contracts now bound the closure at `onDockEdgeChange`, require the current `Move to left edge` / `Move to right edge` accessibility actions, verify that ordinary text uses the full viewport, and separately verify that accessibility text reserves space. The complete local Strand suite passes 2,446 tests with one intentional skip and zero failures; both corrected iPhone viewport cases pass 2/2. | Hosted failures were obsolete assertions against the delivered floating-overlay behavior, and the current tests protect both blank-footer removal and large-text safety without changing product source | Replacement hosted execution or physical VoiceOver behavior |
+| Hosted iOS transient-feedback correction | Exact-head run `37240966560` on `db9ccda25e8ea55f01273972f998172beac34c0b` passed the macOS build/tests and 43 of 44 executed iOS UI cases with one intentional skip. The pull-to-sync case successfully revealed `noop.today.pull-sync`, then queried that two-second accessibility element repeatedly until it disappeared before the final value read. The test now captures the visible status label once and evaluates that immutable snapshot; production timing and animation are unchanged. The exact case passes 3/3 locally. Xcode printed the complete passing test summary, then hung while finalizing its local result bundle and was terminated after the tests completed. | The only hosted iOS failure was a transient-element test race, and the corrected assertion survives repeated execution without weakening product behavior | Replacement hosted execution or physical pull interaction |
 | Diff hygiene | `git diff --check` passed before the product commit | No whitespace-error regression | Runtime behavior |
 
 The first combined iPhone onboarding run exposed a test-query defect: the
@@ -140,7 +141,7 @@ forbidden active use or customer-visible localization value. The active
 allowlist SHA-256 is
 `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`;
 the legacy inventory SHA-256 is
-`e9cbd08fe7cf6870ce987b88d353c7d68de961a0d429c0d7e274b28bba2414ac`.
+`d9c7c30f1c8ae7e363a08d3cde0017a7b78de4f605e1b426286a01a365aa295b`.
 
 ## Data, privacy, and medical truth
 
@@ -191,9 +192,12 @@ the legacy inventory SHA-256 is
 - Exact head `2d1b35249f8c7e4621877a09a726ca2ea844312a` completed all hosted
   work and exposed the bounded Apple test-contract drift recorded above. The
   corrected remote replacement is
-  `e7c35610c3930916c95ceda6a08e96fe369474fe`. The current local
-  customer-entry and terminology follow-up must be committed, pushed normally,
-  and run through the same protected contexts.
+  `e7c35610c3930916c95ceda6a08e96fe369474fe`. Remote head
+  `db9ccda25e8ea55f01273972f998172beac34c0b` then passed every hosted
+  Android, macOS, package, policy, and repository-control boundary and failed
+  only the bounded transient iOS query recorded above. The local test-only
+  correction must be committed, pushed normally, and run through the same
+  protected contexts.
 - Merge only the exact green PR head through protected `main`, then verify the
   resulting protected-main SHA before handing off physical validation.
 
@@ -216,7 +220,8 @@ the legacy inventory SHA-256 is
 
 ## Open risks and honest limitations
 
-- Required hosted PR contexts and protected-main integration remain pending.
+- Replacement hosted PR contexts and protected-main integration remain
+  pending.
 - The exact signed iPhone and Android candidates have not been installed.
 - Physical BLE discovery, account claim, source switching, background
   collection, retention, haptics, battery behavior, notification delivery,
@@ -227,7 +232,7 @@ the legacy inventory SHA-256 is
 
 ## Next round
 
-1. Push the exact documented candidate to PR `#33`.
+1. Push the test-only timing correction to PR `#33`.
 2. Wait for every required protected context and merge normally only when
    green.
 3. Update the Downloads physical-testing handoff with the exact protected-main

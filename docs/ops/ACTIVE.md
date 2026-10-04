@@ -75,13 +75,21 @@ Last updated: **2026-10-04**
   terminology gate now parses every shipped Apple and Android localization
   value and reports zero customer-visible legacy-name values. The reviewed
   inventory records 18,644 occurrences across 1,651 groups, with digest
-  `e9cbd08fe7cf6870ce987b88d353c7d68de961a0d429c0d7e274b28bba2414ac`;
+  `d9c7c30f1c8ae7e363a08d3cde0017a7b78de4f605e1b426286a01a365aa295b`;
   the unchanged active-allowlist digest is
   `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`.
   The exact protected release-control subset passes 260/260 and the complete
   Tools suite passes 376 tests with one intentional skip after both reviewed
   source digests were repinned; all direct release, trust, localization,
-  operations, claims, legal, privacy, shell, and diff gates pass.
+  operations, claims, legal, privacy, shell, and diff gates pass. Exact hosted
+  head `db9ccda25e8ea55f01273972f998172beac34c0b` then passed every
+  Android, macOS, package, policy, localization, and repository-control
+  boundary. Its only failure was the iOS pull-to-sync UI case querying the same
+  two-second accessibility element repeatedly after it had already appeared.
+  The local test-only correction captures that visible status once, leaves
+  production timing unchanged, and passes the exact case 3/3. Xcode emitted
+  the complete passing test summary before hanging during local result-bundle
+  finalization; the process was terminated only after all three tests passed.
   Private staging remains unchanged at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;
