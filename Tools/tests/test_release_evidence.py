@@ -18,8 +18,13 @@ SPEC.loader.exec_module(EVIDENCE)
 
 
 def run(root: Path, *args: str) -> None:
+    command = list(args)
+    if command[:1] == ["git"]:
+        # A hosted Git may detach automatic maintenance after commit. Keep the
+        # temporary fixture synchronous so cleanup cannot race .git/objects.
+        command[1:1] = ["-c", "gc.auto=0", "-c", "maintenance.auto=false"]
     subprocess.run(
-        list(args),
+        command,
         cwd=root,
         check=True,
         stdout=subprocess.PIPE,
