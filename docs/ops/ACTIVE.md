@@ -4,6 +4,23 @@ Last updated: **2026-10-05**
 
 ## Authoritative context
 
+- Exact protected `main` at
+  `366ed412f450a997daf378210bb04b4e2a8d207d` completed a fresh cross-platform
+  UI side-by-side review without requiring product-source changes. All ten
+  exact-main hosted workflows remain successful. Exact-main iPhone and Android
+  builds pass; Android API 35 focused UI cases pass 8/8; selected iPhone UI
+  cases pass 12/12 before a post-result diagnostics hang was interrupted; and
+  the iPhone 17 Pro visual matrix validates 21/21 scenarios. Settled Today,
+  Trends, Workouts, Sleep, More, compact navigation, quick actions, unified
+  scan, full metric selection/history, first-run, account ordering, ordinary
+  text, and accessibility text were reviewed. Uncontended Android cold starts
+  measured 3.664 seconds or less. The current scroll-reactive floating
+  navigation contract is retained; no confirmed clipping, blank route, stale
+  customer model row, or selected-tab mismatch warranted cosmetic churn.
+  Signed phones, physical bands, VoiceOver/TalkBack traversal, notifications,
+  background work, haptics, battery, firmware, and sensor behavior remain
+  pending under the physical-validation handoff.
+
 - PR `#33` is merged on protected `main` at
   `f6b19568bac65acfc5e1803862ae7a1aa56696ba`; the final product and review
   history follows.
