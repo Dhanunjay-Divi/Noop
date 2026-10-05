@@ -196,8 +196,10 @@ Last updated: **2026-10-05**
   smoke, one-phone/zero-debug-token restoration, and the final no-drift plan
   pass. The follow-up repairs lifecycle pool sizing, Secret Manager version
   detection, least-privilege erasure grants, and repeated account-identity
-  erasure continuation. Its protected integration and every signed or
-  physical-device gate remain pending.
+  erasure continuation. Protected PR `#34` passed its exact-head hosted wall
+  and merged to `main` at
+  `9971d66c38c3d9376a6115d8ca312c84356fb875`. Every signed or physical-device
+  gate remains pending.
 
 - Earlier PR `#33` follow-up history was developed on
   `codex/mobile-cloud-release-finalization-20261003`, based on protected merge
