@@ -171,9 +171,7 @@ def test_runtime_function_allowlist_matches_direct_server_calls() -> None:
         / "057_managed_formula_shadow_derived_erasure.sql"
     ).read_text(encoding="utf-8")
     assert "noop_managed_account_erasure_context" in account_erasure_migration
-    assert (
-        "noop_managed_formula_shadow_erasure_context" in formula_erasure_migration
-    )
+    assert "noop_managed_formula_shadow_erasure_context" in formula_erasure_migration
 
 
 def test_provisioning_manifest_matches_every_postgresql_migration() -> None:
@@ -440,16 +438,14 @@ def test_managed_lifecycle_unified_account_grants_are_erasure_only() -> None:
     )
 
     assert (
-        "GRANT SELECT ON TABLE "
-        f'public."unified_account_principals" TO "{role}"'
+        f'GRANT SELECT ON TABLE public."unified_account_principals" TO "{role}"'
     ) in statements
     assert (
         "GRANT SELECT, DELETE ON TABLE "
         f'public."unified_managed_account_links" TO "{role}"'
     ) in statements
     assert (
-        "GRANT SELECT ON TABLE "
-        f'public."unified_ownership_account_links" TO "{role}"'
+        f'GRANT SELECT ON TABLE public."unified_ownership_account_links" TO "{role}"'
     ) in statements
     for column in ("status", "version", "updated_at", "retired_at"):
         assert (
@@ -457,8 +453,7 @@ def test_managed_lifecycle_unified_account_grants_are_erasure_only() -> None:
             f'public."unified_account_principals" TO "{role}"'
         ) in statements
     assert not any(
-        privilege in statement
-        and 'public."unified_account_principals"' in statement
+        privilege in statement and 'public."unified_account_principals"' in statement
         for statement in statements
         for privilege in ("INSERT", "DELETE")
     )
@@ -469,8 +464,7 @@ def test_managed_lifecycle_unified_account_grants_are_erasure_only() -> None:
         for privilege in ("INSERT", "UPDATE", "DELETE")
     )
     assert not any(
-        privilege in statement
-        and 'public."unified_managed_account_links"' in statement
+        privilege in statement and 'public."unified_managed_account_links"' in statement
         for statement in statements
         for privilege in ("INSERT", "UPDATE")
     )
