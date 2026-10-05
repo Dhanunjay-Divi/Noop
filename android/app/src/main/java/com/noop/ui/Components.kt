@@ -63,6 +63,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -114,6 +115,13 @@ import kotlin.math.sin
 // the uniform, instrument-grade look from the reference.
 
 internal const val HISTORY_QUERY_QUIET_MS = 2_000L
+
+internal val LocalNavigationScrollTailClearance = staticCompositionLocalOf { 0.dp }
+
+internal fun navigationScrollTailPadding(
+    base: Dp,
+    overlayClearance: Dp,
+): Dp = base.coerceAtLeast(0.dp) + overlayClearance.coerceAtLeast(0.dp)
 
 /**
  * Holds database-heavy UI reads across the short false edges between back-to-back history sessions.
@@ -1551,6 +1559,10 @@ fun ScreenScaffold(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val scrollState = rememberScrollState()
+    val bottomTailPadding = navigationScrollTailPadding(
+        base = Metrics.space24,
+        overlayClearance = LocalNavigationScrollTailClearance.current,
+    )
     // The scrolling content column. Its OUTER modifier differs by path: with no topBackground it is the
     // original root Column (the caller's `modifier` + an opaque-canvas background — byte-for-byte the old
     // layout); with a topBackground the canvas + scene paint in the wrapping Box's background (below) and
@@ -1570,7 +1582,7 @@ fun ScreenScaffold(
                     start = Metrics.screenPadding,
                     end = Metrics.screenPadding,
                     top = topPadding,
-                    bottom = Metrics.space24,
+                    bottom = bottomTailPadding,
                 ),
             // #765: one shared inter-card spacing token (was a bare `20.dp`), so the eager + lazy scaffolds
             // and every screen through them keep the SAME uniform gap between top-level cards.
@@ -1697,6 +1709,10 @@ fun LazyScreenScaffold(
     listState: LazyListState = rememberLazyListState(),
     content: LazyListScope.() -> Unit,
 ) {
+    val bottomTailPadding = navigationScrollTailPadding(
+        base = Metrics.space24,
+        overlayClearance = LocalNavigationScrollTailClearance.current,
+    )
     // The header row: optional leading action, the title/subtitle, optional trailing action. Omitted
     // entirely when both title and subtitle are null (a screen supplying its own custom header). Matches
     // ScreenScaffold's header block so the eager + lazy scaffolds read identically.
@@ -1747,7 +1763,7 @@ fun LazyScreenScaffold(
                 start = Metrics.screenPadding,
                 top = topPadding,
                 end = Metrics.screenPadding,
-                bottom = Metrics.space24,
+                bottom = bottomTailPadding,
             ),
             // #765: the shared inter-card spacing token by default (Today/Explore + the eager screens share
             // one uniform card rhythm); a caller may pass a tighter [rowSpacing] (the liquid Today does, for

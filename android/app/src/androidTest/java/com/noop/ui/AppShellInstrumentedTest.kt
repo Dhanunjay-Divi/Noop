@@ -27,6 +27,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.noop.R
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -208,6 +209,48 @@ class AppShellInstrumentedTest {
         compose.onNodeWithTag("noop.screen.friends").assertIsDisplayed()
         compose.onNodeWithTag("noop.friends.source.managed").assertDoesNotExist()
         compose.onNodeWithTag("noop.friends.source.selfHosted").assertDoesNotExist()
+    }
+
+    @Test
+    fun devicesConnectBandStartsUnifiedScanWithoutLegacyModelRows() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+        compose.onNodeWithTag("noop.tab.more").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("noop.more.devices").performScrollTo().performClick()
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodesWithTag("noop.devices.connect")
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        compose.onNodeWithTag("noop.devices.connect")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodesWithText(
+                context.getString(R.string.appwide_onboarding_device_wizard_pick_title),
+            ).fetchSemanticsNodes().isNotEmpty()
+        }
+        val wizardBounds = compose.onNodeWithTag("noop.device-wizard")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val displayMetrics = context.resources.displayMetrics
+        assertTrue(wizardBounds.width >= displayMetrics.widthPixels * 0.90f)
+        assertTrue(wizardBounds.height >= displayMetrics.heightPixels * 0.90f)
+        compose.onAllNodesWithText(
+            context.getString(R.string.appwide_onboarding_device_wizard_searching),
+        )[0].assertIsDisplayed()
+        compose.onNodeWithText(
+            context.getString(R.string.appwide_onboarding_device_wizard_compatible_5_title),
+        ).assertDoesNotExist()
+        compose.onNodeWithText(
+            context.getString(R.string.appwide_onboarding_device_wizard_compatible_4_title),
+        ).assertDoesNotExist()
+        compose.onNodeWithText(
+            context.getString(R.string.appwide_onboarding_device_wizard_account_linked_title),
+        ).assertDoesNotExist()
     }
 
     @Test

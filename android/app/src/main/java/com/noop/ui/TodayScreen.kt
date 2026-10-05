@@ -2266,11 +2266,10 @@ fun TodayScreen(
                 (section != TodaySection.TARGET || selectedDayOffset == 0)
         }
         sectionOrder.forEach { section ->
-            // Entrance stagger keyed on the section's FIXED default position, not its live position: the
-            // stagger only matters on first appearance (staggeredAppear latches), and a live-position
-            // stagger changes every moved section's content lambda on every mid-drag swap — recomposing
-            // the heavy sections (Key Metrics grid, HR chart) while the finger is down (drag jank).
-            val stagger = TodaySection.defaultOrder.indexOf(section) + 1
+            // Reorderable sections render at full opacity. A delayed alpha animation on an already
+            // measured LazyColumn item reserves its final height while drawing nothing, which reads as
+            // missing content during launch and scroll. The pinned header keeps the screen's restrained
+            // entrance motion; the actionable feed itself stays immediate and positionally stable.
             // A gated-off section (Start session outside today / beta-off; Your Cards outside today or
             // empty) emits NO item at all: an always-present zero-height item would double the 12dp row
             // gap around its slot — visible on the DEFAULT layout, where Start session sits right under
@@ -2318,8 +2317,7 @@ fun TodayScreen(
                                     .fillMaxWidth()
                                     .liquidTodayHeroSurface(
                                         Palette.onDarkSecondary.copy(alpha = 0.28f),
-                                    )
-                                    .staggeredAppear(stagger),
+                                    ),
                             ) {
                                 Column {
                                     DailySignalHeader(
@@ -2377,7 +2375,7 @@ fun TodayScreen(
                         ) {
                             DailyPlanWhySection(
                                 readiness = dailyActionReadiness,
-                                modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                         TodaySection.TARGET -> TodayDetailSection(
@@ -2425,7 +2423,7 @@ fun TodayScreen(
                                         )
                                     }
                                 },
-                                modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                         TodaySection.WATCH -> TodayDetailSection(
@@ -2437,7 +2435,7 @@ fun TodayScreen(
                         ) {
                             DailyPlanWatchSection(
                                 readiness = dailyActionReadiness,
-                                modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                         // The plain-English read-out, the Charge-tinted Synthesis card. Mirrors the iOS
@@ -2449,7 +2447,7 @@ fun TodayScreen(
                             summaryAction = dailyActionSummary,
                             onToggle = { todayDetailsExpanded = !todayDetailsExpanded },
                         ) {
-                            Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
+                            Box(modifier = Modifier.fillMaxWidth()) {
                                 SynthesisHeroCard(
                                     day = displayMetric,
                                     recoveryCalibration = recoveryCalibration,
@@ -2479,7 +2477,7 @@ fun TodayScreen(
                                     contentAlignment = Alignment.TopCenter,
                                 )
                             }
-                            Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
+                            Box(modifier = Modifier.fillMaxWidth()) {
                                 MetricGrid(
                                     d = displayMetric,
                                     w = window,
@@ -2565,14 +2563,14 @@ fun TodayScreen(
                         }
                         // #991: TodayWorkoutsSection emits header + card as two siblings; spaced Column.
                         TodaySection.WORKOUTS -> Column(
-                            modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             TodayWorkoutsSection(footer.recentWorkouts)
                         }
                         // HEART RATE, the live HR thread / trend card. #991: header + card in a Column.
                         TodaySection.HEART_RATE -> Column(
-                            modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             HeartRateTrendCard(
@@ -2587,7 +2585,7 @@ fun TodayScreen(
                             )
                         }
                         // The three hero vitals, HRV / Resting HR / Respiratory. Carried day (#543).
-                        TodaySection.RECOVERY_VITALS -> Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
+                        TodaySection.RECOVERY_VITALS -> Box(modifier = Modifier.fillMaxWidth()) {
                             HeroMetricRows(day = displayMetric, carriedDay = lastScoredRecoveryDay, vitalsDay = lastVitalsDay)
                         }
                         // YOUR CARDS, the user-customisable dashboard (WHOOP "My Dashboard"). Hydration is

@@ -2973,4 +2973,7 @@
     <string name="noop_command_lens_move_down">下移</string>
     <string name="noop_command_lens_left_edge">左侧边缘</string>
     <string name="noop_command_lens_right_edge">右侧边缘</string>
+    <string name="appwide_action_pair_another_supported_band">配对其他受支持的手环</string>
+    <string name="compact_navigation_show">显示导航</string>
+    <string name="compact_navigation_state">%1$s，%2$s</string>
 </resources>

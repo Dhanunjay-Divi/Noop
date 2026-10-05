@@ -115,7 +115,6 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
         let requiredKeys = [
             "Choose your snapshot",
             "%lld selected",
-            "%lld metrics selected",
             "Clear metric search",
             "All supported metrics are selected.",
             "No metrics match this search.",
@@ -132,6 +131,55 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
                 key
             )
             XCTAssertEqual(Set(localizations.keys), locales, key)
+        }
+    }
+
+    func testSelectedMetricCountUsesPluralRulesAcrossSupportedLocales() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let today = try String(
+            contentsOf: root.appendingPathComponent("Strand/Liquid/LiquidTodayView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(today.contains(
+            "String(localized: \"\\(visibleKeyMetrics.count) metrics selected\")"
+        ))
+
+        let data = try Data(
+            contentsOf: root.appendingPathComponent("Strand/Resources/Localizable.xcstrings")
+        )
+        let catalog = try XCTUnwrap(
+            (JSONSerialization.jsonObject(with: data) as? [String: Any])?["strings"]
+                as? [String: Any]
+        )
+        let entry = try XCTUnwrap(catalog["%lld metrics selected"] as? [String: Any])
+        let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any])
+        XCTAssertEqual(
+            Set(localizations.keys),
+            Set(["de", "en", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
+        )
+
+        for locale in ["de", "en", "es", "fr", "it", "pt-PT"] {
+            let localization = try XCTUnwrap(localizations[locale] as? [String: Any], locale)
+            let variations = try XCTUnwrap(localization["variations"] as? [String: Any], locale)
+            let plural = try XCTUnwrap(variations["plural"] as? [String: Any], locale)
+            XCTAssertNotNil(plural["one"], locale)
+            XCTAssertNotNil(plural["other"], locale)
+        }
+
+        let russian = try XCTUnwrap(localizations["ru"] as? [String: Any])
+        let russianVariations = try XCTUnwrap(russian["variations"] as? [String: Any])
+        let russianPlural = try XCTUnwrap(russianVariations["plural"] as? [String: Any])
+        for category in ["one", "few", "many", "other"] {
+            XCTAssertNotNil(russianPlural[category], category)
+        }
+
+        for locale in ["zh-Hans", "zh-Hant"] {
+            let localization = try XCTUnwrap(localizations[locale] as? [String: Any], locale)
+            let variations = try XCTUnwrap(localization["variations"] as? [String: Any], locale)
+            let plural = try XCTUnwrap(variations["plural"] as? [String: Any], locale)
+            XCTAssertNotNil(plural["other"], locale)
         }
     }
 }

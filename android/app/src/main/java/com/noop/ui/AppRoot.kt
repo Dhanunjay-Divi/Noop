@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -75,6 +76,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.NightsStay
@@ -105,10 +107,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -146,6 +150,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
@@ -424,9 +431,62 @@ fun AppRoot(
     var movementBreakTerminalOutcome by rememberSaveable { mutableStateOf<String?>(null) }
     val contextualActionScope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val keyboardVisible = WindowInsets.ime.getBottom(density) > 0
+    val compactNavigationPrefs = remember(context) {
+        context.getSharedPreferences(
+            CompactNavigationDockPrefs.FILE,
+            android.content.Context.MODE_PRIVATE,
+        )
+    }
+    var compactNavigationDockEdgeName by rememberSaveable {
+        mutableStateOf(
+            CompactNavigationDockPrefs.read(
+                compactNavigationPrefs,
+                layoutDirection,
+            ).name,
+        )
+    }
+    val compactNavigationDockEdge = runCatching {
+        CompactNavigationDockEdge.valueOf(compactNavigationDockEdgeName)
+    }.getOrDefault(CompactNavigationDockEdge.LEFT)
+    var bottomBarCompact by rememberSaveable { mutableStateOf(false) }
+    val bottomBarVisuallyCompact = bottomBarCompact && density.fontScale < 1.6f
+    var bottomBarDirectionalTravel by remember { mutableFloatStateOf(0f) }
+    // Ignore short corrections and elastic scroll noise. The reference interaction
+    // changes chrome only after sustained reading progress or a deliberate return.
+    val compactThresholdPx = with(density) { 72.dp.toPx() }
+    val expandThresholdPx = with(density) { 52.dp.toPx() }
+    val bottomBarScrollConnection = remember(
+        compactThresholdPx,
+        expandThresholdPx,
+    ) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                val updated = updateCompactNavigationHysteresis(
+                    current = CompactNavigationHysteresisState(
+                        compact = bottomBarCompact,
+                        directionalTravelPx = bottomBarDirectionalTravel,
+                    ),
+                    consumed = consumed,
+                    source = source,
+                    compactThresholdPx = compactThresholdPx,
+                    expandThresholdPx = expandThresholdPx,
+                )
+                bottomBarCompact = updated.compact
+                bottomBarDirectionalTravel = updated.directionalTravelPx
+                return Offset.Zero
+            }
+        }
+    }
 
     fun openTopLevel(route: String) {
+        bottomBarCompact = false
+        bottomBarDirectionalTravel = 0f
         selectedTabRoute = primaryTabForRoute(route).route
         if (route != currentRoute) nav.navigateTopLevel(route)
     }
@@ -523,7 +583,19 @@ fun AppRoot(
         com.noop.AppDiagnosticsRecorder.setScreen(currentRoute)
         Destination.entries
             .firstOrNull { it.route == currentRoute && it in primaryTabDestinations }
-            ?.let { selectedTabRoute = it.route }
+            ?.let { destination ->
+                val syncedNavigation = compactNavigationStateAfterPrimaryRouteChange(
+                    current = CompactNavigationHysteresisState(
+                        compact = bottomBarCompact,
+                        directionalTravelPx = bottomBarDirectionalTravel,
+                    ),
+                    selectedTabRoute = selectedTabRoute,
+                    revealedPrimaryTabRoute = destination.route,
+                )
+                bottomBarCompact = syncedNavigation.compact
+                bottomBarDirectionalTravel = syncedNavigation.directionalTravelPx
+                selectedTabRoute = destination.route
+            }
     }
 
     // Notification route bridge: StateFlow emits immediately, so this consumes a cold-launch route that
@@ -578,26 +650,46 @@ fun AppRoot(
         Scaffold(
             containerColor = Palette.surfaceBase,
             bottomBar = {
-                // One translucent five-destination dock. The movable NOOP action lens is composed
-                // separately below so it never reads as a sixth tab.
-                GlassBottomBar(
-                    selected = selectedTab,
-                    onTabSelected = { dest ->
-                        val reselected = selectedTabRoute == dest.route
-                        selectedTabRoute = dest.route
-                        if (reselected) {
-                            nav.returnToTabRoot(dest.route)
-                        } else if (dest.route != currentRoute) {
-                            nav.navigateTopLevel(dest.route)
-                        }
-                    },
-                )
+                if (bottomBarVisuallyCompact) {
+                    // Keep only the system gesture/navigation inset in layout. The compact disclosure
+                    // floats over the page below, so collapsing the rail cannot leave a black footer.
+                    Spacer(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding(),
+                    )
+                } else {
+                    ExpandedGlassBottomBarHost(
+                        selected = selectedTab,
+                        onTabSelected = { dest ->
+                            bottomBarCompact = false
+                            bottomBarDirectionalTravel = 0f
+                            val reselected = selectedTabRoute == dest.route
+                            selectedTabRoute = dest.route
+                            if (reselected) {
+                                nav.returnToTabRoot(dest.route)
+                            } else if (dest.route != currentRoute) {
+                                nav.navigateTopLevel(dest.route)
+                            }
+                        },
+                    )
+                }
             },
         ) { inner ->
-            NavHost(
-                navController = nav,
-                startDestination = startRoute,
-                modifier = Modifier.padding(inner),
+            CompositionLocalProvider(
+                LocalNavigationScrollTailClearance provides
+                    if (bottomBarVisuallyCompact) {
+                        CompactNavigationOverlayFootprint
+                    } else {
+                        0.dp
+                    },
+            ) {
+                NavHost(
+                    navController = nav,
+                    startDestination = startRoute,
+                    modifier = Modifier
+                        .nestedScroll(bottomBarScrollConnection)
+                        .padding(inner),
                 // README motion: top-level destinations crossfade (~240ms) on the calm,
                 // decelerating global easing — nothing slides or bounces between tabs. The
                 // same fade is used for back (pop) so the bar never feels jerky. Drill-ins
@@ -788,7 +880,24 @@ fun AppRoot(
                         nav.navigate(it) { launchSingleTop = true }
                     })
                 }
+                }
             }
+        }
+
+        if (!keyboardVisible && bottomBarVisuallyCompact) {
+            FloatingCompactBottomBar(
+                selected = selectedTab,
+                dockEdge = compactNavigationDockEdge,
+                onExpand = {
+                    bottomBarCompact = false
+                    bottomBarDirectionalTravel = 0f
+                },
+                onDockEdgeChange = { edge ->
+                    compactNavigationDockEdgeName = edge.name
+                    CompactNavigationDockPrefs.write(compactNavigationPrefs, edge)
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
 
         if (!keyboardVisible && !showQuickActions) {
@@ -1503,6 +1612,133 @@ internal const val BottomBarLabelFontScaleCap = 1.30f
 internal const val BottomBarLabelEffectiveScaleFloor = 0.68f
 private const val BottomBarSingleLineHeightDp = 50
 private const val CompactBottomBarWidthDp = 360
+// Keep the longest primary label ("Workouts") intact while remaining far smaller
+// than the expanded five-tab rail. A fixed width also prevents corner movement
+// when the selected tab changes.
+private val CompactNavigationControlWidth = 136.dp
+internal val CompactNavigationOverlayFootprint =
+    Metrics.controlHeight + Metrics.space8
+
+internal enum class CompactNavigationDockEdge {
+    LEFT,
+    RIGHT,
+}
+
+internal object CompactNavigationDockPrefs {
+    const val FILE = "noop.navigation"
+    const val EDGE = "compactDockEdge"
+
+    fun read(
+        prefs: android.content.SharedPreferences,
+        layoutDirection: LayoutDirection,
+    ): CompactNavigationDockEdge {
+        val stored = prefs.getString(EDGE, null)
+        val edge = compactNavigationDockEdgeFromStoredValue(stored, layoutDirection)
+        if (stored != edge.name) {
+            write(prefs, edge)
+        }
+        return edge
+    }
+
+    fun write(
+        prefs: android.content.SharedPreferences,
+        edge: CompactNavigationDockEdge,
+    ) {
+        prefs.edit().putString(EDGE, edge.name).apply()
+    }
+}
+
+internal fun compactNavigationDockEdgeFromStoredValue(
+    stored: String?,
+    layoutDirection: LayoutDirection,
+): CompactNavigationDockEdge = when (stored) {
+    CompactNavigationDockEdge.LEFT.name -> CompactNavigationDockEdge.LEFT
+    CompactNavigationDockEdge.RIGHT.name -> CompactNavigationDockEdge.RIGHT
+    "START" -> if (layoutDirection == LayoutDirection.Rtl) {
+        CompactNavigationDockEdge.RIGHT
+    } else {
+        CompactNavigationDockEdge.LEFT
+    }
+    "END" -> if (layoutDirection == LayoutDirection.Rtl) {
+        CompactNavigationDockEdge.LEFT
+    } else {
+        CompactNavigationDockEdge.RIGHT
+    }
+    else -> CompactNavigationDockEdge.LEFT
+}
+
+internal fun compactNavigationDockDestination(
+    current: CompactNavigationDockEdge,
+    horizontalDragPx: Float,
+    thresholdPx: Float,
+): CompactNavigationDockEdge {
+    val threshold = thresholdPx.coerceAtLeast(0f)
+    return when {
+        current == CompactNavigationDockEdge.LEFT &&
+            horizontalDragPx >= threshold -> CompactNavigationDockEdge.RIGHT
+        current == CompactNavigationDockEdge.RIGHT &&
+            horizontalDragPx <= -threshold -> CompactNavigationDockEdge.LEFT
+        else -> current
+    }
+}
+
+internal data class CompactNavigationHysteresisState(
+    val compact: Boolean,
+    val directionalTravelPx: Float,
+)
+
+internal fun compactNavigationStateAfterPrimaryRouteChange(
+    current: CompactNavigationHysteresisState,
+    selectedTabRoute: String,
+    revealedPrimaryTabRoute: String,
+): CompactNavigationHysteresisState =
+    if (selectedTabRoute == revealedPrimaryTabRoute) {
+        current
+    } else {
+        CompactNavigationHysteresisState(
+            compact = false,
+            directionalTravelPx = 0f,
+        )
+    }
+
+internal fun updateCompactNavigationHysteresis(
+    current: CompactNavigationHysteresisState,
+    consumed: Offset,
+    source: NestedScrollSource,
+    compactThresholdPx: Float,
+    expandThresholdPx: Float,
+): CompactNavigationHysteresisState {
+    if (
+        source != NestedScrollSource.UserInput ||
+        abs(consumed.y) <= abs(consumed.x) * 1.15f ||
+        abs(consumed.y) < 0.5f
+    ) {
+        return current
+    }
+
+    val deltaY = consumed.y
+    var directionalTravel = current.directionalTravelPx
+    if (directionalTravel * deltaY < 0f) {
+        directionalTravel = 0f
+    }
+    directionalTravel += deltaY
+
+    return when {
+        !current.compact &&
+            directionalTravel <= -compactThresholdPx.coerceAtLeast(0f) ->
+            CompactNavigationHysteresisState(
+                compact = true,
+                directionalTravelPx = 0f,
+            )
+        current.compact &&
+            directionalTravel >= expandThresholdPx.coerceAtLeast(0f) ->
+            CompactNavigationHysteresisState(
+                compact = false,
+                directionalTravelPx = 0f,
+            )
+        else -> current.copy(directionalTravelPx = directionalTravel)
+    }
+}
 
 internal fun bottomBarContentPadding(
     availableWidth: Float,
@@ -1812,7 +2048,189 @@ internal fun rememberBottomBarLabelLayout(
 }
 
 @Composable
-private fun GlassBottomBar(
+private fun ExpandedGlassBottomBarHost(
+    selected: Destination,
+    onTabSelected: (Destination) -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .height(Metrics.navigationBarReservedHeight),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        ExpandedGlassBottomBar(
+            selected = selected,
+            onTabSelected = onTabSelected,
+        )
+    }
+}
+
+@Composable
+private fun FloatingCompactBottomBar(
+    selected: Destination,
+    dockEdge: CompactNavigationDockEdge,
+    onExpand: () -> Unit,
+    onDockEdgeChange: (CompactNavigationDockEdge) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val reduceMotion = rememberReduceMotion()
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = Metrics.space12)
+            .padding(bottom = Metrics.space8)
+            .height(Metrics.controlHeight),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        val cornerTravel = maxOf(
+            0.dp,
+            (maxWidth - CompactNavigationControlWidth) / 2,
+        )
+        val targetHorizontalOffset = if (dockEdge == CompactNavigationDockEdge.LEFT) {
+            -cornerTravel
+        } else {
+            cornerTravel
+        }
+        val compactHorizontalOffset by animateDpAsState(
+            targetValue = targetHorizontalOffset,
+            animationSpec = if (reduceMotion) {
+                snap()
+            } else {
+                tween(durationMillis = 340, easing = NavEasing)
+            },
+        )
+        CompactBottomBar(
+            selected = selected,
+            dockEdge = dockEdge,
+            horizontalOffset = compactHorizontalOffset,
+            onExpand = onExpand,
+            onDockEdgeChange = onDockEdgeChange,
+        )
+    }
+}
+
+@Composable
+private fun CompactBottomBar(
+    selected: Destination,
+    dockEdge: CompactNavigationDockEdge,
+    horizontalOffset: Dp,
+    onExpand: () -> Unit,
+    onDockEdgeChange: (CompactNavigationDockEdge) -> Unit,
+) {
+    val tab = bottomBarTabs.firstOrNull { it.dest == selected } ?: bottomBarTabs.first()
+    val label = stringResource(tab.labelRes)
+    val accent = bottomBarAccent(tab.dest)
+    val density = LocalDensity.current
+    val dragThresholdPx = with(density) { 44.dp.toPx() }
+    var dragOffsetPx by remember { mutableFloatStateOf(0f) }
+    val cornerDescription = if (dockEdge == CompactNavigationDockEdge.LEFT) {
+        stringResource(R.string.noop_command_lens_left_edge)
+    } else {
+        stringResource(R.string.noop_command_lens_right_edge)
+    }
+    val showNavigation = stringResource(R.string.compact_navigation_show)
+    val navigationState = stringResource(
+        R.string.compact_navigation_state,
+        label,
+        cornerDescription,
+    )
+    val moveLeft = stringResource(R.string.noop_command_lens_move_left)
+    val moveRight = stringResource(R.string.noop_command_lens_move_right)
+    Row(
+        modifier = Modifier
+            .absoluteOffset(x = horizontalOffset)
+            .absoluteOffset { IntOffset(dragOffsetPx.roundToInt(), 0) }
+            .width(CompactNavigationControlWidth)
+            .height(Metrics.controlHeight)
+            .testTag("noop.tab.compact")
+            .clip(RoundedCornerShape(percent = 50))
+            .pointerInput(dockEdge, dragThresholdPx) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        val destination = compactNavigationDockDestination(
+                            current = dockEdge,
+                            horizontalDragPx = dragOffsetPx,
+                            thresholdPx = dragThresholdPx,
+                        )
+                        dragOffsetPx = 0f
+                        if (destination != dockEdge) {
+                            onDockEdgeChange(destination)
+                        }
+                    },
+                    onDragCancel = { dragOffsetPx = 0f },
+                ) { change, amount ->
+                    change.consume()
+                    dragOffsetPx = if (dockEdge == CompactNavigationDockEdge.LEFT) {
+                        maxOf(0f, dragOffsetPx + amount)
+                    } else {
+                        minOf(0f, dragOffsetPx + amount)
+                    }
+                }
+            }
+            .clickable(
+                role = Role.Button,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onExpand,
+            )
+            .semantics {
+                contentDescription = showNavigation
+                stateDescription = navigationState
+                customActions = listOf(
+                    CustomAccessibilityAction(moveLeft) {
+                        onDockEdgeChange(CompactNavigationDockEdge.LEFT)
+                        true
+                    },
+                    CustomAccessibilityAction(moveRight) {
+                        onDockEdgeChange(CompactNavigationDockEdge.RIGHT)
+                        true
+                    },
+                )
+            }
+            .padding(horizontal = Metrics.space10),
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space6),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(accent.copy(alpha = if (Palette.isLight) 0.14f else 0.20f))
+                .border(
+                    width = Metrics.navigationLensStrokeWidth,
+                    color = accent.copy(alpha = 0.64f),
+                    shape = CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                tab.icon,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+        Text(
+            label,
+            style = NoopType.footnote.copy(fontWeight = FontWeight.SemiBold),
+            color = Palette.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            Icons.Filled.KeyboardArrowUp,
+            contentDescription = null,
+            tint = Palette.textTertiary,
+            modifier = Modifier.size(14.dp),
+        )
+    }
+}
+
+@Composable
+private fun ExpandedGlassBottomBar(
     selected: Destination,
     onTabSelected: (Destination) -> Unit,
 ) {
@@ -1822,8 +2240,7 @@ private fun GlassBottomBar(
     var scrubPreviewIndex by remember { mutableStateOf<Int?>(null) }
     BoxWithConstraints(
         modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding(),
+            .fillMaxWidth(),
         contentAlignment = Alignment.Center,
     ) {
         val compactNavigation = maxWidth < CompactBottomBarWidthDp.dp

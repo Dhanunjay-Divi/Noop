@@ -1934,6 +1934,8 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             XCTAssertTrue(launcher.contains("tile(\"\(title)\""), title)
         }
         XCTAssertTrue(launcher.contains(#".accessibilityIdentifier("noop.quick-actions.updates")"#))
+        XCTAssertTrue(shell.contains(#".accessibilityIdentifier("noop.quick-action.close")"#))
+        XCTAssertFalse(shell.contains(#"Button("Done")"#))
         XCTAssertTrue(shell.contains("Double-tap to open. Drag to move."))
     }
 
@@ -2094,6 +2096,33 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             "Band classifier output must stay decode-only; escaped into:\n"
                 + violations.sorted().joined(separator: "\n")
         )
+    }
+
+    func testCompactNavigationDocksToAPersistedAccessibleEdge() throws {
+        let shell = try source("StrandiOS/App/RootTabView.swift")
+        XCTAssertTrue(shell.contains("private enum CompactNavigationDockEdge"))
+        XCTAssertTrue(shell.contains(#"@AppStorage("noop.navigation.compactDockEdge")"#))
+        XCTAssertTrue(shell.contains("case left"))
+        XCTAssertTrue(shell.contains("case right"))
+        XCTAssertTrue(shell.contains("init(persistedValue: String, layoutDirection: LayoutDirection)"))
+        XCTAssertTrue(shell.contains(#"case "leading":"#))
+        XCTAssertTrue(shell.contains(#"case "trailing":"#))
+        XCTAssertTrue(shell.contains("alignment(for layoutDirection: LayoutDirection)"))
+        XCTAssertTrue(shell.contains("@Environment(\\.layoutDirection) private var layoutDirection"))
+        XCTAssertTrue(shell.contains("migrateCompactNavigationDockPreferenceIfNeeded()"))
+        XCTAssertTrue(shell.contains("dockEdge: compactNavigationDockEdge"))
+        XCTAssertTrue(shell.contains("DragGesture(minimumDistance: 8)"))
+        XCTAssertTrue(shell.contains("value.predictedEndTranslation.width"))
+        XCTAssertTrue(shell.contains("compactDockDragConsumed = true"))
+        XCTAssertTrue(shell.contains("guard !compactDockDragConsumed else { return }"))
+        XCTAssertTrue(shell.contains("DispatchQueue.main.async"))
+        XCTAssertTrue(shell.contains(#"Text("Move to left edge")"#))
+        XCTAssertTrue(shell.contains(#"Text("Move to right edge")"#))
+        XCTAssertTrue(shell.contains(
+            #".accessibilityHint("Expands navigation. Drag horizontally to move.")"#
+        ))
+        XCTAssertTrue(shell.contains("value: compactNavigationDockRaw"))
+        XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize"))
     }
 
     func testEcgSpotRecordingClosesItsStreamAndInvalidatesStaleTimers() throws {

@@ -142,6 +142,7 @@ internal fun shouldAnimateBandPairingDiscovery(
 @Composable
 internal fun BandPairingDiscoveryStage(
     searching: Boolean,
+    supportingWarning: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val motionSuppressed = rememberPoseStill()
@@ -254,5 +255,16 @@ internal fun BandPairingDiscoveryStage(
             color = Palette.textSecondary,
             textAlign = TextAlign.Center,
         )
+        supportingWarning?.let { warning ->
+            Text(
+                warning,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Metrics.space6),
+                style = NoopType.footnote,
+                color = Palette.statusWarningText,
+                textAlign = TextAlign.Start,
+            )
+        }
     }
 }

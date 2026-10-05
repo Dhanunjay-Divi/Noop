@@ -187,7 +187,7 @@ final class MoreListParityTests: XCTestCase {
     /// The iPhone shell owns one custom bar outside the native TabView. Its clearance must come from
     /// that bar's rendered height and be applied once as a real safe-area inset. Unlike a scroll-content
     /// margin, the inset keeps large Dynamic Type rows from rendering behind persistent navigation.
-    func testCustomiPhoneTabBarHasOneMeasuredSafeAreaReservation() throws {
+    func testCustomiPhoneTabBarUsesAnOverlayWithMeasuredScrollTail() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
         let scaffold = try sourceText("Strand/Screens/ScreenScaffold.swift")
         let tabRoutes = try sourceText("Strand/App/TabRoute.swift")
@@ -198,17 +198,17 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(shell.contains("value: geometry.size.height"))
         XCTAssertEqual(
             shell.components(separatedBy: ".safeAreaInset(edge: .bottom, spacing: 0)").count - 1,
-            1,
-            "The measured custom-bar clearance must be reserved exactly once as a safe-area inset."
+            0,
+            "Normal navigation must float over content instead of creating a permanent footer."
         )
         XCTAssertFalse(shell.contains(
             ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
         ), "A scroll-content margin still permits large text to render under the floating controls.")
-        XCTAssertTrue(shell.contains(".padding(.bottom, tabContentBottomReservation)"),
-                      "The viewport must physically end above persistent controls at every text size.")
+        XCTAssertTrue(shell.contains(".padding(.bottom, accessibilityViewportBottomReservation)"),
+                      "Only accessibility text sizes should shorten the live viewport.")
         XCTAssertTrue(shell.contains(
-            ".frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))"
-        ), "The measured safe-area inset and viewport reservation must not double-count the dock.")
+            "\\.persistentBottomChromeInset,\n                    tabContentBottomReservation"
+        ), "Tab roots must receive the measured scroll-tail clearance.")
         let reservation = try XCTUnwrap(
             shell.components(
                 separatedBy: "private var tabContentBottomReservation: CGFloat"
@@ -221,6 +221,9 @@ final class MoreListParityTests: XCTestCase {
         ), "Every non-keyboard viewport must reserve the persistent dock footprint.")
         XCTAssertTrue(reservation.contains("return visibleTabBarHeight"))
         XCTAssertFalse(reservation.contains("dynamicTypeSize.isAccessibilitySize"))
+        XCTAssertTrue(shell.contains(
+            "guard !keyboardVisible, dynamicTypeSize.isAccessibilitySize else { return 0 }"
+        ))
         XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ||"))
         XCTAssertTrue(shell.contains("reduceTransparency ||"))
         XCTAssertTrue(shell.contains("colorSchemeContrast == .increased"))
@@ -284,25 +287,14 @@ final class MoreListParityTests: XCTestCase {
             ".padding(.bottom, NoopMetrics.space4 + persistentBottomChromeInset)"
         ))
         XCTAssertTrue(shell.contains(
-            ".tabRouteDestinations(\n                    persistentBottomChromeInset: visibleTabBarHeight"
+            ".tabRouteDestinations(\n                    persistentBottomChromeInset: tabContentBottomReservation"
         ))
         XCTAssertTrue(tabRoutes.contains(
             "\\.persistentBottomChromeInset,\n                    persistentBottomChromeInset"
         ))
-        let safeAreaStart = try XCTUnwrap(
-            shell.range(of: ".safeAreaInset(edge: .bottom, spacing: 0)")
-        )
-        let accessibilityBoundary = try XCTUnwrap(
-            shell.range(
-                of: "if !keyboardVisible,\n               dynamicTypeSize.isAccessibilitySize ||",
-                range: safeAreaStart.upperBound..<shell.endIndex
-            )
-        )
-        XCTAssertFalse(
-            shell[safeAreaStart.lowerBound..<accessibilityBoundary.lowerBound]
-                .contains("persistentBottomChromeInset"),
-            "Tab roots must keep the single shell safe-area reservation without a second content tail."
-        )
+        XCTAssertTrue(shell.contains(
+            ".environment(\n                    \\.persistentBottomChromeInset,\n                    tabContentBottomReservation"
+        ))
         let moreDestinationStart = try XCTUnwrap(
             shell.range(of: ".navigationDestination(for: MoreDestination.self)")
         )
@@ -319,8 +311,9 @@ final class MoreListParityTests: XCTestCase {
         )
         XCTAssertFalse(liquidToday.contains("Color.clear.frame(height: 90)"),
                        "LiquidToday must inherit the tab-root reservation instead of a magic spacer.")
-        XCTAssertTrue(liquidToday.contains(".padding(.bottom, NoopMetrics.space4)"),
-                      "LiquidToday needs only the standard visual gap above the shell-owned bar clearance.")
+        XCTAssertTrue(liquidToday.contains(
+            ".padding(.bottom, NoopMetrics.space4 + persistentBottomChromeInset)"
+        ), "LiquidToday must carry the floating rail in its scroll tail.")
         XCTAssertTrue(scaffold.contains("screenScaffoldBottomAnchorID"))
         XCTAssertTrue(liquidToday.contains("private static let bottomAnchorID"))
         XCTAssertTrue(scaffold.contains("--demo-scroll-bottom"))
@@ -365,15 +358,15 @@ final class MoreListParityTests: XCTestCase {
         // Compaction is deliberately position-based (you are reading down the page), while EXPANSION keeps
         // directional hysteresis below so a one-frame bounce cannot pop the labels back. Pin both halves
         // of that asymmetry, including the release threshold, so neither side silently loses its rule.
-        XCTAssertTrue(shell.contains("offset <= -24"),
+        XCTAssertTrue(shell.contains("offset <= -72"),
                       "Compaction must still require real page progress, not any downward pixel.")
-        XCTAssertTrue(shell.contains("if offset <= -24 {\n                tabBarCompact = true"),
+        XCTAssertTrue(shell.contains("if offset <= -72 {\n                tabBarCompact = true"),
                       "A coalesced first geometry sample that is already down-page must compact immediately.")
-        XCTAssertTrue(shell.contains("if offset >= -10"),
+        XCTAssertTrue(shell.contains("if offset >= -12"),
                       "Returning near the top must always restore the full bar.")
-        XCTAssertTrue(shell.contains("tracker.directionalTravel >= 18"),
+        XCTAssertTrue(shell.contains("tracker.directionalTravel >= 52"),
                       "Expansion needs a deliberate return, not a one-frame bounce.")
-        XCTAssertTrue(shell.contains("offset >= -10"),
+        XCTAssertTrue(shell.contains("offset >= -12"),
                       "Returning to the page's top band must always restore labels.")
         XCTAssertTrue(shell.contains("@GestureState private var contentGestureActive"),
                       "Per-sample drag bookkeeping must not invalidate the whole tab shell.")

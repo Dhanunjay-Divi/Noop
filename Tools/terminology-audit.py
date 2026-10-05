@@ -15,8 +15,10 @@ import json
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -107,6 +109,33 @@ class Occurrence:
     token: str
     category: str
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class CustomerVisibleValueViolation:
+    path: str
+    key: str
+    locale: str
+
+
+class CustomerVisibleHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.values: list[tuple[int, str, str]] = []
+
+    def handle_data(self, data: str) -> None:
+        if data.strip():
+            self.values.append((self.getpos()[0], "text", data))
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        line = self.getpos()[0]
+        for name, value in attrs:
+            if value:
+                self.values.append((line, f"{tag}.{name}", value))
 
 
 def tracked_files(root: Path) -> list[str]:
@@ -270,6 +299,148 @@ def scan(
     ), forbidden
 
 
+APPLE_LOCALIZATION_CATALOGS = (
+    "Strand/Resources/Localizable.xcstrings",
+    "StrandiOSWidgets/Localizable.xcstrings",
+    "NOOPWatch/Localizable.xcstrings",
+    "NOOPWatchComplications/Localizable.xcstrings",
+    "Packages/StrandDesign/Sources/StrandDesign/Resources/Localizable.xcstrings",
+)
+ANDROID_PACKAGED_RESOURCE_SOURCE_SETS = ("main", "demo", "debug")
+WEB_CUSTOMER_SURFACES = (
+    "server/app/static/index.html",
+    "server/app/static/app.js",
+)
+JS_STRING_LITERAL = re.compile(
+    r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`',
+    re.DOTALL,
+)
+
+
+def localized_string_values(localization: object) -> list[str]:
+    values: list[str] = []
+    pending: list[object] = [localization]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            for field, nested in value.items():
+                if field == "value" and isinstance(nested, str):
+                    values.append(nested)
+                else:
+                    pending.append(nested)
+        elif isinstance(value, list):
+            pending.extend(value)
+    return values
+
+
+def customer_visible_value_violations(
+    root: Path,
+) -> list[CustomerVisibleValueViolation]:
+    violations: list[CustomerVisibleValueViolation] = []
+
+    for apple_relative_path in APPLE_LOCALIZATION_CATALOGS:
+        apple_path = root / apple_relative_path
+        try:
+            catalog = json.loads(apple_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            catalog = {}
+        if not isinstance(catalog, dict):
+            continue
+        source_locale = catalog.get("sourceLanguage")
+        strings = catalog.get("strings", {})
+        if not isinstance(strings, dict):
+            continue
+        for key, entry in strings.items():
+            if not isinstance(entry, dict):
+                continue
+            localizations = entry.get("localizations", {})
+            if not isinstance(localizations, dict):
+                localizations = {}
+            has_explicit_source_value = False
+            for locale, localization in localizations.items():
+                if not isinstance(locale, str) or not isinstance(localization, dict):
+                    continue
+                values = localized_string_values(localization)
+                if locale == source_locale and values:
+                    has_explicit_source_value = True
+                if any(LEGACY.search(value) for value in values):
+                    violations.append(
+                        CustomerVisibleValueViolation(
+                            path=apple_relative_path,
+                            key=key,
+                            locale=locale,
+                        )
+                    )
+            if (
+                isinstance(source_locale, str)
+                and source_locale
+                and not has_explicit_source_value
+                and LEGACY.search(key)
+            ):
+                violations.append(
+                    CustomerVisibleValueViolation(
+                        path=apple_relative_path,
+                        key=key,
+                        locale=source_locale,
+                    )
+                )
+
+    for source_set in ANDROID_PACKAGED_RESOURCE_SOURCE_SETS:
+        resources = root / "android" / "app" / "src" / source_set / "res"
+        for resource_path in sorted(resources.glob("values*/*.xml")):
+            try:
+                resource_root = ET.parse(resource_path).getroot()
+            except (OSError, ET.ParseError):
+                continue
+            locale = resource_path.parent.name
+            for element in resource_root.iter():
+                if element.tag not in {"string", "item"}:
+                    continue
+                value = "".join(element.itertext())
+                if LEGACY.search(value):
+                    violations.append(
+                        CustomerVisibleValueViolation(
+                            path=resource_path.relative_to(root).as_posix(),
+                            key=element.attrib.get("name", ""),
+                            locale=locale,
+                        )
+                    )
+
+    for relative_path in WEB_CUSTOMER_SURFACES:
+        source_path = root / relative_path
+        try:
+            source = source_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if source_path.suffix == ".html":
+            parser = CustomerVisibleHTMLParser()
+            parser.feed(source)
+            visible_values = parser.values
+        else:
+            visible_values = [
+                (
+                    source.count("\n", 0, match.start()) + 1,
+                    "string",
+                    match.group(0)[1:-1],
+                )
+                for match in JS_STRING_LITERAL.finditer(source)
+            ]
+        for line, key, value in visible_values:
+            if LEGACY.search(value):
+                violations.append(
+                    CustomerVisibleValueViolation(
+                        path=relative_path,
+                        key=f"{key}@{line}",
+                        locale="web",
+                    )
+                )
+
+    return sorted(
+        set(violations),
+        key=lambda item: (item.path, item.locale, item.key),
+    )
+
+
 def grouped_inventory(occurrences: Iterable[Occurrence]) -> dict[str, object]:
     grouped: dict[tuple[str, str], list[Occurrence]] = defaultdict(list)
     category_counts: Counter[str] = Counter()
@@ -352,6 +523,13 @@ def write_json(path: Path, value: dict[str, object]) -> None:
 
 
 def check(root: Path, inventory_path: Path, allowlist_path: Path) -> None:
+    visible_violations = customer_visible_value_violations(root)
+    if visible_violations:
+        first = visible_violations[0]
+        raise AuditError(
+            "customer-visible legacy terminology: "
+            f"{first.path} ({first.locale}, {first.key})"
+        )
     occurrences, forbidden = scan(root)
     if forbidden:
         first = forbidden[0]
@@ -392,6 +570,7 @@ def main() -> int:
             check(root, inventory_path, allowlist_path)
             print("Terminology inventory and active-use ratchet passed.")
             return 0
+        visible_violations = customer_visible_value_violations(root)
         occurrences, forbidden = scan(root)
         inventory = grouped_inventory(occurrences)
         if args.command == "summary":
@@ -401,11 +580,18 @@ def main() -> int:
                         "occurrenceCount": inventory["occurrenceCount"],
                         "categoryCounts": inventory["categoryCounts"],
                         "forbiddenCount": len(forbidden),
+                        "customerVisibleValueCount": len(visible_violations),
                     },
                     sort_keys=True,
                 )
             )
-            return 1 if forbidden else 0
+            return 1 if forbidden or visible_violations else 0
+        if visible_violations:
+            first = visible_violations[0]
+            raise AuditError(
+                "snapshot refused while customer-visible legacy terminology remains: "
+                f"{first.path} ({first.locale}, {first.key})"
+            )
         if forbidden:
             first = forbidden[0]
             raise AuditError(

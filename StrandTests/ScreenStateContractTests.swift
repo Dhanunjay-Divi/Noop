@@ -806,9 +806,9 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
         XCTAssertTrue(shell.contains(
             "NoopMetrics.navigationBarReservedHeight"
         ))
-        XCTAssertTrue(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
+        XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         XCTAssertTrue(shell.contains(
-            ".frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))"
+            ".padding(.bottom, accessibilityViewportBottomReservation)"
         ))
         XCTAssertTrue(shell.contains("dynamicTypeSize.isAccessibilitySize ||"))
         XCTAssertTrue(shell.contains("reduceTransparency ||"))
@@ -819,7 +819,9 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
         XCTAssertTrue(shell.contains(
             "(tabBarCompact ? IPhonePrimaryTab.compactControlDimension : 28)"
         ), "Opaque accessibility fallbacks must cover the complete current control footprint.")
-        XCTAssertTrue(shell.contains(".padding(.bottom, tabContentBottomReservation)"))
+        XCTAssertTrue(shell.contains(
+            "\\.persistentBottomChromeInset,\n                    tabContentBottomReservation"
+        ))
         XCTAssertFalse(shell.contains("floatingTabBarClearance"))
     }
 }
@@ -1152,6 +1154,13 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(liquid.contains("profile.cycleAwarenessApplies"))
         XCTAssertTrue(liquid.contains("cycleAwarenessEnabled"))
         XCTAssertTrue(liquid.contains("Open all metric history"))
+        XCTAssertTrue(liquid.contains("pushTabRoute(.metricExplorer)"))
+        XCTAssertTrue(liquid.contains("NavigationLink(value: TabRoute.metricExplorer)"))
+        XCTAssertTrue(liquid.contains("noop.today.key-metrics.section"))
+        XCTAssertTrue(liquid.contains(
+            "String(localized: \"\\(visibleKeyMetrics.count) metrics selected\")"
+        ))
+        XCTAssertFalse(liquid.contains("\\(visibleKeyMetrics.count) selected metrics"))
         XCTAssertTrue(androidToday.contains("val tiles = enabledMetrics"))
         XCTAssertFalse(androidToday.contains("val tiles = KeyMetricPrefs.catalogOrder(enabledMetrics)"))
         XCTAssertTrue(androidToday.contains("metricColumnCount"))
@@ -1171,6 +1180,17 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         ))
         XCTAssertTrue(androidToday.contains("tint = todayRecoveryHeroColors("))
         XCTAssertTrue(androidRing.contains("Palette.recoveryGaugeStops(score)"))
+    }
+
+    func testTrendChartKeepsPointerHoverAlongsideIOSTouchScrub() throws {
+        let trend = try text("Packages/StrandDesign/Sources/StrandDesign/TrendChart.swift")
+
+        XCTAssertTrue(trend.contains("#if os(iOS)"))
+        XCTAssertTrue(trend.contains("TrendChartTouchOverlay("))
+        XCTAssertTrue(trend.contains(".onContinuousHover(coordinateSpace: .local)"))
+        XCTAssertFalse(trend.contains(
+            "#if !os(iOS)\n                .onContinuousHover(coordinateSpace: .local)"
+        ))
     }
 }
 

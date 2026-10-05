@@ -53,7 +53,9 @@ public enum NoopMetrics {
     public static let navigationBarRadius: CGFloat = 22
     public static let navigationLensSize: CGFloat = 44
     public static let navigationBarTopInset: CGFloat = 10
-    public static let navigationBarReservedHeight: CGFloat = 88
+    // The custom rail is 48pt tall. Keep 16pt of breathing room instead of a full
+    // secondary footer so compact navigation never leaves a dead black shelf.
+    public static let navigationBarReservedHeight: CGFloat = 64
     public static let navigationLensItemSpacing: CGFloat = 1
     public static let navigationLensStrokeWidth: CGFloat = 0.8
     public static let navigationLensHighlightWidth: CGFloat = 1.1

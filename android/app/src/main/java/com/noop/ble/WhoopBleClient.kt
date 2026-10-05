@@ -1087,6 +1087,13 @@ class WhoopBleClient(
             requested: WhoopModel,
         ): Boolean = connected && selected == requested
 
+        fun shouldReconnectPreviousConnectionAfterPresentScan(
+            hadPreviousDevice: Boolean,
+            previousIntentionalDisconnect: Boolean,
+            connected: Boolean,
+        ): Boolean =
+            hadPreviousDevice && !previousIntentionalDisconnect && !connected
+
         /** Minimum time since the bond-loop pause tripped (or since the last probe) before another
          *  salvage probe may fire (#78 hole-4). 10 minutes: long enough that a still-held strap sees a
          *  handful of bounded attempts per day, short enough that a strap the user freed reconnects on
@@ -2044,11 +2051,17 @@ class WhoopBleClient(
 
     /** Add-a-WHOOP wizard present-scan flag: while true, [onScanResult] ACCUMULATES every discovered strap
      *  into [discoveredWhoops] instead of auto-connecting. Turned on by [scanForWhoops], off by
-     *  [stopWhoopScan]. Default false leaves the auto-connect path untouched. Written on the main looper
+     *  [pauseWhoopScan]. Default false leaves the auto-connect path untouched. Written on the main looper
      *  (scan lifecycle) and read in the GATT/scan callback — @Volatile for cross-thread visibility. */
     @Volatile
     private var scanningForList = false
     private val presentScanDiagnosticDeduper = BandDiagnostics.CandidateSessionDeduper()
+    private data class PresentScanSession(
+        val previousModel: WhoopModel,
+        val previousDevice: BluetoothDevice?,
+        val previousIntentionalDisconnect: Boolean,
+    )
+    private var presentScanSession: PresentScanSession? = null
 
     /**
      * Multi-source seam (Phase 1B): publish a live HR/R-R reading that came from a NON-WHOOP source
@@ -3284,7 +3297,7 @@ class WhoopBleClient(
     private fun startScan(model: WhoopModel, allowFallback: Boolean) {
         handler.removeCallbacks(scanFallbackRunnable)
         // Defensive: the normal auto-connect scan is NEVER a present-scan. Clearing the flag here means a
-        // leaked wizard present-scan (e.g. the wizard was dismissed without stopWhoopScan) can't divert
+        // leaked wizard present-scan (e.g. the wizard was dismissed without cancelWhoopScan) can't divert
         // this connect's onScanResult into accumulate-not-connect. No-op on the (default) single-WHOOP path.
         scanningForList = false
         selectedModel = model
@@ -3503,6 +3516,13 @@ class WhoopBleClient(
      * Kotlin twin of macOS `BLEManager.prepareForPresentScan`.
      */
     fun prepareForPresentScan(model: WhoopModel) {
+        if (presentScanSession == null) {
+            presentScanSession = PresentScanSession(
+                previousModel = selectedModel,
+                previousDevice = lastDevice,
+                previousIntentionalDisconnect = intentionalDisconnect,
+            )
+        }
         if (shouldKeepLiveConnectionForPresentScan(_state.value.connected, selectedModel, model)) {
             log("Add-a-WHOOP scan: keeping the live ${selectedModel.transportName} connection (#74) - presenting nearby straps without dropping it")
             return
@@ -3575,7 +3595,7 @@ class WhoopBleClient(
      * nearby strap in [discoveredWhoops] WITHOUT auto-connecting. Turns on [scanningForList] so
      * [onScanResult] accumulates rather than connecting, and clears the list for a fresh presentation. It
      * does NOT disturb an existing connection (it never touches [gatt]/bond state) — but it does take over
-     * the single LE scanner, so the wizard MUST call [stopWhoopScan] before any normal connect resumes.
+     * the single LE scanner, so the wizard MUST call [pauseWhoopScan] before any normal connect resumes.
      * Respects the runtime BLUETOOTH_SCAN/CONNECT grant exactly like [startScan]. Port of macOS
      * `BLEManager.scanForWhoops`.
      */
@@ -3665,13 +3685,9 @@ class WhoopBleClient(
         }
     }
 
-    /**
-     * End the Add-a-device present-scan: stop scanning and clear [scanningForList] so [onScanResult]
-     * returns to its normal auto-connect behaviour. Idempotent — safe to call when not presenting. Port of
-     * macOS `BLEManager.stopWhoopScan`.
-     */
+    /** Pause discovery while the wizard shows another step, retaining the prior connection snapshot. */
     @SuppressLint("MissingPermission")
-    fun stopWhoopScan() {
+    fun pauseWhoopScan() {
         if (!scanningForList) return
         scanningForList = false
         stopScan()
@@ -3681,6 +3697,53 @@ class WhoopBleClient(
             "user_cancelled",
         )
         log("Add-a-WHOOP scan: stopped")
+    }
+
+    /**
+     * Cancel the Add-a-device flow and restore the connection target that existed before discovery.
+     * This matters when an active band was temporarily out of range: presenting discovery intentionally
+     * cancels reconnect work and clears [lastDevice], but dismissing without choosing a replacement must
+     * resume that exact target rather than strand it until relaunch.
+     *
+     * Returns the restored family so the ViewModel can restore its presentation selection too.
+     */
+    @SuppressLint("MissingPermission")
+    fun cancelWhoopScan(): WhoopModel? {
+        pauseWhoopScan()
+        val session = presentScanSession ?: return null
+        presentScanSession = null
+        selectedModel = session.previousModel
+        lastDevice = session.previousDevice
+        intentionalDisconnect = session.previousIntentionalDisconnect
+        persistSelectedModel(session.previousModel)
+        session.previousDevice?.let {
+            NoopPrefs.setLastDevice(context, it.address, session.previousModel)
+        }
+
+        val previousDevice = session.previousDevice
+        if (shouldReconnectPreviousConnectionAfterPresentScan(
+                hadPreviousDevice = previousDevice != null,
+                previousIntentionalDisconnect = session.previousIntentionalDisconnect,
+                connected = _state.value.connected,
+            )
+        ) {
+            intentionalDisconnect = false
+            if (gatt == null && previousDevice != null) {
+                connectToDevice(previousDevice, autoConnect = true)
+            }
+            // If an earlier disconnect callback is still pending, the restored false intentional flag
+            // and lastDevice make handleDisconnect resume this same target after teardown.
+        }
+        log("Add-a-WHOOP scan: cancelled; restored previous connection target")
+        return session.previousModel
+    }
+
+    /** Complete a chosen-band flow without reconnecting the band that discovery temporarily replaced. */
+    @SuppressLint("MissingPermission")
+    fun commitWhoopScanSelection() {
+        pauseWhoopScan()
+        presentScanSession = null
+        log("Add-a-WHOOP scan: committed selected connection target")
     }
 
     /**

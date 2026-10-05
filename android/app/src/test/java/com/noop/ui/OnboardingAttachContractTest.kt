@@ -210,39 +210,75 @@ class OnboardingAttachContractTest {
         )
     }
 
-    @Test fun claimEligibleWizardKeepsOnlyAvailableSupplierAndWhoopFamiliesReachable() {
+    @Test fun claimEligibleWizardStartsUnifiedScanAndKeepsSupplierAsSecondaryRoute() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val addDevice = source(userDir, "AddDeviceWizard.kt").readText()
-        val typeStep = addDevice
-            .substringAfter("private fun TypeStep(")
-            .substringBefore("/** A shared \"this tier is experimental\" note")
-        val claimEligibleGroup = typeStep
-            .substringAfter("BandPairingOptionGroup {")
-            .substringBefore(
-                "if (selectionScope == AddDeviceSelectionScope.AllDevices)",
-            )
+        val frame = addDevice
+            .substringAfter("private fun AddDeviceWizardFrame(")
+            .substringBefore("private fun headerTitle(")
+        val fullScreenFrame = frame
+            .substringAfter("if (fullScreen) {")
+            .substringBefore("\n        return")
+        val pickerCall = addDevice
+            .substringAfter("t.isWhoop -> WhoopPickStep(")
+            .substringBefore("t == DeviceType.GymEquipment")
+        val picker = addDevice
+            .substringAfter("private fun WhoopPickStep(")
+            .substringBefore("@Composable\nprivate fun HrPickStep(")
 
-        val supplier =
-            claimEligibleGroup.indexOf("onPick(DeviceType.SupplierBand)")
-        val whoop5 =
-            claimEligibleGroup.indexOf("onPick(DeviceType.Whoop5MG)")
-        val whoop4 =
-            claimEligibleGroup.indexOf("onPick(DeviceType.Whoop4)")
-
-        assertTrue(supplier >= 0)
-        assertTrue(whoop5 > supplier)
-        assertTrue(whoop4 > whoop5)
-        assertTrue(typeStep.contains("BandPairingDiscoveryStage(searching = false)"))
-        assertTrue(claimEligibleGroup.contains("BandPairingOptionRow("))
-        assertTrue(claimEligibleGroup.contains("enabled = supplierAvailable"))
-        assertFalse(claimEligibleGroup.contains("onPick(DeviceType.HrStrap)"))
-        assertFalse(claimEligibleGroup.contains("onPick(DeviceType.GymEquipment)"))
-        assertFalse(claimEligibleGroup.contains("onPick(DeviceType.Oura)"))
+        assertTrue(addDevice.contains(
+            "selectionScope == AddDeviceSelectionScope.ClaimEligibleBands",
+        ))
+        assertTrue(addDevice.contains(
+            "automaticallyScansLaunchBands -> WizardStep.Pick",
+        ))
+        assertTrue(addDevice.contains(
+            "viewModel.selectedModel.value",
+        ))
+        assertTrue(addDevice.contains(
+            "automaticallyScansLaunchBands -> launchWhoopType",
+        ))
+        assertTrue(addDevice.contains(
+            "fullScreen = automaticallyScansLaunchBands",
+        ))
+        assertTrue(fullScreenFrame.contains("Dialog("))
+        assertTrue(fullScreenFrame.contains("Surface("))
+        assertTrue(fullScreenFrame.contains("Modifier\n                    .fillMaxSize()"))
+        assertTrue(fullScreenFrame.contains("usePlatformDefaultWidth = false"))
+        assertFalse(fullScreenFrame.contains("AlertDialog("))
+        assertFalse(addDevice.contains("RectangleShape"))
         assertTrue(
-            claimEligibleGroup.contains(
-                "appwide_onboarding_device_wizard_compatible_band",
+            addDevice.contains(
+                "searchingHintRes =\n" +
+                    "                R.string.appwide_onboarding_device_wizard_whoop_search_hint",
             ),
         )
+        assertTrue(
+            addDevice.contains(
+                "LaunchedEffect(automaticallyScansLaunchBands, launchWhoopModel)",
+            ),
+        )
+        assertTrue(addDevice.contains("viewModel.presentWhoopScan(launchWhoopModel)"))
+        assertTrue(addDevice.contains("onRescan = { startScan(t) }"))
+        assertFalse(addDevice.contains(
+            "automaticallyScansLaunchBands -> DeviceType.Whoop4",
+        ))
+        assertFalse(addDevice.contains(
+            "viewModel.presentWhoopScan(WhoopModel.WHOOP4)",
+        ))
+        assertTrue(pickerCall.contains(
+            "automaticallyScansLaunchBands && supplierAvailable",
+        ))
+        assertTrue(pickerCall.contains("onOpenSupplierBand"))
+        assertTrue(
+            picker.contains(
+                "R.string.appwide_action_pair_another_supported_band",
+            ),
+        )
+        assertTrue(picker.contains("contentDescription = pairAnotherSupportedBand"))
+        assertFalse(picker.contains("DeviceType.HrStrap"))
+        assertFalse(picker.contains("DeviceType.GymEquipment"))
+        assertFalse(picker.contains("DeviceType.Oura"))
         assertTrue(
             addDevice.contains(
                 "appwide_onboarding_device_wizard_compatible_5_title",
@@ -271,7 +307,7 @@ class OnboardingAttachContractTest {
                 "t == DeviceType.SupplierBand && supplierAvailable",
             ),
         )
-        assertTrue(addDevice.contains("enabled = supplierAvailable"))
+        assertTrue(addDevice.contains("if (supplierAvailable)"))
         assertTrue(
             addDevice.contains(
                 "appwide_onboarding_device_wizard_account_linked_title",
@@ -282,9 +318,9 @@ class OnboardingAttachContractTest {
                 "appwide_onboarding_device_wizard_account_linked_subtitle",
             ),
         )
-        assertTrue(
+        assertFalse(
             addDevice.contains(
-                "appwide_onboarding_device_wizard_account_linked_unavailable",
+                "R.string.appwide_onboarding_device_wizard_account_linked_unavailable",
             ),
         )
         assertTrue(

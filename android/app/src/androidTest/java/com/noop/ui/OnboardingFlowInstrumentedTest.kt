@@ -385,11 +385,17 @@ class OnboardingFlowInstrumentedTest {
             .performClick()
 
         waitForTextDisplayed(
-            context.getString(R.string.appwide_onboarding_device_wizard_compatible_5_title),
+            context.getString(R.string.appwide_onboarding_device_wizard_pick_title),
         )
         waitForTextDisplayed(
-            context.getString(R.string.appwide_onboarding_device_wizard_compatible_4_title),
+            context.getString(R.string.appwide_onboarding_device_wizard_searching),
         )
+        compose.onNodeWithText(
+            context.getString(R.string.appwide_onboarding_device_wizard_compatible_5_title),
+        ).assertDoesNotExist()
+        compose.onNodeWithText(
+            context.getString(R.string.appwide_onboarding_device_wizard_compatible_4_title),
+        ).assertDoesNotExist()
         compose.onNodeWithText("Heart-rate strap").assertDoesNotExist()
         compose.onNodeWithText("Gym equipment").assertDoesNotExist()
         compose.onNodeWithText("Oura Ring").assertDoesNotExist()
@@ -581,11 +587,17 @@ class FreshInstallOnboardingOrderInstrumentedTest {
             .performClick()
 
         waitForTextDisplayed(
-            context.getString(R.string.appwide_onboarding_device_wizard_compatible_5_title),
+            context.getString(R.string.appwide_onboarding_device_wizard_pick_title),
         )
         waitForTextDisplayed(
-            context.getString(R.string.appwide_onboarding_device_wizard_compatible_4_title),
+            context.getString(R.string.appwide_onboarding_device_wizard_searching),
         )
+        compose.onNodeWithText(
+            context.getString(R.string.appwide_onboarding_device_wizard_compatible_5_title),
+        ).assertDoesNotExist()
+        compose.onNodeWithText(
+            context.getString(R.string.appwide_onboarding_device_wizard_compatible_4_title),
+        ).assertDoesNotExist()
         compose.onNodeWithText("Heart-rate strap").assertDoesNotExist()
         compose.onNodeWithText("Gym equipment").assertDoesNotExist()
         compose.onNodeWithText("Oura Ring").assertDoesNotExist()

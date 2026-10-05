@@ -6,9 +6,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -34,10 +36,12 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -51,12 +55,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.ble.ExperimentalBrand
 import com.noop.ble.OuraLiveSource
@@ -176,6 +183,24 @@ enum class AddDeviceStart {
     SupplierBandPairing,
 }
 
+internal enum class SupplierPrepOrigin {
+    DirectStart,
+    DevicePicker,
+    UnifiedScan,
+}
+
+internal enum class SupplierPrepBackTarget {
+    DevicePicker,
+    UnifiedScan,
+}
+
+internal fun supplierPrepBackTarget(origin: SupplierPrepOrigin?): SupplierPrepBackTarget =
+    if (origin == SupplierPrepOrigin.UnifiedScan) {
+        SupplierPrepBackTarget.UnifiedScan
+    } else {
+        SupplierPrepBackTarget.DevicePicker
+    }
+
 internal fun resolvedAddDeviceStart(
     requested: AddDeviceStart,
     supplierAvailable: Boolean,
@@ -191,6 +216,11 @@ private fun WhoopModel.registrationLabel(): String = when (this) {
         uiString(R.string.appwide_onboarding_device_wizard_compatible_4_title)
     WhoopModel.WHOOP5_MG ->
         uiString(R.string.appwide_onboarding_device_wizard_compatible_5_title)
+}
+
+private fun WhoopModel.deviceType(): DeviceType = when (this) {
+    WhoopModel.WHOOP4 -> DeviceType.Whoop4
+    WhoopModel.WHOOP5_MG -> DeviceType.Whoop5MG
 }
 
 /**
@@ -221,20 +251,41 @@ fun AddDeviceWizard(
     val scope = rememberCoroutineScope()
     val supplierAvailable = allowSupplierBand && viewModel.supplierBandAvailable
     val resolvedStart = resolvedAddDeviceStart(start, supplierAvailable)
+    val automaticallyScansLaunchBands =
+        selectionScope == AddDeviceSelectionScope.ClaimEligibleBands &&
+            resolvedStart == AddDeviceStart.DevicePicker
+    val launchWhoopModel = remember(
+        viewModel,
+        resolvedStart,
+        automaticallyScansLaunchBands,
+    ) {
+        viewModel.selectedModel.value
+    }
+    val launchWhoopType = remember(launchWhoopModel) { launchWhoopModel.deviceType() }
 
-    var step by remember(resolvedStart) {
+    var step by remember(resolvedStart, automaticallyScansLaunchBands) {
         mutableStateOf(
-            if (resolvedStart == AddDeviceStart.SupplierBandPairing) {
-                WizardStep.Prep
-            } else {
-                WizardStep.Type
+            when {
+                resolvedStart == AddDeviceStart.SupplierBandPairing -> WizardStep.Prep
+                automaticallyScansLaunchBands -> WizardStep.Pick
+                else -> WizardStep.Type
             },
         )
     }
-    var type by remember(resolvedStart) {
+    var type by remember(resolvedStart, automaticallyScansLaunchBands, launchWhoopType) {
         mutableStateOf<DeviceType?>(
+            when {
+                resolvedStart == AddDeviceStart.SupplierBandPairing ->
+                    DeviceType.SupplierBand
+                automaticallyScansLaunchBands -> launchWhoopType
+                else -> null
+            },
+        )
+    }
+    var supplierPrepOrigin by remember(resolvedStart) {
+        mutableStateOf(
             if (resolvedStart == AddDeviceStart.SupplierBandPairing) {
-                DeviceType.SupplierBand
+                SupplierPrepOrigin.DirectStart
             } else {
                 null
             },
@@ -292,7 +343,7 @@ fun AddDeviceWizard(
 
     fun startScan(t: DeviceType) {
         when {
-            t.isWhoop -> viewModel.presentWhoopScan(t.whoopModel ?: WhoopModel.WHOOP4)
+            t.isWhoop -> viewModel.presentWhoopScan(checkNotNull(t.whoopModel))
             t == DeviceType.GymEquipment -> ftmsScanner.get().scan()
             t == DeviceType.Amazfit || t == DeviceType.MiBand -> huamiScanner.get().scan()
             t == DeviceType.Oura -> ouraScanner.get().scan()
@@ -305,7 +356,16 @@ fun AddDeviceWizard(
     }
 
     fun stopAllScans() {
-        viewModel.stopWhoopScan()
+        viewModel.cancelWhoopScan()
+        hrScanner.ifInitialized { it.stopScan() }
+        ftmsScanner.ifInitialized { it.stopScan() }
+        huamiScanner.ifInitialized { it.stopScan() }
+        ouraScanner.ifInitialized { it.stop() }
+        viewModel.cancelSupplierBandPairing()
+    }
+
+    fun pauseAllScans() {
+        viewModel.pauseWhoopScan()
         hrScanner.ifInitialized { it.stopScan() }
         ftmsScanner.ifInitialized { it.stopScan() }
         huamiScanner.ifInitialized { it.stopScan() }
@@ -342,6 +402,14 @@ fun AddDeviceWizard(
         }
     }
 
+    // Customer band setup opens directly in the existing generation-agnostic scan. The full Add Device
+    // catalog remains inert until its explicit Scan action, and all optional scanners stay deferred.
+    LaunchedEffect(automaticallyScansLaunchBands, launchWhoopModel) {
+        if (automaticallyScansLaunchBands) {
+            viewModel.presentWhoopScan(launchWhoopModel)
+        }
+    }
+
     // Belt-and-braces: stop whichever scan is live whenever the wizard leaves composition.
     DisposableEffect(viewModel) { onDispose { stopAllScans() } }
 
@@ -375,10 +443,24 @@ fun AddDeviceWizard(
         if (type == DeviceType.SupplierBand) {
             viewModel.cancelSupplierBandPairing()
             supplierPassword = ""
+            if (
+                step == WizardStep.Prep &&
+                supplierPrepBackTarget(supplierPrepOrigin) ==
+                SupplierPrepBackTarget.UnifiedScan
+            ) {
+                supplierPrepOrigin = null
+                type = launchWhoopType
+                step = WizardStep.Pick
+                viewModel.presentWhoopScan(launchWhoopModel)
+                return
+            }
         }
         when (step) {
             WizardStep.Type -> Unit
-            WizardStep.Prep -> step = WizardStep.Type
+            WizardStep.Prep -> {
+                supplierPrepOrigin = null
+                step = WizardStep.Type
+            }
             WizardStep.Pick -> { stopAllScans(); step = WizardStep.Prep }
             WizardStep.Confirm -> {
                 // Re-enter the pick step and restart its scan so the user can choose a different device.
@@ -410,12 +492,16 @@ fun AddDeviceWizard(
     val confirmRssi = pickedWhoop?.rssi ?: pickedStrap?.rssi ?: pickedMachine?.rssi ?: pickedHuami?.rssi ?: -70
 
     fun finishAdd(makeActive: Boolean) {
-        stopAllScans()
-        val now = System.currentTimeMillis() / 1000
         val pw = pickedWhoop
         val ps = pickedStrap
         val pm = pickedMachine
         val ph = pickedHuami
+        if (pw != null) {
+            pauseAllScans()
+        } else {
+            stopAllScans()
+        }
+        val now = System.currentTimeMillis() / 1000
         val isGarmin = type == DeviceType.Garmin
         val device: PairedDeviceRow? = when {
             pw != null -> {
@@ -500,6 +586,13 @@ fun AddDeviceWizard(
                 viewModel.registerDevice(device, makeActive = makeActive)
             },
             onSuccess = {
+                if (pw != null) {
+                    if (makeActive) {
+                        viewModel.commitWhoopScanSelection()
+                    } else {
+                        viewModel.cancelWhoopScan()
+                    }
+                }
                 onAddedSource(committedSource)
                 onClose()
             },
@@ -576,14 +669,14 @@ fun AddDeviceWizard(
     // The Adopting->Failed observer (the LaunchedEffect below) reads the SAME value.
     val adoptNeedsPairing by viewModel.ouraNeedsPairing.collectAsStateWithLifecycle()
 
-    AlertDialog(
+    AddDeviceWizardFrame(
+        fullScreen = automaticallyScansLaunchBands,
         onDismissRequest = {
             if (!registrationBusy) {
                 stopAllScans()
                 onClose()
             }
         },
-        containerColor = Palette.surfaceOverlay,
         title = {
             // The Oura type drives its own titled step machine; otherwise the generic step titles apply.
             val isOura = type == DeviceType.Oura
@@ -591,7 +684,14 @@ fun AddDeviceWizard(
             val hSub = if (isOura) ouraHeaderSubtitle(ouraStep, ouraAdvanced) else headerSubtitle(step)
             // Back is offered on every step except the very first (the type list). The Adopting progress
             // step hides back so the user can't interrupt the key install mid-flight.
-            val showBack = if (isOura) ouraStep != OuraStep.Adopting else step != WizardStep.Type
+            val showBack = if (isOura) {
+                ouraStep != OuraStep.Adopting
+            } else {
+                step != WizardStep.Type &&
+                    !(automaticallyScansLaunchBands &&
+                        step == WizardStep.Pick &&
+                        type?.isWhoop == true)
+            }
             Row(verticalAlignment = Alignment.Top) {
                 if (showBack && !registrationBusy) {
                     IconButton(onClick = { goBack() }, modifier = Modifier.size(28.dp)) {
@@ -622,7 +722,7 @@ fun AddDeviceWizard(
                 }
             }
         },
-        text = {
+        content = {
             // Make the wizard body scrollable so no step is ever cut off under large font scaling or on
             // large/short displays (#897: the device-type list was taller than the dialog and the lower rows,
             // e.g. Oura, were unreachable). The AlertDialog text slot does not scroll its content on its own,
@@ -686,6 +786,11 @@ fun AddDeviceWizard(
                             ) {
                                 type = t
                                 nameDraft = ""
+                                supplierPrepOrigin = if (t == DeviceType.SupplierBand) {
+                                    SupplierPrepOrigin.DevicePicker
+                                } else {
+                                    null
+                                }
                                 // Oura enters its own step machine at the gate, not the generic prep step.
                                 if (t == DeviceType.Oura) {
                                     ouraStep = OuraStep.Gate
@@ -706,12 +811,28 @@ fun AddDeviceWizard(
                             t.isWhoop -> WhoopPickStep(
                                 viewModel = viewModel,
                                 onSelect = { strap ->
+                                    type = when (strap.model) {
+                                        WhoopModel.WHOOP5_MG -> DeviceType.Whoop5MG
+                                        WhoopModel.WHOOP4 -> DeviceType.Whoop4
+                                    }
                                     pickedWhoop = strap; pickedStrap = null; pickedMachine = null; pickedHuami = null
                                     nameDraft = strap.model.registrationLabel()
-                                    viewModel.stopWhoopScan()
+                                    viewModel.pauseWhoopScan()
                                     step = WizardStep.Confirm
                                 },
-                                onRescan = { viewModel.presentWhoopScan(t.whoopModel ?: WhoopModel.WHOOP4) },
+                                onRescan = { startScan(t) },
+                                onOpenSupplierBand = if (
+                                    automaticallyScansLaunchBands && supplierAvailable
+                                ) {
+                                    {
+                                        viewModel.pauseWhoopScan()
+                                        supplierPrepOrigin = SupplierPrepOrigin.UnifiedScan
+                                        type = DeviceType.SupplierBand
+                                        step = WizardStep.Prep
+                                    }
+                                } else {
+                                    null
+                                },
                             )
                             t == DeviceType.GymEquipment -> FtmsPickStep(
                                 scanner = ftmsScanner.get(),
@@ -786,6 +907,7 @@ fun AddDeviceWizard(
                                         )
                                     },
                                     onSuccess = {
+                                        viewModel.commitWhoopScanSelection()
                                         onAddedSource(SourceKind.veepoo)
                                         onClose()
                                     },
@@ -839,8 +961,6 @@ fun AddDeviceWizard(
                 }
             }
         },
-        confirmButton = {},
-        dismissButton = {},
     )
 
     // After adding, offer to make the new device active.
@@ -947,6 +1067,59 @@ fun AddDeviceWizard(
     }
 }
 
+@Composable
+private fun AddDeviceWizardFrame(
+    fullScreen: Boolean,
+    onDismissRequest: () -> Unit,
+    title: @Composable () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (fullScreen) {
+        Dialog(
+            onDismissRequest = onDismissRequest,
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("noop.device-wizard"),
+                color = Palette.surfaceBase,
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                    ) {
+                        title()
+                    }
+                    HorizontalDivider(color = Palette.hairline)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                    ) {
+                        content()
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    AlertDialog(
+        modifier = Modifier.testTag("noop.device-wizard"),
+        onDismissRequest = onDismissRequest,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = Palette.surfaceOverlay,
+        title = title,
+        text = content,
+        confirmButton = {},
+        dismissButton = {},
+    )
+}
+
 private fun headerTitle(step: WizardStep, type: DeviceType?): String = when (step) {
     WizardStep.Type ->
         uiString(R.string.appwide_onboarding_device_wizard_add_title)
@@ -999,20 +1172,17 @@ private fun TypeStep(
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
         BandPairingDiscoveryStage(searching = false)
         BandPairingOptionGroup {
-            BandPairingOptionRow(
-                Icons.Filled.GraphicEq,
-                DeviceType.SupplierBand.title,
-                uiString(
-                    if (supplierAvailable) {
+            if (supplierAvailable) {
+                BandPairingOptionRow(
+                    Icons.Filled.GraphicEq,
+                    DeviceType.SupplierBand.title,
+                    uiString(
                         R.string.appwide_onboarding_device_wizard_account_linked_subtitle
-                    } else {
-                        R.string.appwide_onboarding_device_wizard_account_linked_unavailable
-                    },
-                ),
-                enabled = supplierAvailable,
-                showDivider = true,
-            ) {
-                onPick(DeviceType.SupplierBand)
+                    ),
+                    showDivider = true,
+                ) {
+                    onPick(DeviceType.SupplierBand)
+                }
             }
             BandPairingOptionRow(
                 Icons.Filled.Watch,
@@ -1486,18 +1656,54 @@ private fun WhoopPickStep(
     viewModel: AppViewModel,
     onSelect: (WhoopBleClient.DiscoveredWhoop) -> Unit,
     onRescan: () -> Unit,
+    onOpenSupplierBand: (() -> Unit)? = null,
 ) {
     val found by viewModel.discoveredWhoops.collectAsStateWithLifecycle()
-    PickList(searching = true, isEmpty = found.isEmpty(), onRescan = onRescan) {
-        found.sortedByDescending { it.rssi }.forEach { strap ->
-            DiscoveredRow(
-                name = strap.model.registrationLabel(),
-                subtitle = uiString(
-                    R.string.appwide_onboarding_device_wizard_compatible_band,
-                ),
-                rssi = strap.rssi,
-                onTap = { onSelect(strap) },
-            )
+    val pairAnotherSupportedBand = uiString(
+        R.string.appwide_action_pair_another_supported_band,
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        PickList(
+            searching = true,
+            isEmpty = found.isEmpty(),
+            onRescan = onRescan,
+            searchingHintRes =
+                R.string.appwide_onboarding_device_wizard_whoop_search_hint,
+        ) {
+            found.sortedByDescending { it.rssi }.forEach { strap ->
+                DiscoveredRow(
+                    name = strap.model.registrationLabel(),
+                    subtitle = uiString(
+                        R.string.appwide_onboarding_device_wizard_compatible_band,
+                    ),
+                    rssi = strap.rssi,
+                    onTap = { onSelect(strap) },
+                )
+            }
+        }
+        onOpenSupplierBand?.let { openSupplierBand ->
+            TextButton(
+                onClick = openSupplierBand,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .semantics {
+                        contentDescription = pairAnotherSupportedBand
+                    },
+            ) {
+                Icon(
+                    Icons.Filled.GraphicEq,
+                    contentDescription = null,
+                    tint = Palette.accent,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(Metrics.space8))
+                Text(
+                    pairAnotherSupportedBand,
+                    style = NoopType.subhead,
+                    color = Palette.accent,
+                )
+            }
         }
     }
 }
@@ -2105,6 +2311,7 @@ private fun PickList(
     idleStatus: String? = null,
     idleTone: StrandTone = StrandTone.Neutral,
     emptyMessage: String? = null,
+    searchingHintRes: Int? = null,
     emptySecondaryRes: Int? =
         R.string.l10n_add_device_wizard_make_sure_it_s_awake_and_8c40e59f,
     rows: @Composable () -> Unit,
@@ -2138,7 +2345,14 @@ private fun PickList(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(Metrics.space10),
             ) {
-                BandPairingDiscoveryStage(searching = searching)
+                BandPairingDiscoveryStage(
+                    searching = searching,
+                    supportingWarning = if (searching) {
+                        searchingHintRes?.let(::uiString)
+                    } else {
+                        null
+                    },
+                )
                 if (!searching) {
                     emptyMessage?.let { message ->
                         Text(

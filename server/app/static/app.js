@@ -8,8 +8,38 @@ const state = {
 const byId = (id) => document.getElementById(id);
 const errorBox = byId("errorMessage");
 
+function customerFacingBrand(value) {
+  return String(value ?? "")
+    .replace(/\bmy-whoop-noop\b/gi, "primary-band-on-device")
+    .replace(/\bmy-whoop\b/gi, "primary-band")
+    .replace(/\bopenwhoop\b/gi, "NOOP legacy storage")
+    .replace(/\bwhoopstore\b/gi, "local store")
+    .replace(/\bwhoopimporter\b/gi, "wearable importer")
+    .replace(/\bwhoop_live_hr_in_adv_ind_pkt\b/gi, "band broadcast setting")
+    .replace(/\bwhoop[- ]compatible\b/gi, "wearable-compatible")
+    .replace(/\bwhoop\s*5(?:\.0)?(?:\s*\/?\s*mg)?\b/gi, "newer band")
+    .replace(/\bwhoop\s*4(?:\.0)?\b/gi, "legacy band")
+    .replace(/\bwhoop\s+mg\b/gi, "ECG-capable band")
+    .replace(/\bwhoop\s+exports\b/gi, "wearable exports")
+    .replace(/\bwhoop\s+export\b/gi, "wearable export")
+    .replace(/\bwhoop\s+imports\b/gi, "wearable imports")
+    .replace(/\bwhoop\s+import\b/gi, "wearable import")
+    .replace(/\bwhoop[-_ ]csv\b/gi, "wearable-csv")
+    .replace(/\bwhoop\s+app\b/gi, "band app")
+    .replace(/\bwhoop-style\b/gi, "wearable-style")
+    .replace(/\bwhoop(?:\u0027s|’s)\b/gi, "the provider's")
+    .replace(/whoop/gi, "compatible band");
+}
+
+function customerFacingFileToken(value) {
+  return customerFacingBrand(value)
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "band";
+}
+
 function showError(message) {
-  errorBox.textContent = message;
+  errorBox.textContent = customerFacingBrand(message);
   errorBox.classList.remove("hidden");
 }
 
@@ -38,13 +68,13 @@ async function api(path, options = {}) {
 function textElement(tag, className, value) {
   const element = document.createElement(tag);
   if (className) element.className = className;
-  element.textContent = value;
+  element.textContent = customerFacingBrand(value);
   return element;
 }
 
 function provenanceLabel(device) {
   const namespace = device?.metadata?.namespace;
-  if (namespace === "official_reference") return "WHOOP import reference";
+  if (namespace === "official_reference") return "Imported reference";
   if (namespace === "noop_computed") return "Noop computed";
   if (namespace === "noop_journal") return "Noop journal";
   if (namespace === "strap_measured" || namespace === "strap") return "Strap measured";
@@ -104,7 +134,7 @@ function appendDefinition(list, name, value) {
 }
 
 function renderProvenance(device) {
-  byId("namespaceTitle").textContent = provenanceLabel(device);
+  byId("namespaceTitle").textContent = customerFacingBrand(provenanceLabel(device));
   const list = byId("provenanceList");
   list.replaceChildren();
   appendDefinition(list, "Namespace ID", device.device_id);
@@ -150,7 +180,7 @@ function renderChart(days) {
     row.metrics?.whoop_strain != null
   ).slice(-30);
   if (!values.length) {
-    chart.append(textElement("p", "empty", "No Recovery or Effort/WHOOP Strain values uploaded for this namespace."));
+    chart.append(textElement("p", "empty", "No Recovery or load values uploaded for this namespace."));
     return;
   }
   for (const row of values) {
@@ -158,7 +188,7 @@ function renderChart(days) {
     column.className = "day-column";
     const recovery = row.metrics.recovery ?? row.metrics.charge;
     const load = row.metrics.whoop_strain ?? row.metrics.effort;
-    const loadName = row.metrics.whoop_strain != null ? "WHOOP Strain" : "Noop Effort";
+    const loadName = row.metrics.whoop_strain != null ? "Imported strain" : "Noop Effort";
     const loadMax = row.metrics.whoop_strain != null ? 21 : 100;
     column.title = `${row.day}: Recovery ${recovery ?? "—"}, ${loadName} ${load ?? "—"}`;
     if (recovery != null) {
@@ -208,7 +238,9 @@ async function connect() {
   for (const device of state.devices) {
     const option = document.createElement("option");
     option.value = device.device_id;
-    option.textContent = `${provenanceLabel(device)} · ${device.device_id}`;
+    option.textContent = customerFacingBrand(
+      `${provenanceLabel(device)} · ${device.device_id}`
+    );
     selector.append(option);
   }
   state.selected = state.devices[0] || null;
@@ -247,7 +279,7 @@ byId("exportButton").addEventListener("click", async () => {
     const blob = await response.blob();
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `noop-${state.selected.device_id}-export.json`;
+    link.download = `noop-${customerFacingFileToken(state.selected.device_id)}-export.json`;
     link.click();
     URL.revokeObjectURL(link.href);
   } catch (error) { showError(error.message); }

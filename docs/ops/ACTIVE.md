@@ -1,31 +1,240 @@
 # Active NOOP handoff
 
-Last updated: **2026-10-03**
+Last updated: **2026-10-05**
 
 ## Authoritative context
 
-- The final mobile UI release-closeout slice is locally verified on branch
-  `codex/noop-release-candidate-handoff-20261002`. Today now accepts all 19
-  eligible metrics while retaining the focused six-card default; sparse card
-  traces, source grouping, cycle eligibility/history truth, same-day Weight
-  arbitration, Apple backup parity, compact bottom navigation, and the
-  edge-reaching movable NOOP N are matched across iPhone and Android. Apple
-  focused source tests pass 90/90, WhoopStore backup tests pass 21/21, Android
-  Full/Demo walls and Android-test compilation pass, the Android API 35
-  over-six case passes, and both Apple rendered cases pass before the known
-  Xcode 27 post-test teardown stall. Exact managed artifacts build with iOS
-  executable SHA-256
-  `b6054189869c025840d8dac4b9015e2861731635f96b9e954e6c2886a4f148c5`
-  and Android Full APK SHA-256
-  `d90bb7764863d49d29104084adb1788abe8ed0c943f44653f987185b8ba1895c`.
-  Fresh uninstall/install opens matching Terms gates; a 21-scenario iPhone
-  matrix and current Android Today plus eight-selected editor were reviewed
-  without observed clipping or overlap. Private staging remains unchanged at
-  protected merge `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable
+- The current PR `#33` replacement candidate is on
+  `codex/mobile-cloud-release-finalization-20261003`, based exactly on GitHub
+  protected merge `1cd401f69dd8b4df75872a830ed33a84918ea344`.
+  Product commit `fc2343ff5f96304ccca95fc802d3b6252b467d5b`
+  removes Android's invisible measured-height Today gaps, gives both phones a
+  calmer scroll-reactive floating navigation disclosure that snaps and
+  persists at either bottom corner, preserves all five named tabs and complete
+  metric history, replaces the quick-action `Done` capsule with an accessible
+  close icon, and starts customer setup in one unified compatible-band scan.
+  Android Demo/Full unit and build matrices plus Android-test source
+  compilation pass; the final navigation recheck passes 15/15. Apple affected
+  contracts pass 107/107, StrandDesign passes 59/59, iPhone navigation passes
+  2/2, complete metric history passes 1/1, and the configured, fresh-install,
+  unified-scan, and quick-action flows pass after correcting one covered-parent
+  accessibility query. The exact iPhone Simulator executable digest is
+  `ee765debf4ab5463e2f794dcd9c3552e3c4332d9f5525ff00f1e051cf35c8e63`;
+  the Demo and Full APK digests are
+  `455a523fb67de460c22e6da8e0c439b17c4d3de3fea1a6837edb3ddc5c30c415`
+  and
+  `ec3bbc03161e40d0bab33136c8655eb8c0b1320497ead10d93b93e2e246861b0`.
+  The exact protected release-control subset passes 258/258, source controls
+  pass 9/9, required-CI policy verifies all 10 contexts, and trusted controls,
+  calibration, terminology, legal, privacy, claims, shell, operations, and
+  diff gates pass. The reviewed terminology snapshot records 18,638
+  occurrences across 1,651 groups, no forbidden active use, active-allowlist
   digest
-  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`.
-  Protected exact-head integration and every signed or physical-device gate
-  remain pending.
+  `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`,
+  and inventory digest
+  `ac2ab789f822bac3ea45d2b371bb36872dadf1e997167c5ea67d9c51a1ccfb06`.
+  Initial hosted localization run `37230079611` rejected 13 newly authored
+  labels. They now use the Apple and Android resource systems; the exact CI
+  audit passes, all four Android production/test source sets compile, and the
+  iPhone Simulator build succeeds. Replacement Android run `37231077501`
+  exposed one missing complete-locale resource and two stale source contracts;
+  the three exact failures and both complete Full/Demo unit suites pass after
+  correction. Hosted release-control run `37231919823` then exposed a
+  temporary Git-fixture cleanup race after its source controls passed. Fixture
+  Git commands now disable automatic garbage collection and maintenance; the
+  formerly failing release-evidence test passes 100 consecutive runs.
+  Final hosted Android run `37232335010` then executed 126 production-shell
+  instrumentation tests and exposed two stale onboarding assertions that still
+  waited for the removed static Band 5.0 / MG and Band 4.0 rows. The product
+  correctly opened the unified live scan. The tests now require the localized
+  device-picker title and searching state while rejecting those static rows;
+  both Android-test source sets compile, the focused onboarding and pairing
+  contracts pass, and the exact API 35 cases pass 2/2.
+  Exact-head Apple run `37233895083` on
+  `2d1b35249f8c7e4621877a09a726ca2ea844312a` then built both products and
+  exposed only stale shell tests: the macOS contracts still parsed an obsolete
+  one-line frame boundary and expected superseded compact-navigation action
+  labels, while one iOS UI case still required ordinary text to end above the
+  floating bar. The corrected contracts now follow the structured
+  `onReselect` closure, require the current `Move to left edge` and
+  `Move to right edge` accessibility actions, verify a full-height ordinary
+  viewport, and separately preserve the accessibility-text reservation. The
+  complete local Strand suite passes 2,446 tests with one intentional skip and
+  zero failures, and both corrected iPhone viewport cases pass 2/2. Product
+  source is unchanged by this correction. A local follow-up on remote head
+  `e7c35610c3930916c95ceda6a08e96fe369474fe` adds exact coverage for
+  `More > Devices > Connect band`, installs the rebuilt Full candidate on API
+  35, and proves that both the normal Devices entry and first-run onboarding
+  open the same live scanner while rejecting the three legacy model rows. The
+  complete Full/Demo unit, product APK, and Android-test APK matrix passes.
+  Current Demo and Full APK digests are
+  `5d8dc888d5f9ab18af0939cd3b658dbebe9bbc530ff0a43176667fafaf8e0022`
+  and
+  `26cfaf9cb8170cdbe7a0a0e23c6ff2a29d84e1f350b9f83a51fb6c194daf9e92`.
+  Apple customer-brand tests pass 4/4 and terminology tests pass 7/7. The
+  terminology gate now parses every shipped Apple and Android localization
+  value and reports zero customer-visible legacy-name values. The reviewed
+  inventory records 18,644 occurrences across 1,651 groups, with digest
+  `783779bed24fe22d987a03d5117f7b2c355223f3102b002c108d92d69d29204a`;
+  the unchanged active-allowlist digest is
+  `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`.
+  The exact protected release-control subset passes 260/260 and the complete
+  Tools suite passes 376 tests with one intentional skip after both reviewed
+  source digests were repinned; all direct release, trust, localization,
+  operations, claims, legal, privacy, shell, and diff gates pass. Exact hosted
+  head `db9ccda25e8ea55f01273972f998172beac34c0b` then passed every
+  Android, macOS, package, policy, localization, and repository-control
+  boundary. Its only failure was the iOS pull-to-sync UI case querying the same
+  two-second accessibility element repeatedly after it had already appeared.
+  The local test-only correction captures that visible status once, leaves
+  production timing unchanged, and passes the exact case 3/3. Xcode emitted
+  the complete passing test summary before hanging during local result-bundle
+  finalization; the process was terminated only after all three tests passed.
+  Replacement head `ea7e34ccc8ae858b4a77e4282ca7cb03c8f115f5` then passed every
+  hosted Android, macOS, package, policy, localization, and repository-control
+  boundary. Apple run `37244321996` executed all 44 iOS UI cases with one
+  intentional skip and failed only the app-report review case: its 20-second
+  readiness wait expired on the hosted simulator, after which five dependent
+  attachment and action assertions cascaded. The test now waits for explicit
+  review readiness, fails fast if generation does not complete, waits for the
+  required attachment rows, and scrolls to the stable send-action identifier
+  before checking the disclosure. The exact local result bundle records 1/1
+  passed with zero failures. Xcode later timed out while collecting simulator
+  diagnostics, but the test result and command exit status were already
+  successful. Product behavior and customer copy are unchanged.
+  A final October 5 review follow-up closes the remaining mobile parity
+  defects before protected integration. Both customer band entries preserve
+  the selected transport family instead of forcing the legacy family, return
+  from optional account-linked setup to the live scanner, and keep static
+  generation rows out of customer setup. Android now derives compact-nav
+  hysteresis from consumed post-scroll movement, supplies scroll-tail
+  clearance for the floating control, and maps physical left/right movement
+  correctly in RTL. Apple now opens complete metric history on macOS, keeps
+  pointer hover on iPad, localizes selected-metric plurals and the compact-nav
+  hint, prevents a dock drag from also expanding navigation, and persists a
+  physical dock edge across layout directions. The terminology wall now scans
+  source-key fallbacks in every shipped Apple catalog plus Android
+  main/demo/debug resources. Three direct diagnostic or explainer strings were
+  neutralized, and the audit still reports zero customer-visible retired
+  vendor values and zero forbidden mappings. Focused Android Full and Demo
+  suites pass the six affected classes; the integrated iOS Simulator build
+  succeeds; and the final Apple affected wall passes 91/91. The reviewed
+  terminology snapshot now records 18,674 occurrences across 1,652 groups,
+  with 885 customer entries. The inventory digest is
+  `ae9a46996c462849909fb40ca4fc322d4a36281f7b72a98e4dfaca3536387a17`;
+  the active-allowlist digest is
+  `f3fa5910bc72e396488d87af06877c79ff2def2724a5fb451e7f30a334120345`;
+  and the exact audit-tool digest is
+  `656746b944543d40069632bffc2c2e184377ec85db584ba1f50cbef1d5ab14ad`.
+  The complete Tools test root passes 382 tests with one intentional skip.
+  Release controls pass 9/9, required CI verifies all 10 contexts, all 122
+  operations records validate, and trust, calibration, localization, claims,
+  legal, privacy, shell, Python, and diff checks pass on the same tree.
+  Exact pushed head `3671002eff829161fcf9f7950f223afa91414ec5`
+  triggered every protected context normally. Release-controls run
+  `37252862331` failed only because these final operations-record additions
+  shifted historical line numbers after the reviewed terminology snapshot;
+  counts, classifications, rendered-value findings, forbidden mappings, and
+  the active allowlist remain unchanged while the snapshot is repinned.
+  Evidence correction `23985cafad3cf67d479166090e1fa21570b30a8e`
+  subsequently passed every hosted context. A final Android review then found
+  that system Back could reveal a different primary root while compact
+  navigation stayed collapsed. The local route synchronizer now expands only
+  for a changed exact primary root and clears partial scroll travel; nested
+  routes remain under their current tab. Full and Demo each pass the affected
+  20-test navigation subset, and both production Kotlin variants compile.
+  Remote head `625a3988c54f9a921b94c097f4322d762c9af962` contains that
+  Back-root correction. The final local follow-up makes the Android production
+  customer scanner a true full-screen surface matching iPhone, rejects the
+  retired static generation rows, restores the prior family and reconnect
+  intent when discovery is cancelled, and commits only an explicitly selected
+  discovery result. The exact API 35 normal Devices entry and first-run
+  onboarding cases pass 1/1 each. Full and Demo each pass 5,300 unit tests
+  with seven intentional skips; the six affected classes pass 34/34 per
+  flavor; and all four production/instrumentation Kotlin variants compile.
+  Current Full, Demo, Full-test, and Demo-test APK SHA-256 values are
+  `45a6cc92f95fb21e0f5be2b11c9649cf376e5d0eb7c4caf3a069e2ab5dd4609f`,
+  `fab3004ec012db41ec6cb728f1a482375fed89bc55ea9309ef239e6873bc74ef`,
+  `ca58655000b91314d7c942e4eb9c5d386247ae8b93a95ddf59e021d301d08c54`,
+  and
+  `cb019c0d3be527c0d1558497f87f53d21b3bb09e413f62c32fc863dc0bee07a7`.
+  Apple chart selection now records pointer, touch-pinned, and accessibility
+  ownership so a synthetic hover end cannot clear a deliberate touch
+  selection. StrandDesign passes 60/60, the exact iPhone Simulator and macOS
+  builds succeed, and the iPhone executable SHA-256 is
+  `6fff1918ec4b35b9e586b197d1f4d33e154142efe09f81e1cc1665de2d5f0028`.
+  iOS account completion and the self-hosted dashboard now use neutral
+  customer copy, and the web rendering boundary sanitizes server-provided
+  labels, errors, titles, and device identifiers before display. The expanded
+  audit parses static HTML plus JavaScript string literals and reports zero
+  customer-visible retired-vendor values and zero forbidden mappings.
+  The final review correction replaces Android's constrained customer
+  `AlertDialog` with a dedicated full-screen `Dialog` and opaque root surface;
+  the focused Full contracts, APK assembly, and exact API 35 customer-entry
+  case pass. A retained API 35 screenshot and UI hierarchy show the scanner
+  owning the full display with no onboarding surface behind it, using the same
+  title, scan state, `Rescan` action, and neutral connection hint as iPhone.
+  Apple discovery cancellation now durably restores the pre-wizard family,
+  Bluetooth intent, monitoring expectation, bond flags, and pending reconnect;
+  its focused wall passes 14/14. Web provenance titles and export filenames
+  are neutralized at both browser and HTTP response boundaries. The complete
+  server suite passes 612 tests with 215 integration-environment skips, Ruff
+  passes, and a black-box server test rejects the retired vendor name in
+  `Content-Disposition`.
+  Exact-head Android run `37269212467` then built the Full APK successfully
+  and failed only one stale source-shape assertion that expected the shared
+  discovery-stage call to remain on one line. The contract now verifies the
+  `searching` and neutral-warning arguments independently; its focused class
+  passes, and the complete Full and Demo suites each pass 5,300 tests with
+  seven intentional skips.
+  Private staging still serves source merge
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
+  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`,
+  but `server/app/static` is part of the server image and changed in this
+  candidate. After protected integration, the exact protected merge therefore
+  requires one clean immutable build, vulnerability scan, guarded migration
+  receipt, runtime rollout, private verifier, synthetic smoke, configuration
+  restoration, and zero-drift plan. The replacement push, protected hosted
+  integration, cloud rollout, and every signed or physical-device gate remain
+  pending.
+
+- The current follow-up candidate is on
+  `codex/mobile-cloud-release-finalization-20261003`, based on protected merge
+  `1cd401f69dd8b4df75872a830ed33a84918ea344`. Exact-main Apple workflow
+  `37108981075` isolated one intermittent Recovery date-scrub failure after the
+  other nine required contexts passed. Production implementation
+  `0d76116178a90f2a93cf7f61b9df579078672868` maps touch through the live chart
+  scale, preserves scroll/tap and macOS hover, and adds adjustable date
+  stepping. PR `#33` hosted run `37120314609` later failed on Xcode 26.6 because
+  only a chart sliver was hittable while the synthesized gesture coordinates
+  remained under persistent bottom navigation; the app-report review state was
+  also slower than its prior wait. Test-only repair
+  `9689bd3b88268eebfc7b174336281de6f9c74476` measures and clears the full
+  gesture corridor and waits for explicit report readiness without changing
+  production interaction. A valid PR review then identified that the redundant
+  400-millisecond post-scrub deadline could discard the first deliberate tap.
+  Local implementation
+  `72f079a9ad6cda697dbcb6978a954826c89cadf9` removes that deadline, proves the
+  immediate tap and one-back path 10/10, and also fixes an onboarding
+  measurement clear action that reproduced keyboard-focus loss in 9/10 runs.
+  The repaired clear-and-retype workflow passes 10/10. The three original
+  hosted failures pass together 3/3, both geometry cases pass 20/20 under
+  repetition, StrandDesign passes 59/59, and the final complete iPhone
+  Simulator graph executes 43 tests with one intentional skip and zero
+  failures. The complete Tools discovery passes 374 tests with one intentional
+  skip; the exact protected release-control subset passes 258/258; local trust,
+  calibration, terminology, localization, claims, privacy, legal, operations,
+  release-shell, and diff gates pass on the final local candidate. The
+  regenerated terminology inventory records 18,626 classified occurrences
+  across 1,650 groups and is reviewed at digest
+  `32da17b04296d5319729f15830af076a57d39e97db41216cb1f31226cd6a6427`.
+  Private staging remains unchanged and reverified at source merge
+  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
+  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;
+  no cloud rebuild, migration, or apply is required. Protected follow-up
+  integration remains pending. Every signed or physical-device validation gate
+  also remains pending; simulator evidence remains explicitly
+  nonphysical.
 
 - One local release-candidate branch now combines the mobile tab/OTP and
   exact-date scrub correction, supplier optional-read request fencing, and the

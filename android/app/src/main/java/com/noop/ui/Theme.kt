@@ -473,7 +473,9 @@ object Metrics {
     val navigationBarRadius = 22.dp
     val navigationLensSize = 44.dp
     val navigationBarTopInset = 10.dp
-    val navigationBarReservedHeight = 88.dp
+    // 48dp control + 16dp optical clearance. A larger fixed footer left an empty
+    // black shelf whenever the rail collapsed to its corner disclosure.
+    val navigationBarReservedHeight = 64.dp
     val navigationLensItemSpacing = 1.dp
     val navigationLensStrokeWidth = 0.8.dp
     val navigationLensHighlightWidth = 1.1.dp

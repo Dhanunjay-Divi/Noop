@@ -321,4 +321,13 @@ final class StrandDesignTests: XCTestCase {
         let chart = TrendChart(points: pts, valueRange: 5...9)
         XCTAssertEqual(chart.plotYDomain.lowerBound, chart.resolvedYDomain.lowerBound, accuracy: 0.0001)
     }
+
+    func testTrendChartTouchScrubRequiresHorizontalIntent() {
+        XCTAssertTrue(TrendChart.isHorizontalTouchScrub(CGSize(width: 12, height: 0)))
+        XCTAssertTrue(TrendChart.isHorizontalTouchScrub(CGSize(width: -40, height: 8)))
+        XCTAssertFalse(TrendChart.isHorizontalTouchScrub(CGSize(width: 11, height: 0)))
+        XCTAssertFalse(TrendChart.isHorizontalTouchScrub(CGSize(width: 16, height: 20)))
+        XCTAssertFalse(TrendChart.isHorizontalTouchScrub(.zero))
+    }
+
 }

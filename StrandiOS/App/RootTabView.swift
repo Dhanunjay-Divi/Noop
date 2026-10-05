@@ -26,6 +26,44 @@ private final class TabBarScrollTracker {
     deinit { idleTask?.cancel() }
 }
 
+/// The compact navigation disclosure docks to one bottom corner. The preference is deliberately
+/// independent from the movable NOOP command lens: each control can sit on the user's preferred side,
+/// while the command lens' bottom clearance keeps the two hit targets from colliding.
+private enum CompactNavigationDockEdge: String {
+    case left
+    case right
+
+    init(persistedValue: String, layoutDirection: LayoutDirection) {
+        switch persistedValue {
+        case Self.left.rawValue:
+            self = .left
+        case Self.right.rawValue:
+            self = .right
+        case "leading":
+            self = layoutDirection == .leftToRight ? .left : .right
+        case "trailing":
+            self = layoutDirection == .leftToRight ? .right : .left
+        default:
+            self = layoutDirection == .leftToRight ? .left : .right
+        }
+    }
+
+    func alignment(for layoutDirection: LayoutDirection) -> Alignment {
+        switch layoutDirection {
+        case .leftToRight:
+            return self == .left ? .leading : .trailing
+        case .rightToLeft:
+            return self == .left ? .trailing : .leading
+        @unknown default:
+            return self == .left ? .leading : .trailing
+        }
+    }
+
+    var opposite: Self {
+        self == .left ? .right : .left
+    }
+}
+
 /// iOS navigation shell. macOS uses a `NavigationSplitView` sidebar (`RootView`); on iPhone the
 /// natural analogue is a `TabView` with the most-used screens as tabs and everything else under a
 /// "More" list. Every screen is the same `StrandDesign`-built view the macOS app uses.
@@ -37,7 +75,9 @@ struct RootTabView: View {
     @EnvironmentObject private var router: NavRouter
     @EnvironmentObject private var updateStore: UpdateStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.layoutDirection) private var layoutDirection
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @ScaledMetric(relativeTo: .footnote) private var scaledTabLabelLineHeight: CGFloat = 13
@@ -62,11 +102,14 @@ struct RootTabView: View {
     /// it keeps Dynamic Type and future visual changes in lockstep with the space reserved below every
     /// tab; a duplicated magic spacer inevitably drifts and hides the last card again.
     @State private var measuredTabBarHeight: CGFloat = FloatingTabBar.expandedReservedHeight
-    /// The navigation chrome follows the user's vertical gesture: an upward swipe (reading farther down
-    /// the page) compacts it to one current-tab control; a downward swipe expands the labels again. The state is
-    /// visual only — the shell keeps reserving the largest measured height so changing modes can never
-    /// move the scroll endpoint or strand the final card behind the bar.
+    /// The navigation chrome follows sustained page movement: reading farther down compacts it to one
+    /// current-tab control, while a deliberate return gesture expands the labels again. The layout keeps
+    /// one stable, compact clearance so this visual change cannot make the scroll endpoint jump.
     @State private var tabBarCompact = Self.initialTabBarCompact
+    /// Legacy values were semantic leading/trailing edges. They are migrated on first appearance to a
+    /// physical left/right edge so changing language direction cannot move the user's chosen control.
+    @AppStorage("noop.navigation.compactDockEdge")
+    private var compactNavigationDockRaw = "leading"
     /// Keeps the DEBUG compact-state launch hook deterministic long enough for screenshot/UI-test capture.
     /// A tap on the compact control or any destination change releases it; production always starts false.
     @State private var demoCompactPinned = Self.initialTabBarCompact
@@ -186,9 +229,9 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        // Keep the custom bar over a full-bleed page and reserve its measured height as a real safe-area
-        // inset. A content margin only extends a ScrollView's endpoint; it still lets large Dynamic Type
-        // rows render underneath the persistent controls while the user is reading them.
+        // Keep the custom bar over a full-bleed page. Normal text sizes use a scroll-content tail so the
+        // page continues behind the floating chrome instead of ending in a black footer. Accessibility
+        // text keeps a viewport reservation because a large row must never be split by persistent controls.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 tab(todayTabRoot, "Today", "waveform.path.ecg.rectangle.fill", tag: IPhonePrimaryTab.today.rawValue,
@@ -220,15 +263,7 @@ struct RootTabView: View {
             // steal gestures from Trends' year strip (and other horizontally scrolling controls), while
             // pushed pages already need the system edge-swipe for Back. Native iOS tab bars do not require
             // page swiping, so leave horizontal gestures to the content that owns them.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                Color.clear
-                    .frame(height: max(0, visibleTabBarHeight - tabContentBottomReservation))
-                    .accessibilityHidden(true)
-            }
-            // Persistent navigation must not cover a metric card or split large text while it is being
-            // read. Reserve the measured control footprint in the viewport at every text size; the rail
-            // still renders as a floating glass surface over the page background rather than a system bar.
-            .padding(.bottom, tabContentBottomReservation)
+            .padding(.bottom, accessibilityViewportBottomReservation)
             if !keyboardVisible,
                dynamicTypeSize.isAccessibilitySize ||
                reduceTransparency ||
@@ -258,6 +293,7 @@ struct RootTabView: View {
                 FloatingTabBar(
                     selection: $selectedTab,
                     compact: tabBarCompact,
+                    dockEdge: compactNavigationDockEdge,
                     onExpand: {
                         demoCompactPinned = false
                         withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.28)) {
@@ -277,12 +313,35 @@ struct RootTabView: View {
                         } else {
                             scrollTop[tag] += 1
                         }
-                    }
+                    },
+                    onDockEdgeChange: updateCompactNavigationDockEdge
                 )
-                .frame(maxWidth: 500)
-                .frame(maxWidth: .infinity)
+                .frame(
+                    maxWidth: tabBarVisuallyCompact ? .infinity : 500,
+                    alignment: tabBarVisuallyCompact
+                        ? compactNavigationDockEdge.alignment(for: layoutDirection)
+                        : .center
+                )
+                .frame(
+                    maxWidth: .infinity,
+                    alignment: tabBarVisuallyCompact
+                        ? compactNavigationDockEdge.alignment(for: layoutDirection)
+                        : .center
+                )
                 .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 8 : 12)
                 .padding(.bottom, 8)
+                .animation(
+                    reduceMotion
+                        ? nil
+                        : .timingCurve(0.22, 1, 0.36, 1, duration: 0.34),
+                    value: tabBarVisuallyCompact
+                )
+                .animation(
+                    reduceMotion
+                        ? nil
+                        : .timingCurve(0.22, 1, 0.36, 1, duration: 0.34),
+                    value: compactNavigationDockRaw
+                )
                 .background {
                     GeometryReader { geometry in
                         Color.clear.preference(
@@ -381,6 +440,7 @@ struct RootTabView: View {
             resetTabBarScrollTracking()
         }
         .onAppear {
+            migrateCompactNavigationDockPreferenceIfNeeded()
             AppDiagnosticsRecorder.shared.record(
                 "ui.tab_visible",
                 fields: ["tab": Self.diagnosticTabName(selectedTab)]
@@ -527,6 +587,43 @@ struct RootTabView: View {
         )
     }
 
+    private var tabBarVisuallyCompact: Bool {
+        tabBarCompact && !dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var accessibilityViewportBottomReservation: CGFloat {
+        guard !keyboardVisible, dynamicTypeSize.isAccessibilitySize else { return 0 }
+        return visibleTabBarHeight
+    }
+
+    private var compactNavigationDockEdge: CompactNavigationDockEdge {
+        CompactNavigationDockEdge(
+            persistedValue: compactNavigationDockRaw,
+            layoutDirection: layoutDirection
+        )
+    }
+
+    private func migrateCompactNavigationDockPreferenceIfNeeded() {
+        guard compactNavigationDockRaw == "leading" || compactNavigationDockRaw == "trailing" else {
+            return
+        }
+        compactNavigationDockRaw = compactNavigationDockEdge.rawValue
+    }
+
+    private func updateCompactNavigationDockEdge(_ edge: CompactNavigationDockEdge) {
+        guard edge != compactNavigationDockEdge else { return }
+        let update = {
+            compactNavigationDockRaw = edge.rawValue
+        }
+        if reduceMotion {
+            update()
+        } else {
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.34)) {
+                update()
+            }
+        }
+    }
+
     private var tabContentBottomReservation: CGFloat {
         guard !keyboardVisible else { return 0 }
         return visibleTabBarHeight
@@ -663,9 +760,9 @@ struct RootTabView: View {
             // The native scroll-geometry callback is allowed to coalesce its first delivery. If the
             // page has already advanced by then, treating that negative sample only as a baseline leaves
             // the expanded rail stranded until another scroll event arrives.
-            if offset <= -24 {
+            if offset <= -72 {
                 tabBarCompact = true
-            } else if offset >= -10 {
+            } else if offset >= -12 {
                 tabBarCompact = false
             }
             return
@@ -680,13 +777,13 @@ struct RootTabView: View {
         if tracker.directionalTravel * delta < 0 { tracker.directionalTravel = 0 }
         tracker.directionalTravel += delta
 
-        if offset >= -10 {
+        if offset >= -12 {
             if tabBarCompact { tabBarCompact = false }
             tracker.directionalTravel = 0
-        } else if !tabBarCompact, offset <= -24 {
+        } else if !tabBarCompact, offset <= -72 {
             tabBarCompact = true
             tracker.directionalTravel = 0
-        } else if tabBarCompact, tracker.directionalTravel >= 18 {
+        } else if tabBarCompact, tracker.directionalTravel >= 52 {
             tabBarCompact = false
             tracker.directionalTravel = 0
         }
@@ -968,12 +1065,33 @@ struct RootTabView: View {
                 // edge-to-edge under a transparent bar — exactly how the tab roots present it. An OPAQUE
                 // surfaceBase toolbar background sat on top of that sky and, as the content scrolled up, its
                 // extended status-bar band CLIPPED the sky + the in-content header ("Live Body Console").
-                // Hiding the bar background lets the sky stay continuous under the floating Done button.
+                // Hiding the bar background lets the sky stay continuous under the compact close control.
                 .toolbarBackground(.hidden, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { quickAction = nil }
-                            .foregroundStyle(StrandPalette.accent)
+                        Button {
+                            quickAction = nil
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .frame(width: 36, height: 36)
+                                .background(
+                                    StrandPalette.surfaceRaised.opacity(0.90),
+                                    in: Circle()
+                                )
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(
+                                            StrandPalette.hairline,
+                                            lineWidth: 1
+                                        )
+                                )
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text("Close"))
+                        .accessibilityIdentifier("noop.quick-action.close")
                     }
                 }
         }
@@ -991,10 +1109,14 @@ struct RootTabView: View {
         // TabRoute values, registered here ONCE per stack (a double registration double-pushes, #38).
         NavigationStack(path: path) {
             view
+                .environment(
+                    \.persistentBottomChromeInset,
+                    tabContentBottomReservation
+                )
                 .background(StrandPalette.surfaceBase.ignoresSafeArea())
                 .toolbar(.hidden, for: .navigationBar)
                 .tabRouteDestinations(
-                    persistentBottomChromeInset: visibleTabBarHeight
+                    persistentBottomChromeInset: tabContentBottomReservation
                 )
         }
         // Drive this tab's root scroll-to-top on an at-root re-tap (#198 follow-up); read by ScreenScaffold
@@ -1109,7 +1231,7 @@ struct RootTabView: View {
                         // endpoint reservation. The More root keeps the single shell-owned inset.
                         .environment(
                             \.persistentBottomChromeInset,
-                            visibleTabBarHeight
+                            tabContentBottomReservation
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .onAppear {
@@ -1129,6 +1251,10 @@ struct RootTabView: View {
                 .toolbarBackground(keyboardVisible ? .visible : .hidden, for: .navigationBar)
             }
         }
+        .environment(
+            \.persistentBottomChromeInset,
+            tabContentBottomReservation
+        )
         // Scroll the More index to the top on an at-root re-tap (#198 follow-up); read by its ScreenScaffold.
         .environment(\.scrollToTopSignal, scrollSignal)
         .environment(\.scrollPositionReporter, { offset in
@@ -2033,10 +2159,8 @@ private struct MeniscusTabRailShape: Shape {
 /// iOS 26 Liquid Glass is used where available, with a material fallback.
 private struct FloatingTabBar: View {
     /// Reserve the expanded bar from the first layout pass. Its 48pt body plus bottom breathing room
-    /// measures about 56pt; 76pt leaves an optical/touch margin and keeps the next card's rounded edge
-    /// fully below the fold instead of peeking into the navigation mask at the initial scroll position.
-    /// A larger Dynamic Type measurement can still raise this value, and the shell intentionally preserves
-    /// that largest value when the bar compacts.
+    /// measures about 56pt; the shared 64pt reservation keeps the final control clear without turning
+    /// compact navigation into an empty footer. A larger Dynamic Type measurement can still raise it.
     static let expandedReservedHeight =
         NoopMetrics.navigationBarReservedHeight
 
@@ -2044,11 +2168,15 @@ private struct FloatingTabBar: View {
     /// Scroll-reactive presentation supplied by the shell. Compact mode keeps the same 48pt target and
     /// full VoiceOver name at every Dynamic Type size; tapping it restores all five visible labels.
     var compact = false
+    /// The user's preferred lower corner for the compact disclosure.
+    var dockEdge: CompactNavigationDockEdge = .left
     /// Compact mode is an explicit disclosure control, not a re-select gesture. Expanding must therefore
     /// preserve the current navigation stack, scroll position, and cached data.
     var onExpand: () -> Void = {}
     /// Fires when the user taps the already-active tab so the shell can pop or scroll to the root.
     var onReselect: (Int) -> Void = { _ in }
+    /// Persists a drag or accessibility request to move the disclosure to the other corner.
+    var onDockEdgeChange: (CompactNavigationDockEdge) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -2057,6 +2185,8 @@ private struct FloatingTabBar: View {
     @Environment(\.noopAppearanceMode) private var appearanceMode
     @ScaledMetric(relativeTo: .footnote) private var scaledLabelLineHeight: CGFloat = 13
     @GestureState private var scrubbedIndex: CGFloat?
+    @GestureState private var compactDragTranslation: CGFloat = 0
+    @State private var compactDockDragConsumed = false
     @Namespace private var navigationMorph
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
@@ -2428,7 +2558,10 @@ private struct FloatingTabBar: View {
     /// Farther down a screen, navigation yields to a borderless current-tab disclosure. Its fixed frame
     /// preserves the tap target without adding another container over the page.
     private var compactButton: some View {
-        Button(action: onExpand) {
+        Button {
+            guard !compactDockDragConsumed else { return }
+            onExpand()
+        } label: {
             HStack(spacing: 7) {
                 Image(systemName: currentItem.icon)
                     .font(.system(size: 17, weight: .semibold))
@@ -2471,13 +2604,65 @@ private struct FloatingTabBar: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .offset(x: compactDragOffset)
+        .simultaneousGesture(compactDockGesture)
         .accessibilityLabel("Show navigation")
-        .accessibilityValue(Text(currentItem.title))
-        .accessibilityHint("Expands the tab bar")
+        .accessibilityValue(
+            Text(currentItem.title)
+                + Text(verbatim: ", ")
+                + Text(dockEdge == .left ? "Left edge" : "Right edge")
+        )
+        .accessibilityHint("Expands navigation. Drag horizontally to move.")
+        .accessibilityAction(named: Text("Move to left edge")) {
+            onDockEdgeChange(.left)
+        }
+        .accessibilityAction(named: Text("Move to right edge")) {
+            onDockEdgeChange(.right)
+        }
         .accessibilityShowsLargeContentViewer {
             Label(currentItem.title, systemImage: currentItem.icon)
         }
         .accessibilityIdentifier("noop.tab.compact")
+    }
+
+    private var compactDragOffset: CGFloat {
+        switch dockEdge {
+        case .left:
+            return max(0, compactDragTranslation)
+        case .right:
+            return min(0, compactDragTranslation)
+        }
+    }
+
+    private var compactDockGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .updating($compactDragTranslation) { value, translation, _ in
+                guard abs(value.translation.width) > abs(value.translation.height) else {
+                    return
+                }
+                translation = value.translation.width
+            }
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else {
+                    return
+                }
+                compactDockDragConsumed = true
+            }
+            .onEnded { value in
+                defer {
+                    DispatchQueue.main.async {
+                        compactDockDragConsumed = false
+                    }
+                }
+                guard abs(value.translation.width) > abs(value.translation.height) * 1.15 else {
+                    return
+                }
+                let projectedInwardTravel = dockEdge == .left
+                    ? value.predictedEndTranslation.width
+                    : -value.predictedEndTranslation.width
+                guard projectedInwardTravel >= 44 else { return }
+                onDockEdgeChange(dockEdge.opposite)
+            }
     }
 
     private func tabButton(_ item: Item) -> some View {

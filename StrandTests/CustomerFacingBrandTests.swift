@@ -37,5 +37,9 @@ final class CustomerFacingBrandTests: XCTestCase {
                 XCTAssertFalse(CustomerFacingBrand.text(item).localizedCaseInsensitiveContains("whoop"))
             }
         }
+        for expectation in AppChangelog.expectations {
+            XCTAssertFalse(CustomerFacingBrand.text(expectation.title).localizedCaseInsensitiveContains("whoop"))
+            XCTAssertFalse(CustomerFacingBrand.text(expectation.body).localizedCaseInsensitiveContains("whoop"))
+        }
     }
 }

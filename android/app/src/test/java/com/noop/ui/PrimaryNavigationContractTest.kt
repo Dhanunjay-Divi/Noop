@@ -184,7 +184,7 @@ class PrimaryNavigationContractTest {
         assertFalse(barSlot.contains("showVisualLabel"))
 
         val bottomBar = text
-            .substringAfter("private fun GlassBottomBar(")
+            .substringAfter("private fun ExpandedGlassBottomBarHost(")
             .substringBefore("\ninternal enum class NoopCommandLensEdge")
         assertTrue(bottomBar.contains(".selectableGroup()"))
         assertTrue(bottomBar.contains("val barHeight = labelLayout.barHeightDp.dp + Metrics.space8"))
@@ -203,6 +203,25 @@ class PrimaryNavigationContractTest {
         assertTrue(bottomBar.contains("preferredPadding = Metrics.space24.value"))
         assertTrue(bottomBar.contains("MeniscusNavigationRail("))
         assertTrue(bottomBar.contains("MeniscusNavigationBead("))
+        assertTrue(bottomBar.contains("private fun CompactBottomBar("))
+        assertTrue(bottomBar.contains("private fun FloatingCompactBottomBar("))
+        assertTrue(bottomBar.contains(".testTag(\"noop.tab.compact\")"))
+        assertTrue(bottomBar.contains("R.string.compact_navigation_show"))
+        assertTrue(bottomBar.contains("contentDescription = showNavigation"))
+        assertTrue(bottomBar.contains("R.string.compact_navigation_state"))
+        assertTrue(text.contains("CompactNavigationControlWidth = 136.dp"))
+        assertTrue(text.contains("CompactNavigationDockPrefs.write("))
+        assertTrue(bottomBar.contains("animateDpAsState("))
+        assertTrue(bottomBar.contains("detectHorizontalDragGestures("))
+        assertTrue(bottomBar.contains("R.string.noop_command_lens_move_left"))
+        assertTrue(bottomBar.contains("R.string.noop_command_lens_move_right"))
+        assertTrue(bottomBar.contains("CustomAccessibilityAction(moveLeft)"))
+        assertTrue(bottomBar.contains("CustomAccessibilityAction(moveRight)"))
+        assertTrue(bottomBar.contains(".height(Metrics.navigationBarReservedHeight)"))
+        assertTrue(text.contains("bottomBarVisuallyCompact = bottomBarCompact && density.fontScale < 1.6f"))
+        assertTrue(text.contains("if (bottomBarVisuallyCompact)"))
+        assertTrue(text.contains("Spacer("))
+        assertTrue(text.contains("modifier = Modifier.align(Alignment.BottomCenter)"))
         assertTrue(bottomBar.contains("val compactBeadDiameter = 34.dp"))
         assertTrue(bottomBar.contains("val beadCanvasSize = 42.dp"))
         assertTrue(bottomBar.contains("selectedCenter = animatedLensCenter"))
@@ -221,6 +240,20 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains("Canvas(modifier = modifier)"))
         assertFalse(bottomBar.contains("MovableNoopCommandLens("))
         assertTrue(text.contains("MovableNoopCommandLens("))
+        assertTrue(text.contains("NestedScrollConnection"))
+        assertTrue(text.contains(".nestedScroll(bottomBarScrollConnection)"))
+        assertTrue(text.contains("override fun onPostScroll("))
+        assertTrue(text.contains("consumed = consumed"))
+        assertFalse(text.contains("override fun onPreScroll("))
+        assertTrue(text.contains("with(density) { 72.dp.toPx() }"))
+        assertTrue(text.contains("with(density) { 52.dp.toPx() }"))
+        assertTrue(text.contains("updateCompactNavigationHysteresis("))
+        assertTrue(text.contains("LocalNavigationScrollTailClearance provides"))
+        assertTrue(text.contains("CompactNavigationOverlayFootprint"))
+        val components = uiSource("Components.kt")?.readText()
+        assumeTrue("Components.kt unavailable from ${System.getProperty("user.dir")}", components != null)
+        assertTrue(components!!.contains("LocalNavigationScrollTailClearance.current"))
+        assertTrue(components.contains("bottom = bottomTailPadding"))
     }
 
     @Test
@@ -355,6 +388,42 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains(
             "composable(Destination.Workouts.route) { WorkoutsScreen(viewModel) }"
         ))
+    }
+
+    @Test
+    fun compactNavigationSnapsOnlyAfterAnInwardCornerDrag() {
+        assertEquals(
+            CompactNavigationDockEdge.RIGHT,
+            compactNavigationDockDestination(
+                current = CompactNavigationDockEdge.LEFT,
+                horizontalDragPx = 48f,
+                thresholdPx = 44f,
+            ),
+        )
+        assertEquals(
+            CompactNavigationDockEdge.LEFT,
+            compactNavigationDockDestination(
+                current = CompactNavigationDockEdge.RIGHT,
+                horizontalDragPx = -48f,
+                thresholdPx = 44f,
+            ),
+        )
+        assertEquals(
+            CompactNavigationDockEdge.LEFT,
+            compactNavigationDockDestination(
+                current = CompactNavigationDockEdge.LEFT,
+                horizontalDragPx = 20f,
+                thresholdPx = 44f,
+            ),
+        )
+        assertEquals(
+            CompactNavigationDockEdge.RIGHT,
+            compactNavigationDockDestination(
+                current = CompactNavigationDockEdge.RIGHT,
+                horizontalDragPx = 20f,
+                thresholdPx = 44f,
+            ),
+        )
     }
 
     @Test
@@ -566,6 +635,8 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains("var selectedTabRoute by rememberSaveable(startRoute)"))
         assertTrue(text.contains("val reselected = selectedTabRoute == dest.route"))
         assertTrue(text.contains("nav.returnToTabRoot(dest.route)"))
+        assertTrue(text.contains("compactNavigationStateAfterPrimaryRouteChange("))
+        assertTrue(text.contains("revealedPrimaryTabRoute = destination.route"))
         assertTrue(text.contains("if (popBackStack(route, inclusive = false)) return"))
         assertTrue(text.contains("restoreState = false"))
         assertTrue(text.contains("nav.navigate(it) { launchSingleTop = true }"))
