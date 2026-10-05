@@ -576,7 +576,19 @@ fun AppRoot(
         com.noop.AppDiagnosticsRecorder.setScreen(currentRoute)
         Destination.entries
             .firstOrNull { it.route == currentRoute && it in primaryTabDestinations }
-            ?.let { selectedTabRoute = it.route }
+            ?.let { destination ->
+                val syncedNavigation = compactNavigationStateAfterPrimaryRouteChange(
+                    current = CompactNavigationHysteresisState(
+                        compact = bottomBarCompact,
+                        directionalTravelPx = bottomBarDirectionalTravel,
+                    ),
+                    selectedTabRoute = selectedTabRoute,
+                    revealedPrimaryTabRoute = destination.route,
+                )
+                bottomBarCompact = syncedNavigation.compact
+                bottomBarDirectionalTravel = syncedNavigation.directionalTravelPx
+                selectedTabRoute = destination.route
+            }
     }
 
     // Notification route bridge: StateFlow emits immediately, so this consumes a cold-launch route that
@@ -1671,6 +1683,20 @@ internal data class CompactNavigationHysteresisState(
     val compact: Boolean,
     val directionalTravelPx: Float,
 )
+
+internal fun compactNavigationStateAfterPrimaryRouteChange(
+    current: CompactNavigationHysteresisState,
+    selectedTabRoute: String,
+    revealedPrimaryTabRoute: String,
+): CompactNavigationHysteresisState =
+    if (selectedTabRoute == revealedPrimaryTabRoute) {
+        current
+    } else {
+        CompactNavigationHysteresisState(
+            compact = false,
+            directionalTravelPx = 0f,
+        )
+    }
 
 internal fun updateCompactNavigationHysteresis(
     current: CompactNavigationHysteresisState,

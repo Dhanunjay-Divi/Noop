@@ -141,4 +141,31 @@ class CompactNavigationBehaviorTest {
         )
         assertEquals(reversed, horizontal)
     }
+
+    @Test
+    fun primaryRouteChangeExpandsNavigationAndClearsTravel() {
+        val compact = CompactNavigationHysteresisState(
+            compact = true,
+            directionalTravelPx = -24f,
+        )
+        assertEquals(
+            CompactNavigationHysteresisState(
+                compact = false,
+                directionalTravelPx = 0f,
+            ),
+            compactNavigationStateAfterPrimaryRouteChange(
+                current = compact,
+                selectedTabRoute = "more",
+                revealedPrimaryTabRoute = "today",
+            ),
+        )
+        assertEquals(
+            compact,
+            compactNavigationStateAfterPrimaryRouteChange(
+                current = compact,
+                selectedTabRoute = "today",
+                revealedPrimaryTabRoute = "today",
+            ),
+        )
+    }
 }

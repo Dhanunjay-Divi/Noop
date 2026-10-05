@@ -121,7 +121,7 @@ Last updated: **2026-10-05**
   succeeds; and the final Apple affected wall passes 91/91. The reviewed
   terminology snapshot now records 18,649 occurrences across 1,651 groups,
   with 886 customer entries. The inventory digest is
-  `950fe0dc839618f2ff1afc7db96e732e768a7a335913adf5174682418ecab773`;
+  `d198b9c70a1b1a8d1e763488c17c87b5418bf8f1d6c973fce2b811419bb17c04`;
   the active-allowlist digest is
   `2c4e7f58aa2cd1e4257165788b88137747be277d5e447f0f90f858c3169af904`;
   and the exact audit-tool digest is
@@ -136,6 +136,13 @@ Last updated: **2026-10-05**
   shifted historical line numbers after the reviewed terminology snapshot;
   counts, classifications, rendered-value findings, forbidden mappings, and
   the active allowlist remain unchanged while the snapshot is repinned.
+  Evidence correction `23985cafad3cf67d479166090e1fa21570b30a8e`
+  subsequently passed every hosted context. A final Android review then found
+  that system Back could reveal a different primary root while compact
+  navigation stayed collapsed. The local route synchronizer now expands only
+  for a changed exact primary root and clears partial scroll travel; nested
+  routes remain under their current tab. Full and Demo each pass the affected
+  20-test navigation subset, and both production Kotlin variants compile.
   Private staging remains unchanged at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;

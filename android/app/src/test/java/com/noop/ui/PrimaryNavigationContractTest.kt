@@ -635,6 +635,8 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains("var selectedTabRoute by rememberSaveable(startRoute)"))
         assertTrue(text.contains("val reselected = selectedTabRoute == dest.route"))
         assertTrue(text.contains("nav.returnToTabRoot(dest.route)"))
+        assertTrue(text.contains("compactNavigationStateAfterPrimaryRouteChange("))
+        assertTrue(text.contains("revealedPrimaryTabRoute = destination.route"))
         assertTrue(text.contains("if (popBackStack(route, inclusive = false)) return"))
         assertTrue(text.contains("restoreState = false"))
         assertTrue(text.contains("nav.navigate(it) { launchSingleTop = true }"))

@@ -2,14 +2,14 @@
 
 ## Status
 
-- State: `replacement head pushed; hosted terminology snapshot correction in progress`
+- State: `late Android Back-root review fix locally verified; replacement checks pending`
 - Owner: project team
 - Branch: `codex/mobile-cloud-release-finalization-20261003`
 - Protected base: `1cd401f69dd8b4df75872a830ed33a84918ea344`
 - Product implementation commit:
   `fc2343ff5f96304ccca95fc802d3b6252b467d5b`
 - Current remote PR head:
-  `3671002eff829161fcf9f7950f223afa91414ec5`
+  `23985cafad3cf67d479166090e1fa21570b30a8e`
 - Pull request: `#33`
 
 ## Objective
@@ -148,6 +148,7 @@ scroll timing without changing data, ordering, or card dimensions.
 | Expanded terminology boundary | Audit unit coverage adds source-key fallback, all five shipped Apple catalogs, and Android main/demo/debug resources. Repository summary reports zero customer-visible retired-vendor values and zero forbidden mappings | Static shipped localization values and reviewed fallback paths are neutral across the packaged source sets | Future unreviewed server text or physical-device advertisements |
 | Final October 5 repository wall | Complete Tools test root passes 379 tests with one intentional skip; release controls pass 9/9; required CI verifies 10/10 contexts; all 122 operations records validate; trust, calibration, terminology, localization, claims, legal, privacy, shell, Python, and diff checks pass | The final local source tree satisfies every repository-controlled release policy | Hosted runner execution, protected merge, signing, or physical devices |
 | Hosted terminology snapshot correction | Exact pushed head `3671002eff829161fcf9f7950f223afa91414ec5` started all protected contexts. Release-controls run `37252862331` failed only `test_repository_snapshot_is_current`: the final operations-record additions had shifted historical line numbers after the prior snapshot. A reviewed temporary regeneration kept 18,649 occurrences, 1,651 groups, 886 customer entries, zero customer-visible values, zero forbidden mappings, and the active allowlist unchanged. | The failure is line-only evidence drift, not a customer-copy or classification regression | Replacement hosted execution after the repinned snapshot |
+| Late Android Back-root review remediation | Exact evidence head `23985cafad3cf67d479166090e1fa21570b30a8e` passed all hosted contexts, but final conversation `r4180212377` identified that system Back could reveal a different primary root while leaving compact navigation collapsed. The route synchronizer now expands navigation and clears partial scroll travel only when the revealed exact primary root differs; nested routes in the same tab remain unchanged. Full and Demo each pass `CompactNavigationBehaviorTest` 5/5 and `PrimaryNavigationContractTest` 15/15, with both production Kotlin variants compiled in the same bounded 53-second run. | System Back cannot carry collapsed navigation into a newly revealed primary tab, while nested-route ownership remains stable | Replacement hosted execution and physical Back/TalkBack interaction |
 | Diff hygiene | `git diff --check` passed before the product commit | No whitespace-error regression | Runtime behavior |
 
 The first combined iPhone onboarding run exposed a test-query defect: the
@@ -162,7 +163,7 @@ forbidden active use or customer-visible localization value. The active
 allowlist SHA-256 is
 `2c4e7f58aa2cd1e4257165788b88137747be277d5e447f0f90f858c3169af904`;
 the legacy inventory SHA-256 is
-`950fe0dc839618f2ff1afc7db96e732e768a7a335913adf5174682418ecab773`;
+`d198b9c70a1b1a8d1e763488c17c87b5418bf8f1d6c973fce2b811419bb17c04`;
 and the exact terminology-audit SHA-256 is
 `8c3149dfa7fa1de08289e81cf1bbf56e675a2924c4e9fc2344b294cb93074f49`.
 
@@ -225,7 +226,11 @@ and the exact terminology-audit SHA-256 is
   and October 5 review remediation were pushed normally as
   `3671002eff829161fcf9f7950f223afa91414ec5`. Its first release-controls run
   exposed only the line-number snapshot drift recorded above; the remaining
-  naturally triggered contexts continue without manual dispatch or re-run.
+  naturally triggered contexts continued without manual dispatch or re-run.
+  Evidence correction `23985cafad3cf67d479166090e1fa21570b30a8e`
+  then passed every hosted context and all earlier review conversations were
+  resolved. The final Android Back-root finding recorded above is fixed
+  locally and requires one normal replacement push.
 - Merge only the exact green PR head through protected `main`, then verify the
   resulting protected-main SHA before handing off physical validation.
 
@@ -261,8 +266,8 @@ and the exact terminology-audit SHA-256 is
 ## Next round
 
 1. Regenerate and repin the reviewed terminology inventory after this durable
-   record, then rerun the exact failed local release-control test.
-2. Push one exact snapshot correction to PR `#33`, wait for every required protected
+   record, then rerun the complete local release-control wall.
+2. Push one exact Back-root replacement to PR `#33`, wait for every required protected
    context, and resolve only review threads backed by the final code and
    evidence.
 3. Merge normally only when the exact head is green, then verify protected
