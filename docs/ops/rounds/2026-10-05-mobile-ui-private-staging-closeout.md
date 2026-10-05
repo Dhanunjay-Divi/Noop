@@ -9,7 +9,7 @@
   `f6b19568bac65acfc5e1803862ae7a1aa56696ba`
 - Deployment implementation commit:
   `9b835fe9c81c296a5eb297255c372eb43ef0d60f`
-- Record commit or PR: pending protected follow-up
+- Record commit or PR: protected PR `#34`
 - Environment: private synthetic GCP staging only
 
 ## Objective
