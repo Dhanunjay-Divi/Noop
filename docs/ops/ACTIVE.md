@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-10-04**
+Last updated: **2026-10-05**
 
 ## Authoritative context
 
@@ -75,7 +75,7 @@ Last updated: **2026-10-04**
   terminology gate now parses every shipped Apple and Android localization
   value and reports zero customer-visible legacy-name values. The reviewed
   inventory records 18,644 occurrences across 1,651 groups, with digest
-  `d9c7c30f1c8ae7e363a08d3cde0017a7b78de4f605e1b426286a01a365aa295b`;
+  `783779bed24fe22d987a03d5117f7b2c355223f3102b002c108d92d69d29204a`;
   the unchanged active-allowlist digest is
   `b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`.
   The exact protected release-control subset passes 260/260 and the complete
@@ -90,6 +90,18 @@ Last updated: **2026-10-04**
   production timing unchanged, and passes the exact case 3/3. Xcode emitted
   the complete passing test summary before hanging during local result-bundle
   finalization; the process was terminated only after all three tests passed.
+  Replacement head `ea7e34ccc8ae858b4a77e4282ca7cb03c8f115f5` then passed every
+  hosted Android, macOS, package, policy, localization, and repository-control
+  boundary. Apple run `37244321996` executed all 44 iOS UI cases with one
+  intentional skip and failed only the app-report review case: its 20-second
+  readiness wait expired on the hosted simulator, after which five dependent
+  attachment and action assertions cascaded. The test now waits for explicit
+  review readiness, fails fast if generation does not complete, waits for the
+  required attachment rows, and scrolls to the stable send-action identifier
+  before checking the disclosure. The exact local result bundle records 1/1
+  passed with zero failures. Xcode later timed out while collecting simulator
+  diagnostics, but the test result and command exit status were already
+  successful. Product behavior and customer copy are unchanged.
   Private staging remains unchanged at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;

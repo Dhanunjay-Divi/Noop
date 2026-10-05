@@ -535,12 +535,23 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "app-report-consent")
 
         app.buttons["Build report"].tap()
-        XCTAssertTrue(app.staticTexts["Report ready"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.staticTexts["app-session-current.jsonl"].exists)
-        XCTAssertTrue(app.staticTexts["meta.json"].exists)
+        guard app.staticTexts["Report ready"].waitForExistence(timeout: 120) else {
+            XCTFail("The report did not finish building for review.")
+            return
+        }
+        XCTAssertTrue(
+            app.staticTexts["app-session-current.jsonl"]
+                .waitForExistence(timeout: 10)
+        )
+        XCTAssertTrue(app.staticTexts["meta.json"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["raw-capture.jsonl"].exists)
         XCTAssertFalse(app.staticTexts["screenshot.png"].exists)
-        XCTAssertTrue(app.buttons["Send feedback"].exists)
+
+        let sendFeedback = app.buttons["noop.app-report.send"]
+        guard scrollToHittable(sendFeedback, in: app, attempts: 10) else {
+            XCTFail("The report did not expose its reviewed send action.")
+            return
+        }
         XCTAssertFalse(app.buttons["Share ZIP"].exists)
         XCTAssertTrue(
             app.staticTexts.matching(
@@ -552,7 +563,7 @@ final class NOOPiOSUITests: XCTestCase {
         )
         keepScreenshot(app, name: "app-report-review")
 
-        app.buttons["Send feedback"].tap()
+        sendFeedback.tap()
         XCTAssertTrue(
             app.descendants(matching: .any)["noop.app-report.delivery"]
                 .waitForExistence(timeout: 20)
