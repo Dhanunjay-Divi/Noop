@@ -2,14 +2,15 @@
 
 ## Status
 
-- State: `mobile product integrated; corrected private staging deployed and verified; lifecycle follow-up protected integration pending`
+- State: `completed on protected main; corrected private staging deployed and verified; physical validation pending`
 - Owner: project team
 - Branch: `codex/mobile-ui-private-staging-rollout-20261005`
 - Product merge: protected PR `#33`, merge
   `f6b19568bac65acfc5e1803862ae7a1aa56696ba`
 - Deployment implementation commit:
   `9b835fe9c81c296a5eb297255c372eb43ef0d60f`
-- Record commit or PR: protected PR `#34`
+- Deployment follow-up merge: protected PR `#34`, merge
+  `9971d66c38c3d9376a6115d8ca312c84356fb875`
 - Environment: private synthetic GCP staging only
 
 ## Objective
@@ -73,6 +74,11 @@ Success requires:
   preserves complete metric history and Trends interaction, uses the movable
   geometric NOOP `N`, and routes both customer band entries through unified
   live discovery.
+- Verified PR `#34` passed all exact-head hosted checks and merged through
+  protected `main` at
+  `9971d66c38c3d9376a6115d8ca312c84356fb875`. The merge contains the
+  lifecycle role, secret-version, account-erasure continuation, deployment
+  record, and hosted-format corrections described in this round.
 - Completed an independent read-only customer-brand audit. Apple, Android,
   web, notification, and export boundaries expose zero customer-visible
   retired vendor values; internal protocol, persisted, provenance, import,
@@ -188,6 +194,7 @@ Success requires:
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | PR `#33` protected integration | Merged at `f6b19568b`; required contexts successful | The consolidated mobile product is on protected `main` | Physical behavior or cloud rollout |
+| PR `#34` protected integration | Merged at `9971d66c`; exact-head contexts successful | The corrected lifecycle and deployment follow-up is on protected `main` | Physical behavior or public launch |
 | Independent customer-brand audit | Terminology and i18n audits passed; zero customer-visible retired vendor values | Current Apple, Android, web, notification, and export boundaries are neutral | Future dynamic content outside the sanitizer contracts |
 | Storage cleanup | Free space increased from about `16 GiB` to `41 GiB` | Stale regeneratable NOOP build output was removed | Cloud cost or simulator data reduction |
 | Focused Python wall | Database-role and deployment-contract tests passed; managed lifecycle `12/12`; account cloud erasure `6/6`; PostgreSQL account-erasure regression passed | Least-privilege grants and the repeated identity-erasure phase behave as designed | Production load or external identity-provider availability |
@@ -224,6 +231,8 @@ Success requires:
   `codex/mobile-ui-private-staging-rollout-20261005`.
 - Deployment implementation commit:
   `9b835fe9c81c296a5eb297255c372eb43ef0d60f`.
+- Deployment follow-up PR `#34` merged to protected `main` at
+  `9971d66c38c3d9376a6115d8ca312c84356fb875`.
 - Repository visibility: public by owner decision. Credentials, secure local
   variables, supplier binaries, firmware, signing material, personal data, and
   health data remain excluded.
@@ -252,8 +261,7 @@ Success requires:
 
 ## Next round
 
-1. Integrate this lifecycle follow-up through protected `main`.
-2. Start the signed iPhone and Android physical-validation handoff from clean
+1. Start the signed iPhone and Android physical-validation handoff from clean
    protected `main`, preserving the existing comparison transport and exact
    supplier quarantine.
 
