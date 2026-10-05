@@ -4,9 +4,9 @@ Last updated: **2026-10-05**
 
 ## Authoritative context
 
-- The current PR `#33` replacement candidate is on
-  `codex/mobile-cloud-release-finalization-20261003`, based exactly on GitHub
-  protected merge `1cd401f69dd8b4df75872a830ed33a84918ea344`.
+- PR `#33` is merged on protected `main` at
+  `f6b19568bac65acfc5e1803862ae7a1aa56696ba`; the final product and review
+  history follows.
   Product commit `fc2343ff5f96304ccca95fc802d3b6252b467d5b`
   removes Android's invisible measured-height Today gaps, gives both phones a
   calmer scroll-reactive floating navigation disclosure that snaps and
@@ -187,18 +187,19 @@ Last updated: **2026-10-05**
   `searching` and neutral-warning arguments independently; its focused class
   passes, and the complete Full and Demo suites each pass 5,300 tests with
   seven intentional skips.
-  Private staging still serves source merge
-  `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
-  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`,
-  but `server/app/static` is part of the server image and changed in this
-  candidate. After protected integration, the exact protected merge therefore
-  requires one clean immutable build, vulnerability scan, guarded migration
-  receipt, runtime rollout, private verifier, synthetic smoke, configuration
-  restoration, and zero-drift plan. The replacement push, protected hosted
-  integration, cloud rollout, and every signed or physical-device gate remain
-  pending.
+  Private staging now serves immutable digest
+  `sha256:36ad895879c84c226b006469f4ceb8f2fb5cf1abd5c5e5c761fa5233ec698192`
+  from deployment implementation `9b835fe9c81c296a5eb297255c372eb43ef0d60f`.
+  The image scan reports zero vulnerabilities; guarded migration
+  `noop-staging-migrate-q8df7`, both manual lifecycle jobs, resumed scheduled
+  executions, the private verifier, the complete 202-second fictional managed
+  smoke, one-phone/zero-debug-token restoration, and the final no-drift plan
+  pass. The follow-up repairs lifecycle pool sizing, Secret Manager version
+  detection, least-privilege erasure grants, and repeated account-identity
+  erasure continuation. Its protected integration and every signed or
+  physical-device gate remain pending.
 
-- The current follow-up candidate is on
+- Earlier PR `#33` follow-up history was developed on
   `codex/mobile-cloud-release-finalization-20261003`, based on protected merge
   `1cd401f69dd8b4df75872a830ed33a84918ea344`. Exact-main Apple workflow
   `37108981075` isolated one intermittent Recovery date-scrub failure after the
