@@ -5,11 +5,23 @@
     "customer": 885,
     "fixture": 6010,
     "generated": 21,
-    "historical": 3465,
+    "historical": 3484,
     "import": 870,
     "persisted": 688
   },
   "entries": [
+    {
+      "category": "historical",
+      "lineNumbers": [
+        26
+      ],
+      "occurrenceCount": 1,
+      "path": ".agents/skills/noop-ops/SKILL.md",
+      "sha256": "c332a967c8d68c0d26ea0344004019218a1000313e0573d795aa4b57b9509d3c",
+      "tokenCounts": {
+        "whoop": 1
+      }
+    },
     {
       "category": "historical",
       "lineNumbers": [
@@ -41,14 +53,15 @@
     {
       "category": "historical",
       "lineNumbers": [
-        10,
-        36
+        7,
+        12,
+        40
       ],
-      "occurrenceCount": 2,
+      "occurrenceCount": 3,
       "path": ".agents/skills/noop-ops/references/supplier-band-integration.md",
-      "sha256": "047accefdb725cf8eb5b001f7f46556c62fb72e5eb6967dcc44a5b6ee25a9633",
+      "sha256": "f18f0fbb02596686ae526231c111c4cf3694cd8f2dacafae586bb010feb0d4bb",
       "tokenCounts": {
-        "whoop": 2
+        "whoop": 3
       }
     },
     {
@@ -147,7 +160,7 @@
     {
       "category": "historical",
       "lineNumbers": [
-        38
+        39
       ],
       "occurrenceCount": 1,
       "path": "AGENTS.md",
@@ -37119,19 +37132,43 @@
     {
       "category": "historical",
       "lineNumbers": [
-        46,
-        131,
-        220,
-        223,
-        228,
-        257,
-        258
+        7,
+        23,
+        41,
+        53,
+        54,
+        55,
+        55,
+        67,
+        68,
+        109,
+        143,
+        145
       ],
-      "occurrenceCount": 7,
-      "path": "docs/handoff/NOOP-PRODUCTION-PHYSICAL-VALIDATION-HANDOFF-2026-10-02.md",
-      "sha256": "0e935009120ef46f7369543b87fb9fda395a01b897402a4180926c7d259f5d43",
+      "occurrenceCount": 12,
+      "path": "docs/handoff/NOOP-DUAL-BAND-TWO-PHONE-TEST-HANDOFF-2026-10-05.md",
+      "sha256": "8ea1f60baf2a6150fa4b0a25bd91189583568b1d417cd30dc70e0c62eb708cd1",
       "tokenCounts": {
-        "whoop": 7
+        "whoop": 12
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        12,
+        50,
+        135,
+        224,
+        227,
+        232,
+        261,
+        262
+      ],
+      "occurrenceCount": 8,
+      "path": "docs/handoff/NOOP-PRODUCTION-PHYSICAL-VALIDATION-HANDOFF-2026-10-02.md",
+      "sha256": "ba87795410d65340606c26c38828f7e8926389d4d4c4803939b25eb24f68d671",
+      "tokenCounts": {
+        "whoop": 8
       }
     },
     {
@@ -37333,37 +37370,38 @@
     {
       "category": "historical",
       "lineNumbers": [
-        281,
-        335,
-        340,
-        383,
-        406,
-        581,
-        584,
-        645,
-        805,
-        860,
-        881,
-        883,
-        938,
+        9,
+        289,
+        343,
+        348,
+        391,
+        414,
+        589,
+        592,
+        653,
+        813,
+        868,
+        889,
+        891,
         946,
-        958,
-        964,
-        1019,
-        1064,
-        1132,
-        1180,
-        1201,
-        1345,
-        1480,
-        1586,
-        1590
+        954,
+        966,
+        972,
+        1027,
+        1072,
+        1140,
+        1188,
+        1209,
+        1353,
+        1488,
+        1594,
+        1598
       ],
-      "occurrenceCount": 25,
+      "occurrenceCount": 26,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "fd1fa51f1fd5111eed6f6d36537b4c125b87be0e2280213cfb0bba7cebfc0950",
+      "sha256": "b93126bbd57a16e15dca1e18d8a99be6c4211fbc1bea97c3399d1d4aaf229944",
       "tokenCounts": {
-        "whoop": 16,
+        "whoop": 17,
         "whoop-first": 1,
         "whoopstore": 8
       }
@@ -38098,6 +38136,19 @@
     {
       "category": "historical",
       "lineNumbers": [
+        14,
+        45
+      ],
+      "occurrenceCount": 2,
+      "path": "docs/ops/rounds/2026-10-05-dual-band-two-phone-handoff.md",
+      "sha256": "196e5d9bc8bec692f3ba390a24efaaf5bdaf57d48d6784dbbc16915a328dacaf",
+      "tokenCounts": {
+        "whoop": 2
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
         221
       ],
       "occurrenceCount": 1,
@@ -38110,30 +38161,31 @@
     {
       "category": "historical",
       "lineNumbers": [
-        12,
-        29,
-        36,
+        7,
+        13,
+        30,
         37,
         38,
-        40,
-        40,
+        39,
+        41,
         41,
         42,
         43,
         44,
-        48,
+        45,
         49,
-        53,
-        58,
-        79,
-        115,
-        115
+        50,
+        54,
+        59,
+        80,
+        116,
+        116
       ],
-      "occurrenceCount": 18,
+      "occurrenceCount": 19,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "7185f95f6df15ce4f8ffcbebc3d44ceafc68f26f95df2883441d34738526a1f3",
+      "sha256": "b32aedefb491bf4ad9bd3b679d7303021460d6ff6322497228246533081d2319",
       "tokenCounts": {
-        "whoop": 11,
+        "whoop": 12,
         "whoop-first": 1,
         "whoopstore": 6
       }
@@ -40352,7 +40404,7 @@
       }
     }
   ],
-  "occurrenceCount": 18675,
+  "occurrenceCount": 18694,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

@@ -9,6 +9,10 @@ clean protected `main` and all required checks are green. It guides the next
 device-connected agent through signed iPhone and Android validation without
 weakening supplier, privacy, account, or release gates.
 
+For separate-phone WHOOP and NOOP Band testing, also read
+`NOOP-DUAL-BAND-TWO-PHONE-TEST-HANDOFF-2026-10-05.md`. It defines the parallel
+isolation and required iPhone/Android cross-over topology.
+
 Simulator builds do not prove BLE, background execution, battery use, haptics,
 retention, notification delivery, sensor accuracy, or physical ownership.
 

@@ -4,6 +4,14 @@ Last updated: **2026-10-05**
 
 ## Authoritative context
 
+- Protected main at
+  `84ce9006e7a87078d7991b7dbd3a3425c77cb698` is green across all ten required
+  checks. The next separate-phone WHOOP and NOOP Band run must use
+  `docs/handoff/NOOP-DUAL-BAND-TWO-PHONE-TEST-HANDOFF-2026-10-05.md`, keep one
+  collector/band per lane, preserve the supplier artifact stop condition, and
+  cross the bands between iPhone and Android before claiming platform parity.
+  No physical run was performed by this documentation round.
+
 - Exact protected `main` at
   `366ed412f450a997daf378210bb04b4e2a8d207d` completed a fresh cross-platform
   UI side-by-side review without requiring product-source changes. All ten
