@@ -102,7 +102,9 @@ class BandPairingDiscoveryContractTest {
             .substringAfter("internal fun BandPairingDiscoveryStage(")
 
         assertTrue(typeStep.contains("BandPairingDiscoveryStage(searching = false)"))
-        assertTrue(picker.contains("BandPairingDiscoveryStage(searching = searching)"))
+        assertTrue(picker.contains("BandPairingDiscoveryStage("))
+        assertTrue(picker.contains("searching = searching"))
+        assertTrue(picker.contains("supportingWarning = if (searching)"))
         assertFalse(picker.contains("CircularProgressIndicator("))
         assertTrue(picker.contains("if (!searching)"))
         assertTrue(stage.contains("rememberPoseStill()"))

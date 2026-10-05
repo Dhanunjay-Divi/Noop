@@ -121,7 +121,7 @@ Last updated: **2026-10-05**
   succeeds; and the final Apple affected wall passes 91/91. The reviewed
   terminology snapshot now records 18,674 occurrences across 1,652 groups,
   with 885 customer entries. The inventory digest is
-  `83b2fef6b9d05507bfd47799c740a2538a96775e38843799098cecbc45f5b90d`;
+  `ae9a46996c462849909fb40ca4fc322d4a36281f7b72a98e4dfaca3536387a17`;
   the active-allowlist digest is
   `f3fa5910bc72e396488d87af06877c79ff2def2724a5fb451e7f30a334120345`;
   and the exact audit-tool digest is
@@ -181,6 +181,12 @@ Last updated: **2026-10-05**
   server suite passes 612 tests with 215 integration-environment skips, Ruff
   passes, and a black-box server test rejects the retired vendor name in
   `Content-Disposition`.
+  Exact-head Android run `37269212467` then built the Full APK successfully
+  and failed only one stale source-shape assertion that expected the shared
+  discovery-stage call to remain on one line. The contract now verifies the
+  `searching` and neutral-warning arguments independently; its focused class
+  passes, and the complete Full and Demo suites each pass 5,300 tests with
+  seven intentional skips.
   Private staging still serves source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`,
