@@ -121,7 +121,7 @@ Last updated: **2026-10-05**
   succeeds; and the final Apple affected wall passes 91/91. The reviewed
   terminology snapshot now records 18,649 occurrences across 1,651 groups,
   with 886 customer entries. The inventory digest is
-  `9bb90d4578acc020b05557bc5820211b92ac48d67839cb73b0b3724b0a899936`;
+  `950fe0dc839618f2ff1afc7db96e732e768a7a335913adf5174682418ecab773`;
   the active-allowlist digest is
   `2c4e7f58aa2cd1e4257165788b88137747be277d5e447f0f90f858c3169af904`;
   and the exact audit-tool digest is
@@ -130,6 +130,12 @@ Last updated: **2026-10-05**
   Release controls pass 9/9, required CI verifies all 10 contexts, all 122
   operations records validate, and trust, calibration, localization, claims,
   legal, privacy, shell, Python, and diff checks pass on the same tree.
+  Exact pushed head `3671002eff829161fcf9f7950f223afa91414ec5`
+  triggered every protected context normally. Release-controls run
+  `37252862331` failed only because these final operations-record additions
+  shifted historical line numbers after the reviewed terminology snapshot;
+  counts, classifications, rendered-value findings, forbidden mappings, and
+  the active allowlist remain unchanged while the snapshot is repinned.
   Private staging remains unchanged at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;

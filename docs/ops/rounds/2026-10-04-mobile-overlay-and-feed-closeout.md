@@ -2,14 +2,14 @@
 
 ## Status
 
-- State: `hosted app-report review correction locally verified; replacement checks pending`
+- State: `replacement head pushed; hosted terminology snapshot correction in progress`
 - Owner: project team
 - Branch: `codex/mobile-cloud-release-finalization-20261003`
 - Protected base: `1cd401f69dd8b4df75872a830ed33a84918ea344`
 - Product implementation commit:
   `fc2343ff5f96304ccca95fc802d3b6252b467d5b`
 - Current remote PR head:
-  `ea7e34ccc8ae858b4a77e4282ca7cb03c8f115f5`
+  `3671002eff829161fcf9f7950f223afa91414ec5`
 - Pull request: `#33`
 
 ## Objective
@@ -147,6 +147,7 @@ scroll timing without changing data, ordering, or card dimensions.
 | Apple review remediation | Integrated iOS Simulator build succeeds. The final affected macOS wall passes 91/91 across Bluetooth consent, device state, customer-brand rendering, key-metric plurals, complete history, and shell contracts. StrandDesign remains 59/59 | Apple source compiles with family persistence, supplier return, macOS history routing, iPad hover, localized plurals, exclusive drag/tap, and physical RTL dock mapping | Signed install, physical pointer/VoiceOver behavior, or real BLE |
 | Expanded terminology boundary | Audit unit coverage adds source-key fallback, all five shipped Apple catalogs, and Android main/demo/debug resources. Repository summary reports zero customer-visible retired-vendor values and zero forbidden mappings | Static shipped localization values and reviewed fallback paths are neutral across the packaged source sets | Future unreviewed server text or physical-device advertisements |
 | Final October 5 repository wall | Complete Tools test root passes 379 tests with one intentional skip; release controls pass 9/9; required CI verifies 10/10 contexts; all 122 operations records validate; trust, calibration, terminology, localization, claims, legal, privacy, shell, Python, and diff checks pass | The final local source tree satisfies every repository-controlled release policy | Hosted runner execution, protected merge, signing, or physical devices |
+| Hosted terminology snapshot correction | Exact pushed head `3671002eff829161fcf9f7950f223afa91414ec5` started all protected contexts. Release-controls run `37252862331` failed only `test_repository_snapshot_is_current`: the final operations-record additions had shifted historical line numbers after the prior snapshot. A reviewed temporary regeneration kept 18,649 occurrences, 1,651 groups, 886 customer entries, zero customer-visible values, zero forbidden mappings, and the active allowlist unchanged. | The failure is line-only evidence drift, not a customer-copy or classification regression | Replacement hosted execution after the repinned snapshot |
 | Diff hygiene | `git diff --check` passed before the product commit | No whitespace-error regression | Runtime behavior |
 
 The first combined iPhone onboarding run exposed a test-query defect: the
@@ -161,7 +162,7 @@ forbidden active use or customer-visible localization value. The active
 allowlist SHA-256 is
 `2c4e7f58aa2cd1e4257165788b88137747be277d5e447f0f90f858c3169af904`;
 the legacy inventory SHA-256 is
-`9bb90d4578acc020b05557bc5820211b92ac48d67839cb73b0b3724b0a899936`;
+`950fe0dc839618f2ff1afc7db96e732e768a7a335913adf5174682418ecab773`;
 and the exact terminology-audit SHA-256 is
 `8c3149dfa7fa1de08289e81cf1bbf56e675a2924c4e9fc2344b294cb93074f49`.
 
@@ -221,8 +222,10 @@ and the exact terminology-audit SHA-256 is
   correction was pushed as `ea7e34ccc8ae858b4a77e4282ca7cb03c8f115f5`.
   That exact head again passed every non-iOS boundary and exposed only the
   bounded app-report review wait recorded above. The local timing correction
-  and October 5 review remediation must be committed, pushed normally, and run
-  through the same protected contexts.
+  and October 5 review remediation were pushed normally as
+  `3671002eff829161fcf9f7950f223afa91414ec5`. Its first release-controls run
+  exposed only the line-number snapshot drift recorded above; the remaining
+  naturally triggered contexts continue without manual dispatch or re-run.
 - Merge only the exact green PR head through protected `main`, then verify the
   resulting protected-main SHA before handing off physical validation.
 
@@ -258,8 +261,8 @@ and the exact terminology-audit SHA-256 is
 ## Next round
 
 1. Regenerate and repin the reviewed terminology inventory after this durable
-   record, then run the complete local release-control wall.
-2. Push one exact replacement to PR `#33`, wait for every required protected
+   record, then rerun the exact failed local release-control test.
+2. Push one exact snapshot correction to PR `#33`, wait for every required protected
    context, and resolve only review threads backed by the final code and
    evidence.
 3. Merge normally only when the exact head is green, then verify protected
