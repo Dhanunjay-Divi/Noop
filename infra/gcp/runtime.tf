@@ -1286,6 +1286,10 @@ resource "google_cloud_run_v2_job" "feedback_lifecycle" {
           value = "2"
         }
         env {
+          name  = "NOOP_SAFETY_WORKER_ENABLED"
+          value = "false"
+        }
+        env {
           name  = "NOOP_MANAGED_STORAGE_ENABLED"
           value = "false"
         }

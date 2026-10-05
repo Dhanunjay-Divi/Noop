@@ -91,6 +91,14 @@ run "feedback_lifecycle_can_drain_with_ingestion_disabled" {
   }
 
   assert {
+    condition = anytrue([
+      for environment in google_cloud_run_v2_job.feedback_lifecycle[0].template[0].template[0].containers[0].env :
+      environment.name == "NOOP_SAFETY_WORKER_ENABLED" && environment.value == "false"
+    ])
+    error_message = "Feedback lifecycle must disable the unrelated safety worker within its bounded database pool."
+  }
+
+  assert {
     condition = alltrue([
       for environment in google_cloud_run_v2_job.managed_lifecycle[0].template[0].template[0].containers[0].env :
       !startswith(environment.name, "NOOP_FEEDBACK_")

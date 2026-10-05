@@ -4156,26 +4156,61 @@ class PostgresManagedRepository:
                             """,
                             account_id,
                         )
+                        if scope == "account":
+                            identity_phase = await connection.fetchrow(
+                                """
+                                SELECT
+                                    EXISTS (
+                                        SELECT 1
+                                        FROM managed_erasure_targets
+                                        WHERE erasure_job_id = $1
+                                          AND target_kind = 'identity'
+                                          AND target_partition = 'firebase_auth'
+                                          AND status IN ('pending', 'running')
+                                    ) AS identity_pending,
+                                    EXISTS (
+                                        SELECT 1
+                                        FROM managed_erasure_targets
+                                        WHERE erasure_job_id = $1
+                                          AND target_kind = 'database'
+                                          AND target_partition = 'managed_account'
+                                          AND status = 'completed'
+                                    ) AS database_completed,
+                                    EXISTS (
+                                        SELECT 1
+                                        FROM managed_erasure_targets
+                                        WHERE erasure_job_id = $1
+                                          AND target_kind = 'object_storage'
+                                          AND target_partition = 'managed_chunks'
+                                          AND status = 'completed'
+                                    ) AS object_storage_completed,
+                                    EXISTS (
+                                        SELECT 1
+                                        FROM managed_account_cloud_erasure_tombstones
+                                        WHERE account_id = $2
+                                          AND erasure_job_id = $1
+                                          AND erasure_scope = 'account'
+                                    ) AS tombstone_exists
+                                """,
+                                job["erasure_job_id"],
+                                account_id,
+                            )
+                            if identity_phase["identity_pending"]:
+                                if (
+                                    account_status != "erased"
+                                    or not identity_phase["database_completed"]
+                                    or not identity_phase["object_storage_completed"]
+                                    or not identity_phase["tombstone_exists"]
+                                ):
+                                    raise ManagedConflictError(
+                                        "managed identity erasure lost its "
+                                        "completion fence"
+                                    )
+                                continue
                         if account_status != "erasure_pending":
                             raise ManagedConflictError(
                                 "managed account erasure lost its account fence"
                             )
-                    if scope == "account":
-                        identity_target_exists = await connection.fetchval(
-                            """
-                            SELECT EXISTS (
-                                SELECT 1
-                                FROM managed_erasure_targets
-                                WHERE erasure_job_id = $1
-                                  AND target_kind = 'identity'
-                                  AND target_partition = 'firebase_auth'
-                                  AND status IN ('pending', 'running')
-                            )
-                            """,
-                            job["erasure_job_id"],
-                        )
-                        if identity_target_exists:
-                            continue
                     includes_raw = scope in {
                         "raw_chunks",
                         "all_managed_data",

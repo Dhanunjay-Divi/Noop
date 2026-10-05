@@ -153,7 +153,27 @@ def test_runtime_function_allowlist_matches_direct_server_calls() -> None:
         )
     )
 
-    assert direct_calls == script.RUNTIME_FUNCTIONS
+    assert direct_calls == script.RUNTIME_DIRECT_FUNCTIONS
+    assert script.RUNTIME_FUNCTIONS == (
+        script.RUNTIME_DIRECT_FUNCTIONS | script.RUNTIME_INDIRECT_FUNCTIONS
+    )
+    assert script.RUNTIME_INDIRECT_FUNCTIONS == {
+        "noop_managed_account_erasure_context",
+        "noop_managed_formula_shadow_erasure_context",
+    }
+    account_erasure_migration = (
+        ROOT / "server" / "migrations" / "052_managed_account_cloud_erasure.sql"
+    ).read_text(encoding="utf-8")
+    formula_erasure_migration = (
+        ROOT
+        / "server"
+        / "migrations"
+        / "057_managed_formula_shadow_derived_erasure.sql"
+    ).read_text(encoding="utf-8")
+    assert "noop_managed_account_erasure_context" in account_erasure_migration
+    assert (
+        "noop_managed_formula_shadow_erasure_context" in formula_erasure_migration
+    )
 
 
 def test_provisioning_manifest_matches_every_postgresql_migration() -> None:
@@ -232,6 +252,12 @@ def test_runtime_grants_are_dml_only_and_function_specific() -> None:
             ("daily_metrics_id_seq", "daily_metrics"),
         ),
         function_signatures={
+            "noop_managed_account_erasure_context": (
+                'public."noop_managed_account_erasure_context"(uuid)'
+            ),
+            "noop_managed_formula_shadow_erasure_context": (
+                'public."noop_managed_formula_shadow_erasure_context"(uuid)'
+            ),
             "noop_erase_managed_account_cloud_state": (
                 'public."noop_erase_managed_account_cloud_state"'
                 "(uuid, uuid, timestamptz)"
@@ -283,6 +309,16 @@ def test_runtime_grants_are_dml_only_and_function_specific() -> None:
         'public."managed_social_profiles_id_seq" TO "noop_managed_api"'
     ) in statements
     assert not any("daily_metrics_id_seq" in statement for statement in statements)
+    assert (
+        "GRANT EXECUTE ON FUNCTION "
+        'public."noop_managed_account_erasure_context"'
+        '(uuid) TO "noop_managed_api"'
+    ) in statements
+    assert (
+        "GRANT EXECUTE ON FUNCTION "
+        'public."noop_managed_formula_shadow_erasure_context"'
+        '(uuid) TO "noop_managed_api"'
+    ) in statements
     assert (
         "GRANT EXECUTE ON FUNCTION "
         'public."noop_erase_managed_account_cloud_state"'
@@ -347,7 +383,15 @@ def test_runtime_profiles_separate_legacy_managed_feedback_and_ownership_data() 
         "managed_social_profiles",
         "unified_managed_account_links",
     }
-    assert allowed["managed-lifecycle"] == allowed["managed-processor"]
+    assert allowed["managed-lifecycle"] == {
+        "noop_schema_migrations",
+        "installation_credentials",
+        "managed_accounts",
+        "managed_social_profiles",
+        "unified_account_principals",
+        "unified_managed_account_links",
+        "unified_ownership_account_links",
+    }
     assert allowed["feedback-lifecycle"] == {
         "noop_schema_migrations",
         "feedback_reports",
@@ -356,9 +400,79 @@ def test_runtime_profiles_separate_legacy_managed_feedback_and_ownership_data() 
         "ownership_accounts" not in profile_relations
         for profile_relations in allowed.values()
     )
+    assert "unified_ownership_account_links" in allowed["managed-lifecycle"]
     assert all(
-        "unified_ownership_account_links" not in profile_relations
-        for profile_relations in allowed.values()
+        "unified_ownership_account_links" not in allowed[profile]
+        for profile in script.RUNTIME_PROFILES
+        if profile != "managed-lifecycle"
+    )
+
+
+def test_managed_lifecycle_unified_account_grants_are_erasure_only() -> None:
+    script = load_script()
+    role = "noop_managed_lifecycle"
+    statements = script.runtime_grant_statements(
+        role,
+        profile="managed-lifecycle",
+        relations=(
+            "noop_schema_migrations",
+            "managed_accounts",
+            "unified_account_principals",
+            "unified_managed_account_links",
+            "unified_ownership_account_links",
+        ),
+        sequences=(),
+        function_signatures={
+            "noop_managed_account_erasure_context": (
+                'public."noop_managed_account_erasure_context"(uuid)'
+            ),
+            "noop_managed_formula_shadow_erasure_context": (
+                'public."noop_managed_formula_shadow_erasure_context"(uuid)'
+            ),
+            "noop_erase_managed_account_cloud_state": (
+                'public."noop_erase_managed_account_cloud_state"'
+                "(uuid, uuid, timestamptz)"
+            ),
+            "noop_managed_append_change": (
+                'public."noop_managed_append_change"(uuid, character, text)'
+            ),
+        },
+    )
+
+    assert (
+        "GRANT SELECT ON TABLE "
+        f'public."unified_account_principals" TO "{role}"'
+    ) in statements
+    assert (
+        "GRANT SELECT, DELETE ON TABLE "
+        f'public."unified_managed_account_links" TO "{role}"'
+    ) in statements
+    assert (
+        "GRANT SELECT ON TABLE "
+        f'public."unified_ownership_account_links" TO "{role}"'
+    ) in statements
+    for column in ("status", "version", "updated_at", "retired_at"):
+        assert (
+            f'GRANT UPDATE ("{column}") ON TABLE '
+            f'public."unified_account_principals" TO "{role}"'
+        ) in statements
+    assert not any(
+        privilege in statement
+        and 'public."unified_account_principals"' in statement
+        for statement in statements
+        for privilege in ("INSERT", "DELETE")
+    )
+    assert not any(
+        privilege in statement
+        and 'public."unified_ownership_account_links"' in statement
+        for statement in statements
+        for privilege in ("INSERT", "UPDATE", "DELETE")
+    )
+    assert not any(
+        privilege in statement
+        and 'public."unified_managed_account_links"' in statement
+        for statement in statements
+        for privilege in ("INSERT", "UPDATE")
     )
 
 
