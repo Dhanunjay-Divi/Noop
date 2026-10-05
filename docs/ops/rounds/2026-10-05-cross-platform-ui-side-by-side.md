@@ -2,14 +2,14 @@
 
 ## Status
 
-- State: `completed locally; protected main unchanged and green; physical validation pending`
+- State: `completed locally; PR #36 integration pending; physical validation pending`
 - Owner: project team
 - Branch: `codex/cross-platform-ui-review-20261005`
 - Start commit:
   `366ed412f450a997daf378210bb04b4e2a8d207d`
 - End implementation commit:
   `366ed412f450a997daf378210bb04b4e2a8d207d` (no product-source change)
-- Record commit or PR: commit containing this record
+- Record commit or PR: PR `#36`
 
 ## Objective
 
@@ -144,12 +144,12 @@ band claim.
 
 ## Git and release state
 
-- Changed paths: this round record, `docs/ops/ACTIVE.md`, and
-  `docs/ops/rounds/INDEX.md`; product source is unchanged.
-- Commits: documentation-only closeout commit containing this record.
+- Changed paths: operations records, generated terminology inventory, and the
+  reviewed required-CI source pin; product source is unchanged.
+- Commits: review closeout plus generated-evidence trust-pin correction.
 - Branch and remote state: isolated review branch from exact protected
-  `origin/main`; the older September Android step-source checkout remains dirty
-  with unrelated user work and was not modified.
+  `origin/main`, proposed as PR `#36`; the older September Android step-source
+  checkout remains dirty with unrelated user work and was not modified.
 - Repository visibility verified: public by current owner decision.
 - Version/build impact: none.
 - Release or distribution impact: none.
