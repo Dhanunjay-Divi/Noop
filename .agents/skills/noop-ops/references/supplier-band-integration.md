@@ -3,12 +3,16 @@
 Use this reference for the optional supplier transport and its source-qualified
 metrics. Current branch, verification, artifact hashes, and next commands remain
 in `docs/ops/ACTIVE.md`, the newest supplier operations round, and
-`docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`.
+`docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`. For separate-phone
+WHOOP and NOOP Band testing, also use
+`docs/handoff/NOOP-DUAL-BAND-TWO-PHONE-TEST-HANDOFF-2026-10-05.md`.
 
 ## Stable Boundaries
 
 - Preserve the existing WHOOP comparison transport. Do not remove, relabel, or
   route around it while qualifying supplier hardware.
+- Keep one collector and band per lane, then cross the bands between iPhone and
+  Android before claiming cross-platform transport support.
 - The owner-validated product baseline is commit
   `7ca94bf8ab79375ce8bc363a2718aae2bebed710`. Treat its connection, live-HR,
   native day-step, and sleep behavior as relevant physical evidence to preserve,

@@ -26,6 +26,7 @@ and protected `main` is green, the next device-connected agent must prioritize
 the signed iPhone and Android install/validation round:
 
 1. Start from clean protected `main`, run the context snapshot, and read
+   `docs/handoff/NOOP-DUAL-BAND-TWO-PHONE-TEST-HANDOFF-2026-10-05.md`,
    `docs/handoff/NOOP-PRODUCTION-PHYSICAL-VALIDATION-HANDOFF-2026-10-02.md`
    and `docs/handoff/NOOP-BAND-PHYSICAL-VALIDATION-HANDOFF.md`.
    Confirm the vendored neutral SDK still reports source revision
@@ -37,6 +38,8 @@ the signed iPhone and Android install/validation round:
    development state.
 3. Validate the existing WHOOP comparison transport first and do not remove,
    relabel, or route around it.
+   For two-phone testing, keep one collector/band per lane and then cross the
+   bands between iPhone and Android before claiming platform parity.
 4. Validate the supplier band only through the quarantined exact-model adapter
    and supplier artifacts approved for that hardware/firmware pair. The
    supplier-neutral SDK and simulator builds do not prove that transport, and
