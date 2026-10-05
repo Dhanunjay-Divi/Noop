@@ -246,7 +246,7 @@ private struct DevicesContent: View {
         }
         // WHOOP 4.0 reboot probe (#235): only reachable with Test Centre → Connection on and a 4.0 connected.
         // Tries each candidate frame one at a time so the strap log shows which one actually reboots.
-        .confirmationDialog("WHOOP 4.0 reboot probe",
+        .confirmationDialog("Legacy band reboot probe",
                             isPresented: Binding(get: { probeTarget != nil },
                                                  set: { if !$0 { probeTarget = nil } }),
                             titleVisibility: .visible,

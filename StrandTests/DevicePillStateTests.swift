@@ -108,6 +108,17 @@ final class DevicePillStateTests: XCTestCase {
         XCTAssertNotEqual(olderDevice.model, newerDevice.model)
     }
 
+    func testCompatibleBandScanPreservesTheSelectedTransportFamily() {
+        XCTAssertEqual(
+            AddDeviceWizard.compatibleBandType(for: .whoop4),
+            .whoop4
+        )
+        XCTAssertEqual(
+            AddDeviceWizard.compatibleBandType(for: .whoop5mg),
+            .whoop5mg
+        )
+    }
+
     func testDeviceModelIsHiddenOnlyWhenItDuplicatesTheDisplayName() {
         XCTAssertFalse(
             DeviceCapabilityProfile.shouldShowModel(

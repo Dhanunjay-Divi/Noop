@@ -498,7 +498,7 @@ struct CompareView: View {
                         let excludedOfficial =
                             referenceReport?.audit.unverifiedStoredOfficialDays ?? 0
                         let excludedNoop = referenceReport?.audit.unverifiedStoredNoopDays ?? 0
-                        Text("Official values require importer stamp \(WhoopImporter.schemaRevision); Noop revision \(referenceMetric.algorithmVersion) is accepted only with a completed compatible-band raw-stream score receipt in this \(referenceRescoreDays)-day window. Excluded: \(excludedOfficial) unstamped official, \(excludedNoop) old, imported-only, or unverified Noop.")
+                        Text("Official values require a verified importer stamp. Noop revision \(referenceMetric.algorithmVersion) is accepted only with a completed compatible-band raw-stream score receipt in this \(referenceRescoreDays)-day window. Excluded: \(excludedOfficial) unstamped official, \(excludedNoop) old, imported-only, or unverified Noop.")
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)

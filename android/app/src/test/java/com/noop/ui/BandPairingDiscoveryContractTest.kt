@@ -20,15 +20,46 @@ class BandPairingDiscoveryContractTest {
             "automaticallyScansLaunchBands -> WizardStep.Pick",
         ))
         assertTrue(wizard.contains(
-            "automaticallyScansLaunchBands -> DeviceType.Whoop4",
+            "viewModel.selectedModel.value",
         ))
         assertTrue(wizard.contains(
-            "viewModel.presentWhoopScan(WhoopModel.WHOOP4)",
+            "automaticallyScansLaunchBands -> launchWhoopType",
         ))
+        assertTrue(wizard.contains(
+            "viewModel.presentWhoopScan(launchWhoopModel)",
+        ))
+        assertTrue(wizard.contains("onRescan = { startScan(t) }"))
+        assertFalse(wizard.contains("automaticallyScansLaunchBands -> DeviceType.Whoop4"))
+        assertFalse(wizard.contains("viewModel.presentWhoopScan(WhoopModel.WHOOP4)"))
         assertTrue(picker.contains("found.sortedByDescending { it.rssi }"))
         assertTrue(picker.contains("strap.model.registrationLabel()"))
         assertTrue(picker.contains("onOpenSupplierBand?.let"))
         assertFalse(picker.contains("BandPairingOptionRow("))
+    }
+
+    @Test
+    fun optionalSupplierPrepBackRestoresTheUnifiedScan() {
+        val wizard = source("AddDeviceWizard.kt").readText()
+        val backHandler = wizard
+            .substringAfter("fun goBack()")
+            .substringBefore("val confirmAdvertisedName")
+        val pickerCall = wizard
+            .substringAfter("t.isWhoop -> WhoopPickStep(")
+            .substringBefore("t == DeviceType.GymEquipment")
+
+        assertTrue(
+            pickerCall.contains(
+                "supplierPrepOrigin = SupplierPrepOrigin.UnifiedScan",
+            ),
+        )
+        assertTrue(
+            backHandler.contains(
+                "supplierPrepBackTarget(supplierPrepOrigin)",
+            ),
+        )
+        assertTrue(backHandler.contains("type = launchWhoopType"))
+        assertTrue(backHandler.contains("step = WizardStep.Pick"))
+        assertTrue(backHandler.contains("viewModel.presentWhoopScan(launchWhoopModel)"))
     }
 
     @Test

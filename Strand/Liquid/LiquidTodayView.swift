@@ -2952,11 +2952,17 @@ struct LiquidTodayView: View {
             }
             Group {
                 if allowsLocalMutations {
+                    #if os(iOS)
                     Button {
                         pushTabRoute(.metricExplorer)
                     } label: {
                         openMetricHistoryLabel
                     }
+                    #else
+                    NavigationLink(value: TabRoute.metricExplorer) {
+                        openMetricHistoryLabel
+                    }
+                    #endif
                 } else {
                     NavigationLink {
                         MetricExplorerView(allowsLocalMutations: false)
@@ -2971,8 +2977,12 @@ struct LiquidTodayView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Key metrics")
-        .accessibilityValue("\(visibleKeyMetrics.count) selected metrics")
+        .accessibilityValue(Text(selectedMetricsAccessibilityValue))
         .accessibilityIdentifier("noop.today.key-metrics.section")
+    }
+
+    private var selectedMetricsAccessibilityValue: String {
+        String(localized: "\(visibleKeyMetrics.count) metrics selected")
     }
 
     private var openMetricHistoryLabel: some View {

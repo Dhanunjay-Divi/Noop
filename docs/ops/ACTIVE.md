@@ -102,6 +102,34 @@ Last updated: **2026-10-05**
   passed with zero failures. Xcode later timed out while collecting simulator
   diagnostics, but the test result and command exit status were already
   successful. Product behavior and customer copy are unchanged.
+  A final October 5 review follow-up closes the remaining mobile parity
+  defects before protected integration. Both customer band entries preserve
+  the selected transport family instead of forcing the legacy family, return
+  from optional account-linked setup to the live scanner, and keep static
+  generation rows out of customer setup. Android now derives compact-nav
+  hysteresis from consumed post-scroll movement, supplies scroll-tail
+  clearance for the floating control, and maps physical left/right movement
+  correctly in RTL. Apple now opens complete metric history on macOS, keeps
+  pointer hover on iPad, localizes selected-metric plurals and the compact-nav
+  hint, prevents a dock drag from also expanding navigation, and persists a
+  physical dock edge across layout directions. The terminology wall now scans
+  source-key fallbacks in every shipped Apple catalog plus Android
+  main/demo/debug resources. Three direct diagnostic or explainer strings were
+  neutralized, and the audit still reports zero customer-visible retired
+  vendor values and zero forbidden mappings. Focused Android Full and Demo
+  suites pass the six affected classes; the integrated iOS Simulator build
+  succeeds; and the final Apple affected wall passes 91/91. The reviewed
+  terminology snapshot now records 18,649 occurrences across 1,651 groups,
+  with 886 customer entries. The inventory digest is
+  `9bb90d4578acc020b05557bc5820211b92ac48d67839cb73b0b3724b0a899936`;
+  the active-allowlist digest is
+  `2c4e7f58aa2cd1e4257165788b88137747be277d5e447f0f90f858c3169af904`;
+  and the exact audit-tool digest is
+  `8c3149dfa7fa1de08289e81cf1bbf56e675a2924c4e9fc2344b294cb93074f49`.
+  The complete Tools test root passes 379 tests with one intentional skip.
+  Release controls pass 9/9, required CI verifies all 10 contexts, all 122
+  operations records validate, and trust, calibration, localization, claims,
+  legal, privacy, shell, Python, and diff checks pass on the same tree.
   Private staging remains unchanged at source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;

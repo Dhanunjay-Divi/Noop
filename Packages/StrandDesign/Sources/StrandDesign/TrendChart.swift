@@ -432,7 +432,6 @@ public struct TrendChart: View {
                 )
                 .contentShape(Rectangle())
                 .animation(StrandMotion.fade, value: hoverX)
-                #if !os(iOS)
                 .onContinuousHover(coordinateSpace: .local) { phase in
                     guard showsHover else { return }
                     // Update the hover position in a NON-animating transaction. Otherwise entering or
@@ -453,7 +452,6 @@ public struct TrendChart: View {
                         }
                     }
                 }
-                #endif
             }
         }
         .frame(height: height)

@@ -152,6 +152,117 @@ class TerminologyAuditTests(unittest.TestCase):
                 },
             )
 
+    def test_apple_source_language_key_fallback_is_scanned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            retired_vendor = "".join(("WHO", "OP"))
+            path = Path(AUDIT.APPLE_LOCALIZATION_CATALOGS[0])
+            catalog = root / path
+            catalog.parent.mkdir(parents=True)
+            key = f"Import {retired_vendor} export"
+            catalog.write_text(
+                json.dumps(
+                    {
+                        "sourceLanguage": "en",
+                        "strings": {key: {}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            violations = AUDIT.customer_visible_value_violations(root)
+
+        self.assertEqual(
+            violations,
+            [
+                AUDIT.CustomerVisibleValueViolation(
+                    path=path.as_posix(),
+                    key=key,
+                    locale="en",
+                )
+            ],
+        )
+
+    def test_every_shipped_apple_catalog_is_scanned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            retired_vendor = "".join(("WHO", "OP"))
+            for relative_path in AUDIT.APPLE_LOCALIZATION_CATALOGS:
+                catalog = root / relative_path
+                catalog.parent.mkdir(parents=True)
+                catalog.write_text(
+                    json.dumps(
+                        {
+                            "sourceLanguage": "en",
+                            "strings": {
+                                "visible.value": {
+                                    "localizations": {
+                                        "en": {
+                                            "stringUnit": {
+                                                "state": "translated",
+                                                "value": f"{retired_vendor} band",
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            violations = AUDIT.customer_visible_value_violations(root)
+
+        self.assertEqual(len(violations), len(AUDIT.APPLE_LOCALIZATION_CATALOGS))
+        self.assertEqual(
+            {violation.path for violation in violations},
+            set(AUDIT.APPLE_LOCALIZATION_CATALOGS),
+        )
+        self.assertEqual({violation.locale for violation in violations}, {"en"})
+
+    def test_android_packaged_source_sets_and_locales_are_scanned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            retired_vendor = "".join(("WHO", "OP"))
+            resource_directories = (
+                ("main", "values"),
+                ("main", "values-de"),
+                ("demo", "values"),
+                ("debug", "values-fr"),
+            )
+            expected_paths = set()
+            for source_set, values_directory in resource_directories:
+                resource = (
+                    root
+                    / "android"
+                    / "app"
+                    / "src"
+                    / source_set
+                    / "res"
+                    / values_directory
+                    / "strings.xml"
+                )
+                resource.parent.mkdir(parents=True)
+                resource.write_text(
+                    "<resources>"
+                    f'<string name="visible_value">{retired_vendor} band</string>'
+                    "</resources>",
+                    encoding="utf-8",
+                )
+                expected_paths.add(resource.relative_to(root).as_posix())
+
+            violations = AUDIT.customer_visible_value_violations(root)
+
+        self.assertEqual(len(violations), len(resource_directories))
+        self.assertEqual(
+            {violation.path for violation in violations},
+            expected_paths,
+        )
+        self.assertEqual(
+            {violation.locale for violation in violations},
+            {"values", "values-de", "values-fr"},
+        )
+
     def test_android_dynamic_customer_copy_is_sanitized_at_render_boundaries(self) -> None:
         whats_new = (
             ROOT / "android/app/src/main/java/com/noop/ui/WhatsNewSheet.kt"

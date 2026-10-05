@@ -95,6 +95,21 @@ claims:
   rendered in any locale. Historical localization keys and internal protocol
   identifiers remain unchanged. Dynamic changelog and onboarding expectation
   copy continues through `CustomerFacingBrand` on both platforms.
+- Review remediation preserves the currently selected compatible-band family
+  for initial scan, rescan, and registration on both platforms. Entering the
+  optional account-linked setup from discovery records that origin, so Back
+  returns to the live scanner instead of exposing the development catalog.
+- Android compact navigation now counts only consumed post-scroll travel,
+  supplies explicit scroll-tail clearance while compact, and maps drag plus
+  accessibility movement to physical left/right edges in both LTR and RTL.
+- Apple complete metric history uses a real macOS navigation destination,
+  iPad retains pointer hover beside touch scrubbing, selected-metric counts use
+  locale plural rules, dock drags cannot also expand navigation, and legacy
+  semantic dock preferences migrate to stable physical edges.
+- The terminology audit now covers source-language key fallback in every
+  shipped Apple catalog and all packaged Android main, demo, and debug value
+  resources. Direct Test Centre and score-explainer copy is neutral, while
+  protocol identifiers and persisted source IDs remain unchanged.
 
 ## Root cause
 
@@ -128,6 +143,10 @@ scroll timing without changing data, ordering, or card dimensions.
 | Hosted Apple shell-contract correction | Exact-head run `37233895083` on `2d1b35249f8c7e4621877a09a726ca2ea844312a` built both Apple products, then exposed only stale tests: the macOS suite still bounded the active-tab closure by an obsolete one-line frame expression and expected superseded compact-navigation action labels, while the iOS UI suite still required ordinary text to stop above the floating bar. The contracts now bound the closure at `onDockEdgeChange`, require the current `Move to left edge` / `Move to right edge` accessibility actions, verify that ordinary text uses the full viewport, and separately verify that accessibility text reserves space. The complete local Strand suite passes 2,446 tests with one intentional skip and zero failures; both corrected iPhone viewport cases pass 2/2. | Hosted failures were obsolete assertions against the delivered floating-overlay behavior, and the current tests protect both blank-footer removal and large-text safety without changing product source | Replacement hosted execution or physical VoiceOver behavior |
 | Hosted iOS transient-feedback correction | Exact-head run `37240966560` on `db9ccda25e8ea55f01273972f998172beac34c0b` passed the macOS build/tests and 43 of 44 executed iOS UI cases with one intentional skip. The pull-to-sync case successfully revealed `noop.today.pull-sync`, then queried that two-second accessibility element repeatedly until it disappeared before the final value read. The test now captures the visible status label once and evaluates that immutable snapshot; production timing and animation are unchanged. The exact case passes 3/3 locally. Xcode printed the complete passing test summary, then hung while finalizing its local result bundle and was terminated after the tests completed. | The only hosted iOS failure was a transient-element test race, and the corrected assertion survives repeated execution without weakening product behavior | Replacement hosted execution or physical pull interaction |
 | Hosted iOS app-report review correction | Replacement head `ea7e34ccc8ae858b4a77e4282ca7cb03c8f115f5` passed every Android, macOS, package, policy, localization, and repository-control boundary. Apple run `37244321996` executed 44 iOS UI cases with one intentional skip and failed only `testAppReportRequiresConsentAndBuildsPrivateAttachmentReview`: the hosted simulator exceeded the prior 20-second review-readiness wait, then five dependent attachment and action assertions cascaded before the review was available. The test now waits up to 120 seconds for explicit readiness, returns after a bounded generation failure, waits for the required attachment rows, and scrolls to `noop.app-report.send` before validating the disclosure. The exact local xcresult reports 1 passed, 0 failed. Xcode later timed out while collecting simulator diagnostics, after the successful result and exit status. | The hosted failure was bounded to UI-test timing and visibility; the corrected case verifies the same privacy review and send contract without changing production behavior | Replacement hosted execution, upload service delivery, or physical-device performance |
+| Android review remediation | Full and Demo unit variants each pass the six focused scan, supplier-Back, compact-navigation, RTL, scroll-tail, and connection-preservation classes; the Full run completed successfully in 2m17s and the Demo run in 2m42s | Both packaged product variants compile and enforce the corrected customer scanner plus compact-navigation behavior | Physical BLE, TalkBack, OEM insets, or touch comfort |
+| Apple review remediation | Integrated iOS Simulator build succeeds. The final affected macOS wall passes 91/91 across Bluetooth consent, device state, customer-brand rendering, key-metric plurals, complete history, and shell contracts. StrandDesign remains 59/59 | Apple source compiles with family persistence, supplier return, macOS history routing, iPad hover, localized plurals, exclusive drag/tap, and physical RTL dock mapping | Signed install, physical pointer/VoiceOver behavior, or real BLE |
+| Expanded terminology boundary | Audit unit coverage adds source-key fallback, all five shipped Apple catalogs, and Android main/demo/debug resources. Repository summary reports zero customer-visible retired-vendor values and zero forbidden mappings | Static shipped localization values and reviewed fallback paths are neutral across the packaged source sets | Future unreviewed server text or physical-device advertisements |
+| Final October 5 repository wall | Complete Tools test root passes 379 tests with one intentional skip; release controls pass 9/9; required CI verifies 10/10 contexts; all 122 operations records validate; trust, calibration, terminology, localization, claims, legal, privacy, shell, Python, and diff checks pass | The final local source tree satisfies every repository-controlled release policy | Hosted runner execution, protected merge, signing, or physical devices |
 | Diff hygiene | `git diff --check` passed before the product commit | No whitespace-error regression | Runtime behavior |
 
 The first combined iPhone onboarding run exposed a test-query defect: the
@@ -136,13 +155,15 @@ under the scan sheet. The wizard's own back control was already hidden. It now
 has a stable identifier, and the scan-only tests query that exact control. Both
 previously affected cases then passed.
 
-The reviewed terminology snapshot contains 18,644 classified occurrences
-across 1,651 groups, with the customer category unchanged at 889 and no
+The reviewed terminology snapshot contains 18,649 classified occurrences
+across 1,651 groups, with the customer category reduced to 886 and no
 forbidden active use or customer-visible localization value. The active
 allowlist SHA-256 is
-`b281b0c5d44913bac8540ccc1c64af55d9262a19e97143a56fdc8ddfc142e147`;
+`2c4e7f58aa2cd1e4257165788b88137747be277d5e447f0f90f858c3169af904`;
 the legacy inventory SHA-256 is
-`783779bed24fe22d987a03d5117f7b2c355223f3102b002c108d92d69d29204a`.
+`9bb90d4578acc020b05557bc5820211b92ac48d67839cb73b0b3724b0a899936`;
+and the exact terminology-audit SHA-256 is
+`8c3149dfa7fa1de08289e81cf1bbf56e675a2924c4e9fc2344b294cb93074f49`.
 
 ## Data, privacy, and medical truth
 
@@ -199,9 +220,9 @@ the legacy inventory SHA-256 is
   only the bounded transient iOS query recorded above. The local test-only
   correction was pushed as `ea7e34ccc8ae858b4a77e4282ca7cb03c8f115f5`.
   That exact head again passed every non-iOS boundary and exposed only the
-  bounded app-report review wait recorded above. The local test-only
-  correction must be committed, pushed normally, and run through the same
-  protected contexts.
+  bounded app-report review wait recorded above. The local timing correction
+  and October 5 review remediation must be committed, pushed normally, and run
+  through the same protected contexts.
 - Merge only the exact green PR head through protected `main`, then verify the
   resulting protected-main SHA before handing off physical validation.
 
@@ -224,8 +245,8 @@ the legacy inventory SHA-256 is
 
 ## Open risks and honest limitations
 
-- Replacement hosted PR contexts and protected-main integration remain
-  pending.
+- Replacement hosted PR contexts, review-thread resolution, and protected-main
+  integration remain pending.
 - The exact signed iPhone and Android candidates have not been installed.
 - Physical BLE discovery, account claim, source switching, background
   collection, retention, haptics, battery behavior, notification delivery,
@@ -236,13 +257,16 @@ the legacy inventory SHA-256 is
 
 ## Next round
 
-1. Push the test-only timing correction to PR `#33`.
-2. Wait for every required protected context and merge normally only when
-   green.
-3. Update the Downloads physical-testing handoff with the exact protected-main
-   merge SHA.
-4. Run the signed iPhone and Android physical-validation matrix from clean
-   protected `main`, WHOOP first.
+1. Regenerate and repin the reviewed terminology inventory after this durable
+   record, then run the complete local release-control wall.
+2. Push one exact replacement to PR `#33`, wait for every required protected
+   context, and resolve only review threads backed by the final code and
+   evidence.
+3. Merge normally only when the exact head is green, then verify protected
+   `main` and its naturally triggered checks.
+4. Update the Downloads physical-testing handoff with the exact protected-main
+   merge SHA and run the signed iPhone and Android physical-validation matrix
+   from clean protected `main`, comparison transport first.
 
 ## Privacy check
 

@@ -1807,7 +1807,7 @@ struct TodayView: View {
                     Text("New here?")
                         .font(StrandFont.headline)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text("See how Recovery, Effort and Sleep Score are calculated, and how they differ from WHOOP.")
+                    Text("See how Recovery, Effort and Sleep Score are calculated.")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

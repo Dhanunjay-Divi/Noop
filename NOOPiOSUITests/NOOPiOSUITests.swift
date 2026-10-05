@@ -1442,7 +1442,7 @@ final class NOOPiOSUITests: XCTestCase {
         )
         XCTAssertEqual(
             metrics.value as? String,
-            "8 selected metrics",
+            "8 metrics selected",
             "Today must expose every configured metric, not a six-card subset."
         )
         let history = app.buttons["noop.today.key-metrics.open-history"]

@@ -1,7 +1,11 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Legacy band reboot probe": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Neustarttest für älteres Band"}},"en":{"stringUnit":{"state":"translated","value":"Legacy band reboot probe"}},"es":{"stringUnit":{"state":"translated","value":"Prueba de reinicio de la banda anterior"}},"fr":{"stringUnit":{"state":"translated","value":"Test de redémarrage de l’ancien bracelet"}},"it":{"stringUnit":{"state":"translated","value":"Test di riavvio della fascia precedente"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Teste de reinício da pulseira anterior"}},"ru":{"stringUnit":{"state":"translated","value":"Проверка перезапуска старого браслета"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"旧款手环重启测试"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"舊款手環重新啟動測試"}}}},
     "Left edge": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Linker Rand"}},"es":{"stringUnit":{"state":"translated","value":"Borde izquierdo"}},"fr":{"stringUnit":{"state":"translated","value":"Bord gauche"}},"it":{"stringUnit":{"state":"translated","value":"Margine sinistro"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Margem esquerda"}},"ru":{"stringUnit":{"state":"translated","value":"Левый край"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"左侧边缘"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"左側邊緣"}}}},
+    "Expands navigation. Drag horizontally to move.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Öffnet die Navigation. Zum Verschieben horizontal ziehen."}},"es":{"stringUnit":{"state":"translated","value":"Expande la navegación. Arrastra horizontalmente para moverla."}},"fr":{"stringUnit":{"state":"translated","value":"Déploie la navigation. Faites glisser horizontalement pour la déplacer."}},"it":{"stringUnit":{"state":"translated","value":"Espande la navigazione. Trascina orizzontalmente per spostarla."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Expande a navegação. Arraste na horizontal para mover."}},"ru":{"stringUnit":{"state":"translated","value":"Разворачивает навигацию. Проведите по горизонтали, чтобы переместить."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"展开导航。水平拖动即可移动。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"展開導覽。水平拖移即可移動。"}}}},
+    "Official values require a verified importer stamp. Noop revision %@ is accepted only with a completed compatible-band raw-stream score receipt in this %lld-day window. Excluded: %lld unstamped official, %lld old, imported-only, or unverified Noop.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Offizielle Werte benötigen einen verifizierten Importstempel. Die Noop-Version %1$@ wird in diesem %2$lld-Tage-Fenster nur mit einem abgeschlossenen Bewertungsnachweis aus Rohdatenströmen eines kompatiblen Bands akzeptiert. Ausgeschlossen: %3$lld offizielle Werte ohne Stempel, %4$lld alte, nur importierte oder ungeprüfte Noop-Werte."}},"en":{"stringUnit":{"state":"translated","value":"Official values require a verified importer stamp. Noop revision %@ is accepted only with a completed compatible-band raw-stream score receipt in this %lld-day window. Excluded: %lld unstamped official, %lld old, imported-only, or unverified Noop."}},"es":{"stringUnit":{"state":"translated","value":"Los valores oficiales requieren un sello de importación verificado. La revisión de Noop %1$@ solo se acepta con un comprobante completo de puntuación de los flujos sin procesar de una banda compatible en esta ventana de %2$lld días. Excluidos: %3$lld oficiales sin sello, %4$lld de Noop antiguos, solo importados o sin verificar."}},"fr":{"stringUnit":{"state":"translated","value":"Les valeurs officielles nécessitent un marquage d’importation vérifié. La révision Noop %1$@ n’est acceptée qu’avec une preuve complète de calcul à partir du flux brut d’un bracelet compatible dans cette fenêtre de %2$lld jours. Exclus : %3$lld officiels non marqués, %4$lld Noop anciens, uniquement importés ou non vérifiés."}},"it":{"stringUnit":{"state":"translated","value":"I valori ufficiali richiedono un contrassegno di importazione verificato. La revisione Noop %1$@ viene accettata solo con una ricevuta completa del calcolo dal flusso grezzo di una fascia compatibile in questa finestra di %2$lld giorni. Esclusi: %3$lld ufficiali senza contrassegno, %4$lld Noop vecchi, solo importati o non verificati."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Os valores oficiais requerem um carimbo de importação verificado. A revisão do Noop %1$@ só é aceite com um comprovativo completo de pontuação dos fluxos brutos de uma pulseira compatível nesta janela de %2$lld dias. Excluídos: %3$lld oficiais sem carimbo, %4$lld do Noop antigos, apenas importados ou não verificados."}},"ru":{"stringUnit":{"state":"translated","value":"Для официальных значений требуется подтверждённая отметка импорта. Версия Noop %1$@ принимается только при наличии полного подтверждения расчёта по необработанному потоку совместимого браслета за окно в %2$lld дн. Исключено: %3$lld официальных значений без отметки, %4$lld старых, только импортированных или непроверенных значений Noop."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"官方数值需要经过验证的导入标记。只有在最近 %2$lld 天内具备兼容手环原始数据流的完整评分凭证时，才会接受 Noop 修订版 %1$@。已排除：%3$lld 个未标记的官方数值，以及 %4$lld 个过旧、仅导入或未经验证的 Noop 数值。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"官方數值需要經過驗證的匯入標記。只有在最近 %2$lld 天內具備相容手環原始資料流的完整評分憑證時，才會接受 Noop 修訂版 %1$@。已排除：%3$lld 個未標記的官方數值，以及 %4$lld 個過舊、僅匯入或未經驗證的 Noop 數值。"}}}},
+    "See how Recovery, Effort and Sleep Score are calculated.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Sehen Sie, wie Erholung, Anstrengung und Schlafwert berechnet werden."}},"en":{"stringUnit":{"state":"translated","value":"See how Recovery, Effort and Sleep Score are calculated."}},"es":{"stringUnit":{"state":"translated","value":"Vea cómo se calculan las puntuaciones de recuperación, esfuerzo y sueño."}},"fr":{"stringUnit":{"state":"translated","value":"Découvrez comment les scores de récupération, d’effort et de sommeil sont calculés."}},"it":{"stringUnit":{"state":"translated","value":"Scopri come vengono calcolati Recupero, Sforzo e Punteggio del sonno."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Veja como são calculados os índices de Recuperação, Esforço e Sono."}},"ru":{"stringUnit":{"state":"translated","value":"Узнайте, как рассчитываются восстановление, нагрузка и оценка сна."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"了解恢复、运动负荷和睡眠评分的计算方式。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"了解恢復、運動負荷和睡眠評分的計算方式。"}}}},
     "Pair another supported band": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Weiteres unterstütztes Band koppeln"}},"es":{"stringUnit":{"state":"translated","value":"Emparejar otra banda compatible"}},"fr":{"stringUnit":{"state":"translated","value":"Associer un autre bracelet compatible"}},"it":{"stringUnit":{"state":"translated","value":"Abbina un’altra fascia supportata"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Emparelhar outra pulseira compatível"}},"ru":{"stringUnit":{"state":"translated","value":"Подключить другой поддерживаемый браслет"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"配对其他受支持的手环"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"配對其他支援的手環"}}}},
     "Right edge": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Rechter Rand"}},"es":{"stringUnit":{"state":"translated","value":"Borde derecho"}},"fr":{"stringUnit":{"state":"translated","value":"Bord droit"}},"it":{"stringUnit":{"state":"translated","value":"Margine destro"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Margem direita"}},"ru":{"stringUnit":{"state":"translated","value":"Правый край"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"右侧边缘"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"右側邊緣"}}}},
     "Choose your snapshot": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Wähle deine Übersicht"}},"es":{"stringUnit":{"state":"translated","value":"Elige tu resumen"}},"fr":{"stringUnit":{"state":"translated","value":"Choisissez votre aperçu"}},"it":{"stringUnit":{"state":"translated","value":"Scegli la tua panoramica"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Escolha o seu resumo"}},"ru":{"stringUnit":{"state":"translated","value":"Выберите свой обзор"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"选择你的概览"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"選擇你的概覽"}}}},
@@ -469,7 +473,172 @@
     "%lld exercises · %lld sets · about %lld min": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"%1$lld Übungen · %2$lld Sätze · etwa %3$lld Min."}},"es":{"stringUnit":{"state":"translated","value":"%1$lld ejercicios · %2$lld series · unos %3$lld min"}},"fr":{"stringUnit":{"state":"translated","value":"%1$lld exercices · %2$lld séries · environ %3$lld min"}},"pt-PT":{"stringUnit":{"state":"translated","value":"%1$lld exercícios · %2$lld séries · cerca de %3$lld min"}}}},
     "%lld of %lld sets": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"%1$lld von %2$lld Sätzen"}},"es":{"stringUnit":{"state":"translated","value":"%1$lld de %2$lld series"}},"fr":{"stringUnit":{"state":"translated","value":"%1$lld séries sur %2$lld"}},"pt-PT":{"stringUnit":{"state":"translated","value":"%1$lld de %2$lld séries"}}}},
     "%lld seconds": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"%lld Sekunden"}},"es":{"stringUnit":{"state":"translated","value":"%lld segundos"}},"fr":{"stringUnit":{"state":"translated","value":"%lld secondes"}},"pt-PT":{"stringUnit":{"state":"translated","value":"%lld segundos"}}}},
-    "%lld metrics selected": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"%lld Messwerte ausgewählt"}},"es":{"stringUnit":{"state":"translated","value":"%lld métricas seleccionadas"}},"fr":{"stringUnit":{"state":"translated","value":"%lld mesures sélectionnées"}},"it":{"stringUnit":{"state":"translated","value":"%lld metriche selezionate"}},"pt-PT":{"stringUnit":{"state":"translated","value":"%lld métricas selecionadas"}},"ru":{"stringUnit":{"state":"translated","value":"Выбрано метрик: %lld"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"已选择 %lld 项指标"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"已選取 %lld 項指標"}}}},
+    "%lld metrics selected": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Messwert ausgewählt"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Messwerte ausgewählt"
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld metric selected"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld metrics selected"
+                }
+              }
+            }
+          }
+        },
+        "es": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld métrica seleccionada"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld métricas seleccionadas"
+                }
+              }
+            }
+          }
+        },
+        "fr": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld mesure sélectionnée"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld mesures sélectionnées"
+                }
+              }
+            }
+          }
+        },
+        "it": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld metrica selezionata"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld metriche selezionate"
+                }
+              }
+            }
+          }
+        },
+        "pt-PT": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld métrica selecionada"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld métricas selecionadas"
+                }
+              }
+            }
+          }
+        },
+        "ru": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Выбрано %lld метрики"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Выбрано %lld метрик"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Выбрана %lld метрика"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Выбрано %lld метрик"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "已选择 %lld 项指标"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "已選取 %lld 項指標"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld selected": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"%lld ausgewählt"}},"es":{"stringUnit":{"state":"translated","value":"%lld seleccionados"}},"fr":{"stringUnit":{"state":"translated","value":"%lld sélectionnés"}},"it":{"stringUnit":{"state":"translated","value":"%lld selezionate"}},"pt-PT":{"stringUnit":{"state":"translated","value":"%lld selecionados"}},"ru":{"stringUnit":{"state":"translated","value":"Выбрано: %lld"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"已选择 %lld 项"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"已選取 %lld 項"}}}},
     "3 sec": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"3 Sek."}},"es":{"stringUnit":{"state":"translated","value":"3 s"}},"fr":{"stringUnit":{"state":"translated","value":"3 s"}},"pt-PT":{"stringUnit":{"state":"translated","value":"3 s"}}}},
     "4 sec": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"4 Sek."}},"es":{"stringUnit":{"state":"translated","value":"4 s"}},"fr":{"stringUnit":{"state":"translated","value":"4 s"}},"pt-PT":{"stringUnit":{"state":"translated","value":"4 s"}}}},

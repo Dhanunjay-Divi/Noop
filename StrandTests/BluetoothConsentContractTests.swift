@@ -148,9 +148,21 @@ final class BluetoothConsentContractTests: XCTestCase {
         XCTAssertTrue(addDevice.contains("beginAutomaticBandScanIfNeeded()"))
         XCTAssertTrue(
             addDevice.contains(
-                "model.presentWhoopScan(model: WhoopModel.persisted)"
+                "_compatibleBandScanModel = State(initialValue: initialBandModel)"
             )
         )
+        XCTAssertTrue(
+            addDevice.contains(
+                "model.presentWhoopScan(model: compatibleBandScanModel)"
+            )
+        )
+        XCTAssertTrue(addDevice.contains("model.selectWhoopModel(strap.model)"))
+        XCTAssertTrue(
+            addDevice.contains(
+                "supplierEntryOrigin = .compatibleBandScan"
+            )
+        )
+        XCTAssertTrue(addDevice.contains("returnFromSupplierFlow()"))
         XCTAssertTrue(addDevice.contains("return \"whoop-5-mg\""))
         XCTAssertTrue(addDevice.contains("return \"whoop-4\""))
         XCTAssertTrue(

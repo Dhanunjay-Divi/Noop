@@ -1155,8 +1155,12 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(liquid.contains("cycleAwarenessEnabled"))
         XCTAssertTrue(liquid.contains("Open all metric history"))
         XCTAssertTrue(liquid.contains("pushTabRoute(.metricExplorer)"))
+        XCTAssertTrue(liquid.contains("NavigationLink(value: TabRoute.metricExplorer)"))
         XCTAssertTrue(liquid.contains("noop.today.key-metrics.section"))
-        XCTAssertTrue(liquid.contains("\\(visibleKeyMetrics.count) selected metrics"))
+        XCTAssertTrue(liquid.contains(
+            "String(localized: \"\\(visibleKeyMetrics.count) metrics selected\")"
+        ))
+        XCTAssertFalse(liquid.contains("\\(visibleKeyMetrics.count) selected metrics"))
         XCTAssertTrue(androidToday.contains("val tiles = enabledMetrics"))
         XCTAssertFalse(androidToday.contains("val tiles = KeyMetricPrefs.catalogOrder(enabledMetrics)"))
         XCTAssertTrue(androidToday.contains("metricColumnCount"))
@@ -1176,6 +1180,17 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         ))
         XCTAssertTrue(androidToday.contains("tint = todayRecoveryHeroColors("))
         XCTAssertTrue(androidRing.contains("Palette.recoveryGaugeStops(score)"))
+    }
+
+    func testTrendChartKeepsPointerHoverAlongsideIOSTouchScrub() throws {
+        let trend = try text("Packages/StrandDesign/Sources/StrandDesign/TrendChart.swift")
+
+        XCTAssertTrue(trend.contains("#if os(iOS)"))
+        XCTAssertTrue(trend.contains("TrendChartTouchOverlay("))
+        XCTAssertTrue(trend.contains(".onContinuousHover(coordinateSpace: .local)"))
+        XCTAssertFalse(trend.contains(
+            "#if !os(iOS)\n                .onContinuousHover(coordinateSpace: .local)"
+        ))
     }
 }
 

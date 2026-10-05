@@ -227,10 +227,24 @@ class OnboardingAttachContractTest {
             "automaticallyScansLaunchBands -> WizardStep.Pick",
         ))
         assertTrue(addDevice.contains(
+            "viewModel.selectedModel.value",
+        ))
+        assertTrue(addDevice.contains(
+            "automaticallyScansLaunchBands -> launchWhoopType",
+        ))
+        assertTrue(
+            addDevice.contains(
+                "LaunchedEffect(automaticallyScansLaunchBands, launchWhoopModel)",
+            ),
+        )
+        assertTrue(addDevice.contains("viewModel.presentWhoopScan(launchWhoopModel)"))
+        assertTrue(addDevice.contains("onRescan = { startScan(t) }"))
+        assertFalse(addDevice.contains(
             "automaticallyScansLaunchBands -> DeviceType.Whoop4",
         ))
-        assertTrue(addDevice.contains("LaunchedEffect(automaticallyScansLaunchBands)"))
-        assertTrue(addDevice.contains("viewModel.presentWhoopScan(WhoopModel.WHOOP4)"))
+        assertFalse(addDevice.contains(
+            "viewModel.presentWhoopScan(WhoopModel.WHOOP4)",
+        ))
         assertTrue(pickerCall.contains(
             "automaticallyScansLaunchBands && supplierAvailable",
         ))

@@ -30,15 +30,37 @@ private final class TabBarScrollTracker {
 /// independent from the movable NOOP command lens: each control can sit on the user's preferred side,
 /// while the command lens' bottom clearance keeps the two hit targets from colliding.
 private enum CompactNavigationDockEdge: String {
-    case leading
-    case trailing
+    case left
+    case right
 
-    var alignment: Alignment {
-        self == .leading ? .leading : .trailing
+    init(persistedValue: String, layoutDirection: LayoutDirection) {
+        switch persistedValue {
+        case Self.left.rawValue:
+            self = .left
+        case Self.right.rawValue:
+            self = .right
+        case "leading":
+            self = layoutDirection == .leftToRight ? .left : .right
+        case "trailing":
+            self = layoutDirection == .leftToRight ? .right : .left
+        default:
+            self = layoutDirection == .leftToRight ? .left : .right
+        }
+    }
+
+    func alignment(for layoutDirection: LayoutDirection) -> Alignment {
+        switch layoutDirection {
+        case .leftToRight:
+            return self == .left ? .leading : .trailing
+        case .rightToLeft:
+            return self == .left ? .trailing : .leading
+        @unknown default:
+            return self == .left ? .leading : .trailing
+        }
     }
 
     var opposite: Self {
-        self == .leading ? .trailing : .leading
+        self == .left ? .right : .left
     }
 }
 
@@ -53,6 +75,7 @@ struct RootTabView: View {
     @EnvironmentObject private var router: NavRouter
     @EnvironmentObject private var updateStore: UpdateStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.layoutDirection) private var layoutDirection
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -83,10 +106,10 @@ struct RootTabView: View {
     /// current-tab control, while a deliberate return gesture expands the labels again. The layout keeps
     /// one stable, compact clearance so this visual change cannot make the scroll endpoint jump.
     @State private var tabBarCompact = Self.initialTabBarCompact
-    /// The edge disclosure defaults to the lower-leading corner, matching the reference's compact
-    /// reading state. A horizontal drag snaps it to either corner and persists that choice locally.
+    /// Legacy values were semantic leading/trailing edges. They are migrated on first appearance to a
+    /// physical left/right edge so changing language direction cannot move the user's chosen control.
     @AppStorage("noop.navigation.compactDockEdge")
-    private var compactNavigationDockRaw = CompactNavigationDockEdge.leading.rawValue
+    private var compactNavigationDockRaw = "leading"
     /// Keeps the DEBUG compact-state launch hook deterministic long enough for screenshot/UI-test capture.
     /// A tap on the compact control or any destination change releases it; production always starts false.
     @State private var demoCompactPinned = Self.initialTabBarCompact
@@ -296,13 +319,13 @@ struct RootTabView: View {
                 .frame(
                     maxWidth: tabBarVisuallyCompact ? .infinity : 500,
                     alignment: tabBarVisuallyCompact
-                        ? compactNavigationDockEdge.alignment
+                        ? compactNavigationDockEdge.alignment(for: layoutDirection)
                         : .center
                 )
                 .frame(
                     maxWidth: .infinity,
                     alignment: tabBarVisuallyCompact
-                        ? compactNavigationDockEdge.alignment
+                        ? compactNavigationDockEdge.alignment(for: layoutDirection)
                         : .center
                 )
                 .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 8 : 12)
@@ -417,6 +440,7 @@ struct RootTabView: View {
             resetTabBarScrollTracking()
         }
         .onAppear {
+            migrateCompactNavigationDockPreferenceIfNeeded()
             AppDiagnosticsRecorder.shared.record(
                 "ui.tab_visible",
                 fields: ["tab": Self.diagnosticTabName(selectedTab)]
@@ -573,7 +597,17 @@ struct RootTabView: View {
     }
 
     private var compactNavigationDockEdge: CompactNavigationDockEdge {
-        CompactNavigationDockEdge(rawValue: compactNavigationDockRaw) ?? .leading
+        CompactNavigationDockEdge(
+            persistedValue: compactNavigationDockRaw,
+            layoutDirection: layoutDirection
+        )
+    }
+
+    private func migrateCompactNavigationDockPreferenceIfNeeded() {
+        guard compactNavigationDockRaw == "leading" || compactNavigationDockRaw == "trailing" else {
+            return
+        }
+        compactNavigationDockRaw = compactNavigationDockEdge.rawValue
     }
 
     private func updateCompactNavigationDockEdge(_ edge: CompactNavigationDockEdge) {
@@ -2135,7 +2169,7 @@ private struct FloatingTabBar: View {
     /// full VoiceOver name at every Dynamic Type size; tapping it restores all five visible labels.
     var compact = false
     /// The user's preferred lower corner for the compact disclosure.
-    var dockEdge: CompactNavigationDockEdge = .leading
+    var dockEdge: CompactNavigationDockEdge = .left
     /// Compact mode is an explicit disclosure control, not a re-select gesture. Expanding must therefore
     /// preserve the current navigation stack, scroll position, and cached data.
     var onExpand: () -> Void = {}
@@ -2152,6 +2186,7 @@ private struct FloatingTabBar: View {
     @ScaledMetric(relativeTo: .footnote) private var scaledLabelLineHeight: CGFloat = 13
     @GestureState private var scrubbedIndex: CGFloat?
     @GestureState private var compactDragTranslation: CGFloat = 0
+    @State private var compactDockDragConsumed = false
     @Namespace private var navigationMorph
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
@@ -2523,7 +2558,10 @@ private struct FloatingTabBar: View {
     /// Farther down a screen, navigation yields to a borderless current-tab disclosure. Its fixed frame
     /// preserves the tap target without adding another container over the page.
     private var compactButton: some View {
-        Button(action: onExpand) {
+        Button {
+            guard !compactDockDragConsumed else { return }
+            onExpand()
+        } label: {
             HStack(spacing: 7) {
                 Image(systemName: currentItem.icon)
                     .font(.system(size: 17, weight: .semibold))
@@ -2572,14 +2610,14 @@ private struct FloatingTabBar: View {
         .accessibilityValue(
             Text(currentItem.title)
                 + Text(verbatim: ", ")
-                + Text(dockEdge == .leading ? "Left edge" : "Right edge")
+                + Text(dockEdge == .left ? "Left edge" : "Right edge")
         )
-        .accessibilityHint("Expands the tab bar. Drag horizontally to move.")
+        .accessibilityHint("Expands navigation. Drag horizontally to move.")
         .accessibilityAction(named: Text("Move to left edge")) {
-            onDockEdgeChange(.leading)
+            onDockEdgeChange(.left)
         }
         .accessibilityAction(named: Text("Move to right edge")) {
-            onDockEdgeChange(.trailing)
+            onDockEdgeChange(.right)
         }
         .accessibilityShowsLargeContentViewer {
             Label(currentItem.title, systemImage: currentItem.icon)
@@ -2589,9 +2627,9 @@ private struct FloatingTabBar: View {
 
     private var compactDragOffset: CGFloat {
         switch dockEdge {
-        case .leading:
+        case .left:
             return max(0, compactDragTranslation)
-        case .trailing:
+        case .right:
             return min(0, compactDragTranslation)
         }
     }
@@ -2604,11 +2642,22 @@ private struct FloatingTabBar: View {
                 }
                 translation = value.translation.width
             }
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else {
+                    return
+                }
+                compactDockDragConsumed = true
+            }
             .onEnded { value in
+                defer {
+                    DispatchQueue.main.async {
+                        compactDockDragConsumed = false
+                    }
+                }
                 guard abs(value.translation.width) > abs(value.translation.height) * 1.15 else {
                     return
                 }
-                let projectedInwardTravel = dockEdge == .leading
+                let projectedInwardTravel = dockEdge == .left
                     ? value.predictedEndTranslation.width
                     : -value.predictedEndTranslation.width
                 guard projectedInwardTravel >= 44 else { return }

@@ -2156,6 +2156,12 @@ final class AppModel: ObservableObject {
     /// `LiveState.whoop5Detected` field the equivalent screen reads.
     var whoop5Detected: Bool { ble.isWhoop5 }
 
+    /// Persist the family the user explicitly selected from discovery so later reconnects target the same
+    /// service even when CoreBluetooth can no longer retrieve the previously chosen peripheral by UUID.
+    func selectWhoopModel(_ model: WhoopModel) {
+        UserDefaults.standard.set(model.rawValue, forKey: "selectedWhoopModel")
+    }
+
     /// Point the WHOOP scan at a specific family, then present nearby straps WITHOUT auto-connecting.
     /// `prepareForModelSwitch()` first clears any sticky bond/connection so the engine is idle, then
     /// `connect(model:)` selects the family + installs its framing (it sets the engine's private
@@ -2164,7 +2170,7 @@ final class AppModel: ObservableObject {
     /// allowing present scan). The persisted `selectedWhoopModel` is updated too, so a later real
     /// connect to the chosen strap targets the right family. All via existing public methods.
     func presentWhoopScan(model: WhoopModel) {
-        UserDefaults.standard.set(model.rawValue, forKey: "selectedWhoopModel")
+        selectWhoopModel(model)
         ble.prepareForPresentScan(model: model) // idle for a family switch, but KEEP a live same-family bond (#74)
         ble.connect(model: model)             // select the family (sets engine selectedModel + framing)
         ble.scanForWhoops()                   // take over the central, present nearby straps only

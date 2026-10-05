@@ -106,6 +106,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -454,34 +455,23 @@ fun AppRoot(
         expandThresholdPx,
     ) {
         object : NestedScrollConnection {
-            override fun onPreScroll(
+            override fun onPostScroll(
+                consumed: Offset,
                 available: Offset,
                 source: NestedScrollSource,
             ): Offset {
-                if (
-                    source != NestedScrollSource.UserInput ||
-                    abs(available.y) <= abs(available.x) * 1.15f ||
-                    abs(available.y) < 0.5f
-                ) {
-                    return Offset.Zero
-                }
-                if (bottomBarDirectionalTravel * available.y < 0f) {
-                    bottomBarDirectionalTravel = 0f
-                }
-                bottomBarDirectionalTravel += available.y
-                if (
-                    !bottomBarCompact &&
-                    bottomBarDirectionalTravel <= -compactThresholdPx
-                ) {
-                    bottomBarCompact = true
-                    bottomBarDirectionalTravel = 0f
-                } else if (
-                    bottomBarCompact &&
-                    bottomBarDirectionalTravel >= expandThresholdPx
-                ) {
-                    bottomBarCompact = false
-                    bottomBarDirectionalTravel = 0f
-                }
+                val updated = updateCompactNavigationHysteresis(
+                    current = CompactNavigationHysteresisState(
+                        compact = bottomBarCompact,
+                        directionalTravelPx = bottomBarDirectionalTravel,
+                    ),
+                    consumed = consumed,
+                    source = source,
+                    compactThresholdPx = compactThresholdPx,
+                    expandThresholdPx = expandThresholdPx,
+                )
+                bottomBarCompact = updated.compact
+                bottomBarDirectionalTravel = updated.directionalTravelPx
                 return Offset.Zero
             }
         }
@@ -667,12 +657,20 @@ fun AppRoot(
                 }
             },
         ) { inner ->
-            NavHost(
-                navController = nav,
-                startDestination = startRoute,
-                modifier = Modifier
-                    .nestedScroll(bottomBarScrollConnection)
-                    .padding(inner),
+            CompositionLocalProvider(
+                LocalNavigationScrollTailClearance provides
+                    if (bottomBarVisuallyCompact) {
+                        CompactNavigationOverlayFootprint
+                    } else {
+                        0.dp
+                    },
+            ) {
+                NavHost(
+                    navController = nav,
+                    startDestination = startRoute,
+                    modifier = Modifier
+                        .nestedScroll(bottomBarScrollConnection)
+                        .padding(inner),
                 // README motion: top-level destinations crossfade (~240ms) on the calm,
                 // decelerating global easing — nothing slides or bounces between tabs. The
                 // same fade is used for back (pop) so the bar never feels jerky. Drill-ins
@@ -862,6 +860,7 @@ fun AppRoot(
                     MoreScreen(onNavigate = {
                         nav.navigate(it) { launchSingleTop = true }
                     })
+                }
                 }
             }
         }
@@ -1598,6 +1597,8 @@ private const val CompactBottomBarWidthDp = 360
 // than the expanded five-tab rail. A fixed width also prevents corner movement
 // when the selected tab changes.
 private val CompactNavigationControlWidth = 136.dp
+internal val CompactNavigationOverlayFootprint =
+    Metrics.controlHeight + Metrics.space8
 
 internal enum class CompactNavigationDockEdge {
     START,
@@ -1636,6 +1637,77 @@ internal fun compactNavigationDockDestination(
         current == CompactNavigationDockEdge.END &&
             horizontalDragPx <= -threshold -> CompactNavigationDockEdge.START
         else -> current
+    }
+}
+
+internal fun compactNavigationLogicalDragDelta(
+    physicalDeltaPx: Float,
+    layoutDirection: LayoutDirection,
+): Float = if (layoutDirection == LayoutDirection.Rtl) {
+    -physicalDeltaPx
+} else {
+    physicalDeltaPx
+}
+
+internal fun compactNavigationPhysicalLeftEdge(
+    layoutDirection: LayoutDirection,
+): CompactNavigationDockEdge =
+    if (layoutDirection == LayoutDirection.Rtl) {
+        CompactNavigationDockEdge.END
+    } else {
+        CompactNavigationDockEdge.START
+    }
+
+internal fun compactNavigationPhysicalRightEdge(
+    layoutDirection: LayoutDirection,
+): CompactNavigationDockEdge =
+    if (layoutDirection == LayoutDirection.Rtl) {
+        CompactNavigationDockEdge.START
+    } else {
+        CompactNavigationDockEdge.END
+    }
+
+internal data class CompactNavigationHysteresisState(
+    val compact: Boolean,
+    val directionalTravelPx: Float,
+)
+
+internal fun updateCompactNavigationHysteresis(
+    current: CompactNavigationHysteresisState,
+    consumed: Offset,
+    source: NestedScrollSource,
+    compactThresholdPx: Float,
+    expandThresholdPx: Float,
+): CompactNavigationHysteresisState {
+    if (
+        source != NestedScrollSource.UserInput ||
+        abs(consumed.y) <= abs(consumed.x) * 1.15f ||
+        abs(consumed.y) < 0.5f
+    ) {
+        return current
+    }
+
+    val deltaY = consumed.y
+    var directionalTravel = current.directionalTravelPx
+    if (directionalTravel * deltaY < 0f) {
+        directionalTravel = 0f
+    }
+    directionalTravel += deltaY
+
+    return when {
+        !current.compact &&
+            directionalTravel <= -compactThresholdPx.coerceAtLeast(0f) ->
+            CompactNavigationHysteresisState(
+                compact = true,
+                directionalTravelPx = 0f,
+            )
+        current.compact &&
+            directionalTravel >= expandThresholdPx.coerceAtLeast(0f) ->
+            CompactNavigationHysteresisState(
+                compact = false,
+                directionalTravelPx = 0f,
+            )
+        else -> current.copy(directionalTravelPx = directionalTravel)
     }
 }
 
@@ -2022,9 +2094,12 @@ private fun CompactBottomBar(
     val label = stringResource(tab.labelRes)
     val accent = bottomBarAccent(tab.dest)
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val dragThresholdPx = with(density) { 44.dp.toPx() }
     var dragOffsetPx by remember { mutableFloatStateOf(0f) }
-    val cornerDescription = if (dockEdge == CompactNavigationDockEdge.START) {
+    val physicalLeftEdge = compactNavigationPhysicalLeftEdge(layoutDirection)
+    val physicalRightEdge = compactNavigationPhysicalRightEdge(layoutDirection)
+    val cornerDescription = if (dockEdge == physicalLeftEdge) {
         stringResource(R.string.noop_command_lens_left_edge)
     } else {
         stringResource(R.string.noop_command_lens_right_edge)
@@ -2045,7 +2120,7 @@ private fun CompactBottomBar(
             .height(Metrics.controlHeight)
             .testTag("noop.tab.compact")
             .clip(RoundedCornerShape(percent = 50))
-            .pointerInput(dockEdge, dragThresholdPx) {
+            .pointerInput(dockEdge, dragThresholdPx, layoutDirection) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         val destination = compactNavigationDockDestination(
@@ -2061,10 +2136,14 @@ private fun CompactBottomBar(
                     onDragCancel = { dragOffsetPx = 0f },
                 ) { change, amount ->
                     change.consume()
+                    val logicalAmount = compactNavigationLogicalDragDelta(
+                        physicalDeltaPx = amount,
+                        layoutDirection = layoutDirection,
+                    )
                     dragOffsetPx = if (dockEdge == CompactNavigationDockEdge.START) {
-                        maxOf(0f, dragOffsetPx + amount)
+                        maxOf(0f, dragOffsetPx + logicalAmount)
                     } else {
-                        minOf(0f, dragOffsetPx + amount)
+                        minOf(0f, dragOffsetPx + logicalAmount)
                     }
                 }
             }
@@ -2079,11 +2158,11 @@ private fun CompactBottomBar(
                 stateDescription = navigationState
                 customActions = listOf(
                     CustomAccessibilityAction(moveLeft) {
-                        onDockEdgeChange(CompactNavigationDockEdge.START)
+                        onDockEdgeChange(physicalLeftEdge)
                         true
                     },
                     CustomAccessibilityAction(moveRight) {
-                        onDockEdgeChange(CompactNavigationDockEdge.END)
+                        onDockEdgeChange(physicalRightEdge)
                         true
                     },
                 )

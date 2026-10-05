@@ -176,6 +176,24 @@ enum class AddDeviceStart {
     SupplierBandPairing,
 }
 
+internal enum class SupplierPrepOrigin {
+    DirectStart,
+    DevicePicker,
+    UnifiedScan,
+}
+
+internal enum class SupplierPrepBackTarget {
+    DevicePicker,
+    UnifiedScan,
+}
+
+internal fun supplierPrepBackTarget(origin: SupplierPrepOrigin?): SupplierPrepBackTarget =
+    if (origin == SupplierPrepOrigin.UnifiedScan) {
+        SupplierPrepBackTarget.UnifiedScan
+    } else {
+        SupplierPrepBackTarget.DevicePicker
+    }
+
 internal fun resolvedAddDeviceStart(
     requested: AddDeviceStart,
     supplierAvailable: Boolean,
@@ -191,6 +209,11 @@ private fun WhoopModel.registrationLabel(): String = when (this) {
         uiString(R.string.appwide_onboarding_device_wizard_compatible_4_title)
     WhoopModel.WHOOP5_MG ->
         uiString(R.string.appwide_onboarding_device_wizard_compatible_5_title)
+}
+
+private fun WhoopModel.deviceType(): DeviceType = when (this) {
+    WhoopModel.WHOOP4 -> DeviceType.Whoop4
+    WhoopModel.WHOOP5_MG -> DeviceType.Whoop5MG
 }
 
 /**
@@ -224,6 +247,14 @@ fun AddDeviceWizard(
     val automaticallyScansLaunchBands =
         selectionScope == AddDeviceSelectionScope.ClaimEligibleBands &&
             resolvedStart == AddDeviceStart.DevicePicker
+    val launchWhoopModel = remember(
+        viewModel,
+        resolvedStart,
+        automaticallyScansLaunchBands,
+    ) {
+        viewModel.selectedModel.value
+    }
+    val launchWhoopType = remember(launchWhoopModel) { launchWhoopModel.deviceType() }
 
     var step by remember(resolvedStart, automaticallyScansLaunchBands) {
         mutableStateOf(
@@ -234,13 +265,22 @@ fun AddDeviceWizard(
             },
         )
     }
-    var type by remember(resolvedStart, automaticallyScansLaunchBands) {
+    var type by remember(resolvedStart, automaticallyScansLaunchBands, launchWhoopType) {
         mutableStateOf<DeviceType?>(
             when {
                 resolvedStart == AddDeviceStart.SupplierBandPairing ->
                     DeviceType.SupplierBand
-                automaticallyScansLaunchBands -> DeviceType.Whoop4
+                automaticallyScansLaunchBands -> launchWhoopType
                 else -> null
+            },
+        )
+    }
+    var supplierPrepOrigin by remember(resolvedStart) {
+        mutableStateOf(
+            if (resolvedStart == AddDeviceStart.SupplierBandPairing) {
+                SupplierPrepOrigin.DirectStart
+            } else {
+                null
             },
         )
     }
@@ -296,7 +336,7 @@ fun AddDeviceWizard(
 
     fun startScan(t: DeviceType) {
         when {
-            t.isWhoop -> viewModel.presentWhoopScan(t.whoopModel ?: WhoopModel.WHOOP4)
+            t.isWhoop -> viewModel.presentWhoopScan(checkNotNull(t.whoopModel))
             t == DeviceType.GymEquipment -> ftmsScanner.get().scan()
             t == DeviceType.Amazfit || t == DeviceType.MiBand -> huamiScanner.get().scan()
             t == DeviceType.Oura -> ouraScanner.get().scan()
@@ -348,9 +388,9 @@ fun AddDeviceWizard(
 
     // Customer band setup opens directly in the existing generation-agnostic scan. The full Add Device
     // catalog remains inert until its explicit Scan action, and all optional scanners stay deferred.
-    LaunchedEffect(automaticallyScansLaunchBands) {
+    LaunchedEffect(automaticallyScansLaunchBands, launchWhoopModel) {
         if (automaticallyScansLaunchBands) {
-            viewModel.presentWhoopScan(WhoopModel.WHOOP4)
+            viewModel.presentWhoopScan(launchWhoopModel)
         }
     }
 
@@ -387,10 +427,24 @@ fun AddDeviceWizard(
         if (type == DeviceType.SupplierBand) {
             viewModel.cancelSupplierBandPairing()
             supplierPassword = ""
+            if (
+                step == WizardStep.Prep &&
+                supplierPrepBackTarget(supplierPrepOrigin) ==
+                SupplierPrepBackTarget.UnifiedScan
+            ) {
+                supplierPrepOrigin = null
+                type = launchWhoopType
+                step = WizardStep.Pick
+                viewModel.presentWhoopScan(launchWhoopModel)
+                return
+            }
         }
         when (step) {
             WizardStep.Type -> Unit
-            WizardStep.Prep -> step = WizardStep.Type
+            WizardStep.Prep -> {
+                supplierPrepOrigin = null
+                step = WizardStep.Type
+            }
             WizardStep.Pick -> { stopAllScans(); step = WizardStep.Prep }
             WizardStep.Confirm -> {
                 // Re-enter the pick step and restart its scan so the user can choose a different device.
@@ -705,6 +759,11 @@ fun AddDeviceWizard(
                             ) {
                                 type = t
                                 nameDraft = ""
+                                supplierPrepOrigin = if (t == DeviceType.SupplierBand) {
+                                    SupplierPrepOrigin.DevicePicker
+                                } else {
+                                    null
+                                }
                                 // Oura enters its own step machine at the gate, not the generic prep step.
                                 if (t == DeviceType.Oura) {
                                     ouraStep = OuraStep.Gate
@@ -734,12 +793,13 @@ fun AddDeviceWizard(
                                     viewModel.stopWhoopScan()
                                     step = WizardStep.Confirm
                                 },
-                                onRescan = { viewModel.presentWhoopScan(t.whoopModel ?: WhoopModel.WHOOP4) },
+                                onRescan = { startScan(t) },
                                 onOpenSupplierBand = if (
                                     automaticallyScansLaunchBands && supplierAvailable
                                 ) {
                                     {
                                         viewModel.stopWhoopScan()
+                                        supplierPrepOrigin = SupplierPrepOrigin.UnifiedScan
                                         type = DeviceType.SupplierBand
                                         step = WizardStep.Prep
                                     }

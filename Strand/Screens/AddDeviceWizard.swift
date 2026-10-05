@@ -185,6 +185,10 @@ struct AddDeviceWizard: View {
         }
     }
 
+    static func compatibleBandType(for model: WhoopModel) -> DeviceType {
+        model == .whoop5mg ? .whoop5mg : .whoop4
+    }
+
     static func supplierLaunchAvailable(
         adapterAvailable: Bool,
         ownershipConfigured: Bool
@@ -205,6 +209,7 @@ struct AddDeviceWizard: View {
     }
 
     enum Step { case type, prep, pick, confirm }
+    enum SupplierEntryOrigin { case deviceCatalog, compatibleBandScan }
 
     /// The Oura factory-reset-and-adopt sub-flow's own step machine (section 2 of the onboarding UX spec).
     /// The Oura type does NOT use the generic prep/pick/confirm shape: it owns this machine, entered from the
@@ -278,6 +283,8 @@ struct AddDeviceWizard: View {
     @State private var veepooFailure: VeepooPairingFailurePresentation?
     @State private var registrationFailed = false
     @State private var didStartAutomaticBandScan = false
+    @State private var compatibleBandScanModel: WhoopModel
+    @State private var supplierEntryOrigin: SupplierEntryOrigin = .deviceCatalog
 
     /// - Parameter startAt: Optional route into a specific (type, step). Devices uses it to send a removed
     ///   supplier row back through mandatory pairing after its credential is cleared. DEBUG seeded builds
@@ -286,10 +293,12 @@ struct AddDeviceWizard: View {
          onAddedSource: @escaping (SourceKind) -> Void = { _ in },
          selectionScope: SelectionScope,
          startAt: (type: DeviceType, step: Step)? = nil) {
+        let initialBandModel = WhoopModel.persisted
         self.onClose = onClose
         self.onAddedSource = onAddedSource
         self.selectionScope = selectionScope
         self.scannerLive = live
+        _compatibleBandScanModel = State(initialValue: initialBandModel)
         if let startAt,
            selectionScope.allows(
                startAt.type,
@@ -301,7 +310,9 @@ struct AddDeviceWizard: View {
         } else if selectionScope != .allDevices {
             // Customer setup is generation-agnostic. Enter the existing combined scan directly; the
             // discovered advertisement still records the actual transport family before registration.
-            _type = State(initialValue: .whoop4)
+            _type = State(
+                initialValue: Self.compatibleBandType(for: initialBandModel)
+            )
             _step = State(initialValue: .pick)
         }
         // Route each throwaway scanner's diagnostics into the SAME exported strap log the active source
@@ -650,6 +661,12 @@ struct AddDeviceWizard: View {
         }
         type = selectedType
         nameDraft = ""
+        if let whoopModel = selectedType.whoopModel {
+            compatibleBandScanModel = whoopModel
+        }
+        if selectedType == .veepoo {
+            supplierEntryOrigin = .deviceCatalog
+        }
         // The Oura factory-reset-and-adopt gate is destructive, so every fresh entry into the Oura flow
         // re-requires the irreversible-consent tick and clears any stale Advanced-key / adopt state, and
         // enters the Oura sub-flow at its gate rather than the generic prep step.
@@ -1350,7 +1367,9 @@ struct AddDeviceWizard: View {
                     // Observe BLEManager directly so the list updates as `discoveredWhoops` grows. The
                     // subview holds the @ObservedObject; the wizard owns selection + scan lifecycle.
                     WhoopPickList(ble: model.ble) { strap in
-                        self.type = strap.model == .whoop5mg ? .whoop5mg : .whoop4
+                        compatibleBandScanModel = strap.model
+                        self.type = Self.compatibleBandType(for: strap.model)
+                        model.selectWhoopModel(strap.model)
                         pickedWhoop = strap
                         pickedStrap = nil
                         pickedMachine = nil
@@ -1361,13 +1380,14 @@ struct AddDeviceWizard: View {
                         model.stopWhoopScan()
                         step = .confirm
                     } onRescan: {
-                        model.presentWhoopScan(model: WhoopModel.persisted)
+                        model.presentWhoopScan(model: compatibleBandScanModel)
                     }
 
                     if selectionScope != .allDevices,
                        Self.supplierPairingAvailableForCurrentBuild {
                         Button {
                             model.stopWhoopScan()
+                            supplierEntryOrigin = .compatibleBandScan
                             self.type = .veepoo
                             step = .prep
                         } label: {
@@ -1570,7 +1590,12 @@ struct AddDeviceWizard: View {
         }
         switch step {
         case .type:    break
-        case .prep:    step = .type
+        case .prep:
+            if type == .veepoo {
+                returnFromSupplierFlow()
+            } else {
+                step = .type
+            }
         case .pick:    stopAllScans(); step = .prep
         case .confirm:
             // Re-enter the pick step and restart its scan so the user can choose a different device.
@@ -1615,7 +1640,10 @@ struct AddDeviceWizard: View {
     private func startScan(for type: DeviceType) {
         registrationFailed = false
         switch type {
-        case .whoop4, .whoop5mg: model.presentWhoopScan(model: type.whoopModel ?? .whoop4)
+        case .whoop4, .whoop5mg:
+            let whoopModel = type.whoopModel ?? compatibleBandScanModel
+            compatibleBandScanModel = whoopModel
+            model.presentWhoopScan(model: whoopModel)
         case .gymEquipment:      ensureFTMSScanner().scan()
         case .amazfit, .miBand:  ensureHuamiScanner().scan()
         case .oura:              ensureOuraScanner().scan()
@@ -1623,8 +1651,7 @@ struct AddDeviceWizard: View {
             endVeepooPairing()
             guard Self.supplierPairingAvailableForCurrentBuild else {
                 veepooFailure = nil
-                self.type = nil
-                step = .type
+                returnFromSupplierFlow()
                 return
             }
             veepooFailure = nil
@@ -1653,6 +1680,19 @@ struct AddDeviceWizard: View {
         }
     }
 
+    private func returnFromSupplierFlow() {
+        endVeepooPairing()
+        if supplierEntryOrigin == .compatibleBandScan {
+            type = Self.compatibleBandType(for: compatibleBandScanModel)
+            step = .pick
+            model.presentWhoopScan(model: compatibleBandScanModel)
+        } else {
+            type = nil
+            step = .type
+        }
+        supplierEntryOrigin = .deviceCatalog
+    }
+
     private func beginAutomaticBandScanIfNeeded() {
         guard selectionScope != .allDevices,
               step == .pick,
@@ -1661,7 +1701,7 @@ struct AddDeviceWizard: View {
             return
         }
         didStartAutomaticBandScan = true
-        model.presentWhoopScan(model: WhoopModel.persisted)
+        model.presentWhoopScan(model: compatibleBandScanModel)
     }
 
     /// These are the only construction points for the wizard's four discovery-only sources. Since each

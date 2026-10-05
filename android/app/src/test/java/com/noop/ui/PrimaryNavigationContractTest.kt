@@ -242,10 +242,18 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains("MovableNoopCommandLens("))
         assertTrue(text.contains("NestedScrollConnection"))
         assertTrue(text.contains(".nestedScroll(bottomBarScrollConnection)"))
+        assertTrue(text.contains("override fun onPostScroll("))
+        assertTrue(text.contains("consumed = consumed"))
+        assertFalse(text.contains("override fun onPreScroll("))
         assertTrue(text.contains("with(density) { 72.dp.toPx() }"))
         assertTrue(text.contains("with(density) { 52.dp.toPx() }"))
-        assertTrue(text.contains("bottomBarDirectionalTravel <= -compactThresholdPx"))
-        assertTrue(text.contains("bottomBarDirectionalTravel >= expandThresholdPx"))
+        assertTrue(text.contains("updateCompactNavigationHysteresis("))
+        assertTrue(text.contains("LocalNavigationScrollTailClearance provides"))
+        assertTrue(text.contains("CompactNavigationOverlayFootprint"))
+        val components = uiSource("Components.kt")?.readText()
+        assumeTrue("Components.kt unavailable from ${System.getProperty("user.dir")}", components != null)
+        assertTrue(components!!.contains("LocalNavigationScrollTailClearance.current"))
+        assertTrue(components.contains("bottom = bottomTailPadding"))
     }
 
     @Test
