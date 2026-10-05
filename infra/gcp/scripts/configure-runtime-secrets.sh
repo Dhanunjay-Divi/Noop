@@ -145,8 +145,9 @@ assert_live_workloads_disabled
 has_enabled_version() {
   gcloud secrets versions list "${1}" \
     --project="${project_id}" \
-    --format='value(state)' \
-    | grep -qx 'ENABLED'
+    --filter='state=ENABLED' \
+    --format='value(name)' \
+    | grep -q .
 }
 
 if [[ "${database_phase}" == "migration" ]]; then

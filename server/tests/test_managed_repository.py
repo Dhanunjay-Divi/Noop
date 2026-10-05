@@ -2403,6 +2403,41 @@ async def test_account_erasure_blocks_reenrollment_until_identity_is_deleted() -
         assert erased_push["status"] == "revoked"
         assert erased_push["token_ciphertext"] == f"revoked.{push_hash}"
 
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_erasure_targets
+            SET status = 'pending'
+            WHERE erasure_job_id = $1
+              AND target_kind = 'database'
+              AND target_partition = 'managed_account'
+            """,
+            erasure_job_id,
+        )
+        with pytest.raises(
+            ManagedConflictError,
+            match="managed identity erasure lost its completion fence",
+        ):
+            await repository.finalize_erasure_jobs(
+                now=lifecycle_now,
+                batch_size=10,
+            )
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_erasure_targets
+            SET status = 'completed'
+            WHERE erasure_job_id = $1
+              AND target_kind = 'database'
+              AND target_partition = 'managed_account'
+            """,
+            erasure_job_id,
+        )
+        assert (
+            await repository.finalize_erasure_jobs(
+                now=lifecycle_now,
+                batch_size=10,
+            )
+            == []
+        )
         pending = await repository.pending_identity_deletions(
             now=lifecycle_now,
             batch_size=10,

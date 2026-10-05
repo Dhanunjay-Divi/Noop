@@ -328,6 +328,16 @@ def test_gcp_feedback_lifecycle_is_independent_and_retention_bounded() -> None:
     assert "enable_feedback_ingestion = false" in staging
     assert lifecycle.count('name  = "NOOP_FEEDBACK_LIFECYCLE_BATCH_SIZE"') == 1
     assert 'value = "20"' in lifecycle
+    assert lifecycle.count('name  = "NOOP_SAFETY_WORKER_ENABLED"') == 1
+    assert (
+        lifecycle.split(
+            'name  = "NOOP_SAFETY_WORKER_ENABLED"',
+            maxsplit=1,
+        )[1]
+        .split("}", maxsplit=1)[0]
+        .count('value = "false"')
+        == 1
+    )
     assert (
         lifecycle.count('name  = "NOOP_FEEDBACK_CLEANUP_CONFIRMATION_DELAY_SECONDS"')
         == 1

@@ -55,12 +55,19 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 MIGRATION_MANIFEST_PATH = (
     REPOSITORY_ROOT / "server" / "backup" / "migration-manifest-postgresql.sha256"
 )
-RUNTIME_FUNCTIONS = frozenset(
+RUNTIME_DIRECT_FUNCTIONS = frozenset(
     {
         "noop_erase_managed_account_cloud_state",
         "noop_managed_append_change",
     }
 )
+RUNTIME_INDIRECT_FUNCTIONS = frozenset(
+    {
+        "noop_managed_account_erasure_context",
+        "noop_managed_formula_shadow_erasure_context",
+    }
+)
+RUNTIME_FUNCTIONS = RUNTIME_DIRECT_FUNCTIONS | RUNTIME_INDIRECT_FUNCTIONS
 RUNTIME_PROFILE_FUNCTIONS = {
     "private-api": frozenset(),
     "managed-api": RUNTIME_FUNCTIONS,
@@ -764,10 +771,20 @@ def runtime_profile_allows_relation(profile: str, relation: str) -> bool:
             "installation_credentials",
             "unified_account_principals",
         }
-    if profile in {"managed-processor", "managed-lifecycle"}:
+    if profile == "managed-processor":
         return (
             relation.startswith(("managed_", "unified_managed_"))
             or relation == "installation_credentials"
+        )
+    if profile == "managed-lifecycle":
+        return (
+            relation.startswith(("managed_", "unified_managed_"))
+            or relation
+            in {
+                "installation_credentials",
+                "unified_account_principals",
+                "unified_ownership_account_links",
+            }
         )
     return relation.startswith("feedback_")
 
@@ -778,6 +795,13 @@ def runtime_relation_privileges(profile: str, relation: str) -> tuple[str, ...]:
         "unified_managed_account_links",
     }:
         return ("SELECT", "INSERT")
+    if profile == "managed-lifecycle":
+        if relation == "unified_account_principals":
+            return ("SELECT",)
+        if relation == "unified_managed_account_links":
+            return ("SELECT", "DELETE")
+        if relation == "unified_ownership_account_links":
+            return ("SELECT",)
     return ("SELECT", "INSERT", "UPDATE", "DELETE")
 
 
@@ -790,6 +814,13 @@ def runtime_relation_column_privileges(
         "unified_managed_account_links",
     }:
         return (("principal_id", ("UPDATE",)),)
+    if profile == "managed-lifecycle" and relation == "unified_account_principals":
+        return (
+            ("status", ("UPDATE",)),
+            ("version", ("UPDATE",)),
+            ("updated_at", ("UPDATE",)),
+            ("retired_at", ("UPDATE",)),
+        )
     return ()
 
 
