@@ -412,6 +412,12 @@ def _device_id(value: str) -> str:
     return value
 
 
+def _customer_facing_file_token(value: str) -> str:
+    neutral = re.sub("whoop", "compatible-band", value, flags=re.IGNORECASE)
+    token = re.sub(r"[^a-z0-9._-]+", "-", neutral, flags=re.IGNORECASE)
+    return token.strip("-")[:80] or "band"
+
+
 def _scoped_device_installation(value: str) -> str | None:
     components = value.split(":", 2)
     if (
@@ -3830,7 +3836,8 @@ def create_app(
             finish,
             runtime_settings.export_max_rows,
         )
-        return _json_download(value, f"noop-{device_id}-export.json")
+        file_token = _customer_facing_file_token(device_id)
+        return _json_download(value, f"noop-{file_token}-export.json")
 
     @router.delete("/devices/{device_id}", tags=["data-control"])
     async def erase_device(

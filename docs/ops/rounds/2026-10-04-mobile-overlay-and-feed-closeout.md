@@ -126,6 +126,19 @@ claims:
   self-hosted dashboard removes static retired-vendor copy and sanitizes
   server-provided errors, labels, titles, and device identifiers at every text
   rendering boundary while preserving internal protocol and metric keys.
+- The Android customer scanner now uses a dedicated full-screen `Dialog` and
+  opaque root `Surface`; it no longer asks `AlertDialog` to imitate a
+  full-screen page. The rounded dialog remains only for the broader settings
+  catalog.
+- Cancelling Apple discovery now restores the pre-wizard family, durable
+  Bluetooth intent/release state, monitoring expectation, bond flags, and
+  reconnect request, including after process termination. Pausing for
+  confirmation preserves that snapshot; committing a replacement clears it so
+  the superseded band is not reconnected.
+- Static web device titles and export filenames both pass through the neutral
+  customer boundary in browser code and the server's HTTP
+  `Content-Disposition`. Raw server namespace or device identifiers cannot put
+  the retired vendor name back into visible text or a downloaded filename.
 - The terminology audit now parses customer-visible HTML text and attributes
   plus JavaScript string literals in shipped static web surfaces. Focused
   tests cover both static markup and dynamic render-boundary sanitization.
@@ -169,9 +182,11 @@ scroll timing without changing data, ordering, or card dimensions.
 | Hosted terminology snapshot correction | Exact pushed head `3671002eff829161fcf9f7950f223afa91414ec5` started all protected contexts. Release-controls run `37252862331` failed only `test_repository_snapshot_is_current`: the final operations-record additions had shifted historical line numbers after the prior snapshot. A reviewed temporary regeneration kept 18,649 occurrences, 1,651 groups, 886 customer entries, zero customer-visible values, zero forbidden mappings, and the active allowlist unchanged. | The failure is line-only evidence drift, not a customer-copy or classification regression | Replacement hosted execution after the repinned snapshot |
 | Late Android Back-root review remediation | Exact evidence head `23985cafad3cf67d479166090e1fa21570b30a8e` passed all hosted contexts, but final conversation `r4180212377` identified that system Back could reveal a different primary root while leaving compact navigation collapsed. The route synchronizer now expands navigation and clears partial scroll travel only when the revealed exact primary root differs; nested routes in the same tab remain unchanged. Full and Demo each pass `CompactNavigationBehaviorTest` 5/5 and `PrimaryNavigationContractTest` 15/15, with both production Kotlin variants compiled in the same bounded 53-second run. | System Back cannot carry collapsed navigation into a newly revealed primary tab, while nested-route ownership remains stable | Replacement hosted execution and physical Back/TalkBack interaction |
 | Android full-screen scanner recheck | Rebuilt Full app and Android-test APKs were installed on API 35 without clearing app data. The normal Devices entry and first-run post-Terms case pass 1/1 each, require a scanner at least 90% of display width and height, and reject every retired static generation/account row. | Both production customer entries present the same full-screen live scanner instead of the Android-only contained selector | Physical BLE advertisements, pairing, ownership, or OEM layout behavior |
-| Android final matrix | Full and Demo each pass 5,300 unit tests with zero failures/errors and seven intentional skips. The six affected scan/navigation classes pass 34/34 per flavor; both production and both Android-test Kotlin variants compile. Full, Demo, Full-test, and Demo-test APK SHA-256 values are `d6a29ef2702816a88bb76ee50a8bc5b4e64749fa8972470f5f6b1688c4593fe1`, `52793ab3126c8400ac82da115892b9dca0e26bb340331bdc0bb544695e1336f4`, `ca58655000b91314d7c942e4eb9c5d386247ae8b93a95ddf59e021d301d08c54`, and `cb019c0d3be527c0d1558497f87f53d21b3bb09e413f62c32fc863dc0bee07a7`. | Both packaged variants enforce full-screen discovery, cancellation restoration, lazy-safe scanner shutdown, and physical-edge dock persistence | Release signing, physical TalkBack, or real connection behavior |
+| Android full-screen root remediation | The focused Full JVM contracts pass, both Full APKs assemble, and `AppShellInstrumentedTest#devicesConnectBandStartsUnifiedScanWithoutLegacyModelRows` passes 1/1 on API 35 after replacing the customer `AlertDialog` path with a full-screen `Dialog` plus opaque `Surface`. A retained API 35 screenshot and UI hierarchy show no underlying onboarding surface, `Choose your device`, `Searching...`, `Rescan`, and the neutral connection hint with no retired vendor name. The source contract rejects `AlertDialog` in that branch. | The customer scanner owns the display and matches the implemented iPhone scanner structure instead of leaving onboarding visible around a constrained dialog | Physical BLE discovery, signed installation, physical TalkBack, and OEM-specific rendering |
+| Apple presentation-cancel remediation | `BandPresentationScanTests` passes 7/7 and `BluetoothConsentContractTests` passes 7/7 in one macOS run, including durable abandoned-context recovery, corrupt-context clearing, bond-state restoration, disconnected-paired, active reconnect-scan, pending-connect, fresh-install, and intentional-disconnect cases. | Closing discovery or restarting after an interrupted presentation restores prior intent without inventing a connection or reconnecting after an explicit disconnect | CoreBluetooth behavior on a signed phone or a real band |
+| Android final matrix | Full and Demo each pass 5,300 unit tests with zero failures/errors and seven intentional skips. The six affected scan/navigation classes pass 34/34 per flavor; both production and both Android-test Kotlin variants compile. Full, Demo, Full-test, and Demo-test APK SHA-256 values are `45a6cc92f95fb21e0f5be2b11c9649cf376e5d0eb7c4caf3a069e2ab5dd4609f`, `fab3004ec012db41ec6cb728f1a482375fed89bc55ea9309ef239e6873bc74ef`, `ca58655000b91314d7c942e4eb9c5d386247ae8b93a95ddf59e021d301d08c54`, and `cb019c0d3be527c0d1558497f87f53d21b3bb09e413f62c32fc863dc0bee07a7`. | Both packaged variants enforce full-screen discovery, cancellation restoration, lazy-safe scanner shutdown, and physical-edge dock persistence | Release signing, physical TalkBack, or real connection behavior |
 | Apple final interaction recheck | StrandDesign passes 60/60 including selection-source ownership. Exact iPhone Simulator and macOS builds succeed; the iPhone executable SHA-256 is `6fff1918ec4b35b9e586b197d1f4d33e154142efe09f81e1cc1665de2d5f0028`. | Touch-pinned chart selections survive synthetic hover end while pointer and accessibility paths remain distinct; neutral completion copy compiles in both products | Physical touch, pointer, VoiceOver, signing, or real account completion |
-| Static web customer-copy boundary | `node --check server/app/static/app.js` passes. Terminology unit coverage verifies visible HTML text/attributes, JavaScript string literals, and render-boundary sanitization; the current audit summary reports zero customer-visible retired-vendor values and zero forbidden mappings. | Shipped static dashboard text and server-derived text written through reviewed rendering helpers are neutral | Full hosted server suite, arbitrary future DOM writes, or a deployed image |
+| Static web customer-copy boundary | `node --check server/app/static/app.js` passes. The complete server suite records 612 passed and 215 integration-environment skips; Ruff passes all 100 files. Terminology unit coverage verifies visible HTML text/attributes, JavaScript string literals, rendered provenance titles, and sanitized export filename tokens. A black-box server test exports a raw legacy-namespaced device identifier and verifies that `Content-Disposition` contains `compatible-band` and no retired vendor name. The current audit summary reports zero customer-visible retired-vendor values and zero forbidden mappings. | Shipped static dashboard text, server-derived titles, and both browser- and server-selected downloaded filenames are neutral | Hosted execution, arbitrary future DOM writes, or a deployed image |
 | Diff hygiene | `git diff --check` passed before the product commit | No whitespace-error regression | Runtime behavior |
 
 The first combined iPhone onboarding run exposed a test-query defect: the
@@ -180,13 +195,13 @@ under the scan sheet. The wizard's own back control was already hidden. It now
 has a stable identifier, and the scan-only tests query that exact control. Both
 previously affected cases then passed.
 
-The reviewed terminology snapshot contains 18,655 classified occurrences
-across 1,650 groups, with the customer category reduced to 885 and no
+The reviewed terminology snapshot contains 18,674 classified occurrences
+across 1,652 groups, with the customer category reduced to 885 and no
 forbidden active use or customer-visible localization value. The active
 allowlist SHA-256 is
-`c0d5c398b82cf572889cc15be3010abb2eb080c6ba9988b86782ba142cea2ab5`;
+`f3fa5910bc72e396488d87af06877c79ff2def2724a5fb451e7f30a334120345`;
 the legacy inventory SHA-256 is
-`7a85e1df026086693b0b9ea924dc123aa6739c2183597195a422b46f92be42bb`;
+`83b2fef6b9d05507bfd47799c740a2538a96775e38843799098cecbc45f5b90d`;
 and the exact terminology-audit SHA-256 is
 `656746b944543d40069632bffc2c2e184377ec85db584ba1f50cbef1d5ab14ad`.
 

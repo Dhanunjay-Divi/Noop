@@ -758,12 +758,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 75,
+      "occurrenceCount": 73,
       "owner": "project team",
       "path": "Strand/App/AppModel.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "c2d6483ee25abef17d452830e70312d03da3b45820a28c29e7b708562b91a275"
+      "sha256": "c08f6a855046e25748c5402cf0036ff645fd22739cd52c5a22226fde11418031"
     },
     {
       "category": "core",
@@ -794,12 +794,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 426,
+      "occurrenceCount": 432,
       "owner": "project team",
       "path": "Strand/BLE/BLEManager.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "cfcf13de80f899585f406613ad4a18a8fee76d9269a0842db2ac0357589ca95b"
+      "sha256": "8edfbb597c14abaa7a9c4228b9edcb946e7f31e0c857c65689fbe5e6f770b88c"
     },
     {
       "category": "core",
@@ -3656,12 +3656,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 64,
+      "occurrenceCount": 65,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/AddDeviceWizard.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "eef44b03ac63e121113a4134e336575fb399f3ba13922842d415a8abb890229f"
+      "sha256": "430072ae15cb46676f958015a3787c3256ebe89e89e403a6d6be74866e0a1181"
     },
     {
       "category": "customer",
@@ -4688,6 +4688,15 @@
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
       "sha256": "1dfa3ef6d5a4d766c066f5d90a7e6b520db04f05d1b3d35965d2edaefee5f912"
+    },
+    {
+      "category": "core",
+      "occurrenceCount": 1,
+      "owner": "project team",
+      "path": "server/app/main.py",
+      "reason": "Existing active symbol retained behind the additive compatibility migration.",
+      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
+      "sha256": "0bddd3d179e325d72dd74971f2d7883fe68e4c39e81de7d555f863b580789176"
     },
     {
       "category": "core",

@@ -95,9 +95,10 @@ class AddDeviceWizardScannerLifecycleTest {
         )
         assertTrue(
             sharedPicker.contains(
-                "BandPairingDiscoveryStage(searching = searching)",
+                "BandPairingDiscoveryStage(",
             ),
         )
+        assertTrue(sharedPicker.contains("supportingWarning = if (searching)"))
         assertFalse(sharedPicker.contains("CircularProgressIndicator("))
         assertTrue(
             picker.contains(

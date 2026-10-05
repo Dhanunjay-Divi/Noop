@@ -512,6 +512,25 @@ def test_export_delete_and_retention_are_authenticated_and_confirmed(
     assert retention.json()["retention_days"] == 30
 
 
+def test_export_filename_neutralizes_retired_vendor_device_id(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    payload = official_payload()
+    assert (
+        client.post("/v1/sync", headers=auth_headers, json=payload).status_code == 200
+    )
+
+    exported = client.get(
+        f"/v1/devices/{OFFICIAL_DEVICE_ID}/export",
+        headers=auth_headers,
+    )
+
+    assert exported.status_code == 200
+    content_disposition = exported.headers["content-disposition"].lower()
+    assert "whoop" not in content_disposition
+    assert "compatible-band" in content_disposition
+
+
 def test_dashboard_is_static_and_never_embeds_a_secret(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200

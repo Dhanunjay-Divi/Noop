@@ -828,6 +828,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// A deliberate device removal must beat the legacy `lastSyncedAt` migration signal below; otherwise an
     /// app that once connected would recreate its central and begin scanning again after the user removed it.
     private static let bluetoothReleasedKey = "noop.bluetooth.explicitlyReleased"
+    static let presentScanResumeContextKey = "noop.bluetooth.presentScanResumeContext.v1"
 
     // MARK: Published state
     public let state: LiveState
@@ -1122,9 +1123,46 @@ public final class BLEManager: NSObject, ObservableObject {
     private var preferredPeripheralUUID: UUID?
     /// Multi-WHOOP Add-a-WHOOP wizard: while true, `didDiscover` POPULATES `discoveredWhoops` instead
     /// of auto-connecting - an explicit, separate "present the nearby straps" mode the wizard turns on
-    /// (`scanForWhoops()`) then off (`stopWhoopScan()`). Default false leaves the auto-connect path
-    /// untouched. Must never overlap the normal connect flow (the wizard owns the central while true).
+    /// (`scanForWhoops()`) then exits through the explicit pause/cancel/commit lifecycle. Default false
+    /// leaves the auto-connect path untouched. The wizard owns the central while this is true.
     private var isPresentingScan = false
+    struct PresentScanResumeContext: Codable, Equatable {
+        let modelRawValue: String
+        let persistedModelRaw: String?
+        let bluetoothIntent: Bool?
+        let bluetoothReleased: Bool?
+        let monitoringExpected: Bool?
+        let shouldReconnect: Bool
+        let bonded: Bool
+        let encryptedBond: Bool
+
+        var model: WhoopModel {
+            WhoopModel(rawValue: modelRawValue) ?? .whoop4
+        }
+
+        init(
+            model: WhoopModel,
+            persistedModelRaw: String?,
+            bluetoothIntent: Bool?,
+            bluetoothReleased: Bool?,
+            monitoringExpected: Bool?,
+            shouldReconnect: Bool,
+            bonded: Bool,
+            encryptedBond: Bool
+        ) {
+            self.modelRawValue = model.rawValue
+            self.persistedModelRaw = persistedModelRaw
+            self.bluetoothIntent = bluetoothIntent
+            self.bluetoothReleased = bluetoothReleased
+            self.monitoringExpected = monitoringExpected
+            self.shouldReconnect = shouldReconnect
+            self.bonded = bonded
+            self.encryptedBond = encryptedBond
+        }
+    }
+    /// Opening discovery temporarily replaces the normal reconnect scan. Keep the pre-presentation
+    /// intent until the wizard either commits a replacement or closes and restores collection.
+    private var presentScanResumeContext: PresentScanResumeContext?
     /// Duplicate advertisements keep the visible RSSI current, but a report needs only one candidate
     /// transition per transport family for each explicit discovery session.
     private var presentScanDiagnosticDeduper = BandDiagnostics.CandidateSessionDeduper()
@@ -1278,7 +1316,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// The strap family the user chose to pair. Drives which service we scan for
     /// and which service we discover after connecting. Hydrated from the persisted
     /// pick so restoration/reconnect after a relaunch target the right strap.
-    private var selectedModel: WhoopModel = .persisted
+    private var selectedModel: WhoopModel
     private var lastStandardHRLogAt: Date?
 
     /// True when the selected/connected strap is a WHOOP 5/MG. Read-only window onto the private
@@ -1329,10 +1367,13 @@ public final class BLEManager: NSObject, ObservableObject {
         resumeRememberedRuntimeAtLaunch: Bool = true,
         allowsBluetoothRuntime: Bool = true
     ) {
+        let abandonedPresentScan =
+            Self.consumeAbandonedPresentScanResumeContext()
         self.state = state
         self.deviceId = deviceId
         self.allowsBluetoothRuntime = allowsBluetoothRuntime
         self.router = FrameRouter(state: state)
+        self.selectedModel = abandonedPresentScan?.model ?? .persisted
         // WhoopStore.init is now async, so it can't run here.
         // bootstrapStore() is called once the CBCentralManager reaches poweredOn
         // (see centralManagerDidUpdateState), which guarantees the store is ready
@@ -1340,11 +1381,21 @@ public final class BLEManager: NSObject, ObservableObject {
         self.collector = nil
         super.init()
         state.lastSyncedAt = UserDefaults.standard.object(forKey: "lastSyncedAt") as? Double
+        if let abandonedPresentScan {
+            state.bonded = abandonedPresentScan.bonded
+            state.encryptedBond = abandonedPresentScan.encryptedBond
+            state.batteryRatedHours =
+                selectedModel.deviceFamily == .whoop5
+                ? BatteryEstimator.ratedLifeHoursWhoop5
+                : BatteryEstimator.ratedLifeHoursWhoop4
+        }
         // Restore identifier + background-capable central (foundation for M3 state restoration).
         #if os(iOS)
         // Returning users retain restoration. Fresh installs do not construct CoreBluetooth until an
         // explicit Connect/Scan gesture, so the system sheet can never precede NOOP's rationale.
-        if resumeRememberedRuntimeAtLaunch, Self.shouldResumeBluetoothRuntime {
+        if resumeRememberedRuntimeAtLaunch,
+           abandonedPresentScan?.shouldReconnect == true
+            || Self.shouldResumeBluetoothRuntime {
             activateCentralIfNeeded(recordUserIntent: false)
         }
         #else
@@ -1515,6 +1566,7 @@ public final class BLEManager: NSObject, ObservableObject {
         self.deviceId = deviceId
         self.allowsBluetoothRuntime = false
         self.router = FrameRouter(state: state)
+        self.selectedModel = .persisted
         self.collector = collector
         super.init()
         state.lastSyncedAt = UserDefaults.standard.object(forKey: "lastSyncedAt") as? Double
@@ -1833,6 +1885,62 @@ public final class BLEManager: NSObject, ObservableObject {
         prepareForModelSwitch()
     }
 
+    nonisolated static func shouldResumeConnectionAfterPresentScan(
+        intentionalDisconnect: Bool,
+        connected: Bool,
+        bonded: Bool,
+        hasReconnectTarget: Bool,
+        pendingConnect: Bool,
+        normalScanActive: Bool
+    ) -> Bool {
+        guard !intentionalDisconnect else { return false }
+        return connected || bonded || hasReconnectTarget || pendingConnect || normalScanActive
+    }
+
+    /// Begin or resume one presentation session. Re-scans and the supplier sub-flow retain the original
+    /// snapshot so a later cancellation still returns to the connection that was active before discovery.
+    public func presentWhoopScan(model: WhoopModel) {
+        if presentScanResumeContext == nil {
+            let resumeContext = PresentScanResumeContext(
+                model: selectedModel,
+                persistedModelRaw: UserDefaults.standard.string(
+                    forKey: "selectedWhoopModel"
+                ),
+                bluetoothIntent: UserDefaults.standard.object(
+                    forKey: Self.bluetoothIntentKey
+                ) as? Bool,
+                bluetoothReleased: UserDefaults.standard.object(
+                    forKey: Self.bluetoothReleasedKey
+                ) as? Bool,
+                monitoringExpected:
+                    BluetoothAvailabilityNotifications.monitoringExpected,
+                shouldReconnect: Self.shouldResumeConnectionAfterPresentScan(
+                    intentionalDisconnect: intentionalDisconnect,
+                    connected: state.connected,
+                    bonded: state.bonded,
+                    hasReconnectTarget: peripheral != nil
+                        || restoredPeripheral != nil
+                        || preferredPeripheralUUID != nil
+                        || lastBondedPeripheralUUID != nil,
+                    pendingConnect: pendingConnectModel != nil,
+                    normalScanActive: central?.isScanning == true
+                        && !isPresentingScan
+                ),
+                bonded: state.bonded,
+                encryptedBond: state.encryptedBond
+            )
+            Self.persistPresentScanResumeContext(resumeContext)
+            presentScanResumeContext = resumeContext
+        }
+        UserDefaults.standard.set(
+            model.rawValue,
+            forKey: "selectedWhoopModel"
+        )
+        prepareForPresentScan(model: model)
+        connect(model: model)
+        scanForWhoops()
+    }
+
     // MARK: Bond-loop salvage probe (#78 hole-4)
 
     /// Minimum time since the pause tripped (or since the last probe) before another salvage probe may
@@ -2037,13 +2145,119 @@ public final class BLEManager: NSObject, ObservableObject {
         log("Add-a-band scan: presenting nearby compatible straps")
     }
 
-    /// End the Add-a-WHOOP present-scan: stop scanning and clear `isPresentingScan` so `didDiscover`
-    /// returns to its normal auto-connect behaviour. Safe to call when not presenting (idempotent).
-    public func stopWhoopScan() {
+    /// Pause discovery while the wizard confirms a candidate or enters another pairing adapter. The
+    /// original connection snapshot remains owned by the wizard session.
+    public func pauseWhoopScan() {
+        stopPresentingWhoopScan(reason: "selection_paused")
+    }
+
+    /// Commit a replacement source. A later sheet dismissal must not reconnect the superseded band.
+    public func commitWhoopScan() {
+        stopPresentingWhoopScan(reason: "selection_committed")
+        Self.clearPresentScanResumeContext()
+        presentScanResumeContext = nil
+    }
+
+    /// Cancel discovery and resume the connection intent that presentation temporarily replaced.
+    public func cancelWhoopScan() {
+        stopPresentingWhoopScan(reason: "user_cancelled")
+        guard let resume = presentScanResumeContext else { return }
+        Self.restorePresentScanPreferences(resume)
+        selectedModel = resume.model
+        state.bonded = resume.bonded
+        state.encryptedBond = resume.encryptedBond
+        state.batteryRatedHours =
+            resume.model.deviceFamily == .whoop5
+            ? BatteryEstimator.ratedLifeHoursWhoop5
+            : BatteryEstimator.ratedLifeHoursWhoop4
+        Self.clearPresentScanResumeContext()
+        presentScanResumeContext = nil
+        if resume.shouldReconnect {
+            connectFromSystem(model: resume.model)
+        } else {
+            intentionalDisconnect = true
+            pendingConnectModel = nil
+        }
+    }
+
+    nonisolated static func persistPresentScanResumeContext(
+        _ context: PresentScanResumeContext,
+        defaults: UserDefaults = .standard
+    ) {
+        guard let data = try? JSONEncoder().encode(context) else { return }
+        defaults.set(data, forKey: presentScanResumeContextKey)
+    }
+
+    nonisolated static func consumeAbandonedPresentScanResumeContext(
+        defaults: UserDefaults = .standard
+    ) -> PresentScanResumeContext? {
+        guard let data = defaults.data(forKey: presentScanResumeContextKey),
+              let context = try? JSONDecoder().decode(
+                PresentScanResumeContext.self,
+                from: data
+              ) else {
+            defaults.removeObject(forKey: presentScanResumeContextKey)
+            return nil
+        }
+        restorePresentScanPreferences(context, defaults: defaults)
+        clearPresentScanResumeContext(defaults: defaults)
+        return context
+    }
+
+    private nonisolated static func restorePresentScanPreferences(
+        _ context: PresentScanResumeContext,
+        defaults: UserDefaults = .standard
+    ) {
+        if let persistedModelRaw = context.persistedModelRaw {
+            defaults.set(persistedModelRaw, forKey: "selectedWhoopModel")
+        } else {
+            defaults.removeObject(forKey: "selectedWhoopModel")
+        }
+        restoreOptionalPreference(
+            context.bluetoothIntent,
+            forKey: bluetoothIntentKey,
+            defaults: defaults
+        )
+        restoreOptionalPreference(
+            context.bluetoothReleased,
+            forKey: bluetoothReleasedKey,
+            defaults: defaults
+        )
+        restoreOptionalPreference(
+            context.monitoringExpected,
+            forKey: BluetoothAvailabilityNotifications.monitoringExpectedKey,
+            defaults: defaults
+        )
+    }
+
+    private nonisolated static func clearPresentScanResumeContext(
+        defaults: UserDefaults = .standard
+    ) {
+        defaults.removeObject(forKey: presentScanResumeContextKey)
+    }
+
+    private nonisolated static func restoreOptionalPreference(
+        _ value: Bool?,
+        forKey key: String,
+        defaults: UserDefaults = .standard
+    ) {
+        if let value {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    /// Stop only the presentation scan and return discovery to normal routing. Safe when already paused.
+    private func stopPresentingWhoopScan(reason: String) {
         guard isPresentingScan else { return }
         isPresentingScan = false
         central?.stopScan()
-        BandDiagnostics.recordScan(.stopped, family: selectedModel.deviceFamily, reason: "user_cancelled")
+        BandDiagnostics.recordScan(
+            .stopped,
+            family: selectedModel.deviceFamily,
+            reason: reason
+        )
         log("Add-a-WHOOP scan: stopped")
     }
 

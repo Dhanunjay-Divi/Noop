@@ -1377,7 +1377,7 @@ struct AddDeviceWizard: View {
                         nameDraft = Self.compatibleBandIdentity(
                             for: strap.model
                         ).displayName
-                        model.stopWhoopScan()
+                        model.pauseWhoopScan()
                         step = .confirm
                     } onRescan: {
                         model.presentWhoopScan(model: compatibleBandScanModel)
@@ -1386,7 +1386,7 @@ struct AddDeviceWizard: View {
                     if selectionScope != .allDevices,
                        Self.supplierPairingAvailableForCurrentBuild {
                         Button {
-                            model.stopWhoopScan()
+                            model.pauseWhoopScan()
                             supplierEntryOrigin = .compatibleBandScan
                             self.type = .veepoo
                             step = .prep
@@ -1744,17 +1744,26 @@ struct AddDeviceWizard: View {
     }
 
     private func stopAllScans() {
-        model.stopWhoopScan()
         hrScanner?.stopScan()
         ftmsScanner?.stopScan()
         huamiScanner?.stopScan()
         ouraScanner?.stop()
         endVeepooPairing()
+        model.stopWhoopScan()
+    }
+
+    private func pauseAllScansForCommit() {
+        hrScanner?.stopScan()
+        ftmsScanner?.stopScan()
+        huamiScanner?.stopScan()
+        ouraScanner?.stop()
+        endVeepooPairing()
+        model.pauseWhoopScan()
     }
 
     /// Build the right `PairedDevice` for the chosen path, register it, optionally activate, then close.
     private func finishAdd(makeActive: Bool) {
-        stopAllScans()
+        pauseAllScansForCommit()
         let now = Int(Date().timeIntervalSince1970)
         let name = confirmName
         let device: PairedDevice
@@ -1830,6 +1839,11 @@ struct AddDeviceWizard: View {
         guard model.registerDevice(device, makeActive: makeActive) else {
             registrationFailed = true
             return
+        }
+        if makeActive {
+            model.commitWhoopScan()
+        } else {
+            model.stopWhoopScan()
         }
         onAddedSource(device.sourceKind)
         onClose()
@@ -1955,6 +1969,7 @@ struct AddDeviceWizard: View {
         veepooCommitted = true
         veepooFailure = nil
         veepooSession = nil
+        model.commitWhoopScan()
         onAddedSource(addedDevice.sourceKind)
         onClose()
     }

@@ -213,6 +213,12 @@ class OnboardingAttachContractTest {
     @Test fun claimEligibleWizardStartsUnifiedScanAndKeepsSupplierAsSecondaryRoute() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val addDevice = source(userDir, "AddDeviceWizard.kt").readText()
+        val frame = addDevice
+            .substringAfter("private fun AddDeviceWizardFrame(")
+            .substringBefore("private fun headerTitle(")
+        val fullScreenFrame = frame
+            .substringAfter("if (fullScreen) {")
+            .substringBefore("\n        return")
         val pickerCall = addDevice
             .substringAfter("t.isWhoop -> WhoopPickStep(")
             .substringBefore("t == DeviceType.GymEquipment")
@@ -232,6 +238,21 @@ class OnboardingAttachContractTest {
         assertTrue(addDevice.contains(
             "automaticallyScansLaunchBands -> launchWhoopType",
         ))
+        assertTrue(addDevice.contains(
+            "fullScreen = automaticallyScansLaunchBands",
+        ))
+        assertTrue(fullScreenFrame.contains("Dialog("))
+        assertTrue(fullScreenFrame.contains("Surface("))
+        assertTrue(fullScreenFrame.contains("Modifier\n                    .fillMaxSize()"))
+        assertTrue(fullScreenFrame.contains("usePlatformDefaultWidth = false"))
+        assertFalse(fullScreenFrame.contains("AlertDialog("))
+        assertFalse(addDevice.contains("RectangleShape"))
+        assertTrue(
+            addDevice.contains(
+                "searchingHintRes =\n" +
+                    "                R.string.appwide_onboarding_device_wizard_whoop_search_hint",
+            ),
+        )
         assertTrue(
             addDevice.contains(
                 "LaunchedEffect(automaticallyScansLaunchBands, launchWhoopModel)",

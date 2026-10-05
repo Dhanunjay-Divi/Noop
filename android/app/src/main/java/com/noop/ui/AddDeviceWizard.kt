@@ -6,6 +6,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,10 +36,12 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,7 +55,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -60,6 +62,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.ble.ExperimentalBrand
@@ -666,34 +669,13 @@ fun AddDeviceWizard(
     // The Adopting->Failed observer (the LaunchedEffect below) reads the SAME value.
     val adoptNeedsPairing by viewModel.ouraNeedsPairing.collectAsStateWithLifecycle()
 
-    AlertDialog(
-        modifier = Modifier
-            .then(
-                if (automaticallyScansLaunchBands) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier
-                },
-            )
-            .testTag("noop.device-wizard"),
+    AddDeviceWizardFrame(
+        fullScreen = automaticallyScansLaunchBands,
         onDismissRequest = {
             if (!registrationBusy) {
                 stopAllScans()
                 onClose()
             }
-        },
-        properties = DialogProperties(
-            usePlatformDefaultWidth = !automaticallyScansLaunchBands,
-        ),
-        shape = if (automaticallyScansLaunchBands) {
-            RectangleShape
-        } else {
-            RoundedCornerShape(28.dp)
-        },
-        containerColor = if (automaticallyScansLaunchBands) {
-            Palette.surfaceBase
-        } else {
-            Palette.surfaceOverlay
         },
         title = {
             // The Oura type drives its own titled step machine; otherwise the generic step titles apply.
@@ -740,7 +722,7 @@ fun AddDeviceWizard(
                 }
             }
         },
-        text = {
+        content = {
             // Make the wizard body scrollable so no step is ever cut off under large font scaling or on
             // large/short displays (#897: the device-type list was taller than the dialog and the lower rows,
             // e.g. Oura, were unreachable). The AlertDialog text slot does not scroll its content on its own,
@@ -979,8 +961,6 @@ fun AddDeviceWizard(
                 }
             }
         },
-        confirmButton = {},
-        dismissButton = {},
     )
 
     // After adding, offer to make the new device active.
@@ -1085,6 +1065,59 @@ fun AddDeviceWizard(
             adoptNeedsPairing != null -> ouraStep = OuraStep.Failed
         }
     }
+}
+
+@Composable
+private fun AddDeviceWizardFrame(
+    fullScreen: Boolean,
+    onDismissRequest: () -> Unit,
+    title: @Composable () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (fullScreen) {
+        Dialog(
+            onDismissRequest = onDismissRequest,
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("noop.device-wizard"),
+                color = Palette.surfaceBase,
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                    ) {
+                        title()
+                    }
+                    HorizontalDivider(color = Palette.hairline)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                    ) {
+                        content()
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    AlertDialog(
+        modifier = Modifier.testTag("noop.device-wizard"),
+        onDismissRequest = onDismissRequest,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = Palette.surfaceOverlay,
+        title = title,
+        text = content,
+        confirmButton = {},
+        dismissButton = {},
+    )
 }
 
 private fun headerTitle(step: WizardStep, type: DeviceType?): String = when (step) {
@@ -1630,7 +1663,13 @@ private fun WhoopPickStep(
         R.string.appwide_action_pair_another_supported_band,
     )
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        PickList(searching = true, isEmpty = found.isEmpty(), onRescan = onRescan) {
+        PickList(
+            searching = true,
+            isEmpty = found.isEmpty(),
+            onRescan = onRescan,
+            searchingHintRes =
+                R.string.appwide_onboarding_device_wizard_whoop_search_hint,
+        ) {
             found.sortedByDescending { it.rssi }.forEach { strap ->
                 DiscoveredRow(
                     name = strap.model.registrationLabel(),
@@ -2272,6 +2311,7 @@ private fun PickList(
     idleStatus: String? = null,
     idleTone: StrandTone = StrandTone.Neutral,
     emptyMessage: String? = null,
+    searchingHintRes: Int? = null,
     emptySecondaryRes: Int? =
         R.string.l10n_add_device_wizard_make_sure_it_s_awake_and_8c40e59f,
     rows: @Composable () -> Unit,
@@ -2305,7 +2345,14 @@ private fun PickList(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(Metrics.space10),
             ) {
-                BandPairingDiscoveryStage(searching = searching)
+                BandPairingDiscoveryStage(
+                    searching = searching,
+                    supportingWarning = if (searching) {
+                        searchingHintRes?.let(::uiString)
+                    } else {
+                        null
+                    },
+                )
                 if (!searching) {
                     emptyMessage?.let { message ->
                         Text(

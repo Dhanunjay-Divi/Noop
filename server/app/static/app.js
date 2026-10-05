@@ -31,6 +31,13 @@ function customerFacingBrand(value) {
     .replace(/whoop/gi, "compatible band");
 }
 
+function customerFacingFileToken(value) {
+  return customerFacingBrand(value)
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "band";
+}
+
 function showError(message) {
   errorBox.textContent = customerFacingBrand(message);
   errorBox.classList.remove("hidden");
@@ -127,7 +134,7 @@ function appendDefinition(list, name, value) {
 }
 
 function renderProvenance(device) {
-  byId("namespaceTitle").textContent = provenanceLabel(device);
+  byId("namespaceTitle").textContent = customerFacingBrand(provenanceLabel(device));
   const list = byId("provenanceList");
   list.replaceChildren();
   appendDefinition(list, "Namespace ID", device.device_id);
@@ -272,7 +279,7 @@ byId("exportButton").addEventListener("click", async () => {
     const blob = await response.blob();
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `noop-${state.selected.device_id}-export.json`;
+    link.download = `noop-${customerFacingFileToken(state.selected.device_id)}-export.json`;
     link.click();
     URL.revokeObjectURL(link.href);
   } catch (error) { showError(error.message); }

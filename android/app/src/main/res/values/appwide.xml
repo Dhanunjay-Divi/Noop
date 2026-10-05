@@ -647,7 +647,7 @@
     <string name="appwide_onboarding_device_wizard_pick_body">Tap the device that is yours.</string>
     <string name="appwide_onboarding_device_wizard_pick_title">Choose your device</string>
     <string name="appwide_onboarding_device_wizard_prep_body">Get it ready, then scan.</string>
-    <string name="appwide_onboarding_device_wizard_rescan">Scan again</string>
+    <string name="appwide_onboarding_device_wizard_rescan">Rescan</string>
     <string name="appwide_onboarding_device_wizard_searching">Searching…</string>
     <string name="appwide_onboarding_device_wizard_supplier_add_active">Add as active band</string>
     <string name="appwide_onboarding_device_wizard_supplier_android_add_verified">Add verified band</string>

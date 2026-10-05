@@ -119,11 +119,11 @@ Last updated: **2026-10-05**
   vendor values and zero forbidden mappings. Focused Android Full and Demo
   suites pass the six affected classes; the integrated iOS Simulator build
   succeeds; and the final Apple affected wall passes 91/91. The reviewed
-  terminology snapshot now records 18,655 occurrences across 1,650 groups,
+  terminology snapshot now records 18,674 occurrences across 1,652 groups,
   with 885 customer entries. The inventory digest is
-  `7a85e1df026086693b0b9ea924dc123aa6739c2183597195a422b46f92be42bb`;
+  `83b2fef6b9d05507bfd47799c740a2538a96775e38843799098cecbc45f5b90d`;
   the active-allowlist digest is
-  `c0d5c398b82cf572889cc15be3010abb2eb080c6ba9988b86782ba142cea2ab5`;
+  `f3fa5910bc72e396488d87af06877c79ff2def2724a5fb451e7f30a334120345`;
   and the exact audit-tool digest is
   `656746b944543d40069632bffc2c2e184377ec85db584ba1f50cbef1d5ab14ad`.
   The complete Tools test root passes 382 tests with one intentional skip.
@@ -153,8 +153,8 @@ Last updated: **2026-10-05**
   with seven intentional skips; the six affected classes pass 34/34 per
   flavor; and all four production/instrumentation Kotlin variants compile.
   Current Full, Demo, Full-test, and Demo-test APK SHA-256 values are
-  `d6a29ef2702816a88bb76ee50a8bc5b4e64749fa8972470f5f6b1688c4593fe1`,
-  `52793ab3126c8400ac82da115892b9dca0e26bb340331bdc0bb544695e1336f4`,
+  `45a6cc92f95fb21e0f5be2b11c9649cf376e5d0eb7c4caf3a069e2ab5dd4609f`,
+  `fab3004ec012db41ec6cb728f1a482375fed89bc55ea9309ef239e6873bc74ef`,
   `ca58655000b91314d7c942e4eb9c5d386247ae8b93a95ddf59e021d301d08c54`,
   and
   `cb019c0d3be527c0d1558497f87f53d21b3bb09e413f62c32fc863dc0bee07a7`.
@@ -168,6 +168,19 @@ Last updated: **2026-10-05**
   labels, errors, titles, and device identifiers before display. The expanded
   audit parses static HTML plus JavaScript string literals and reports zero
   customer-visible retired-vendor values and zero forbidden mappings.
+  The final review correction replaces Android's constrained customer
+  `AlertDialog` with a dedicated full-screen `Dialog` and opaque root surface;
+  the focused Full contracts, APK assembly, and exact API 35 customer-entry
+  case pass. A retained API 35 screenshot and UI hierarchy show the scanner
+  owning the full display with no onboarding surface behind it, using the same
+  title, scan state, `Rescan` action, and neutral connection hint as iPhone.
+  Apple discovery cancellation now durably restores the pre-wizard family,
+  Bluetooth intent, monitoring expectation, bond flags, and pending reconnect;
+  its focused wall passes 14/14. Web provenance titles and export filenames
+  are neutralized at both browser and HTTP response boundaries. The complete
+  server suite passes 612 tests with 215 integration-environment skips, Ruff
+  passes, and a black-box server test rejects the retired vendor name in
+  `Content-Disposition`.
   Private staging still serves source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`,

@@ -16,7 +16,8 @@ final class BluetoothConsentContractTests: XCTestCase {
         let iosInitializer = try slice(initializer, from: "#if os(iOS)", to: "#else")
 
         XCTAssertTrue(initializer.contains("Self.shouldResumeBluetoothRuntime"))
-        XCTAssertTrue(initializer.contains("if resumeRememberedRuntimeAtLaunch, Self.shouldResumeBluetoothRuntime {"))
+        XCTAssertTrue(initializer.contains("abandonedPresentScan?.shouldReconnect == true"))
+        XCTAssertTrue(initializer.contains("|| Self.shouldResumeBluetoothRuntime"))
         XCTAssertTrue(initializer.contains("activateCentralIfNeeded(recordUserIntent: false)"))
         XCTAssertFalse(iosInitializer.contains("central = CBCentralManager"),
                        "A fresh AppModel must not directly construct CoreBluetooth before rationale.")
@@ -79,12 +80,21 @@ final class BluetoothConsentContractTests: XCTestCase {
     func testAddDeviceWizardClosesOnlyAfterVerifiedRegistration() throws {
         let source = try text("Strand/Screens/AddDeviceWizard.swift")
         let model = try text("Strand/App/AppModel.swift")
+        let bleManager = try text("Strand/BLE/BLEManager.swift")
 
         XCTAssertTrue(
             source.contains(
                 "guard model.registerDevice(device, makeActive: makeActive) else"
             )
         )
+        XCTAssertTrue(source.contains("private func pauseAllScansForCommit()"))
+        XCTAssertTrue(source.contains("model.pauseWhoopScan()"))
+        XCTAssertTrue(source.contains("model.commitWhoopScan()"))
+        XCTAssertTrue(source.contains("model.stopWhoopScan()"))
+        XCTAssertTrue(bleManager.contains("state.bonded = resume.bonded"))
+        XCTAssertTrue(bleManager.contains("state.encryptedBond = resume.encryptedBond"))
+        XCTAssertTrue(bleManager.contains("persistPresentScanResumeContext(resumeContext)"))
+        XCTAssertTrue(bleManager.contains("consumeAbandonedPresentScanResumeContext()"))
         XCTAssertTrue(source.contains("registrationFailed = true"))
         XCTAssertTrue(
             source.contains(

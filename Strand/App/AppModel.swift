@@ -2162,22 +2162,18 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(model.rawValue, forKey: "selectedWhoopModel")
     }
 
-    /// Point the WHOOP scan at a specific family, then present nearby straps WITHOUT auto-connecting.
-    /// `prepareForModelSwitch()` first clears any sticky bond/connection so the engine is idle, then
-    /// `connect(model:)` selects the family + installs its framing (it sets the engine's private
-    /// `selectedModel`, which `scanForWhoops()` scans for), and the immediate `scanForWhoops()` takes
-    /// over the central in present-mode (it `stopScan()`s the connect's scan and re-arms a duplicate-
-    /// allowing present scan). The persisted `selectedWhoopModel` is updated too, so a later real
-    /// connect to the chosen strap targets the right family. All via existing public methods.
+    /// Present nearby compatible bands while BLEManager preserves the connection intent that discovery
+    /// temporarily replaces. Re-scans keep that snapshot until the wizard commits or cancels.
     func presentWhoopScan(model: WhoopModel) {
-        selectWhoopModel(model)
-        ble.prepareForPresentScan(model: model) // idle for a family switch, but KEEP a live same-family bond (#74)
-        ble.connect(model: model)             // select the family (sets engine selectedModel + framing)
-        ble.scanForWhoops()                   // take over the central, present nearby straps only
+        ble.presentWhoopScan(model: model)
     }
 
-    /// End the WHOOP present-scan (idempotent). Call on leaving the wizard's pick step / on dismiss.
-    func stopWhoopScan() { ble.stopWhoopScan() }
+    /// Pause while confirming a candidate or entering another adapter, retaining cancellation restore.
+    func pauseWhoopScan() { ble.pauseWhoopScan() }
+    /// Commit a replacement source so dismissal cannot reconnect the superseded band.
+    func commitWhoopScan() { ble.commitWhoopScan() }
+    /// Cancel the wizard session and restore the prior collection intent.
+    func stopWhoopScan() { ble.cancelWhoopScan() }
 
     /// Source-aware pre-archive teardown for Devices. The registry row still carries brand, source kind,
     /// and active status here; after reducing it to `peripheralId` a nil Apple Watch/import/legacy id is

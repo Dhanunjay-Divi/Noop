@@ -327,6 +327,9 @@ class TerminologyAuditTests(unittest.TestCase):
         script = (
             ROOT / "server/app/static/app.js"
         ).read_text(encoding="utf-8")
+        server_main = (
+            ROOT / "server/app/main.py"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("function customerFacingBrand(value)", script)
         self.assertIn(
@@ -340,6 +343,23 @@ class TerminologyAuditTests(unittest.TestCase):
         self.assertIn(
             "option.textContent = customerFacingBrand(",
             script,
+        )
+        self.assertIn(
+            'byId("namespaceTitle").textContent = '
+            "customerFacingBrand(provenanceLabel(device));",
+            script,
+        )
+        self.assertIn(
+            "customerFacingFileToken(state.selected.device_id)",
+            script,
+        )
+        self.assertIn(
+            "def _customer_facing_file_token(value: str) -> str:",
+            server_main,
+        )
+        self.assertIn(
+            "_customer_facing_file_token(device_id)",
+            server_main,
         )
 
     def test_android_dynamic_customer_copy_is_sanitized_at_render_boundaries(self) -> None:
