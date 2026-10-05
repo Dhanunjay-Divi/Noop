@@ -603,8 +603,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         ble.scanForWhoops(model)
     }
 
-    /** End the WHOOP present-scan (idempotent). Call on leaving the wizard's pick step / on dismiss. */
-    fun stopWhoopScan() = ble.stopWhoopScan()
+    /** Pause discovery while the wizard shows another step, retaining the pre-scan restore target. */
+    fun pauseWhoopScan() = ble.pauseWhoopScan()
+
+    /** Dismiss discovery and restore the family/connection target that existed before the wizard. */
+    fun cancelWhoopScan() {
+        ble.cancelWhoopScan()?.let { _selectedModel.value = it }
+    }
+
+    /** Finish a selected-band flow without restoring the connection that discovery replaced. */
+    fun commitWhoopScanSelection() = ble.commitWhoopScanSelection()
 
     /**
      * Register a paired device and optionally make it active. Active registration uses the registry's

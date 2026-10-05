@@ -1298,12 +1298,12 @@
     },
     {
       "category": "customer",
-      "occurrenceCount": 2,
+      "occurrenceCount": 1,
       "owner": "project team",
       "path": "Strand/Onboarding/OnboardingWizard.swift",
       "reason": "Existing customer wording pending reviewed provenance/localization migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "4e5ad0a08c12e94a9d438c8466dfc1c7f479bf6ca49640052342b029a5445ae8"
+      "sha256": "53121ba1e35b98fa22d45572847e89fc300aae189982210b909e3203c0a2cf00"
     },
     {
       "category": "core",
@@ -3701,12 +3701,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 88,
+      "occurrenceCount": 87,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/AppViewModel.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "e283f47dfb3b61fc21457dca32099185a623ca1b2908f105ce2de42966d747ff"
+      "sha256": "86439d2975c65d8ff52fe78b60c73b4598b3fb08f47b2b3d48a216cff8aecaea"
     },
     {
       "category": "core",
@@ -4705,16 +4705,7 @@
       "path": "server/app/static/app.js",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "6ae19cb47571cbeee427df53b02fd49a0122666e23de50cc3ab9a987ce78d27d"
-    },
-    {
-      "category": "core",
-      "occurrenceCount": 3,
-      "owner": "project team",
-      "path": "server/app/static/index.html",
-      "reason": "Existing active symbol retained behind the additive compatibility migration.",
-      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "b5bdf28e43fe522824ecf763ed4d81294fc381efb39b3c9213adc1730693c3e2"
+      "sha256": "28a2a166a0dcbfa7eb3dee0ab17ab70a6cb6bdc931249743574194bb92d7faf8"
     },
     {
       "category": "core",

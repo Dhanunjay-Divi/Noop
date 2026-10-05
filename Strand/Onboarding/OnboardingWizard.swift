@@ -1327,7 +1327,10 @@ private struct ConnectedTransportAccountStep: View {
     private var sourceTitle: String {
         switch source {
         case .liveBLE, .historyBLE:
-            return "WHOOP"
+            return String(
+                localized:
+                    "appwide.onboarding.device_wizard.compatible_band"
+            )
         case .veepoo:
             return "NOOP Band"
         default:

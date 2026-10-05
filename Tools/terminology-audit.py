@@ -18,6 +18,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -115,6 +116,26 @@ class CustomerVisibleValueViolation:
     path: str
     key: str
     locale: str
+
+
+class CustomerVisibleHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.values: list[tuple[int, str, str]] = []
+
+    def handle_data(self, data: str) -> None:
+        if data.strip():
+            self.values.append((self.getpos()[0], "text", data))
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        line = self.getpos()[0]
+        for name, value in attrs:
+            if value:
+                self.values.append((line, f"{tag}.{name}", value))
 
 
 def tracked_files(root: Path) -> list[str]:
@@ -286,6 +307,14 @@ APPLE_LOCALIZATION_CATALOGS = (
     "Packages/StrandDesign/Sources/StrandDesign/Resources/Localizable.xcstrings",
 )
 ANDROID_PACKAGED_RESOURCE_SOURCE_SETS = ("main", "demo", "debug")
+WEB_CUSTOMER_SURFACES = (
+    "server/app/static/index.html",
+    "server/app/static/app.js",
+)
+JS_STRING_LITERAL = re.compile(
+    r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`',
+    re.DOTALL,
+)
 
 
 def localized_string_values(localization: object) -> list[str]:
@@ -376,6 +405,35 @@ def customer_visible_value_violations(
                             locale=locale,
                         )
                     )
+
+    for relative_path in WEB_CUSTOMER_SURFACES:
+        source_path = root / relative_path
+        try:
+            source = source_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if source_path.suffix == ".html":
+            parser = CustomerVisibleHTMLParser()
+            parser.feed(source)
+            visible_values = parser.values
+        else:
+            visible_values = [
+                (
+                    source.count("\n", 0, match.start()) + 1,
+                    "string",
+                    match.group(0)[1:-1],
+                )
+                for match in JS_STRING_LITERAL.finditer(source)
+            ]
+        for line, key, value in visible_values:
+            if LEGACY.search(value):
+                violations.append(
+                    CustomerVisibleValueViolation(
+                        path=relative_path,
+                        key=f"{key}@{line}",
+                        locale="web",
+                    )
+                )
 
     return sorted(
         set(violations),

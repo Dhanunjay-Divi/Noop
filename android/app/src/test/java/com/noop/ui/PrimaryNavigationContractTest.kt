@@ -393,33 +393,33 @@ class PrimaryNavigationContractTest {
     @Test
     fun compactNavigationSnapsOnlyAfterAnInwardCornerDrag() {
         assertEquals(
-            CompactNavigationDockEdge.END,
+            CompactNavigationDockEdge.RIGHT,
             compactNavigationDockDestination(
-                current = CompactNavigationDockEdge.START,
+                current = CompactNavigationDockEdge.LEFT,
                 horizontalDragPx = 48f,
                 thresholdPx = 44f,
             ),
         )
         assertEquals(
-            CompactNavigationDockEdge.START,
+            CompactNavigationDockEdge.LEFT,
             compactNavigationDockDestination(
-                current = CompactNavigationDockEdge.END,
+                current = CompactNavigationDockEdge.RIGHT,
                 horizontalDragPx = -48f,
                 thresholdPx = 44f,
             ),
         )
         assertEquals(
-            CompactNavigationDockEdge.START,
+            CompactNavigationDockEdge.LEFT,
             compactNavigationDockDestination(
-                current = CompactNavigationDockEdge.START,
+                current = CompactNavigationDockEdge.LEFT,
                 horizontalDragPx = 20f,
                 thresholdPx = 44f,
             ),
         )
         assertEquals(
-            CompactNavigationDockEdge.END,
+            CompactNavigationDockEdge.RIGHT,
             compactNavigationDockDestination(
-                current = CompactNavigationDockEdge.END,
+                current = CompactNavigationDockEdge.RIGHT,
                 horizontalDragPx = 20f,
                 thresholdPx = 44f,
             ),

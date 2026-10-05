@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -51,12 +52,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.ble.ExperimentalBrand
 import com.noop.ble.OuraLiveSource
@@ -349,7 +353,16 @@ fun AddDeviceWizard(
     }
 
     fun stopAllScans() {
-        viewModel.stopWhoopScan()
+        viewModel.cancelWhoopScan()
+        hrScanner.ifInitialized { it.stopScan() }
+        ftmsScanner.ifInitialized { it.stopScan() }
+        huamiScanner.ifInitialized { it.stopScan() }
+        ouraScanner.ifInitialized { it.stop() }
+        viewModel.cancelSupplierBandPairing()
+    }
+
+    fun pauseAllScans() {
+        viewModel.pauseWhoopScan()
         hrScanner.ifInitialized { it.stopScan() }
         ftmsScanner.ifInitialized { it.stopScan() }
         huamiScanner.ifInitialized { it.stopScan() }
@@ -476,12 +489,16 @@ fun AddDeviceWizard(
     val confirmRssi = pickedWhoop?.rssi ?: pickedStrap?.rssi ?: pickedMachine?.rssi ?: pickedHuami?.rssi ?: -70
 
     fun finishAdd(makeActive: Boolean) {
-        stopAllScans()
-        val now = System.currentTimeMillis() / 1000
         val pw = pickedWhoop
         val ps = pickedStrap
         val pm = pickedMachine
         val ph = pickedHuami
+        if (pw != null) {
+            pauseAllScans()
+        } else {
+            stopAllScans()
+        }
+        val now = System.currentTimeMillis() / 1000
         val isGarmin = type == DeviceType.Garmin
         val device: PairedDeviceRow? = when {
             pw != null -> {
@@ -566,6 +583,13 @@ fun AddDeviceWizard(
                 viewModel.registerDevice(device, makeActive = makeActive)
             },
             onSuccess = {
+                if (pw != null) {
+                    if (makeActive) {
+                        viewModel.commitWhoopScanSelection()
+                    } else {
+                        viewModel.cancelWhoopScan()
+                    }
+                }
                 onAddedSource(committedSource)
                 onClose()
             },
@@ -643,13 +667,34 @@ fun AddDeviceWizard(
     val adoptNeedsPairing by viewModel.ouraNeedsPairing.collectAsStateWithLifecycle()
 
     AlertDialog(
+        modifier = Modifier
+            .then(
+                if (automaticallyScansLaunchBands) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier
+                },
+            )
+            .testTag("noop.device-wizard"),
         onDismissRequest = {
             if (!registrationBusy) {
                 stopAllScans()
                 onClose()
             }
         },
-        containerColor = Palette.surfaceOverlay,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = !automaticallyScansLaunchBands,
+        ),
+        shape = if (automaticallyScansLaunchBands) {
+            RectangleShape
+        } else {
+            RoundedCornerShape(28.dp)
+        },
+        containerColor = if (automaticallyScansLaunchBands) {
+            Palette.surfaceBase
+        } else {
+            Palette.surfaceOverlay
+        },
         title = {
             // The Oura type drives its own titled step machine; otherwise the generic step titles apply.
             val isOura = type == DeviceType.Oura
@@ -790,7 +835,7 @@ fun AddDeviceWizard(
                                     }
                                     pickedWhoop = strap; pickedStrap = null; pickedMachine = null; pickedHuami = null
                                     nameDraft = strap.model.registrationLabel()
-                                    viewModel.stopWhoopScan()
+                                    viewModel.pauseWhoopScan()
                                     step = WizardStep.Confirm
                                 },
                                 onRescan = { startScan(t) },
@@ -798,7 +843,7 @@ fun AddDeviceWizard(
                                     automaticallyScansLaunchBands && supplierAvailable
                                 ) {
                                     {
-                                        viewModel.stopWhoopScan()
+                                        viewModel.pauseWhoopScan()
                                         supplierPrepOrigin = SupplierPrepOrigin.UnifiedScan
                                         type = DeviceType.SupplierBand
                                         step = WizardStep.Prep
@@ -880,6 +925,7 @@ fun AddDeviceWizard(
                                         )
                                     },
                                     onSuccess = {
+                                        viewModel.commitWhoopScanSelection()
                                         onAddedSource(SourceKind.veepoo)
                                         onClose()
                                     },

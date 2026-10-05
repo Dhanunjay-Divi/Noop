@@ -41,6 +41,9 @@ class AddDeviceWizardScannerLifecycleTest {
             .substringBefore("fun startScan(t: DeviceType)")
         val stopAll = source
             .substringAfter("fun stopAllScans()")
+            .substringBefore("fun pauseAllScans()")
+        val pauseAll = source
+            .substringAfter("fun pauseAllScans()")
             .substringBefore("fun launchDurableRegistration(")
 
         listOf(
@@ -62,6 +65,8 @@ class AddDeviceWizardScannerLifecycleTest {
         }
         assertEquals(4, Regex("""\.ifInitialized\s*\{""").findAll(stopAll).count())
         assertFalse(stopAll.contains(".get()"))
+        assertEquals(4, Regex("""\.ifInitialized\s*\{""").findAll(pauseAll).count())
+        assertFalse(pauseAll.contains(".get()"))
     }
 
     @Test

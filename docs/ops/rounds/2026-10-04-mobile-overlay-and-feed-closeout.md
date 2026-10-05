@@ -2,14 +2,14 @@
 
 ## Status
 
-- State: `late Android Back-root review fix locally verified; replacement checks pending`
+- State: `final local parity and terminology follow-up verified; replacement push pending`
 - Owner: project team
 - Branch: `codex/mobile-cloud-release-finalization-20261003`
 - Protected base: `1cd401f69dd8b4df75872a830ed33a84918ea344`
 - Product implementation commit:
   `fc2343ff5f96304ccca95fc802d3b6252b467d5b`
-- Current remote PR head:
-  `23985cafad3cf67d479166090e1fa21570b30a8e`
+- Pre-follow-up remote PR head:
+  `625a3988c54f9a921b94c097f4322d762c9af962`
 - Pull request: `#33`
 
 ## Objective
@@ -110,6 +110,25 @@ claims:
   shipped Apple catalog and all packaged Android main, demo, and debug value
   resources. Direct Test Centre and score-explainer copy is neutral, while
   protocol identifiers and persisted source IDs remain unchanged.
+- Android production customer discovery now occupies the full display rather
+  than a rounded platform-width dialog. Its live scanner is the first surface
+  from onboarding and `More > Devices`, and neither entry exposes static
+  generation rows or the broader development source catalog.
+- Cancelling Android discovery restores the prior selected transport family,
+  target, and reconnect intent. Selecting a discovered device commits that
+  choice without reconnecting the superseded target. Scanner shutdown remains
+  lazy-safe for builds where an optional transport was never initialized.
+- Shared Apple trend selection now records whether pointer hover, a pinned
+  touch, or accessibility adjustment owns the selected day. Synthetic iOS
+  hover-end delivery clears pointer state only and cannot erase a deliberate
+  touch selection.
+- iOS account-completion copy uses the localized compatible-band label. The
+  self-hosted dashboard removes static retired-vendor copy and sanitizes
+  server-provided errors, labels, titles, and device identifiers at every text
+  rendering boundary while preserving internal protocol and metric keys.
+- The terminology audit now parses customer-visible HTML text and attributes
+  plus JavaScript string literals in shipped static web surfaces. Focused
+  tests cover both static markup and dynamic render-boundary sanitization.
 
 ## Root cause
 
@@ -146,9 +165,13 @@ scroll timing without changing data, ordering, or card dimensions.
 | Android review remediation | Full and Demo unit variants each pass the six focused scan, supplier-Back, compact-navigation, RTL, scroll-tail, and connection-preservation classes; the Full run completed successfully in 2m17s and the Demo run in 2m42s | Both packaged product variants compile and enforce the corrected customer scanner plus compact-navigation behavior | Physical BLE, TalkBack, OEM insets, or touch comfort |
 | Apple review remediation | Integrated iOS Simulator build succeeds. The final affected macOS wall passes 91/91 across Bluetooth consent, device state, customer-brand rendering, key-metric plurals, complete history, and shell contracts. StrandDesign remains 59/59 | Apple source compiles with family persistence, supplier return, macOS history routing, iPad hover, localized plurals, exclusive drag/tap, and physical RTL dock mapping | Signed install, physical pointer/VoiceOver behavior, or real BLE |
 | Expanded terminology boundary | Audit unit coverage adds source-key fallback, all five shipped Apple catalogs, and Android main/demo/debug resources. Repository summary reports zero customer-visible retired-vendor values and zero forbidden mappings | Static shipped localization values and reviewed fallback paths are neutral across the packaged source sets | Future unreviewed server text or physical-device advertisements |
-| Final October 5 repository wall | Complete Tools test root passes 379 tests with one intentional skip; release controls pass 9/9; required CI verifies 10/10 contexts; all 122 operations records validate; trust, calibration, terminology, localization, claims, legal, privacy, shell, Python, and diff checks pass | The final local source tree satisfies every repository-controlled release policy | Hosted runner execution, protected merge, signing, or physical devices |
+| Final October 5 repository wall | Complete Tools test root passes 382 tests with one intentional skip; release controls pass 9/9; required CI verifies 10/10 contexts; all 122 operations records validate; trust, calibration, terminology, strict localization, claims, legal, privacy, clean-checkout launch isolation, shell, Python, and diff checks pass | The final local source tree satisfies every repository-controlled release policy | Hosted runner execution, protected merge, signing, or physical devices |
 | Hosted terminology snapshot correction | Exact pushed head `3671002eff829161fcf9f7950f223afa91414ec5` started all protected contexts. Release-controls run `37252862331` failed only `test_repository_snapshot_is_current`: the final operations-record additions had shifted historical line numbers after the prior snapshot. A reviewed temporary regeneration kept 18,649 occurrences, 1,651 groups, 886 customer entries, zero customer-visible values, zero forbidden mappings, and the active allowlist unchanged. | The failure is line-only evidence drift, not a customer-copy or classification regression | Replacement hosted execution after the repinned snapshot |
 | Late Android Back-root review remediation | Exact evidence head `23985cafad3cf67d479166090e1fa21570b30a8e` passed all hosted contexts, but final conversation `r4180212377` identified that system Back could reveal a different primary root while leaving compact navigation collapsed. The route synchronizer now expands navigation and clears partial scroll travel only when the revealed exact primary root differs; nested routes in the same tab remain unchanged. Full and Demo each pass `CompactNavigationBehaviorTest` 5/5 and `PrimaryNavigationContractTest` 15/15, with both production Kotlin variants compiled in the same bounded 53-second run. | System Back cannot carry collapsed navigation into a newly revealed primary tab, while nested-route ownership remains stable | Replacement hosted execution and physical Back/TalkBack interaction |
+| Android full-screen scanner recheck | Rebuilt Full app and Android-test APKs were installed on API 35 without clearing app data. The normal Devices entry and first-run post-Terms case pass 1/1 each, require a scanner at least 90% of display width and height, and reject every retired static generation/account row. | Both production customer entries present the same full-screen live scanner instead of the Android-only contained selector | Physical BLE advertisements, pairing, ownership, or OEM layout behavior |
+| Android final matrix | Full and Demo each pass 5,300 unit tests with zero failures/errors and seven intentional skips. The six affected scan/navigation classes pass 34/34 per flavor; both production and both Android-test Kotlin variants compile. Full, Demo, Full-test, and Demo-test APK SHA-256 values are `d6a29ef2702816a88bb76ee50a8bc5b4e64749fa8972470f5f6b1688c4593fe1`, `52793ab3126c8400ac82da115892b9dca0e26bb340331bdc0bb544695e1336f4`, `ca58655000b91314d7c942e4eb9c5d386247ae8b93a95ddf59e021d301d08c54`, and `cb019c0d3be527c0d1558497f87f53d21b3bb09e413f62c32fc863dc0bee07a7`. | Both packaged variants enforce full-screen discovery, cancellation restoration, lazy-safe scanner shutdown, and physical-edge dock persistence | Release signing, physical TalkBack, or real connection behavior |
+| Apple final interaction recheck | StrandDesign passes 60/60 including selection-source ownership. Exact iPhone Simulator and macOS builds succeed; the iPhone executable SHA-256 is `6fff1918ec4b35b9e586b197d1f4d33e154142efe09f81e1cc1665de2d5f0028`. | Touch-pinned chart selections survive synthetic hover end while pointer and accessibility paths remain distinct; neutral completion copy compiles in both products | Physical touch, pointer, VoiceOver, signing, or real account completion |
+| Static web customer-copy boundary | `node --check server/app/static/app.js` passes. Terminology unit coverage verifies visible HTML text/attributes, JavaScript string literals, and render-boundary sanitization; the current audit summary reports zero customer-visible retired-vendor values and zero forbidden mappings. | Shipped static dashboard text and server-derived text written through reviewed rendering helpers are neutral | Full hosted server suite, arbitrary future DOM writes, or a deployed image |
 | Diff hygiene | `git diff --check` passed before the product commit | No whitespace-error regression | Runtime behavior |
 
 The first combined iPhone onboarding run exposed a test-query defect: the
@@ -157,15 +180,15 @@ under the scan sheet. The wizard's own back control was already hidden. It now
 has a stable identifier, and the scan-only tests query that exact control. Both
 previously affected cases then passed.
 
-The reviewed terminology snapshot contains 18,649 classified occurrences
-across 1,651 groups, with the customer category reduced to 886 and no
+The reviewed terminology snapshot contains 18,655 classified occurrences
+across 1,650 groups, with the customer category reduced to 885 and no
 forbidden active use or customer-visible localization value. The active
 allowlist SHA-256 is
-`2c4e7f58aa2cd1e4257165788b88137747be277d5e447f0f90f858c3169af904`;
+`c0d5c398b82cf572889cc15be3010abb2eb080c6ba9988b86782ba142cea2ab5`;
 the legacy inventory SHA-256 is
-`d198b9c70a1b1a8d1e763488c17c87b5418bf8f1d6c973fce2b811419bb17c04`;
+`7a85e1df026086693b0b9ea924dc123aa6739c2183597195a422b46f92be42bb`;
 and the exact terminology-audit SHA-256 is
-`8c3149dfa7fa1de08289e81cf1bbf56e675a2924c4e9fc2344b294cb93074f49`.
+`656746b944543d40069632bffc2c2e184377ec85db584ba1f50cbef1d5ab14ad`.
 
 ## Data, privacy, and medical truth
 
@@ -174,6 +197,8 @@ and the exact terminology-audit SHA-256 is
 - Data retention, source arbitration, or provenance impact: none.
 - Account protocol or OTP impact: none.
 - Network or cloud API impact: none.
+- Server runtime image impact: static dashboard presentation changed; API,
+  schema, retention, and health processing behavior did not.
 - New health claim: none.
 - No credentials, personal data, device addresses, raw sensor frames, or
   health values were added to logs or repository evidence.
@@ -182,15 +207,25 @@ and the exact terminology-audit SHA-256 is
 
 ### Cloud and managed configuration
 
-- No cloud source, migration, image, infrastructure, or managed runtime input
-  changed in this round.
-- Private synthetic staging remains at protected source merge
+- `server/app/static/index.html` and `server/app/static/app.js` changed. The
+  server Dockerfile copies the complete application directory, so these files
+  are part of the immutable private-staging runtime image.
+- Private synthetic staging currently remains at protected source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable image digest
   `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`.
-- No cloud rebuild, deployment, migration, or apply is required.
+- No schema or infrastructure source changed. After PR `#33` is merged through
+  protected `main`, the exact protected merge must be built once, pinned by
+  digest, scanned with no effective Critical/High finding, applied through the
+  guarded migration receipt and workload-specific runtime-secret sequence,
+  rolled to every enabled private service/job, and checked with the private
+  verifier, bounded fictional-data smoke, restored synthetic configuration,
+  resumed lifecycle schedule, and a zero-drift plan.
 - Ignored local managed configuration remains at
   `Config/ManagedCloudSecrets.xcconfig` and
-  `android/managed-cloud.properties`; neither file is part of this change.
+  `android/managed-cloud.properties`. Deployment state and variables remain in
+  ignored `infra/gcp/backend.hcl` and
+  `infra/gcp/staging.auto.tfvars`. None is part of this change and no contents
+  may enter logs, chat, screenshots, operations records, or commits.
 
 ### Physical boundary
 
@@ -230,9 +265,13 @@ and the exact terminology-audit SHA-256 is
   Evidence correction `23985cafad3cf67d479166090e1fa21570b30a8e`
   then passed every hosted context and all earlier review conversations were
   resolved. The final Android Back-root finding recorded above is fixed
-  locally and requires one normal replacement push.
+  in remote head `625a3988c54f9a921b94c097f4322d762c9af962`.
+  The final full-screen scanner, cancellation-restoration, chart-selection,
+  iOS completion, static-web, and audit expansion are locally verified on top
+  of that head and require one normal replacement push.
 - Merge only the exact green PR head through protected `main`, then verify the
-  resulting protected-main SHA before handing off physical validation.
+  resulting protected-main SHA and complete the exact-image private-staging
+  rollout before handing off physical validation.
 
 ## Decisions
 
@@ -248,13 +287,14 @@ and the exact terminology-audit SHA-256 is
   scanner; keep broader source selection restricted to development/test scope.
 - Enforce neutral customer copy at both static localization and dynamic
   rendering boundaries without renaming protocol or persisted identifiers.
-- Treat cloud deployment as a verified no-op because no cloud source,
-  migration, image, infrastructure, or managed runtime input changed.
+- Treat any shipped `server/app/static` change as runtime-image source. Build,
+  scan, migrate, roll, smoke, and verify the exact protected merge even when
+  schema and infrastructure source are unchanged.
 
 ## Open risks and honest limitations
 
-- Replacement hosted PR contexts, review-thread resolution, and protected-main
-  integration remain pending.
+- Replacement hosted PR contexts, review-thread resolution, protected-main
+  integration, and the exact-image private-staging rollout remain pending.
 - The exact signed iPhone and Android candidates have not been installed.
 - Physical BLE discovery, account claim, source switching, background
   collection, retention, haptics, battery behavior, notification delivery,
@@ -267,12 +307,15 @@ and the exact terminology-audit SHA-256 is
 
 1. Regenerate and repin the reviewed terminology inventory after this durable
    record, then rerun the complete local release-control wall.
-2. Push one exact Back-root replacement to PR `#33`, wait for every required protected
+2. Push one exact replacement to PR `#33`, wait for every required protected
    context, and resolve only review threads backed by the final code and
    evidence.
 3. Merge normally only when the exact head is green, then verify protected
    `main` and its naturally triggered checks.
-4. Update the Downloads physical-testing handoff with the exact protected-main
+4. Build, scan, migrate, deploy, smoke, restore, and verify the exact protected
+   merge in IAM-only private synthetic staging, then record its revision,
+   digest, lifecycle execution, and zero-drift result.
+5. Update the Downloads physical-testing handoff with the exact protected-main
    merge SHA and run the signed iPhone and Android physical-validation matrix
    from clean protected `main`, comparison transport first.
 

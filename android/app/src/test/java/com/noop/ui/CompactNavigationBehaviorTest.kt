@@ -30,44 +30,57 @@ class CompactNavigationBehaviorTest {
     }
 
     @Test
-    fun physicalEdgesAndDragDeltasMapToLogicalEdgesInBothDirections() {
+    fun physicalEdgesPersistAcrossLayoutDirectionsAndDragPhysically() {
         assertEquals(
-            CompactNavigationDockEdge.START,
-            compactNavigationPhysicalLeftEdge(LayoutDirection.Ltr),
+            CompactNavigationDockEdge.LEFT,
+            compactNavigationDockEdgeFromStoredValue("LEFT", LayoutDirection.Ltr),
         )
         assertEquals(
-            CompactNavigationDockEdge.END,
-            compactNavigationPhysicalRightEdge(LayoutDirection.Ltr),
+            CompactNavigationDockEdge.LEFT,
+            compactNavigationDockEdgeFromStoredValue("LEFT", LayoutDirection.Rtl),
         )
         assertEquals(
-            CompactNavigationDockEdge.END,
-            compactNavigationPhysicalLeftEdge(LayoutDirection.Rtl),
+            CompactNavigationDockEdge.RIGHT,
+            compactNavigationDockEdgeFromStoredValue("RIGHT", LayoutDirection.Ltr),
         )
         assertEquals(
-            CompactNavigationDockEdge.START,
-            compactNavigationPhysicalRightEdge(LayoutDirection.Rtl),
+            CompactNavigationDockEdge.RIGHT,
+            compactNavigationDockEdgeFromStoredValue("RIGHT", LayoutDirection.Rtl),
         )
 
-        val rtlInwardDrag = compactNavigationLogicalDragDelta(
-            physicalDeltaPx = -48f,
-            layoutDirection = LayoutDirection.Rtl,
-        )
-        assertEquals(48f, rtlInwardDrag, 0.0001f)
+        // Legacy logical values migrate to whichever physical edge they represented at read time.
         assertEquals(
-            CompactNavigationDockEdge.END,
+            CompactNavigationDockEdge.LEFT,
+            compactNavigationDockEdgeFromStoredValue("START", LayoutDirection.Ltr),
+        )
+        assertEquals(
+            CompactNavigationDockEdge.RIGHT,
+            compactNavigationDockEdgeFromStoredValue("START", LayoutDirection.Rtl),
+        )
+        assertEquals(
+            CompactNavigationDockEdge.RIGHT,
+            compactNavigationDockEdgeFromStoredValue("END", LayoutDirection.Ltr),
+        )
+        assertEquals(
+            CompactNavigationDockEdge.LEFT,
+            compactNavigationDockEdgeFromStoredValue("END", LayoutDirection.Rtl),
+        )
+
+        assertEquals(
+            CompactNavigationDockEdge.RIGHT,
             compactNavigationDockDestination(
-                current = CompactNavigationDockEdge.START,
-                horizontalDragPx = rtlInwardDrag,
+                current = CompactNavigationDockEdge.LEFT,
+                horizontalDragPx = 48f,
                 thresholdPx = 44f,
             ),
         )
         assertEquals(
-            -48f,
-            compactNavigationLogicalDragDelta(
-                physicalDeltaPx = 48f,
-                layoutDirection = LayoutDirection.Rtl,
+            CompactNavigationDockEdge.LEFT,
+            compactNavigationDockDestination(
+                current = CompactNavigationDockEdge.RIGHT,
+                horizontalDragPx = -48f,
+                thresholdPx = 44f,
             ),
-            0.0001f,
         )
     }
 

@@ -68,10 +68,10 @@ RELEASE_SOURCE_DIGESTS = {
         "74f6978e7244bff50d17270a772b64d5b7f60a6cdc64f4d777e19dfb7231ec05"
     ),
     "release/terminology/active-allowlist.json": (
-        "2c4e7f58aa2cd1e4257165788b88137747be277d5e447f0f90f858c3169af904"
+        "c0d5c398b82cf572889cc15be3010abb2eb080c6ba9988b86782ba142cea2ab5"
     ),
     "release/terminology/legacy-inventory.json": (
-        "d198b9c70a1b1a8d1e763488c17c87b5418bf8f1d6c973fce2b811419bb17c04"
+        "7a85e1df026086693b0b9ea924dc123aa6739c2183597195a422b46f92be42bb"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -137,7 +137,7 @@ RELEASE_SOURCE_DIGESTS = {
         "f0b63ead11c0eefbd98dff1c5489d7eb9a16d01e7c7b5c064bfbcc950c102406"
     ),
     "Tools/terminology-audit.py": (
-        "8c3149dfa7fa1de08289e81cf1bbf56e675a2924c4e9fc2344b294cb93074f49"
+        "656746b944543d40069632bffc2c2e184377ec85db584ba1f50cbef1d5ab14ad"
     ),
     "Tools/trusted-release-controls.py": (
         "cb4260aae16ace02a58c69655414db649199c104bd09c116dad719341a9f11ab"

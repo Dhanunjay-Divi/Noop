@@ -119,14 +119,14 @@ Last updated: **2026-10-05**
   vendor values and zero forbidden mappings. Focused Android Full and Demo
   suites pass the six affected classes; the integrated iOS Simulator build
   succeeds; and the final Apple affected wall passes 91/91. The reviewed
-  terminology snapshot now records 18,649 occurrences across 1,651 groups,
-  with 886 customer entries. The inventory digest is
-  `d198b9c70a1b1a8d1e763488c17c87b5418bf8f1d6c973fce2b811419bb17c04`;
+  terminology snapshot now records 18,655 occurrences across 1,650 groups,
+  with 885 customer entries. The inventory digest is
+  `7a85e1df026086693b0b9ea924dc123aa6739c2183597195a422b46f92be42bb`;
   the active-allowlist digest is
-  `2c4e7f58aa2cd1e4257165788b88137747be277d5e447f0f90f858c3169af904`;
+  `c0d5c398b82cf572889cc15be3010abb2eb080c6ba9988b86782ba142cea2ab5`;
   and the exact audit-tool digest is
-  `8c3149dfa7fa1de08289e81cf1bbf56e675a2924c4e9fc2344b294cb93074f49`.
-  The complete Tools test root passes 379 tests with one intentional skip.
+  `656746b944543d40069632bffc2c2e184377ec85db584ba1f50cbef1d5ab14ad`.
+  The complete Tools test root passes 382 tests with one intentional skip.
   Release controls pass 9/9, required CI verifies all 10 contexts, all 122
   operations records validate, and trust, calibration, localization, claims,
   legal, privacy, shell, Python, and diff checks pass on the same tree.
@@ -143,11 +143,41 @@ Last updated: **2026-10-05**
   for a changed exact primary root and clears partial scroll travel; nested
   routes remain under their current tab. Full and Demo each pass the affected
   20-test navigation subset, and both production Kotlin variants compile.
-  Private staging remains unchanged at source merge
+  Remote head `625a3988c54f9a921b94c097f4322d762c9af962` contains that
+  Back-root correction. The final local follow-up makes the Android production
+  customer scanner a true full-screen surface matching iPhone, rejects the
+  retired static generation rows, restores the prior family and reconnect
+  intent when discovery is cancelled, and commits only an explicitly selected
+  discovery result. The exact API 35 normal Devices entry and first-run
+  onboarding cases pass 1/1 each. Full and Demo each pass 5,300 unit tests
+  with seven intentional skips; the six affected classes pass 34/34 per
+  flavor; and all four production/instrumentation Kotlin variants compile.
+  Current Full, Demo, Full-test, and Demo-test APK SHA-256 values are
+  `d6a29ef2702816a88bb76ee50a8bc5b4e64749fa8972470f5f6b1688c4593fe1`,
+  `52793ab3126c8400ac82da115892b9dca0e26bb340331bdc0bb544695e1336f4`,
+  `ca58655000b91314d7c942e4eb9c5d386247ae8b93a95ddf59e021d301d08c54`,
+  and
+  `cb019c0d3be527c0d1558497f87f53d21b3bb09e413f62c32fc863dc0bee07a7`.
+  Apple chart selection now records pointer, touch-pinned, and accessibility
+  ownership so a synthetic hover end cannot clear a deliberate touch
+  selection. StrandDesign passes 60/60, the exact iPhone Simulator and macOS
+  builds succeed, and the iPhone executable SHA-256 is
+  `6fff1918ec4b35b9e586b197d1f4d33e154142efe09f81e1cc1665de2d5f0028`.
+  iOS account completion and the self-hosted dashboard now use neutral
+  customer copy, and the web rendering boundary sanitizes server-provided
+  labels, errors, titles, and device identifiers before display. The expanded
+  audit parses static HTML plus JavaScript string literals and reports zero
+  customer-visible retired-vendor values and zero forbidden mappings.
+  Private staging still serves source merge
   `cb57ce4fb6cdae2baf8ef7cf2b9fb4cd5781552c` and immutable digest
-  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`;
-  no cloud build, migration, deploy, or apply is required. Protected hosted
-  integration and every signed or physical-device gate remain pending.
+  `sha256:318aee6a0160df7b5d4eb4f8f7430698dfaec7fa9261f2361c90f58bce24be3c`,
+  but `server/app/static` is part of the server image and changed in this
+  candidate. After protected integration, the exact protected merge therefore
+  requires one clean immutable build, vulnerability scan, guarded migration
+  receipt, runtime rollout, private verifier, synthetic smoke, configuration
+  restoration, and zero-drift plan. The replacement push, protected hosted
+  integration, cloud rollout, and every signed or physical-device gate remain
+  pending.
 
 - The current follow-up candidate is on
   `codex/mobile-cloud-release-finalization-20261003`, based on protected merge

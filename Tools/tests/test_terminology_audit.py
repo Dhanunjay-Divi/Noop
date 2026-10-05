@@ -263,6 +263,85 @@ class TerminologyAuditTests(unittest.TestCase):
             {"values", "values-de", "values-fr"},
         )
 
+    def test_web_customer_copy_is_scanned_without_flagging_internal_metric_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            retired_vendor = "".join(("WHO", "OP"))
+            static = root / "server" / "app" / "static"
+            static.mkdir(parents=True)
+            index = static / "index.html"
+            script = static / "app.js"
+            index.write_text(
+                "<main><p>Imported reference</p></main>",
+                encoding="utf-8",
+            )
+            script.write_text(
+                "const sanitized = raw.replace("
+                r"/\bwhoop(?:\u0027s|’s)\b/gi, "
+                '"the provider\\\'s");\n'
+                'const load = row.metrics.whoop_strain;\n'
+                'const label = "Imported strain";\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                AUDIT.customer_visible_value_violations(root),
+                [],
+            )
+
+            index.write_text(
+                f"<main><p>{retired_vendor} reference</p></main>",
+                encoding="utf-8",
+            )
+            script.write_text(
+                'const load = row.metrics.whoop_strain;\n'
+                f'const label = "{retired_vendor} strain";\n',
+                encoding="utf-8",
+            )
+
+            violations = AUDIT.customer_visible_value_violations(root)
+
+        self.assertEqual(len(violations), 2)
+        self.assertEqual(
+            {violation.path for violation in violations},
+            set(AUDIT.WEB_CUSTOMER_SURFACES),
+        )
+        self.assertEqual({violation.locale for violation in violations}, {"web"})
+
+    def test_ios_connected_transport_completion_uses_neutral_copy(self) -> None:
+        onboarding = (
+            ROOT / "Strand/Onboarding/OnboardingWizard.swift"
+        ).read_text(encoding="utf-8")
+        source_title = onboarding.split(
+            "private var sourceTitle: String {",
+            maxsplit=1,
+        )[1].split("\n    }\n}", maxsplit=1)[0]
+
+        self.assertNotIn('return "WHOOP"', source_title)
+        self.assertIn(
+            '"appwide.onboarding.device_wizard.compatible_band"',
+            source_title,
+        )
+
+    def test_web_dynamic_customer_copy_uses_render_boundary(self) -> None:
+        script = (
+            ROOT / "server/app/static/app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("function customerFacingBrand(value)", script)
+        self.assertIn(
+            "errorBox.textContent = customerFacingBrand(message);",
+            script,
+        )
+        self.assertIn(
+            "element.textContent = customerFacingBrand(value);",
+            script,
+        )
+        self.assertIn(
+            "option.textContent = customerFacingBrand(",
+            script,
+        )
+
     def test_android_dynamic_customer_copy_is_sanitized_at_render_boundaries(self) -> None:
         whats_new = (
             ROOT / "android/app/src/main/java/com/noop/ui/WhatsNewSheet.kt"

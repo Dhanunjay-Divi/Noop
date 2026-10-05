@@ -233,6 +233,12 @@ class AppShellInstrumentedTest {
                 context.getString(R.string.appwide_onboarding_device_wizard_pick_title),
             ).fetchSemanticsNodes().isNotEmpty()
         }
+        val wizardBounds = compose.onNodeWithTag("noop.device-wizard")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val displayMetrics = context.resources.displayMetrics
+        assertTrue(wizardBounds.width >= displayMetrics.widthPixels * 0.90f)
+        assertTrue(wizardBounds.height >= displayMetrics.heightPixels * 0.90f)
         compose.onAllNodesWithText(
             context.getString(R.string.appwide_onboarding_device_wizard_searching),
         )[0].assertIsDisplayed()

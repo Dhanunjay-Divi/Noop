@@ -31,6 +31,13 @@ public struct TrendPoint: Identifiable, Sendable, Equatable {
     }
 }
 
+enum TrendChartSelectionSource: Equatable {
+    case none
+    case pointer
+    case touchPinned
+    case accessibility
+}
+
 public struct TrendChart: View {
 
     public var points: [TrendPoint]
@@ -134,6 +141,9 @@ public struct TrendChart: View {
     /// The exact full-resolution sample represented by the crosshair. Keeping this separate from the
     /// downsampled marks lets both the visible callout and VoiceOver expose every recorded date.
     @State private var selectedPoint: TrendPoint?
+    /// Pointer exits clear pointer-owned selections. Touch scrubs and VoiceOver adjustments stay pinned
+    /// until another interaction replaces them or the series changes.
+    @State private var selectionSource = TrendChartSelectionSource.none
     #if os(iOS)
     /// Separates a deliberate hold-to-inspect interaction from the surrounding card's normal tap.
     @State private var scrubEngaged = false
@@ -198,17 +208,21 @@ public struct TrendChart: View {
         showsBars ? min(0, resolvedYDomain.lowerBound)...resolvedYDomain.upperBound : resolvedYDomain
     }
 
-    private func setSelectedPoint(_ point: TrendPoint?) {
+    private func setSelectedPoint(
+        _ point: TrendPoint?,
+        source: TrendChartSelectionSource
+    ) {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             hoverX = nil
             selectedPoint = point
+            selectionSource = point == nil ? .none : source
         }
     }
 
     private func clearSelection() {
-        setSelectedPoint(nil)
+        setSelectedPoint(nil, source: .none)
         #if os(iOS)
         scrubEngaged = false
         #endif
@@ -228,7 +242,13 @@ public struct TrendChart: View {
         @unknown default:
             return
         }
-        setSelectedPoint(points[nextIndex])
+        setSelectedPoint(points[nextIndex], source: .accessibility)
+    }
+
+    static func clearsSelectionOnHoverEnd(
+        source: TrendChartSelectionSource
+    ) -> Bool {
+        source == .pointer
     }
 
     static func isHorizontalTouchScrub(_ translation: CGSize) -> Bool {
@@ -243,7 +263,7 @@ public struct TrendChart: View {
         guard let point = nearestPoint(toX: x, proxy: proxy, plot: plot) else {
             return false
         }
-        setSelectedPoint(point)
+        setSelectedPoint(point, source: .touchPinned)
         return true
     }
 
@@ -446,9 +466,13 @@ public struct TrendChart: View {
                         case .active(let location):
                             hoverX = location.x
                             selectedPoint = nearestPoint(toX: location.x, proxy: proxy, plot: plot)
+                            selectionSource = selectedPoint == nil ? .none : .pointer
                         case .ended:
                             hoverX = nil
-                            selectedPoint = nil
+                            if Self.clearsSelectionOnHoverEnd(source: selectionSource) {
+                                selectedPoint = nil
+                                selectionSource = .none
+                            }
                         }
                     }
                 }

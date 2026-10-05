@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -430,6 +431,7 @@ fun AppRoot(
     var movementBreakTerminalOutcome by rememberSaveable { mutableStateOf<String?>(null) }
     val contextualActionScope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val keyboardVisible = WindowInsets.ime.getBottom(density) > 0
     val compactNavigationPrefs = remember(context) {
         context.getSharedPreferences(
@@ -438,11 +440,16 @@ fun AppRoot(
         )
     }
     var compactNavigationDockEdgeName by rememberSaveable {
-        mutableStateOf(CompactNavigationDockPrefs.read(compactNavigationPrefs).name)
+        mutableStateOf(
+            CompactNavigationDockPrefs.read(
+                compactNavigationPrefs,
+                layoutDirection,
+            ).name,
+        )
     }
     val compactNavigationDockEdge = runCatching {
         CompactNavigationDockEdge.valueOf(compactNavigationDockEdgeName)
-    }.getOrDefault(CompactNavigationDockEdge.START)
+    }.getOrDefault(CompactNavigationDockEdge.LEFT)
     var bottomBarCompact by rememberSaveable { mutableStateOf(false) }
     val bottomBarVisuallyCompact = bottomBarCompact && density.fontScale < 1.6f
     var bottomBarDirectionalTravel by remember { mutableFloatStateOf(0f) }
@@ -1613,21 +1620,25 @@ internal val CompactNavigationOverlayFootprint =
     Metrics.controlHeight + Metrics.space8
 
 internal enum class CompactNavigationDockEdge {
-    START,
-    END,
+    LEFT,
+    RIGHT,
 }
 
 internal object CompactNavigationDockPrefs {
     const val FILE = "noop.navigation"
     const val EDGE = "compactDockEdge"
 
-    fun read(prefs: android.content.SharedPreferences): CompactNavigationDockEdge =
-        runCatching {
-            CompactNavigationDockEdge.valueOf(
-                prefs.getString(EDGE, CompactNavigationDockEdge.START.name)
-                    ?: CompactNavigationDockEdge.START.name,
-            )
-        }.getOrDefault(CompactNavigationDockEdge.START)
+    fun read(
+        prefs: android.content.SharedPreferences,
+        layoutDirection: LayoutDirection,
+    ): CompactNavigationDockEdge {
+        val stored = prefs.getString(EDGE, null)
+        val edge = compactNavigationDockEdgeFromStoredValue(stored, layoutDirection)
+        if (stored != edge.name) {
+            write(prefs, edge)
+        }
+        return edge
+    }
 
     fun write(
         prefs: android.content.SharedPreferences,
@@ -1637,6 +1648,25 @@ internal object CompactNavigationDockPrefs {
     }
 }
 
+internal fun compactNavigationDockEdgeFromStoredValue(
+    stored: String?,
+    layoutDirection: LayoutDirection,
+): CompactNavigationDockEdge = when (stored) {
+    CompactNavigationDockEdge.LEFT.name -> CompactNavigationDockEdge.LEFT
+    CompactNavigationDockEdge.RIGHT.name -> CompactNavigationDockEdge.RIGHT
+    "START" -> if (layoutDirection == LayoutDirection.Rtl) {
+        CompactNavigationDockEdge.RIGHT
+    } else {
+        CompactNavigationDockEdge.LEFT
+    }
+    "END" -> if (layoutDirection == LayoutDirection.Rtl) {
+        CompactNavigationDockEdge.LEFT
+    } else {
+        CompactNavigationDockEdge.RIGHT
+    }
+    else -> CompactNavigationDockEdge.LEFT
+}
+
 internal fun compactNavigationDockDestination(
     current: CompactNavigationDockEdge,
     horizontalDragPx: Float,
@@ -1644,40 +1674,13 @@ internal fun compactNavigationDockDestination(
 ): CompactNavigationDockEdge {
     val threshold = thresholdPx.coerceAtLeast(0f)
     return when {
-        current == CompactNavigationDockEdge.START &&
-            horizontalDragPx >= threshold -> CompactNavigationDockEdge.END
-        current == CompactNavigationDockEdge.END &&
-            horizontalDragPx <= -threshold -> CompactNavigationDockEdge.START
+        current == CompactNavigationDockEdge.LEFT &&
+            horizontalDragPx >= threshold -> CompactNavigationDockEdge.RIGHT
+        current == CompactNavigationDockEdge.RIGHT &&
+            horizontalDragPx <= -threshold -> CompactNavigationDockEdge.LEFT
         else -> current
     }
 }
-
-internal fun compactNavigationLogicalDragDelta(
-    physicalDeltaPx: Float,
-    layoutDirection: LayoutDirection,
-): Float = if (layoutDirection == LayoutDirection.Rtl) {
-    -physicalDeltaPx
-} else {
-    physicalDeltaPx
-}
-
-internal fun compactNavigationPhysicalLeftEdge(
-    layoutDirection: LayoutDirection,
-): CompactNavigationDockEdge =
-    if (layoutDirection == LayoutDirection.Rtl) {
-        CompactNavigationDockEdge.END
-    } else {
-        CompactNavigationDockEdge.START
-    }
-
-internal fun compactNavigationPhysicalRightEdge(
-    layoutDirection: LayoutDirection,
-): CompactNavigationDockEdge =
-    if (layoutDirection == LayoutDirection.Rtl) {
-        CompactNavigationDockEdge.START
-    } else {
-        CompactNavigationDockEdge.END
-    }
 
 internal data class CompactNavigationHysteresisState(
     val compact: Boolean,
@@ -2085,7 +2088,7 @@ private fun FloatingCompactBottomBar(
             0.dp,
             (maxWidth - CompactNavigationControlWidth) / 2,
         )
-        val targetHorizontalOffset = if (dockEdge == CompactNavigationDockEdge.START) {
+        val targetHorizontalOffset = if (dockEdge == CompactNavigationDockEdge.LEFT) {
             -cornerTravel
         } else {
             cornerTravel
@@ -2120,12 +2123,9 @@ private fun CompactBottomBar(
     val label = stringResource(tab.labelRes)
     val accent = bottomBarAccent(tab.dest)
     val density = LocalDensity.current
-    val layoutDirection = LocalLayoutDirection.current
     val dragThresholdPx = with(density) { 44.dp.toPx() }
     var dragOffsetPx by remember { mutableFloatStateOf(0f) }
-    val physicalLeftEdge = compactNavigationPhysicalLeftEdge(layoutDirection)
-    val physicalRightEdge = compactNavigationPhysicalRightEdge(layoutDirection)
-    val cornerDescription = if (dockEdge == physicalLeftEdge) {
+    val cornerDescription = if (dockEdge == CompactNavigationDockEdge.LEFT) {
         stringResource(R.string.noop_command_lens_left_edge)
     } else {
         stringResource(R.string.noop_command_lens_right_edge)
@@ -2140,13 +2140,13 @@ private fun CompactBottomBar(
     val moveRight = stringResource(R.string.noop_command_lens_move_right)
     Row(
         modifier = Modifier
-            .offset(x = horizontalOffset)
-            .offset { IntOffset(dragOffsetPx.roundToInt(), 0) }
+            .absoluteOffset(x = horizontalOffset)
+            .absoluteOffset { IntOffset(dragOffsetPx.roundToInt(), 0) }
             .width(CompactNavigationControlWidth)
             .height(Metrics.controlHeight)
             .testTag("noop.tab.compact")
             .clip(RoundedCornerShape(percent = 50))
-            .pointerInput(dockEdge, dragThresholdPx, layoutDirection) {
+            .pointerInput(dockEdge, dragThresholdPx) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         val destination = compactNavigationDockDestination(
@@ -2162,14 +2162,10 @@ private fun CompactBottomBar(
                     onDragCancel = { dragOffsetPx = 0f },
                 ) { change, amount ->
                     change.consume()
-                    val logicalAmount = compactNavigationLogicalDragDelta(
-                        physicalDeltaPx = amount,
-                        layoutDirection = layoutDirection,
-                    )
-                    dragOffsetPx = if (dockEdge == CompactNavigationDockEdge.START) {
-                        maxOf(0f, dragOffsetPx + logicalAmount)
+                    dragOffsetPx = if (dockEdge == CompactNavigationDockEdge.LEFT) {
+                        maxOf(0f, dragOffsetPx + amount)
                     } else {
-                        minOf(0f, dragOffsetPx + logicalAmount)
+                        minOf(0f, dragOffsetPx + amount)
                     }
                 }
             }
@@ -2184,11 +2180,11 @@ private fun CompactBottomBar(
                 stateDescription = navigationState
                 customActions = listOf(
                     CustomAccessibilityAction(moveLeft) {
-                        onDockEdgeChange(physicalLeftEdge)
+                        onDockEdgeChange(CompactNavigationDockEdge.LEFT)
                         true
                     },
                     CustomAccessibilityAction(moveRight) {
-                        onDockEdgeChange(physicalRightEdge)
+                        onDockEdgeChange(CompactNavigationDockEdge.RIGHT)
                         true
                     },
                 )

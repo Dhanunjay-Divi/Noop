@@ -45,4 +45,28 @@ class PresentScanKeepsConnectionTest {
         assertFalse(WhoopBleClient.shouldKeepLiveConnectionForPresentScan(
             connected = false, selected = WhoopModel.WHOOP4, requested = WhoopModel.WHOOP5_MG))
     }
+
+    @Test
+    fun cancelledScan_reconnectsTheRememberedBandOnlyWhenItWasAutomatic() {
+        assertTrue(WhoopBleClient.shouldReconnectPreviousConnectionAfterPresentScan(
+            hadPreviousDevice = true,
+            previousIntentionalDisconnect = false,
+            connected = false,
+        ))
+        assertFalse(WhoopBleClient.shouldReconnectPreviousConnectionAfterPresentScan(
+            hadPreviousDevice = true,
+            previousIntentionalDisconnect = true,
+            connected = false,
+        ))
+        assertFalse(WhoopBleClient.shouldReconnectPreviousConnectionAfterPresentScan(
+            hadPreviousDevice = false,
+            previousIntentionalDisconnect = false,
+            connected = false,
+        ))
+        assertFalse(WhoopBleClient.shouldReconnectPreviousConnectionAfterPresentScan(
+            hadPreviousDevice = true,
+            previousIntentionalDisconnect = false,
+            connected = true,
+        ))
+    }
 }
